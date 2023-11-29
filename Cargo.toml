@@ -18,6 +18,10 @@ log = "0.4"
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
+wowsunpack = { version = "0.1.3", default-features = false }
+egui_extras = "0.24.0"
+egui_dock = "0.9.0"
+rfd = "0.12.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
