@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
         Arc,
     },
@@ -13,6 +14,7 @@ use std::{
 use egui::{ahash::HashSet, mutex::Mutex, CollapsingHeader, Label, Sense, Separator, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
+use serde::{Deserialize, Serialize};
 use wowsunpack::{
     idx::{self, FileNode, IdxFile},
     pkg::PkgFileLoader,
@@ -115,15 +117,19 @@ impl ToolkitTabViewer<'_> {
                 egui::ScrollArea::both()
                     .id_source("file_tree_scroll_area")
                     .show(ui, |ui| {
-                        if !self.parent.filter.is_empty() {
-                            let leafs = self.parent.files.iter().filter(|(path, node)| {
-                                path.to_str()
-                                    .map(|path| path.contains(self.parent.filter.as_str()))
-                                    .unwrap_or(false)
-                            });
-                            self.build_tree_node_from_array(ui, leafs);
-                        } else {
-                            self.build_tree_node(ui, &self.parent.file_tree);
+                        if let (Some(file_tree), Some(files)) =
+                            (&self.parent.file_tree, &self.parent.files)
+                        {
+                            if !self.parent.filter.is_empty() {
+                                let leafs = files.iter().filter(|(path, node)| {
+                                    path.to_str()
+                                        .map(|path| path.contains(self.parent.filter.as_str()))
+                                        .unwrap_or(false)
+                                });
+                                self.build_tree_node_from_array(ui, leafs);
+                            } else {
+                                self.build_tree_node(ui, file_tree);
+                            }
                         }
                     });
             });
@@ -142,14 +148,27 @@ impl ToolkitTabViewer<'_> {
 
                                     ui.separator();
 
-                                    let items = self.parent.items_to_extract.lock();
-                                    for item in &*items {
-                                        ui.label(
-                                            Path::new("res")
-                                                .join(item.path().unwrap())
-                                                .to_string_lossy()
-                                                .to_owned(),
-                                        );
+                                    let mut items = self.parent.items_to_extract.lock();
+                                    let mut remove_idx = None;
+                                    for (i, item) in items.iter().enumerate() {
+                                        if ui
+                                            .add(
+                                                Label::new(
+                                                    Path::new("res")
+                                                        .join(item.path().unwrap())
+                                                        .to_string_lossy()
+                                                        .to_owned(),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .double_clicked()
+                                        {
+                                            remove_idx = Some(i);
+                                        }
+                                    }
+
+                                    if let Some(remove_idx) = remove_idx {
+                                        items.remove(remove_idx);
                                     }
                                 });
                         });
@@ -183,56 +202,74 @@ impl ToolkitTabViewer<'_> {
                                             self.parent.items_to_extract.lock().clone();
                                         let output_dir =
                                             Path::new(self.parent.output_dir.as_str()).join("res");
-                                        let pkg_loader = self.parent.pkg_loader.clone();
+                                        if let Some(pkg_loader) = self.parent.pkg_loader.clone() {
+                                            let (tx, rx) = mpsc::channel();
 
-                                        let (tx, rx) = mpsc::channel();
+                                            self.parent.unpacker_progress = Some(rx);
+                                            UNPACKER_STOP.store(false, Ordering::Relaxed);
 
-                                        self.parent.unpacker_progress = Some(rx);
-
-                                        if !items_to_unpack.is_empty() {
-                                            let unpacker_thread =
-                                                Some(std::thread::spawn(move || {
-                                                    let mut file_queue = items_to_unpack.clone();
-                                                    let mut files_to_extract = HashSet::default();
-                                                    let mut folders_created = HashSet::default();
-                                                    while let Some(file) = file_queue.pop() {
-                                                        if file.is_file() {
-                                                            files_to_extract.insert(file);
-                                                        } else {
-                                                            for (_, child) in file.children() {
-                                                                file_queue.push(child.clone());
+                                            if !items_to_unpack.is_empty() {
+                                                let unpacker_thread =
+                                                    Some(std::thread::spawn(move || {
+                                                        let mut file_queue =
+                                                            items_to_unpack.clone();
+                                                        let mut files_to_extract =
+                                                            HashSet::default();
+                                                        let mut folders_created =
+                                                            HashSet::default();
+                                                        while let Some(file) = file_queue.pop() {
+                                                            if file.is_file() {
+                                                                files_to_extract.insert(file);
+                                                            } else {
+                                                                for (_, child) in file.children() {
+                                                                    file_queue.push(child.clone());
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                    let file_count = files_to_extract.len();
-                                                    let mut files_written = 0;
+                                                        let file_count = files_to_extract.len();
+                                                        let mut files_written = 0;
 
-                                                    for file in files_to_extract {
-                                                        let path = output_dir.join(
-                                                            file.parent().unwrap().path().unwrap(),
-                                                        );
-                                                        tx.send(UnpackerProgress {
-                                                            file_name: path
-                                                                .to_string_lossy()
-                                                                .into_owned(),
-                                                            progress: (files_written as f32)
-                                                                / (file_count as f32),
-                                                        })
-                                                        .unwrap();
-                                                        if !folders_created.contains(&path) {
-                                                            fs::create_dir_all(&path);
-                                                            folders_created.insert(path.clone());
+                                                        for file in files_to_extract {
+                                                            if UNPACKER_STOP.load(Ordering::Relaxed)
+                                                            {
+                                                                break;
+                                                            }
+
+                                                            let path = output_dir.join(
+                                                                file.parent()
+                                                                    .unwrap()
+                                                                    .path()
+                                                                    .unwrap(),
+                                                            );
+                                                            let mut file_path =
+                                                                path.join(file.filename());
+                                                            tx.send(UnpackerProgress {
+                                                                file_name: file_path
+                                                                    .to_string_lossy()
+                                                                    .into(),
+                                                                progress: (files_written as f32)
+                                                                    / (file_count as f32),
+                                                            })
+                                                            .unwrap();
+                                                            if !folders_created.contains(&path) {
+                                                                fs::create_dir_all(&path);
+                                                                folders_created
+                                                                    .insert(path.clone());
+                                                            }
+
+                                                            let mut out_file = File::create(
+                                                                file_path,
+                                                            )
+                                                            .expect("failed to create output file");
+
+                                                            file.read_file(
+                                                                &*pkg_loader,
+                                                                &mut out_file,
+                                                            );
+                                                            files_written += 1;
                                                         }
-
-                                                        let mut out_file = File::create(
-                                                            path.join(file.filename()),
-                                                        )
-                                                        .expect("failed to create output file");
-
-                                                        file.read_file(&*pkg_loader, &mut out_file);
-                                                        files_written += 1;
-                                                    }
-                                                }));
+                                                    }));
+                                            }
                                         }
                                     }
                                 });
@@ -266,6 +303,7 @@ impl ToolkitTabViewer<'_> {
                                         if let Some(folder) = folder {
                                             self.parent.settings.wows_dir =
                                                 folder.to_string_lossy().into_owned();
+                                            self.parent.load_wows_files();
                                         }
                                     }
                                 });
@@ -296,23 +334,124 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct Settings {
     wows_dir: String,
 }
 
+static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
 struct TabState {
-    file_tree: FileNode,
-    pkg_loader: Arc<PkgFileLoader>,
-    files: Vec<(Rc<PathBuf>, FileNode)>,
+    #[serde(skip)]
+    file_tree: Option<FileNode>,
+
+    #[serde(skip)]
+    pkg_loader: Option<Arc<PkgFileLoader>>,
+
+    #[serde(skip)]
+    files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
+
     filter: String,
 
+    #[serde(skip)]
     items_to_extract: Mutex<Vec<FileNode>>,
+
     settings: Settings,
 
     output_dir: String,
+
+    #[serde(skip)]
     unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
+
+    #[serde(skip)]
     last_progress: Option<UnpackerProgress>,
+}
+
+impl Default for TabState {
+    fn default() -> Self {
+        Self {
+            file_tree: Default::default(),
+            pkg_loader: Default::default(),
+            files: Default::default(),
+            filter: Default::default(),
+            items_to_extract: Default::default(),
+            settings: Default::default(),
+            output_dir: Default::default(),
+            unpacker_progress: Default::default(),
+            last_progress: Default::default(),
+        }
+    }
+}
+
+impl TabState {
+    pub fn load_wows_files(&mut self) -> std::io::Result<()> {
+        let mut idx_files = Vec::new();
+        let wows_directory = Path::new(self.settings.wows_dir.as_str());
+        if wows_directory.exists() {
+            let mut highest_number = None;
+            for file in read_dir(wows_directory.join("bin"))? {
+                if file.is_err() {
+                    continue;
+                }
+
+                let file = file.unwrap();
+                if let Ok(ty) = file.file_type() {
+                    if ty.is_file() {
+                        continue;
+                    }
+
+                    if let Some(build_num) = file
+                        .file_name()
+                        .to_str()
+                        .and_then(|name| usize::from_str_radix(name, 10).ok())
+                    {
+                        if highest_number.is_none()
+                            || highest_number
+                                .clone()
+                                .map(|number| number < build_num)
+                                .unwrap_or(false)
+                        {
+                            highest_number = Some(build_num)
+                        }
+                    }
+                }
+            }
+
+            if let Some(number) = highest_number {
+                for file in read_dir(
+                    wows_directory
+                        .join("bin")
+                        .join(format!("{}", number))
+                        .join("idx"),
+                )? {
+                    let file = file.unwrap();
+                    if file.file_type().unwrap().is_file() {
+                        let file_data = std::fs::read(file.path()).unwrap();
+                        let mut file = Cursor::new(file_data.as_slice());
+                        idx_files.push(idx::parse(&mut file).unwrap());
+                    }
+                }
+
+                let pkgs_path = wows_directory.join("res_packages");
+                if !pkgs_path.exists() {
+                    return Ok(());
+                }
+
+                let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
+
+                let file_tree = idx::build_file_tree(idx_files.as_slice());
+                let files = file_tree.paths();
+
+                self.file_tree = Some(file_tree);
+                self.files = Some(files);
+                self.pkg_loader = Some(pkg_loader);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 struct UnpackerProgress {
@@ -321,42 +460,28 @@ struct UnpackerProgress {
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
 pub struct WowsToolkitApp {
     label: String,
 
     value: f32,
 
     tab_state: TabState,
+    #[serde(skip)]
     dock_state: DockState<Tab>,
 }
 
 impl Default for WowsToolkitApp {
     fn default() -> Self {
-        let mut idx_files = Vec::new();
-        for file in
-            read_dir("/Users/lander/Downloads/depots/552993/12603293/bin/7708495/idx").unwrap()
-        {
-            let file = file.unwrap();
-            if file.file_type().unwrap().is_file() {
-                let file_data = std::fs::read(file.path()).unwrap();
-                let mut file = Cursor::new(file_data.as_slice());
-                idx_files.push(idx::parse(&mut file).unwrap());
-            }
-        }
-
-        let file_tree = idx::build_file_tree(idx_files.as_slice());
-        let files = file_tree.paths();
-
         Self {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
             tab_state: TabState {
-                file_tree,
-                files,
-                pkg_loader: Arc::new(PkgFileLoader::new(
-                    "/Users/lander/Downloads/depots/552993/12603293/res_packages",
-                )),
+                file_tree: None,
+                files: None,
+                pkg_loader: None,
                 filter: Default::default(),
                 items_to_extract: Default::default(),
                 output_dir: String::new(),
@@ -375,13 +500,27 @@ impl WowsToolkitApp {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
+        // Load previous app state (if any).
+        // Note that you must enable the `persistence` feature for this to work.
+        if let Some(storage) = cc.storage {
+            let mut saved_state: Self =
+                eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            if !saved_state.tab_state.settings.wows_dir.is_empty() {
+                saved_state.tab_state.load_wows_files();
+            }
+
+            return saved_state;
+        }
+
         Default::default()
     }
 }
 
 impl eframe::App for WowsToolkitApp {
     /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {}
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -409,31 +548,35 @@ impl eframe::App for WowsToolkitApp {
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Status");
                 if let Some(rx) = &self.tab_state.unpacker_progress {
-                    match rx.try_recv() {
-                        Ok(progress) => {
-                            ui.add(
-                                egui::ProgressBar::new(progress.progress)
-                                    .animate(true)
-                                    .text(progress.file_name.as_str()),
-                            );
-
-                            self.tab_state.last_progress = Some(progress);
-                        }
-                        Err(TryRecvError::Empty) => {
-                            if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
-                                ui.add(
-                                    egui::ProgressBar::new(last_progress.progress)
-                                        .animate(true)
-                                        .text(last_progress.file_name.as_str()),
-                                );
+                    if ui.button("Stop").clicked() {
+                        UNPACKER_STOP.store(true, Ordering::Relaxed);
+                    }
+                    let mut done = false;
+                    loop {
+                        match rx.try_recv() {
+                            Ok(progress) => {
+                                self.tab_state.last_progress = Some(progress);
+                            }
+                            Err(TryRecvError::Empty) => {
+                                if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
+                                    ui.add(
+                                        egui::ProgressBar::new(last_progress.progress)
+                                            .text(last_progress.file_name.as_str()),
+                                    );
+                                }
+                                break;
+                            }
+                            Err(TryRecvError::Disconnected) => {
+                                done = true;
+                                break;
                             }
                         }
-                        Err(TryRecvError::Disconnected) => {
-                            self.tab_state.unpacker_progress.take();
-                            self.tab_state.last_progress.take();
-                        }
+                    }
+
+                    if done {
+                        self.tab_state.unpacker_progress.take();
+                        self.tab_state.last_progress.take();
                     }
                 }
             });
@@ -441,8 +584,6 @@ impl eframe::App for WowsToolkitApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("WoWs Toolkit");
-
             DockArea::new(&mut self.dock_state)
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
