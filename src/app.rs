@@ -32,7 +32,7 @@ impl Tab {
         match self {
             Tab::Unpacker => "Resource Unpacker",
             Tab::Settings => "Settings",
-            Tab::ReplayParser => "Replay Parser",
+            Tab::ReplayParser => "Replay Inspector",
         }
     }
 }
@@ -120,13 +120,22 @@ impl ToolkitTabViewer<'_> {
                         if let (Some(file_tree), Some(files)) =
                             (&self.parent.file_tree, &self.parent.files)
                         {
-                            if !self.parent.filter.is_empty() {
-                                let leafs = files.iter().filter(|(path, node)| {
-                                    path.to_str()
-                                        .map(|path| path.contains(self.parent.filter.as_str()))
-                                        .unwrap_or(false)
-                                });
-                                self.build_tree_node_from_array(ui, leafs);
+                            if self.parent.filter.len() > 3 {
+                                let glob = glob::Pattern::new(self.parent.filter.as_str());
+                                if self.parent.filter.contains("*") && glob.is_ok() {
+                                    let glob = glob.unwrap();
+                                    let leafs = files
+                                        .iter()
+                                        .filter(|(path, _node)| glob.matches_path(&*path));
+                                    self.build_tree_node_from_array(ui, leafs);
+                                } else {
+                                    let leafs = files.iter().filter(|(path, node)| {
+                                        path.to_str()
+                                            .map(|path| path.contains(self.parent.filter.as_str()))
+                                            .unwrap_or(false)
+                                    });
+                                    self.build_tree_node_from_array(ui, leafs);
+                                }
                             } else {
                                 self.build_tree_node(ui, file_tree);
                             }
@@ -144,7 +153,14 @@ impl ToolkitTabViewer<'_> {
                             egui::ScrollArea::both()
                                 .id_source("selected_files_scroll_area")
                                 .show(ui, |ui| {
-                                    ui.heading("Selected Files");
+                                    ui.horizontal(|ui| {
+                                        // strip.cell(|ui| {
+                                        ui.heading("Selected Files");
+                                        // });
+                                        // strip.cell(|ui| {
+                                        ui.button("Add Glob");
+                                        // });
+                                    });
 
                                     ui.separator();
 
@@ -506,7 +522,14 @@ impl WowsToolkitApp {
             let mut saved_state: Self =
                 eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                saved_state.tab_state.load_wows_files();
+                match saved_state.tab_state.load_wows_files() {
+                    Ok(_) => {
+                        // do nothing
+                    }
+                    Err(_) => {
+                        // TODO: handle errors
+                    }
+                }
             }
 
             return saved_state;
