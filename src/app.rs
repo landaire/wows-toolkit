@@ -11,7 +11,9 @@ use std::{
     thread::JoinHandle,
 };
 
-use egui::{ahash::HashSet, mutex::Mutex, CollapsingHeader, Label, Sense, Separator, WidgetText};
+use egui::{
+    ahash::HashSet, mutex::Mutex, CollapsingHeader, Label, Sense, Separator, Ui, WidgetText,
+};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use serde::{Deserialize, Serialize};
@@ -20,8 +22,10 @@ use wowsunpack::{
     pkg::PkgFileLoader,
 };
 
+use crate::file_unpacker::{UnpackerProgress, UNPACKER_STOP};
+
 #[derive(Clone)]
-enum Tab {
+pub enum Tab {
     Unpacker,
     ReplayParser,
     Settings,
@@ -37,264 +41,11 @@ impl Tab {
     }
 }
 
-struct ToolkitTabViewer<'a> {
-    parent: &'a mut TabState,
+pub struct ToolkitTabViewer<'a> {
+    pub parent: &'a mut TabState,
 }
 
 impl ToolkitTabViewer<'_> {
-    fn build_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
-        let header = CollapsingHeader::new(if file_tree.is_root() {
-            "res"
-        } else {
-            file_tree.filename()
-        })
-        .default_open(file_tree.is_root())
-        .show(ui, |ui| {
-            for (name, node) in file_tree.children() {
-                if node.children().is_empty() {
-                    if ui
-                        .add(Label::new(name).sense(Sense::click()))
-                        .double_clicked()
-                    {
-                        self.parent.items_to_extract.lock().push(node.clone());
-                    }
-                } else {
-                    self.build_tree_node(ui, node);
-                }
-            }
-        });
-
-        if header.header_response.double_clicked() {
-            self.parent.items_to_extract.lock().push(file_tree.clone());
-        }
-    }
-
-    fn build_tree_node_from_array<'i, I>(&self, ui: &mut egui::Ui, files: I)
-    where
-        I: IntoIterator<Item = &'i (Rc<PathBuf>, FileNode)>,
-    {
-        egui::Grid::new("filtered_files_grid")
-            .num_columns(1)
-            .striped(true)
-            .show(ui, |ui| {
-                let files = files.into_iter();
-                for file in files {
-                    let label = ui.add(
-                        Label::new(Path::new("res").join(&*file.0).to_string_lossy().to_owned())
-                            .sense(Sense::click()),
-                    );
-
-                    let text = if file.1.is_file() {
-                        format!(
-                            "File ({})",
-                            humansize::format_size(
-                                file.1.file_info().unwrap().size,
-                                humansize::DECIMAL
-                            )
-                        )
-                    } else {
-                        format!("Folder")
-                    };
-
-                    let label = label.on_hover_text(text);
-
-                    if label.double_clicked() {
-                        self.parent.items_to_extract.lock().push(file.1.clone());
-                    }
-                    ui.end_row();
-                }
-            });
-    }
-    fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
-        egui::SidePanel::left("left").show_inside(ui, |ui| {
-            // })
-            // ui.with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |ui| {
-            ui.vertical(|ui| {
-                //     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                //     });
-
-                ui.add(egui::TextEdit::singleline(&mut self.parent.filter).hint_text("Filter"));
-                egui::ScrollArea::both()
-                    .id_source("file_tree_scroll_area")
-                    .show(ui, |ui| {
-                        if let (Some(file_tree), Some(files)) =
-                            (&self.parent.file_tree, &self.parent.files)
-                        {
-                            if self.parent.filter.len() > 3 {
-                                let glob = glob::Pattern::new(self.parent.filter.as_str());
-                                if self.parent.filter.contains("*") && glob.is_ok() {
-                                    let glob = glob.unwrap();
-                                    let leafs = files
-                                        .iter()
-                                        .filter(|(path, _node)| glob.matches_path(&*path));
-                                    self.build_tree_node_from_array(ui, leafs);
-                                } else {
-                                    let leafs = files.iter().filter(|(path, node)| {
-                                        path.to_str()
-                                            .map(|path| path.contains(self.parent.filter.as_str()))
-                                            .unwrap_or(false)
-                                    });
-                                    self.build_tree_node_from_array(ui, leafs);
-                                }
-                            } else {
-                                self.build_tree_node(ui, file_tree);
-                            }
-                        }
-                    });
-            });
-        });
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            StripBuilder::new(ui)
-                .size(Size::remainder())
-                .size(Size::exact(20.0))
-                .vertical(|mut strip| {
-                    strip.cell(|ui| {
-                        ui.vertical(|ui| {
-                            egui::ScrollArea::both()
-                                .id_source("selected_files_scroll_area")
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        // strip.cell(|ui| {
-                                        ui.heading("Selected Files");
-                                        // });
-                                        // strip.cell(|ui| {
-                                        ui.button("Add Glob");
-                                        // });
-                                    });
-
-                                    ui.separator();
-
-                                    let mut items = self.parent.items_to_extract.lock();
-                                    let mut remove_idx = None;
-                                    for (i, item) in items.iter().enumerate() {
-                                        if ui
-                                            .add(
-                                                Label::new(
-                                                    Path::new("res")
-                                                        .join(item.path().unwrap())
-                                                        .to_string_lossy()
-                                                        .to_owned(),
-                                                )
-                                                .sense(Sense::click()),
-                                            )
-                                            .double_clicked()
-                                        {
-                                            remove_idx = Some(i);
-                                        }
-                                    }
-
-                                    if let Some(remove_idx) = remove_idx {
-                                        items.remove(remove_idx);
-                                    }
-                                });
-                        });
-                    });
-
-                    strip.strip(|builder| {
-                        builder
-                            .size(Size::remainder())
-                            .size(Size::exact(60.0))
-                            .size(Size::exact(60.0))
-                            .horizontal(|mut strip| {
-                                strip.cell(|ui| {
-                                    ui.add_sized(
-                                        ui.available_size(),
-                                        egui::TextEdit::singleline(&mut self.parent.output_dir)
-                                            .hint_text("Output Path"),
-                                    );
-                                });
-                                strip.cell(|ui| {
-                                    if ui.button("Choose...").clicked() {
-                                        let folder = rfd::FileDialog::new().pick_folder();
-                                        if let Some(folder) = folder {
-                                            self.parent.output_dir =
-                                                folder.to_string_lossy().into_owned();
-                                        }
-                                    }
-                                });
-                                strip.cell(|ui| {
-                                    if ui.button("Extract").clicked() {
-                                        let items_to_unpack =
-                                            self.parent.items_to_extract.lock().clone();
-                                        let output_dir =
-                                            Path::new(self.parent.output_dir.as_str()).join("res");
-                                        if let Some(pkg_loader) = self.parent.pkg_loader.clone() {
-                                            let (tx, rx) = mpsc::channel();
-
-                                            self.parent.unpacker_progress = Some(rx);
-                                            UNPACKER_STOP.store(false, Ordering::Relaxed);
-
-                                            if !items_to_unpack.is_empty() {
-                                                let unpacker_thread =
-                                                    Some(std::thread::spawn(move || {
-                                                        let mut file_queue =
-                                                            items_to_unpack.clone();
-                                                        let mut files_to_extract =
-                                                            HashSet::default();
-                                                        let mut folders_created =
-                                                            HashSet::default();
-                                                        while let Some(file) = file_queue.pop() {
-                                                            if file.is_file() {
-                                                                files_to_extract.insert(file);
-                                                            } else {
-                                                                for (_, child) in file.children() {
-                                                                    file_queue.push(child.clone());
-                                                                }
-                                                            }
-                                                        }
-                                                        let file_count = files_to_extract.len();
-                                                        let mut files_written = 0;
-
-                                                        for file in files_to_extract {
-                                                            if UNPACKER_STOP.load(Ordering::Relaxed)
-                                                            {
-                                                                break;
-                                                            }
-
-                                                            let path = output_dir.join(
-                                                                file.parent()
-                                                                    .unwrap()
-                                                                    .path()
-                                                                    .unwrap(),
-                                                            );
-                                                            let mut file_path =
-                                                                path.join(file.filename());
-                                                            tx.send(UnpackerProgress {
-                                                                file_name: file_path
-                                                                    .to_string_lossy()
-                                                                    .into(),
-                                                                progress: (files_written as f32)
-                                                                    / (file_count as f32),
-                                                            })
-                                                            .unwrap();
-                                                            if !folders_created.contains(&path) {
-                                                                fs::create_dir_all(&path);
-                                                                folders_created
-                                                                    .insert(path.clone());
-                                                            }
-
-                                                            let mut out_file = File::create(
-                                                                file_path,
-                                                            )
-                                                            .expect("failed to create output file");
-
-                                                            file.read_file(
-                                                                &*pkg_loader,
-                                                                &mut out_file,
-                                                            );
-                                                            files_written += 1;
-                                                        }
-                                                    }));
-                                            }
-                                        }
-                                    }
-                                });
-                            });
-                    });
-                });
-        });
-    }
-
     fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.group(|ui| {
@@ -329,6 +80,8 @@ impl ToolkitTabViewer<'_> {
             });
         });
     }
+
+    fn build_bottom_panel(&mut self, ui: &mut egui::Ui) {}
 }
 
 impl TabViewer for ToolkitTabViewer<'_> {
@@ -355,34 +108,32 @@ struct Settings {
     wows_dir: String,
 }
 
-static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
-
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
-struct TabState {
+pub struct TabState {
     #[serde(skip)]
-    file_tree: Option<FileNode>,
-
-    #[serde(skip)]
-    pkg_loader: Option<Arc<PkgFileLoader>>,
+    pub file_tree: Option<FileNode>,
 
     #[serde(skip)]
-    files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
-
-    filter: String,
+    pub pkg_loader: Option<Arc<PkgFileLoader>>,
 
     #[serde(skip)]
-    items_to_extract: Mutex<Vec<FileNode>>,
+    pub files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
 
-    settings: Settings,
-
-    output_dir: String,
+    pub filter: String,
 
     #[serde(skip)]
-    unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
+    pub items_to_extract: Mutex<Vec<FileNode>>,
+
+    pub settings: Settings,
+
+    pub output_dir: String,
 
     #[serde(skip)]
-    last_progress: Option<UnpackerProgress>,
+    pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
+
+    #[serde(skip)]
+    pub last_progress: Option<UnpackerProgress>,
 }
 
 impl Default for TabState {
@@ -470,11 +221,6 @@ impl TabState {
     }
 }
 
-struct UnpackerProgress {
-    file_name: String,
-    progress: f32,
-}
-
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -537,6 +283,42 @@ impl WowsToolkitApp {
 
         Default::default()
     }
+
+    pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            if let Some(rx) = &self.tab_state.unpacker_progress {
+                if ui.button("Stop").clicked() {
+                    UNPACKER_STOP.store(true, Ordering::Relaxed);
+                }
+                let mut done = false;
+                loop {
+                    match rx.try_recv() {
+                        Ok(progress) => {
+                            self.tab_state.last_progress = Some(progress);
+                        }
+                        Err(TryRecvError::Empty) => {
+                            if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
+                                ui.add(
+                                    egui::ProgressBar::new(last_progress.progress)
+                                        .text(last_progress.file_name.as_str()),
+                                );
+                            }
+                            break;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            done = true;
+                            break;
+                        }
+                    }
+                }
+
+                if done {
+                    self.tab_state.unpacker_progress.take();
+                    self.tab_state.last_progress.take();
+                }
+            }
+        });
+    }
 }
 
 impl eframe::App for WowsToolkitApp {
@@ -570,39 +352,7 @@ impl eframe::App for WowsToolkitApp {
         });
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(rx) = &self.tab_state.unpacker_progress {
-                    if ui.button("Stop").clicked() {
-                        UNPACKER_STOP.store(true, Ordering::Relaxed);
-                    }
-                    let mut done = false;
-                    loop {
-                        match rx.try_recv() {
-                            Ok(progress) => {
-                                self.tab_state.last_progress = Some(progress);
-                            }
-                            Err(TryRecvError::Empty) => {
-                                if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
-                                    ui.add(
-                                        egui::ProgressBar::new(last_progress.progress)
-                                            .text(last_progress.file_name.as_str()),
-                                    );
-                                }
-                                break;
-                            }
-                            Err(TryRecvError::Disconnected) => {
-                                done = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if done {
-                        self.tab_state.unpacker_progress.take();
-                        self.tab_state.last_progress.take();
-                    }
-                }
-            });
+            self.build_bottom_panel(ui);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
