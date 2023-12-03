@@ -1,24 +1,23 @@
 use std::{
-    fs::{self, read_dir, File},
+    fs::{read_dir},
     io::Cursor,
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{Ordering},
         mpsc::{self, TryRecvError},
         Arc,
     },
-    thread::JoinHandle,
 };
 
 use egui::{
-    ahash::HashSet, mutex::Mutex, CollapsingHeader, Label, Sense, Separator, Ui, WidgetText,
+    mutex::Mutex, Ui, WidgetText,
 };
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use serde::{Deserialize, Serialize};
 use wowsunpack::{
-    idx::{self, FileNode, IdxFile},
+    idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
 
@@ -81,7 +80,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn build_bottom_panel(&mut self, ui: &mut egui::Ui) {}
+    fn build_bottom_panel(&mut self, _ui: &mut egui::Ui) {}
 }
 
 impl TabViewer for ToolkitTabViewer<'_> {

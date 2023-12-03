@@ -88,7 +88,7 @@ impl ToolkitTabViewer<'_> {
             });
     }
 
-    fn extract_files_clicked(&mut self, ui: &mut Ui) {
+    fn extract_files_clicked(&mut self, _ui: &mut Ui) {
         {
             let items_to_unpack = self.parent.items_to_extract.lock().clone();
             let output_dir = Path::new(self.parent.output_dir.as_str()).join("res");
@@ -99,7 +99,7 @@ impl ToolkitTabViewer<'_> {
                 UNPACKER_STOP.store(false, Ordering::Relaxed);
 
                 if !items_to_unpack.is_empty() {
-                    let unpacker_thread = Some(std::thread::spawn(move || {
+                    let _unpacker_thread = Some(std::thread::spawn(move || {
                         let mut file_queue = items_to_unpack.clone();
                         let mut files_to_extract: HashSet<FileNode> = HashSet::default();
                         let mut folders_created: HashSet<PathBuf> = HashSet::default();
