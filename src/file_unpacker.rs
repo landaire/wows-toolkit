@@ -89,57 +89,56 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
-        {
-            let items_to_unpack = self.parent.items_to_extract.lock().clone();
-            let output_dir = Path::new(self.parent.output_dir.as_str()).join("res");
-            if let Some(pkg_loader) = self.parent.pkg_loader.clone() {
-                let (tx, rx) = mpsc::channel();
+        let items_to_unpack = self.parent.items_to_extract.lock().clone();
+        let output_dir = Path::new(self.parent.output_dir.as_str()).join("res");
+        if let Some(pkg_loader) = self.parent.pkg_loader.clone() {
+            let (tx, rx) = mpsc::channel();
 
-                self.parent.unpacker_progress = Some(rx);
-                UNPACKER_STOP.store(false, Ordering::Relaxed);
+            self.parent.unpacker_progress = Some(rx);
+            UNPACKER_STOP.store(false, Ordering::Relaxed);
 
-                if !items_to_unpack.is_empty() {
-                    let _unpacker_thread = Some(std::thread::spawn(move || {
-                        let mut file_queue = items_to_unpack.clone();
-                        let mut files_to_extract: HashSet<FileNode> = HashSet::default();
-                        let mut folders_created: HashSet<PathBuf> = HashSet::default();
-                        while let Some(file) = file_queue.pop() {
-                            if file.is_file() {
-                                files_to_extract.insert(file);
-                            } else {
-                                for (_, child) in file.children() {
-                                    file_queue.push(child.clone());
-                                }
+            if !items_to_unpack.is_empty() {
+                let _unpacker_thread = Some(std::thread::spawn(move || {
+                    let mut file_queue = items_to_unpack.clone();
+                    let mut files_to_extract: HashSet<FileNode> = HashSet::default();
+                    let mut folders_created: HashSet<PathBuf> = HashSet::default();
+                    while let Some(file) = file_queue.pop() {
+                        if file.is_file() {
+                            files_to_extract.insert(file);
+                        } else {
+                            for (_, child) in file.children() {
+                                file_queue.push(child.clone());
                             }
                         }
-                        let file_count = files_to_extract.len();
-                        let mut files_written = 0;
+                    }
+                    let file_count = files_to_extract.len();
+                    let mut files_written = 0;
 
-                        for file in files_to_extract {
-                            if UNPACKER_STOP.load(Ordering::Relaxed) {
-                                break;
-                            }
-
-                            let path = output_dir.join(file.parent().unwrap().path().unwrap());
-                            let file_path = path.join(file.filename());
-                            tx.send(UnpackerProgress {
-                                file_name: file_path.to_string_lossy().into(),
-                                progress: (files_written as f32) / (file_count as f32),
-                            })
-                            .unwrap();
-                            if !folders_created.contains(&path) {
-                                fs::create_dir_all(&path);
-                                folders_created.insert(path.clone());
-                            }
-
-                            let mut out_file =
-                                File::create(file_path).expect("failed to create output file");
-
-                            file.read_file(&*pkg_loader, &mut out_file);
-                            files_written += 1;
+                    for file in files_to_extract {
+                        if UNPACKER_STOP.load(Ordering::Relaxed) {
+                            break;
                         }
-                    }));
-                }
+
+                        let path = output_dir.join(file.parent().unwrap().path().unwrap());
+                        let file_path = path.join(file.filename());
+                        tx.send(UnpackerProgress {
+                            file_name: file_path.to_string_lossy().into(),
+                            progress: (files_written as f32) / (file_count as f32),
+                        })
+                        .unwrap();
+                        if !folders_created.contains(&path) {
+                            fs::create_dir_all(&path).expect("failed to create folder");
+                            folders_created.insert(path.clone());
+                        }
+
+                        let mut out_file =
+                            File::create(file_path).expect("failed to create output file");
+
+                        file.read_file(&*pkg_loader, &mut out_file)
+                            .expect("Failed to read file");
+                        files_written += 1;
+                    }
+                }));
             }
         }
     }
