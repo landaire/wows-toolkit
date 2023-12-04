@@ -5,21 +5,23 @@ use std::{
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
 };
 
-use egui::{CollapsingHeader, Label, Sense, Ui};
+use egui::{mutex::Mutex, CollapsingHeader, Label, Sense, TextEdit, Ui};
 use egui_extras::{Size, StripBuilder};
 use wowsunpack::idx::FileNode;
 
-use crate::app::ToolkitTabViewer;
+use crate::{app::ToolkitTabViewer, plaintext_viewer};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
     pub file_name: String,
     pub progress: f32,
 }
+
+const PLAINTEXT_FILE_TYPES: [&'static str; 3] = [".xml", ".json", ".txt"];
 
 impl ToolkitTabViewer<'_> {
     /// Builds a resource tree node from a [FileNode]
@@ -32,12 +34,46 @@ impl ToolkitTabViewer<'_> {
         .default_open(file_tree.is_root())
         .show(ui, |ui| {
             for (name, node) in file_tree.children() {
-                if node.children().is_empty() {
-                    if ui
-                        .add(Label::new(name).sense(Sense::click()))
-                        .double_clicked()
-                    {
-                        self.parent.items_to_extract.lock().push(node.clone());
+                if node.is_file() {
+                    let file_label = ui.add(Label::new(name).sense(Sense::click()));
+                    let is_plaintext_file = PLAINTEXT_FILE_TYPES
+                        .iter()
+                        .find(|extension| node.filename().ends_with(**extension));
+
+                    let file_label = if is_plaintext_file.is_some() {
+                        file_label.context_menu(|ui| {
+                            if let Some(pkg_loader) = &self.tab_state.pkg_loader {
+                                if ui.button("View Contents").clicked() {
+                                    let mut file_contents: Vec<u8> = Vec::with_capacity(
+                                        node.file_info().unwrap().unpacked_size as usize,
+                                    );
+
+                                    node.read_file(&*pkg_loader, &mut file_contents)
+                                        .expect("failed to read file");
+
+                                    if let Some(text) = String::from_utf8(file_contents).ok() {
+                                        let viewer = plaintext_viewer::PlaintextFileViewer {
+                                            title: Arc::new(
+                                                Path::new("res")
+                                                    .join(node.path().unwrap())
+                                                    .to_str()
+                                                    .unwrap()
+                                                    .to_string(),
+                                            ),
+                                            text: Arc::new(Mutex::new(text)),
+                                            open: Arc::new(AtomicBool::new(true)),
+                                        };
+
+                                        self.tab_state.file_viewer.lock().push(viewer);
+                                    }
+                                }
+                            }
+                        })
+                    } else {
+                        file_label
+                    };
+                    if file_label.double_clicked() {
+                        self.tab_state.items_to_extract.lock().push(node.clone());
                     }
                 } else {
                     self.build_resource_tree_node(ui, node);
@@ -46,7 +82,10 @@ impl ToolkitTabViewer<'_> {
         });
 
         if header.header_response.double_clicked() {
-            self.parent.items_to_extract.lock().push(file_tree.clone());
+            self.tab_state
+                .items_to_extract
+                .lock()
+                .push(file_tree.clone());
         }
     }
 
@@ -81,7 +120,7 @@ impl ToolkitTabViewer<'_> {
                     let label = label.on_hover_text(text);
 
                     if label.double_clicked() {
-                        self.parent.items_to_extract.lock().push(file.1.clone());
+                        self.tab_state.items_to_extract.lock().push(file.1.clone());
                     }
                     ui.end_row();
                 }
@@ -89,12 +128,12 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
-        let items_to_unpack = self.parent.items_to_extract.lock().clone();
-        let output_dir = Path::new(self.parent.output_dir.as_str()).join("res");
-        if let Some(pkg_loader) = self.parent.pkg_loader.clone() {
+        let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
+        let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
+        if let Some(pkg_loader) = self.tab_state.pkg_loader.clone() {
             let (tx, rx) = mpsc::channel();
 
-            self.parent.unpacker_progress = Some(rx);
+            self.tab_state.unpacker_progress = Some(rx);
             UNPACKER_STOP.store(false, Ordering::Relaxed);
 
             if !items_to_unpack.is_empty() {
@@ -147,33 +186,88 @@ impl ToolkitTabViewer<'_> {
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.parent.filter).hint_text("Filter"));
-                egui::ScrollArea::both()
-                    .id_source("file_tree_scroll_area")
-                    .show(ui, |ui| {
-                        if let (Some(file_tree), Some(files)) =
-                            (&self.parent.file_tree, &self.parent.files)
-                        {
-                            if self.parent.filter.len() > 3 {
-                                let glob = glob::Pattern::new(self.parent.filter.as_str());
-                                if self.parent.filter.contains("*") && glob.is_ok() {
-                                    let glob = glob.unwrap();
-                                    let leafs = files
-                                        .iter()
-                                        .filter(|(path, _node)| glob.matches_path(&*path));
-                                    self.build_file_list_from_array(ui, leafs);
-                                } else {
-                                    let leafs = files.iter().filter(|(path, _node)| {
-                                        path.to_str()
-                                            .map(|path| path.contains(self.parent.filter.as_str()))
-                                            .unwrap_or(false)
-                                    });
-                                    self.build_file_list_from_array(ui, leafs);
-                                }
-                            } else {
-                                self.build_resource_tree_node(ui, file_tree);
-                            }
+                let filter_list = if let (Some(_file_tree), Some(files)) =
+                    (&self.tab_state.file_tree, &self.tab_state.files)
+                {
+                    if self.tab_state.filter.len() > 3 {
+                        let glob = glob::Pattern::new(self.tab_state.filter.as_str());
+                        if self.tab_state.filter.contains("*") && glob.is_ok() {
+                            let glob = glob.unwrap();
+                            let leafs: Vec<_> = files
+                                .iter()
+                                .filter(|(path, _node)| glob.matches_path(&*path))
+                                .cloned()
+                                .collect();
+
+                            Some(leafs)
+                        } else {
+                            let leafs = files
+                                .iter()
+                                .filter(|(path, _node)| {
+                                    path.to_str()
+                                        .map(|path| path.contains(self.tab_state.filter.as_str()))
+                                        .unwrap_or(false)
+                                })
+                                .cloned()
+                                .collect();
+
+                            Some(leafs)
                         }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                StripBuilder::new(ui)
+                    .size(Size::exact(25.0))
+                    .size(Size::remainder())
+                    .vertical(|mut strip| {
+                        strip.strip(|builder| {
+                            builder
+                                .size(Size::remainder())
+                                .size(Size::exact(50.0))
+                                .horizontal(|mut strip| {
+                                    strip.cell(|ui| {
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut self.tab_state.filter)
+                                                .hint_text("Filter"),
+                                        );
+                                    });
+                                    strip.cell(|ui| {
+                                        if let Some(filter_list) = &filter_list {
+                                            if ui.button("Add All").clicked() {
+                                                println!("button clicked");
+                                                let mut items_to_extract =
+                                                    self.tab_state.items_to_extract.lock();
+                                                println!("filter_list: {}", filter_list.len());
+                                                for file in filter_list {
+                                                    items_to_extract.push(file.1.clone());
+                                                }
+                                            }
+                                        }
+                                    });
+                                });
+                        });
+                        strip.cell(|ui| {
+                            egui::ScrollArea::both()
+                                .id_source("file_tree_scroll_area")
+                                .show(ui, |ui| {
+                                    if let (Some(file_tree), Some(files)) =
+                                        (&self.tab_state.file_tree, &self.tab_state.files)
+                                    {
+                                        if let Some(filtered_files) = &filter_list {
+                                            self.build_file_list_from_array(
+                                                ui,
+                                                filtered_files.iter(),
+                                            );
+                                        } else {
+                                            self.build_resource_tree_node(ui, file_tree);
+                                        }
+                                    }
+                                });
+                        });
                     });
             });
         });
@@ -193,7 +287,7 @@ impl ToolkitTabViewer<'_> {
 
                                     ui.separator();
 
-                                    let mut items = self.parent.items_to_extract.lock();
+                                    let mut items = self.tab_state.items_to_extract.lock();
                                     let mut remove_idx = None;
                                     for (i, item) in items.iter().enumerate() {
                                         if ui
@@ -228,7 +322,7 @@ impl ToolkitTabViewer<'_> {
                                 strip.cell(|ui| {
                                     ui.add_sized(
                                         ui.available_size(),
-                                        egui::TextEdit::singleline(&mut self.parent.output_dir)
+                                        egui::TextEdit::singleline(&mut self.tab_state.output_dir)
                                             .hint_text("Output Path"),
                                     );
                                 });
@@ -236,7 +330,7 @@ impl ToolkitTabViewer<'_> {
                                     if ui.button("Choose...").clicked() {
                                         let folder = rfd::FileDialog::new().pick_folder();
                                         if let Some(folder) = folder {
-                                            self.parent.output_dir =
+                                            self.tab_state.output_dir =
                                                 folder.to_string_lossy().into_owned();
                                         }
                                     }

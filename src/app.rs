@@ -1,27 +1,30 @@
 use std::{
-    fs::{read_dir},
+    fs::read_dir,
     io::Cursor,
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
-        atomic::{Ordering},
+        atomic::Ordering,
         mpsc::{self, TryRecvError},
         Arc,
     },
 };
 
-use egui::{
-    mutex::Mutex, Ui, WidgetText,
-};
+use egui::{mutex::Mutex, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use serde::{Deserialize, Serialize};
+use wows_replays::ReplayFile;
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
 
-use crate::file_unpacker::{UnpackerProgress, UNPACKER_STOP};
+use crate::{
+    file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+    plaintext_viewer::PlaintextFileViewer,
+    replay_parser::{ChatChannel, SharedReplayParserTabState},
+};
 
 #[derive(Clone)]
 pub enum Tab {
@@ -41,7 +44,7 @@ impl Tab {
 }
 
 pub struct ToolkitTabViewer<'a> {
-    pub parent: &'a mut TabState,
+    pub tab_state: &'a mut TabState,
 }
 
 impl ToolkitTabViewer<'_> {
@@ -58,7 +61,7 @@ impl ToolkitTabViewer<'_> {
                                     ui.add_sized(
                                         ui.available_size(),
                                         egui::TextEdit::singleline(
-                                            &mut self.parent.settings.wows_dir,
+                                            &mut self.tab_state.settings.wows_dir,
                                         )
                                         .hint_text("World of Warships Directory"),
                                     );
@@ -67,9 +70,9 @@ impl ToolkitTabViewer<'_> {
                                     if ui.button("Open...").clicked() {
                                         let folder = rfd::FileDialog::new().pick_folder();
                                         if let Some(folder) = folder {
-                                            self.parent.settings.wows_dir =
+                                            self.tab_state.settings.wows_dir =
                                                 folder.to_string_lossy().into_owned();
-                                            self.parent.load_wows_files();
+                                            self.tab_state.load_wows_files();
                                         }
                                     }
                                 });
@@ -79,8 +82,6 @@ impl ToolkitTabViewer<'_> {
             });
         });
     }
-
-    fn build_bottom_panel(&mut self, _ui: &mut egui::Ui) {}
 }
 
 impl TabViewer for ToolkitTabViewer<'_> {
@@ -97,14 +98,31 @@ impl TabViewer for ToolkitTabViewer<'_> {
         match tab {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),
-            Tab::ReplayParser => todo!(),
+            Tab::ReplayParser => self.build_replay_parser_tab(ui),
         }
     }
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Settings {
+pub struct Settings {
+    #[serde(skip)]
+    pub current_replay: Option<ReplayFile>,
+    pub current_replay_path: PathBuf,
     wows_dir: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GameMessage {
+    pub sender_relation: u32,
+    pub sender_name: String,
+    pub channel: ChatChannel,
+    pub message: String,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReplayParserTabState {
+    pub game_chat: Vec<GameMessage>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -133,6 +151,11 @@ pub struct TabState {
 
     #[serde(skip)]
     pub last_progress: Option<UnpackerProgress>,
+
+    pub replay_parser_tab: SharedReplayParserTabState,
+
+    #[serde(skip)]
+    pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
 }
 
 impl Default for TabState {
@@ -147,6 +170,8 @@ impl Default for TabState {
             output_dir: Default::default(),
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
+            replay_parser_tab: Default::default(),
+            file_viewer: Default::default(),
         }
     }
 }
@@ -239,17 +264,7 @@ impl Default for WowsToolkitApp {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
-            tab_state: TabState {
-                file_tree: None,
-                files: None,
-                pkg_loader: None,
-                filter: Default::default(),
-                items_to_extract: Default::default(),
-                output_dir: String::new(),
-                settings: Settings::default(),
-                unpacker_progress: None,
-                last_progress: None,
-            },
+            tab_state: Default::default(),
             dock_state: DockState::new([Tab::Unpacker, Tab::ReplayParser, Tab::Settings].to_vec()),
         }
     }
@@ -363,7 +378,7 @@ impl eframe::App for WowsToolkitApp {
                 .show_inside(
                     ui,
                     &mut ToolkitTabViewer {
-                        parent: &mut self.tab_state,
+                        tab_state: &mut self.tab_state,
                     },
                 );
 
@@ -395,6 +410,27 @@ impl eframe::App for WowsToolkitApp {
             //     egui::warn_if_debug_build(ui);
             // });
         });
+
+        let mut file_viewer = self.tab_state.file_viewer.lock();
+        let mut remove_viewers = Vec::new();
+        for (idx, file_viewer) in file_viewer.iter_mut().enumerate() {
+            file_viewer.draw(ctx);
+            if !file_viewer.open.load(Ordering::Relaxed) {
+                remove_viewers.push(idx);
+            }
+        }
+
+        *file_viewer = file_viewer
+            .drain(..)
+            .enumerate()
+            .filter_map(|(idx, viewer)| {
+                if !remove_viewers.contains(&idx) {
+                    Some(viewer)
+                } else {
+                    None
+                }
+            })
+            .collect();
     }
 }
 
