@@ -4,12 +4,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use bounded_vec_deque::BoundedVecDeque;
 use egui::{text::LayoutJob, Color32, Label, Sense, Separator, TextFormat};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use serde::{Deserialize, Serialize};
 use wows_replays::{
     analyzer::{Analyzer, AnalyzerBuilder},
-    packet2::{PacketType, PacketTypeKind},
+    packet2::{Packet, PacketType, PacketTypeKind},
     parse_scripts,
     rpc::typedefs::ArgValue,
     ReplayFile, ReplayMeta,
@@ -26,6 +27,7 @@ pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 struct ReplayAnalyzer {
     game_meta: ReplayMeta,
     replay_tab_state: SharedReplayParserTabState,
+    last_packets: BoundedVecDeque<Vec<u8>>,
 }
 
 impl ReplayAnalyzer {
@@ -33,6 +35,7 @@ impl ReplayAnalyzer {
         Self {
             game_meta,
             replay_tab_state,
+            last_packets: BoundedVecDeque::new(5),
         }
     }
 }
@@ -46,9 +49,19 @@ pub enum ChatChannel {
 
 impl Analyzer for ReplayAnalyzer {
     fn process(&mut self, packet: &wows_replays::packet2::Packet<'_, '_>) {
-        println!("packet: {}", packet.payload.kind());
+        println!(
+            "packet: {}, type: 0x{:x}, len: {}",
+            packet.payload.kind(),
+            packet.packet_type,
+            packet.packet_size,
+        );
+        self.last_packets.push_back(packet.raw.to_vec());
 
         if let PacketType::EntityMethod(packet) = &packet.payload {
+            println!("\t {}", packet.method);
+            if packet.method == "onBattleEnd" {
+                println!("{:?}", packet);
+            }
             if packet.method == "onChatMessage" {
                 let sender = packet.args[0].clone().int_32().unwrap();
                 let mut sender_team = None;
@@ -90,7 +103,11 @@ impl Analyzer for ReplayAnalyzer {
         }
     }
 
-    fn finish(&self) {}
+    fn finish(&self) {
+        for (i, data) in self.last_packets.iter().enumerate() {
+            std::fs::write(format!("packet_{i}.bin"), data);
+        }
+    }
 }
 
 impl ToolkitTabViewer<'_> {
