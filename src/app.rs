@@ -1,5 +1,5 @@
 use std::{
-    fs::read_dir,
+    fs::{read_dir, File},
     io::Cursor,
     path::{Path, PathBuf},
     rc::Rc,
@@ -8,12 +8,16 @@ use std::{
         mpsc::{self, TryRecvError},
         Arc,
     },
+    thread::LocalKey,
 };
 
 use egui::{mutex::Mutex, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
+use gettext::Catalog;
+use language_tags::LanguageTag;
 use serde::{Deserialize, Serialize};
+use sys_locale::get_locale;
 use wows_replays::ReplayFile;
 use wowsunpack::{
     idx::{self, FileNode},
@@ -144,6 +148,9 @@ pub struct TabState {
 
     pub settings: Settings,
 
+    #[serde(skip)]
+    pub translations: Option<Catalog>,
+
     pub output_dir: String,
 
     #[serde(skip)]
@@ -167,6 +174,7 @@ impl Default for TabState {
             filter: Default::default(),
             items_to_extract: Default::default(),
             settings: Default::default(),
+            translations: Default::default(),
             output_dir: Default::default(),
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
@@ -211,6 +219,22 @@ impl TabState {
             }
 
             if let Some(number) = highest_number {
+                let locale = get_locale().unwrap_or_else(|| String::from("en"));
+                let language_tag: LanguageTag = locale.parse().unwrap();
+                let attempted_dirs = [locale.as_str(), language_tag.primary_language(), "en"];
+                for dir in attempted_dirs {
+                    let localization_path = wows_directory.join(format!(
+                        "bin/{}/res/texts/{}/LC_MESSAGES/global.mo",
+                        number, dir
+                    ));
+                    if !localization_path.exists() {
+                        continue;
+                    }
+                    let global =
+                        File::open(localization_path).expect("failed to open localization file");
+                    let catalog = Catalog::parse(global).expect("could not parse catalog");
+                    self.translations = Some(catalog);
+                }
                 for file in read_dir(
                     wows_directory
                         .join("bin")

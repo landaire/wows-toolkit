@@ -202,12 +202,21 @@ impl ToolkitTabViewer<'_> {
 
             if let Some(replay_file) = &self.tab_state.settings.current_replay {
                 let meta = &replay_file.meta;
+                std::fs::write("meta.txt", format!("{:#?}", meta).as_bytes());
                 ui.horizontal(|ui| {
-                    ui.heading(meta.playerName.to_owned());
-                    ui.label(meta.matchGroup.to_owned());
-                    ui.label(meta.clientVersionFromExe.to_owned());
-                    ui.label(meta.scenario.to_owned());
-                    ui.label(meta.mapDisplayName.to_owned());
+                    ui.heading(meta.playerName.as_str());
+                    ui.label(meta.matchGroup.as_str());
+                    ui.label(meta.clientVersionFromExe.as_str());
+                    if let Some(translations) = self.tab_state.translations.as_ref() {
+                        let id = format!("IDS_{}", meta.scenario.to_uppercase());
+                        ui.label(translations.gettext(id.as_str()));
+
+                        let id = format!("IDS_{}", meta.mapName.to_uppercase());
+                        ui.label(translations.gettext(id.as_str()));
+                    } else {
+                        ui.label(meta.scenario.as_str());
+                        ui.label(meta.mapDisplayName.as_str());
+                    }
                 });
 
                 StripBuilder::new(ui)

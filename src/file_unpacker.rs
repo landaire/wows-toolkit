@@ -189,7 +189,7 @@ impl ToolkitTabViewer<'_> {
                 let filter_list = if let (Some(_file_tree), Some(files)) =
                     (&self.tab_state.file_tree, &self.tab_state.files)
                 {
-                    if self.tab_state.filter.len() > 3 {
+                    if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
                         if self.tab_state.filter.contains("*") && glob.is_ok() {
                             let glob = glob.unwrap();
