@@ -1,10 +1,13 @@
 use std::{
     borrow::Cow,
+    collections::HashMap,
+    io::{self, Cursor},
     path::Path,
     sync::{Arc, Mutex},
 };
 
 use bounded_vec_deque::BoundedVecDeque;
+use byteorder::{LittleEndian, ReadBytesExt};
 use egui::{text::LayoutJob, Color32, Label, Sense, Separator, TextFormat};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,31 @@ use crate::app::{GameMessage, ReplayParserTabState, ToolkitTabViewer};
 const CHAT_VIEW_WIDTH: f32 = 200.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
+
+#[derive(Debug)]
+pub struct ShipConfig {
+    abilities: Vec<u32>,
+    hull: u32,
+    modernization: Vec<u32>,
+    units: Vec<u32>,
+    signals: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub struct Skills {
+    aircraft_carrier: Vec<u8>,
+    battleship: Vec<u8>,
+    cruiser: Vec<u8>,
+    destroyer: Vec<u8>,
+    auxiliary: Vec<u8>,
+    submarine: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct ShipLoadout {
+    config: ShipConfig,
+    skills: Skills,
+}
 
 struct ReplayAnalyzer {
     game_meta: ReplayMeta,
@@ -47,6 +75,56 @@ pub enum ChatChannel {
     Team,
 }
 
+fn parse_ship_config(blob: &[u8]) -> io::Result<ShipConfig> {
+    let mut reader = Cursor::new(blob);
+    let _unk = reader.read_u32::<LittleEndian>()?;
+
+    let ship_params_id = reader.read_u32::<LittleEndian>()?;
+
+    let _unk2 = reader.read_u32::<LittleEndian>()?;
+
+    let unit_count = reader.read_u32::<LittleEndian>()?;
+    let mut units = Vec::with_capacity(unit_count as usize);
+    for _ in 0..unit_count {
+        units.push(reader.read_u32::<LittleEndian>()?);
+    }
+
+    let modernization_count = reader.read_u32::<LittleEndian>()?;
+    let mut modernization = Vec::with_capacity(modernization_count as usize);
+    for _ in 0..modernization_count {
+        modernization.push(reader.read_u32::<LittleEndian>()?);
+    }
+
+    let signal_count = reader.read_u32::<LittleEndian>()?;
+    let mut signals = Vec::with_capacity(signal_count as usize);
+    for _ in 0..signal_count {
+        signals.push(reader.read_u32::<LittleEndian>()?);
+    }
+
+    let _supply_state = reader.read_u32::<LittleEndian>()?;
+
+    let camo_info_count = reader.read_u32::<LittleEndian>()?;
+    println!("camo info count: {camo_info_count}");
+    for _ in 0..camo_info_count {
+        let _camo_info = reader.read_u32::<LittleEndian>()?;
+        let _camo_scheme = reader.read_u32::<LittleEndian>()?;
+    }
+
+    let abilities_count = reader.read_u32::<LittleEndian>()?;
+    let mut abilities = Vec::with_capacity(abilities_count as usize);
+    for _ in 0..abilities_count {
+        abilities.push(reader.read_u32::<LittleEndian>()?)
+    }
+
+    Ok(ShipConfig {
+        abilities,
+        hull: units[0],
+        modernization,
+        units,
+        signals,
+    })
+}
+
 impl Analyzer for ReplayAnalyzer {
     fn process(&mut self, packet: &wows_replays::packet2::Packet<'_, '_>) {
         println!(
@@ -55,7 +133,86 @@ impl Analyzer for ReplayAnalyzer {
             packet.packet_type,
             packet.packet_size,
         );
+        if !matches!(packet.payload.kind(), PacketTypeKind::Unknown) {
+            println!("{:#?}", packet.payload);
+        }
         self.last_packets.push_back(packet.raw.to_vec());
+
+        if let PacketType::BattleResults(results) = &packet.payload {
+            std::fs::write("battle_results.json", results);
+        }
+        if let PacketType::EntityCreate(packet) = &packet.payload {
+            println!("\t {:#?}", packet);
+            if packet.entity_type != "Vehicle" {
+                return;
+            }
+
+            {
+                self.replay_tab_state
+                    .lock()
+                    .unwrap()
+                    .vehicle_id_to_entity_id
+                    .insert(packet.vehicle_id, packet.entity_id);
+            }
+            let config = if let Some(ArgValue::Blob(ship_config)) = packet.props.get("shipConfig") {
+                let config =
+                    parse_ship_config(ship_config.as_slice()).expect("failed to parse ship config");
+                println!("{:#?}", config);
+
+                config
+            } else {
+                panic!("ship config is not a blob")
+            };
+
+            let skills = if let Some(ArgValue::FixedDict(crew_modifiers)) =
+                packet.props.get("crewModifiersCompactParams")
+            {
+                if let Some(ArgValue::Array(learned_skills)) = crew_modifiers.get("learnedSkills") {
+                    let skills_from_idx = |idx: usize| -> Vec<u8> {
+                        learned_skills[idx]
+                            .array_ref()
+                            .unwrap()
+                            .iter()
+                            .map(|idx| *(*idx).uint_8_ref().unwrap())
+                            .collect()
+                    };
+
+                    Skills {
+                        aircraft_carrier: skills_from_idx(0),
+                        battleship: skills_from_idx(1),
+                        cruiser: skills_from_idx(2),
+                        destroyer: skills_from_idx(3),
+                        auxiliary: skills_from_idx(4),
+                        submarine: skills_from_idx(5),
+                    }
+                } else {
+                    panic!("learnedSkills is not an array");
+                }
+            } else {
+                panic!("crew modifiers is not a dictionary");
+            };
+
+            let loadout = ShipLoadout { config, skills };
+            println!("{:#?}", loadout);
+            self.replay_tab_state
+                .lock()
+                .unwrap()
+                .ship_configs
+                .insert(packet.entity_id, loadout);
+        }
+
+        if let PacketType::BasePlayerCreate(packet) = &packet.payload {
+            println!("\t {:?}", packet)
+        }
+        if let PacketType::CellPlayerCreate(packet) = &packet.payload {
+            println!("\t {:?}", packet)
+        }
+        if let PacketType::PropertyUpdate(packet) = &packet.payload {
+            println!("\t {:?}", packet)
+        }
+        if let PacketType::EntityProperty(packet) = &packet.payload {
+            println!("\t {:?}", packet);
+        }
 
         if let PacketType::EntityMethod(packet) = &packet.payload {
             println!("\t {}", packet.method);
@@ -231,6 +388,8 @@ impl ToolkitTabViewer<'_> {
                                 .column(Column::auto())
                                 .column(Column::initial(100.0).range(40.0..=300.0))
                                 .column(Column::initial(100.0).at_least(40.0).clip(true))
+                                .column(Column::initial(100.0).at_least(40.0).clip(true))
+                                .column(Column::initial(100.0).at_least(40.0).clip(true))
                                 .column(Column::remainder())
                                 .min_scrolled_height(0.0);
 
@@ -246,11 +405,19 @@ impl ToolkitTabViewer<'_> {
                                         ui.strong("ID");
                                     });
                                     header.col(|ui| {
-                                        ui.strong("Ship ID");
+                                        ui.strong("Ship Name");
+                                    });
+                                    header.col(|ui| {
+                                        ui.strong("Ship Class");
+                                    });
+                                    header.col(|ui| {
+                                        ui.strong("Allocated Skills");
                                     });
                                 })
                                 .body(|mut body| {
-                                    for player in &meta.vehicles {
+                                    let mut sorted_players = meta.vehicles.clone();
+                                    sorted_players.sort_by(|a, b| a.relation.cmp(&b.relation));
+                                    for player in &sorted_players {
                                         body.row(30.0, |mut ui| {
                                             ui.col(|ui| {
                                                 ui.label(player.name.clone());
@@ -266,9 +433,89 @@ impl ToolkitTabViewer<'_> {
                                                 ui.label(format!("{}", player.id));
                                             });
                                             ui.col(|ui| {
-                                                ui.label(format!("{}", player.shipId));
+                                                if let (Some(game_params), Some(translations)) = (
+                                                    &self.tab_state.game_params,
+                                                    &self.tab_state.translations,
+                                                ) {
+                                                    let translation_id = game_params
+                                                        .ship_id_to_localization_id(
+                                                            player.shipId as i64,
+                                                        )
+                                                        .unwrap();
+                                                    ui.label(translations.gettext(translation_id));
+                                                } else {
+                                                    ui.label(format!("{}", player.shipId));
+                                                }
                                             });
-                                        })
+                                            ui.col(|ui| {
+                                                let mut got_ship_info = true;
+                                                if let (Some(game_params), Some(translations)) = (
+                                                    &self.tab_state.game_params,
+                                                    &self.tab_state.translations,
+                                                ) {
+                                                    if let Some(type_info) = game_params
+                                                        .ship_type_info(player.shipId as i64)
+                                                    {
+                                                        if let Some(serde_pickle::Value::String(
+                                                            species,
+                                                        )) = type_info.get(
+                                                            &serde_pickle::HashableValue::String(
+                                                                "species".to_string(),
+                                                            ),
+                                                        ) {
+                                                            let translation_id = format!(
+                                                                "IDS_{}",
+                                                                species.to_uppercase()
+                                                            );
+                                                            ui.label(
+                                                                translations.gettext(
+                                                                    translation_id.as_str(),
+                                                                ),
+                                                            );
+                                                        } else {
+                                                            println!("failed to get species");
+                                                            got_ship_info = false;
+                                                        }
+                                                    } else {
+                                                        println!("failed to get ship info");
+                                                        got_ship_info = false;
+                                                    }
+                                                }
+                                                if !got_ship_info {
+                                                    ui.label("unk");
+                                                }
+                                            });
+
+                                            ui.col(|ui| {
+                                                ui.label("foo");
+                                                // let replay_tab = self
+                                                //     .tab_state
+                                                //     .replay_parser_tab
+                                                //     .lock()
+                                                //     .unwrap();
+                                                // let entity_id = replay_tab
+                                                //     .vehicle_id_to_entity_id
+                                                //     .get(&(player.id as u32))
+                                                //     .expect("failed to get entity ID");
+
+                                                // let ship_loadouts =
+                                                //     replay_tab.ship_configs.get(entity_id).unwrap();
+                                                // let skills = [
+                                                //     &ship_loadouts.skills.aircraft_carrier,
+                                                //     &ship_loadouts.skills.auxiliary,
+                                                //     &ship_loadouts.skills.battleship,
+                                                //     &ship_loadouts.skills.cruiser,
+                                                //     &ship_loadouts.skills.destroyer,
+                                                //     &ship_loadouts.skills.submarine,
+                                                // ];
+                                                // for skillset in skills {
+                                                //     if !skillset.is_empty() {
+                                                //         ui.label(format!("{}", skillset.len()));
+                                                //         break;
+                                                //     }
+                                                // }
+                                            });
+                                        });
                                     }
                                 });
                         });

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::{read_dir, File},
     io::Cursor,
     path::{Path, PathBuf},
@@ -20,14 +21,16 @@ use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
 use wows_replays::ReplayFile;
 use wowsunpack::{
+    game_params,
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
 
 use crate::{
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+    game_params::GameParams,
     plaintext_viewer::PlaintextFileViewer,
-    replay_parser::{ChatChannel, SharedReplayParserTabState},
+    replay_parser::{ChatChannel, SharedReplayParserTabState, ShipLoadout},
 };
 
 #[derive(Clone)]
@@ -123,10 +126,11 @@ pub struct GameMessage {
     pub message: String,
 }
 
-#[derive(Default, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Default)]
 pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
+    pub ship_configs: HashMap<u32, ShipLoadout>,
+    pub vehicle_id_to_entity_id: HashMap<u32, u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -151,6 +155,9 @@ pub struct TabState {
     #[serde(skip)]
     pub translations: Option<Catalog>,
 
+    #[serde(skip)]
+    pub game_params: Option<GameParams>,
+
     pub output_dir: String,
 
     #[serde(skip)]
@@ -159,6 +166,7 @@ pub struct TabState {
     #[serde(skip)]
     pub last_progress: Option<UnpackerProgress>,
 
+    #[serde(skip)]
     pub replay_parser_tab: SharedReplayParserTabState,
 
     #[serde(skip)]
@@ -175,6 +183,7 @@ impl Default for TabState {
             items_to_extract: Default::default(),
             settings: Default::default(),
             translations: Default::default(),
+            game_params: Default::default(),
             output_dir: Default::default(),
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
@@ -258,6 +267,9 @@ impl TabState {
 
                 let file_tree = idx::build_file_tree(idx_files.as_slice());
                 let files = file_tree.paths();
+
+                // Try loading GameParams.data
+                self.game_params = GameParams::from_pkg(&file_tree, &pkg_loader).ok();
 
                 self.file_tree = Some(file_tree);
                 self.files = Some(files);
