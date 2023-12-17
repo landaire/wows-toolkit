@@ -31,11 +31,12 @@ bounded-vec-deque = "0.1.1"
 gettext = "0.4"
 sys-locale = "0.3"
 language-tags = "0.3"
-serde-pickle = "1.0"
+serde-pickle = { version = "1.0", features = ["variantly"] }
 flate2 = "1.0.28"
 ouroboros = "0.18"
 byteorder = "1.5.0"
 bincode = "1.0"
+tap = "1.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

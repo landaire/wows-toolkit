@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     io::{self, Cursor},
     path::Path,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 
@@ -10,9 +11,13 @@ use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
 use egui::{text::LayoutJob, Color32, Label, Sense, Separator, TextFormat};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use wows_replays::{
-    analyzer::{Analyzer, AnalyzerBuilder},
+    analyzer::{
+        battle_controller::{BattleController, EventHandler},
+        Analyzer, AnalyzerBuilder,
+    },
     packet2::{Packet, PacketType, PacketTypeKind},
     parse_scripts,
     rpc::typedefs::ArgValue,
@@ -21,250 +26,44 @@ use wows_replays::{
 
 use itertools::Itertools;
 
-use crate::app::{GameMessage, ReplayParserTabState, ToolkitTabViewer};
+use crate::{
+    app::{ReplayParserTabState, ToolkitTabViewer},
+    game_params::GameMetadataProvider,
+};
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
-#[derive(Debug)]
-pub struct ShipConfig {
-    abilities: Vec<u32>,
-    hull: u32,
-    modernization: Vec<u32>,
-    units: Vec<u32>,
-    signals: Vec<u32>,
-}
-
-#[derive(Debug)]
-pub struct Skills {
-    aircraft_carrier: Vec<u8>,
-    battleship: Vec<u8>,
-    cruiser: Vec<u8>,
-    destroyer: Vec<u8>,
-    auxiliary: Vec<u8>,
-    submarine: Vec<u8>,
-}
-
-#[derive(Debug)]
-pub struct ShipLoadout {
-    config: ShipConfig,
-    skills: Skills,
-}
-
-struct ReplayAnalyzer {
-    game_meta: ReplayMeta,
+struct ReplayEventHandler {
     replay_tab_state: SharedReplayParserTabState,
-    last_packets: BoundedVecDeque<Vec<u8>>,
 }
 
-impl ReplayAnalyzer {
+impl ReplayEventHandler {
     pub fn new(game_meta: ReplayMeta, replay_tab_state: SharedReplayParserTabState) -> Self {
-        Self {
-            game_meta,
-            replay_tab_state,
-            last_packets: BoundedVecDeque::new(5),
-        }
+        Self { replay_tab_state }
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum ChatChannel {
-    Division,
-    Global,
-    Team,
+impl EventHandler for ReplayEventHandler {
+    fn on_chat_message(&self, message: wows_replays::analyzer::battle_controller::GameMessage) {
+        self.replay_tab_state
+            .lock()
+            .unwrap()
+            .game_chat
+            .push(message)
+    }
 }
 
-fn parse_ship_config(blob: &[u8]) -> io::Result<ShipConfig> {
-    let mut reader = Cursor::new(blob);
-    let _unk = reader.read_u32::<LittleEndian>()?;
+#[self_referencing]
+struct Replay<'res> {
+    replay_file: ReplayFile,
 
-    let ship_params_id = reader.read_u32::<LittleEndian>()?;
+    resource_loader: &'res GameMetadataProvider,
 
-    let _unk2 = reader.read_u32::<LittleEndian>()?;
-
-    let unit_count = reader.read_u32::<LittleEndian>()?;
-    let mut units = Vec::with_capacity(unit_count as usize);
-    for _ in 0..unit_count {
-        units.push(reader.read_u32::<LittleEndian>()?);
-    }
-
-    let modernization_count = reader.read_u32::<LittleEndian>()?;
-    let mut modernization = Vec::with_capacity(modernization_count as usize);
-    for _ in 0..modernization_count {
-        modernization.push(reader.read_u32::<LittleEndian>()?);
-    }
-
-    let signal_count = reader.read_u32::<LittleEndian>()?;
-    let mut signals = Vec::with_capacity(signal_count as usize);
-    for _ in 0..signal_count {
-        signals.push(reader.read_u32::<LittleEndian>()?);
-    }
-
-    let _supply_state = reader.read_u32::<LittleEndian>()?;
-
-    let camo_info_count = reader.read_u32::<LittleEndian>()?;
-    println!("camo info count: {camo_info_count}");
-    for _ in 0..camo_info_count {
-        let _camo_info = reader.read_u32::<LittleEndian>()?;
-        let _camo_scheme = reader.read_u32::<LittleEndian>()?;
-    }
-
-    let abilities_count = reader.read_u32::<LittleEndian>()?;
-    let mut abilities = Vec::with_capacity(abilities_count as usize);
-    for _ in 0..abilities_count {
-        abilities.push(reader.read_u32::<LittleEndian>()?)
-    }
-
-    Ok(ShipConfig {
-        abilities,
-        hull: units[0],
-        modernization,
-        units,
-        signals,
-    })
-}
-
-impl Analyzer for ReplayAnalyzer {
-    fn process(&mut self, packet: &wows_replays::packet2::Packet<'_, '_>) {
-        println!(
-            "packet: {}, type: 0x{:x}, len: {}",
-            packet.payload.kind(),
-            packet.packet_type,
-            packet.packet_size,
-        );
-        if !matches!(packet.payload.kind(), PacketTypeKind::Unknown) {
-            println!("{:#?}", packet.payload);
-        }
-        self.last_packets.push_back(packet.raw.to_vec());
-
-        if let PacketType::BattleResults(results) = &packet.payload {
-            std::fs::write("battle_results.json", results);
-        }
-        if let PacketType::EntityCreate(packet) = &packet.payload {
-            println!("\t {:#?}", packet);
-            if packet.entity_type != "Vehicle" {
-                return;
-            }
-
-            {
-                self.replay_tab_state
-                    .lock()
-                    .unwrap()
-                    .vehicle_id_to_entity_id
-                    .insert(packet.vehicle_id, packet.entity_id);
-            }
-            let config = if let Some(ArgValue::Blob(ship_config)) = packet.props.get("shipConfig") {
-                let config =
-                    parse_ship_config(ship_config.as_slice()).expect("failed to parse ship config");
-                println!("{:#?}", config);
-
-                config
-            } else {
-                panic!("ship config is not a blob")
-            };
-
-            let skills = if let Some(ArgValue::FixedDict(crew_modifiers)) =
-                packet.props.get("crewModifiersCompactParams")
-            {
-                if let Some(ArgValue::Array(learned_skills)) = crew_modifiers.get("learnedSkills") {
-                    let skills_from_idx = |idx: usize| -> Vec<u8> {
-                        learned_skills[idx]
-                            .array_ref()
-                            .unwrap()
-                            .iter()
-                            .map(|idx| *(*idx).uint_8_ref().unwrap())
-                            .collect()
-                    };
-
-                    Skills {
-                        aircraft_carrier: skills_from_idx(0),
-                        battleship: skills_from_idx(1),
-                        cruiser: skills_from_idx(2),
-                        destroyer: skills_from_idx(3),
-                        auxiliary: skills_from_idx(4),
-                        submarine: skills_from_idx(5),
-                    }
-                } else {
-                    panic!("learnedSkills is not an array");
-                }
-            } else {
-                panic!("crew modifiers is not a dictionary");
-            };
-
-            let loadout = ShipLoadout { config, skills };
-            println!("{:#?}", loadout);
-            self.replay_tab_state
-                .lock()
-                .unwrap()
-                .ship_configs
-                .insert(packet.entity_id, loadout);
-        }
-
-        if let PacketType::BasePlayerCreate(packet) = &packet.payload {
-            println!("\t {:?}", packet)
-        }
-        if let PacketType::CellPlayerCreate(packet) = &packet.payload {
-            println!("\t {:?}", packet)
-        }
-        if let PacketType::PropertyUpdate(packet) = &packet.payload {
-            println!("\t {:?}", packet)
-        }
-        if let PacketType::EntityProperty(packet) = &packet.payload {
-            println!("\t {:?}", packet);
-        }
-
-        if let PacketType::EntityMethod(packet) = &packet.payload {
-            println!("\t {}", packet.method);
-            if packet.method == "onBattleEnd" {
-                println!("{:?}", packet);
-            }
-            if packet.method == "onChatMessage" {
-                let sender = packet.args[0].clone().int_32().unwrap();
-                let mut sender_team = None;
-                let channel = std::str::from_utf8(packet.args[1].string_ref().unwrap()).unwrap();
-                let message = std::str::from_utf8(packet.args[2].string_ref().unwrap()).unwrap();
-
-                let channel = match channel {
-                    "battle_common" => ChatChannel::Global,
-                    "battle_team" => ChatChannel::Team,
-                    other => panic!("unknown channel {channel}"),
-                };
-
-                let mut sender_name = "Unknown".to_owned();
-                for player in &self.game_meta.vehicles {
-                    if player.id == (sender as i64) {
-                        sender_name = player.name.clone();
-                        sender_team = Some(player.relation);
-                    }
-                }
-
-                println!(
-                    "chat message from sender {sender_name} in channel {channel:?}: {message}"
-                );
-
-                self.replay_tab_state
-                    .lock()
-                    .unwrap()
-                    .game_chat
-                    .push(GameMessage {
-                        sender_relation: sender_team.unwrap(),
-                        sender_name,
-                        channel,
-                        message: message.to_string(),
-                    });
-            }
-        }
-        if let PacketTypeKind::Invalid = packet.payload.kind() {
-            println!("{:#?}", packet.payload);
-        }
-    }
-
-    fn finish(&self) {
-        for (i, data) in self.last_packets.iter().enumerate() {
-            std::fs::write(format!("packet_{i}.bin"), data);
-        }
-    }
+    #[borrows(replay_file, resource_loader)]
+    #[not_covariant]
+    battle_controller: BattleController<'this, 'this, GameMetadataProvider>,
 }
 
 impl ToolkitTabViewer<'_> {
@@ -296,7 +95,15 @@ impl ToolkitTabViewer<'_> {
                     let replay_file: ReplayFile =
                         ReplayFile::from_file(&self.tab_state.settings.current_replay_path)
                             .unwrap();
-                    println!("{:#?}", replay_file.meta);
+
+                    let replay = ReplayBuilder {
+                        replay_file,
+                        resource_loader: &self.tab_state.game_metadata.unwrap(),
+                        battle_controller_builder: |replay_file, resource_loader| {
+                            BattleController::new(&replay_file.meta, resource_loader)
+                        },
+                    }
+                    .build();
 
                     if let (Some(file_tree), Some(pkg_loader)) =
                         (&self.tab_state.file_tree, &self.tab_state.pkg_loader)
@@ -315,7 +122,7 @@ impl ToolkitTabViewer<'_> {
                                 Ok(Cow::Owned(file_data))
                             });
 
-                        let analyzer = Box::new(ReplayAnalyzer::new(
+                        let analyzer = Rc::new(ReplayEventHandler::new(
                             replay_file.meta.clone(),
                             Arc::clone(&self.tab_state.replay_parser_tab),
                         ));
@@ -330,7 +137,10 @@ impl ToolkitTabViewer<'_> {
                         // Parse packets
                         let mut p = wows_replays::packet2::Parser::new(&specs);
                         let mut analyzer_set =
-                            wows_replays::analyzer::AnalyzerAdapter::new(vec![processor]);
+                            wows_replays::analyzer::AnalyzerAdapter::new(vec![Box::new(
+                                battle_controller,
+                            )]);
+
                         match p.parse_packets::<wows_replays::analyzer::AnalyzerAdapter>(
                             &replay_file.packet_data,
                             &mut analyzer_set,
@@ -434,13 +244,11 @@ impl ToolkitTabViewer<'_> {
                                             });
                                             ui.col(|ui| {
                                                 if let (Some(game_params), Some(translations)) = (
-                                                    &self.tab_state.game_params,
+                                                    &self.tab_state.game_metadata,
                                                     &self.tab_state.translations,
                                                 ) {
                                                     let translation_id = game_params
-                                                        .ship_id_to_localization_id(
-                                                            player.shipId as i64,
-                                                        )
+                                                        .param_localization_id(player.shipId as u32)
                                                         .unwrap();
                                                     ui.label(translations.gettext(translation_id));
                                                 } else {
@@ -450,32 +258,20 @@ impl ToolkitTabViewer<'_> {
                                             ui.col(|ui| {
                                                 let mut got_ship_info = true;
                                                 if let (Some(game_params), Some(translations)) = (
-                                                    &self.tab_state.game_params,
+                                                    &self.tab_state.game_metadata,
                                                     &self.tab_state.translations,
                                                 ) {
-                                                    if let Some(type_info) = game_params
-                                                        .ship_type_info(player.shipId as i64)
+                                                    if let Some(vehicle) = game_params
+                                                        .vehicle_by_id(player.shipId as u32)
                                                     {
-                                                        if let Some(serde_pickle::Value::String(
-                                                            species,
-                                                        )) = type_info.get(
-                                                            &serde_pickle::HashableValue::String(
-                                                                "species".to_string(),
-                                                            ),
-                                                        ) {
-                                                            let translation_id = format!(
-                                                                "IDS_{}",
-                                                                species.to_uppercase()
-                                                            );
-                                                            ui.label(
-                                                                translations.gettext(
-                                                                    translation_id.as_str(),
-                                                                ),
-                                                            );
-                                                        } else {
-                                                            println!("failed to get species");
-                                                            got_ship_info = false;
-                                                        }
+                                                        let translation_id = vehicle
+                                                            .species()
+                                                            .map(|s| s.translation_id())
+                                                            .expect("failed to get translation ID");
+                                                        ui.label(
+                                                            translations
+                                                                .gettext(translation_id.as_str()),
+                                                        );
                                                     } else {
                                                         println!("failed to get ship info");
                                                         got_ship_info = false;

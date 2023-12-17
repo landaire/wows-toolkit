@@ -14,4 +14,6 @@ pub enum DataLoadError {
     Io(#[from] io::Error),
     #[error("Could not deserialize GameParams.data")]
     GameParamsDeserialization(#[from] serde_pickle::Error),
+    #[error("Unexpected field type for {0:?}")]
+    GameParamsUnexpectedType(&'static str),
 }

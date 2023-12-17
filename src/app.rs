@@ -19,7 +19,7 @@ use gettext::Catalog;
 use language_tags::LanguageTag;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use wows_replays::ReplayFile;
+use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
 use wowsunpack::{
     game_params,
     idx::{self, FileNode},
@@ -28,9 +28,9 @@ use wowsunpack::{
 
 use crate::{
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
-    game_params::GameParams,
+    game_params::GameMetadataProvider,
     plaintext_viewer::PlaintextFileViewer,
-    replay_parser::{ChatChannel, SharedReplayParserTabState, ShipLoadout},
+    replay_parser::SharedReplayParserTabState,
 };
 
 #[derive(Clone)]
@@ -118,19 +118,9 @@ pub struct Settings {
     wows_dir: String,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct GameMessage {
-    pub sender_relation: u32,
-    pub sender_name: String,
-    pub channel: ChatChannel,
-    pub message: String,
-}
-
 #[derive(Default)]
 pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
-    pub ship_configs: HashMap<u32, ShipLoadout>,
-    pub vehicle_id_to_entity_id: HashMap<u32, u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,7 +146,7 @@ pub struct TabState {
     pub translations: Option<Catalog>,
 
     #[serde(skip)]
-    pub game_params: Option<GameParams>,
+    pub game_metadata: Option<GameMetadataProvider>,
 
     pub output_dir: String,
 
@@ -183,7 +173,7 @@ impl Default for TabState {
             items_to_extract: Default::default(),
             settings: Default::default(),
             translations: Default::default(),
-            game_params: Default::default(),
+            game_metadata: Default::default(),
             output_dir: Default::default(),
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
@@ -269,7 +259,7 @@ impl TabState {
                 let files = file_tree.paths();
 
                 // Try loading GameParams.data
-                self.game_params = GameParams::from_pkg(&file_tree, &pkg_loader).ok();
+                self.game_metadata = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader).ok();
 
                 self.file_tree = Some(file_tree);
                 self.files = Some(files);

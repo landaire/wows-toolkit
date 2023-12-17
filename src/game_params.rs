@@ -8,30 +8,63 @@ use std::{
 
 use egui::ahash::HashMapExt;
 use flate2::read::ZlibDecoder;
+use gettext::Catalog;
 use itertools::Itertools;
 use ouroboros::self_referencing;
 use serde_pickle::{DeOptions, HashableValue, Value};
 use wows_replays::{
-    game_params::{Param, ParamBuilder, ParamData, Species},
-    resource_loader::{EntityType, Vehicle, VehicleBuilder},
+    game_params::{GameParamProvider, GameParams, Param, ParamBuilder, ParamData, Species},
+    resource_loader::{EntityType, ResourceLoader, Vehicle, VehicleBuilder},
 };
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::error::DataLoadError;
 
-pub struct GameParams {
+pub struct GameMetadataProvider {
     params: wows_replays::game_params::GameParams,
-    param_id_to_translation_id: HashMap<i64, String>,
-    #[borrows(params)]
-    #[covariant]
-    param_id_to_dict: HashMap<i64, &'this BTreeMap<HashableValue, Value>>,
+    param_id_to_translation_id: HashMap<u32, String>,
+    translations: Option<Catalog>,
 }
 
-impl GameParams {
+impl GameParamProvider for GameMetadataProvider {
+    fn by_id(&self, id: u32) -> Option<&Param> {
+        self.params.by_id(id)
+    }
+
+    fn by_index(&self, index: &str) -> Option<&Param> {
+        todo!()
+    }
+
+    fn by_name(&self, name: &str) -> Option<&Param> {
+        todo!()
+    }
+}
+
+impl ResourceLoader for GameMetadataProvider {
+    fn localized_name_from_param(&self, param: &Param) -> Option<&str> {
+        self.param_localization_id(param.id()).and_then(|id| {
+            self.translations
+                .as_ref()
+                .map(|catalog| catalog.gettext(id))
+        })
+    }
+
+    fn localized_name_from_id(&self, id: &str) -> Option<&str> {
+        self.translations
+            .as_ref()
+            .map(|catalog| catalog.gettext(id))
+    }
+
+    fn param_by_id(&self, id: u32) -> Option<&Param> {
+        self.params.by_id(id)
+    }
+}
+
+impl GameMetadataProvider {
     pub fn from_pkg(
         file_tree: &FileNode,
         pkg_loader: &PkgFileLoader,
-    ) -> Result<GameParams, DataLoadError> {
+    ) -> Result<GameMetadataProvider, DataLoadError> {
         println!("loading game params");
         let cache_path = Path::new("game_params.bin");
         println!("deserializing gameparams");
@@ -57,7 +90,7 @@ impl GameParams {
             let mut decoder = ZlibDecoder::new(Cursor::new(game_params_data));
             std::io::copy(&mut decoder, &mut decompressed_data)?;
             decompressed_data.set_position(0);
-            let pickled_params = serde_pickle::from_reader(
+            let pickled_params: Value = serde_pickle::from_reader(
                 &mut decompressed_data,
                 DeOptions::default()
                     .replace_unresolved_globals()
@@ -65,77 +98,102 @@ impl GameParams {
             )
             .expect("failed to load game params");
 
-            let new_params = if let Value::List(mut params_list) = pickled_params {
-                let params = params_list.remove(0);
-                if let Value::Dict(params_dict) = params {
-                    params_dict.values().filter_map(|param| {
-                        if let Value::Dict(param_data) = param {
-                            param_data.get(&HashableValue::String("typeinfo".to_string())).and_then(|type_info| {
-                                if let Value::Dict(type_info) = type_info {
-                                    Some((type_info.get(&HashableValue::String("nation".to_string()))?, type_info.get(&HashableValue::String("species".to_string()))?, type_info.get(&HashableValue::String("type".to_string()))?))
-                                } else {
-                                    None
-                                }
-                            }).and_then(|(nation, species, typ)| {
-                                if let (Value::String(nation), Value::String(typ)) = (nation, typ) {
-                                    let entity_type = EntityType::from_str(&typ).ok()?;
-                                    let nation = nation.clone();
-                                    let species = if let Value::String(species) = species{
-                                        Species::from_str(species).ok()
-                                    } else {
-                                        None
-                                    };
+            let params_list = pickled_params
+                .list_ref()
+                .expect("Root game params is not a list");
 
-                                    let parsed_param_data = match entity_type {
-                                        EntityType::Ship => {
-                                            let level = if let Value::I64(level) = param_data.get(&HashableValue::String("level".to_string())).expect("vehicle does not have level attribute") {
-                                                *level as u32
-                                            } else {
-                                                panic!("vehicle level is not an i64");
-                                            };
-                                            let group = if let Value::String(group) = param_data.get(&HashableValue::String("group".to_string())).expect("vehicle does not have group attribute") {
-                                                group.clone()
-                                            } else {
-                                                panic!("vehicle leve is not an i64");
-                                            };
-                                            VehicleBuilder::default().level(level).group(group).build().ok().map(|v| ParamData::Vehicle(v))
-                                    },
-                                    _ => None,
-                                    }?;
+            let params = &params_list[0];
+            let params_dict = params
+                .dict_ref()
+                .expect("First element of GameParams is not a dictionary");
 
-                                    let id = if let Value::I64(id) = param_data.get(&HashableValue::String("id".to_string())).expect("param has no id field") {
-                                        *id as u32
-                                    } else {
-                                        panic!("param id is not an i64");
-                                    };
+            let new_params = params_dict
+                .values()
+                .filter_map(|param| {
+                    let param_data = param
+                        .dict_ref()
+                        .expect("Params root level dictionary values are not dictionaries");
 
-                                    let index = if let Value::String(index) = param_data.get(&HashableValue::String("index".to_string())).expect("param has no index field") {
-                                        index.clone()
-                                    } else {
-                                        panic!("param index is not a string");
-                                    };
-
-                                    let name = if let Value::String(name) = param_data.get(&HashableValue::String("name".to_string())).expect("param has no name field") {
-                                        name.clone()
-                                    } else {
-                                        panic!("param name is not a string");
-                                    };
-
-                                    ParamBuilder::default().id(id).index(index).name(name).species(species).nation(nation).data(parsed_param_data).build().ok()
-                                } else {
-                                    None
-                                }
+                    param_data
+                        .get(&HashableValue::String("typeinfo".to_string()))
+                        .and_then(|type_info| {
+                            type_info.dict_ref().and_then(|type_info| {
+                                Some((
+                                    type_info.get(&HashableValue::String("nation".to_string()))?,
+                                    type_info.get(&HashableValue::String("species".to_string()))?,
+                                    type_info.get(&HashableValue::String("type".to_string()))?,
+                                ))
                             })
-                        } else {
-                            None
-                        }
-                    }).collect::<Vec<wows_replays::game_params::Param>>()
-                } else {
-                    panic!("params is not a list");
-                }
-            } else {
-                panic!("game params are not a list");
-            };
+                        })
+                        .and_then(|(nation, species, typ)| {
+                            if let (Value::String(nation), Value::String(typ)) = (nation, typ) {
+                                let entity_type = EntityType::from_str(&typ).ok()?;
+                                let nation = nation.clone();
+                                let species =
+                                    species.string_ref().and_then(|s| Species::from_str(s).ok());
+
+                                let parsed_param_data = match entity_type {
+                                    EntityType::Ship => {
+                                        let level = *param_data
+                                            .get(&HashableValue::String("level".to_string()))
+                                            .expect("vehicle does not have level attribute")
+                                            .i64_ref()
+                                            .expect("vehicle level is not an int64")
+                                            as u32;
+
+                                        let group = param_data
+                                            .get(&HashableValue::String("group".to_string()))
+                                            .expect("vehicle does not have group attribute")
+                                            .string_ref()
+                                            .cloned()
+                                            .expect("vehicle group is not a string");
+
+                                        VehicleBuilder::default()
+                                            .level(level)
+                                            .group(group)
+                                            .build()
+                                            .ok()
+                                            .map(|v| ParamData::Vehicle(v))
+                                    }
+                                    _ => None,
+                                }?;
+
+                                let id = *param_data
+                                    .get(&HashableValue::String("id".to_string()))
+                                    .expect("param has no id field")
+                                    .i64_ref()
+                                    .expect("param id is not an i64")
+                                    as u32;
+
+                                let index = param_data
+                                    .get(&HashableValue::String("index".to_string()))
+                                    .expect("param has no index field")
+                                    .string_ref()
+                                    .cloned()
+                                    .expect("param index is not a string");
+
+                                let name = param_data
+                                    .get(&HashableValue::String("name".to_string()))
+                                    .expect("param has no name field")
+                                    .string_ref()
+                                    .cloned()
+                                    .expect("param name is not a string");
+
+                                ParamBuilder::default()
+                                    .id(id)
+                                    .index(index)
+                                    .name(name)
+                                    .species(species)
+                                    .nation(nation)
+                                    .data(parsed_param_data)
+                                    .build()
+                                    .ok()
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .collect::<Vec<wows_replays::game_params::Param>>();
 
             let file = std::fs::File::create(cache_path).unwrap();
             bincode::serialize_into(file, &new_params)
@@ -146,8 +204,6 @@ impl GameParams {
 
         let now = Instant::now();
         println!("took {} seconds to load", (now - start).as_secs());
-
-        panic!("{:#?}", params);
 
         // println!("loading ships");
 
@@ -210,27 +266,28 @@ impl GameParams {
         //     },
         // }
         // .build())
+
+        let param_id_to_translation_id = HashMap::from_iter(
+            params
+                .iter()
+                .map(|param| (param.id(), format!("IDS_{}", param.index()))),
+        );
+
+        Ok(GameMetadataProvider {
+            params: params.into(),
+            param_id_to_translation_id,
+            translations: None,
+        })
     }
 
-    pub fn ship_id_to_localization_id(&self, ship_id: i64) -> Option<&str> {
-        self.borrow_param_id_to_translation_id()
+    pub fn set_translations(&mut self, catalog: Catalog) {
+        self.translations = Some(catalog);
+    }
+
+    pub fn param_localization_id(&self, ship_id: u32) -> Option<&str> {
+        self.param_id_to_translation_id
             .get(&ship_id)
             .map(|s| s.as_str())
-    }
-
-    pub fn ship_type_info(&self, ship_id: i64) -> Option<&BTreeMap<HashableValue, Value>> {
-        self.borrow_param_id_to_dict()
-            .get(&ship_id)
-            .map(|s| {
-                if let Some(Value::Dict(dict)) =
-                    s.get(&HashableValue::String("typeinfo".to_string()))
-                {
-                    Some(dict)
-                } else {
-                    None
-                }
-            })
-            .flatten()
     }
 
     // pub fn get(&self, path: &str) -> Option<&serde_pickle::Value> {
