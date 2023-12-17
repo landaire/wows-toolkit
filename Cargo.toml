@@ -35,6 +35,8 @@ serde-pickle = "1.0"
 flate2 = "1.0.28"
 ouroboros = "0.18"
 byteorder = "1.5.0"
+bson = "2.8"
+cbor = "0.4"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -58,7 +60,7 @@ debug = true
 
 
 [patch.crates-io]
-serde-pickle = { git = "https://github.com/landaire/serde-pickle.git" }
+serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }
