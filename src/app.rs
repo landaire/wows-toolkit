@@ -17,6 +17,7 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 use language_tags::LanguageTag;
+use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
 use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
@@ -30,7 +31,7 @@ use crate::{
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
     game_params::GameMetadataProvider,
     plaintext_viewer::PlaintextFileViewer,
-    replay_parser::SharedReplayParserTabState,
+    replay_parser::{Replay, SharedReplayParserTabState},
 };
 
 #[derive(Clone)]
@@ -110,10 +111,20 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
+pub struct WorldOfWarshipsData {
+    pub file_tree: Option<FileNode>,
+
+    pub pkg_loader: Option<Arc<PkgFileLoader>>,
+
+    pub files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
+
+    pub game_metadata: Option<Rc<GameMetadataProvider>>,
+
+    pub current_replay: Option<Replay>,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(skip)]
-    pub current_replay: Option<ReplayFile>,
     pub current_replay_path: PathBuf,
     wows_dir: String,
 }
@@ -127,13 +138,7 @@ pub struct ReplayParserTabState {
 #[serde(default)]
 pub struct TabState {
     #[serde(skip)]
-    pub file_tree: Option<FileNode>,
-
-    #[serde(skip)]
-    pub pkg_loader: Option<Arc<PkgFileLoader>>,
-
-    #[serde(skip)]
-    pub files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
+    pub world_of_warships_data: WorldOfWarshipsData,
 
     pub filter: String,
 
@@ -144,9 +149,6 @@ pub struct TabState {
 
     #[serde(skip)]
     pub translations: Option<Catalog>,
-
-    #[serde(skip)]
-    pub game_metadata: Option<GameMetadataProvider>,
 
     pub output_dir: String,
 
@@ -166,14 +168,17 @@ pub struct TabState {
 impl Default for TabState {
     fn default() -> Self {
         Self {
-            file_tree: Default::default(),
-            pkg_loader: Default::default(),
-            files: Default::default(),
+            world_of_warships_data: WorldOfWarshipsData {
+                file_tree: None,
+                pkg_loader: None,
+                files: None,
+                game_metadata: None,
+                current_replay: Default::default(),
+            },
             filter: Default::default(),
             items_to_extract: Default::default(),
             settings: Default::default(),
             translations: Default::default(),
-            game_metadata: Default::default(),
             output_dir: Default::default(),
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
@@ -259,11 +264,17 @@ impl TabState {
                 let files = file_tree.paths();
 
                 // Try loading GameParams.data
-                self.game_metadata = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader).ok();
+                let data = WorldOfWarshipsData {
+                    game_metadata: GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
+                        .ok()
+                        .map(Rc::new),
+                    file_tree: Some(file_tree),
+                    pkg_loader: Some(pkg_loader),
+                    files: Some(files),
+                    current_replay: Default::default(),
+                };
 
-                self.file_tree = Some(file_tree);
-                self.files = Some(files);
-                self.pkg_loader = Some(pkg_loader);
+                self.world_of_warships_data = data;
             }
         }
 

@@ -14,7 +14,7 @@ use ouroboros::self_referencing;
 use serde_pickle::{DeOptions, HashableValue, Value};
 use wows_replays::{
     game_params::{GameParamProvider, GameParams, Param, ParamBuilder, ParamData, Species},
-    resource_loader::{EntityType, ResourceLoader, Vehicle, VehicleBuilder},
+    resource_loader::{ParamType, ResourceLoader, Vehicle, VehicleBuilder},
 };
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
@@ -49,10 +49,10 @@ impl ResourceLoader for GameMetadataProvider {
         })
     }
 
-    fn localized_name_from_id(&self, id: &str) -> Option<&str> {
+    fn localized_name_from_id(&self, id: &str) -> Option<String> {
         self.translations
             .as_ref()
-            .map(|catalog| catalog.gettext(id))
+            .map(move |catalog| catalog.gettext(id).to_string())
     }
 
     fn param_by_id(&self, id: u32) -> Option<&Param> {
@@ -127,13 +127,13 @@ impl GameMetadataProvider {
                         })
                         .and_then(|(nation, species, typ)| {
                             if let (Value::String(nation), Value::String(typ)) = (nation, typ) {
-                                let entity_type = EntityType::from_str(&typ).ok()?;
+                                let param_type = ParamType::from_str(&typ).ok()?;
                                 let nation = nation.clone();
                                 let species =
                                     species.string_ref().and_then(|s| Species::from_str(s).ok());
 
-                                let parsed_param_data = match entity_type {
-                                    EntityType::Ship => {
+                                let parsed_param_data = match param_type {
+                                    ParamType::Ship => {
                                         let level = *param_data
                                             .get(&HashableValue::String("level".to_string()))
                                             .expect("vehicle does not have level attribute")

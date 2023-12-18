@@ -42,7 +42,9 @@ impl ToolkitTabViewer<'_> {
 
                     let file_label = if is_plaintext_file.is_some() {
                         file_label.context_menu(|ui| {
-                            if let Some(pkg_loader) = &self.tab_state.pkg_loader {
+                            if let Some(pkg_loader) =
+                                self.tab_state.world_of_warships_data.pkg_loader.as_ref()
+                            {
                                 if ui.button("View Contents").clicked() {
                                     let mut file_contents: Vec<u8> = Vec::with_capacity(
                                         node.file_info().unwrap().unpacked_size as usize,
@@ -130,7 +132,7 @@ impl ToolkitTabViewer<'_> {
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
         let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
-        if let Some(pkg_loader) = self.tab_state.pkg_loader.clone() {
+        if let Some(pkg_loader) = self.tab_state.world_of_warships_data.pkg_loader.clone() {
             let (tx, rx) = mpsc::channel();
 
             self.tab_state.unpacker_progress = Some(rx);
@@ -186,9 +188,10 @@ impl ToolkitTabViewer<'_> {
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
-                let filter_list = if let (Some(_file_tree), Some(files)) =
-                    (&self.tab_state.file_tree, &self.tab_state.files)
-                {
+                let filter_list = if let (Some(_file_tree), Some(files)) = (
+                    self.tab_state.world_of_warships_data.file_tree.as_ref(),
+                    &self.tab_state.world_of_warships_data.files.as_ref(),
+                ) {
                     if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
                         if self.tab_state.filter.contains("*") && glob.is_ok() {
@@ -254,9 +257,10 @@ impl ToolkitTabViewer<'_> {
                             egui::ScrollArea::both()
                                 .id_source("file_tree_scroll_area")
                                 .show(ui, |ui| {
-                                    if let (Some(file_tree), Some(files)) =
-                                        (&self.tab_state.file_tree, &self.tab_state.files)
-                                    {
+                                    if let (Some(file_tree), Some(files)) = (
+                                        self.tab_state.world_of_warships_data.file_tree.as_ref(),
+                                        self.tab_state.world_of_warships_data.files.as_ref(),
+                                    ) {
                                         if let Some(filtered_files) = &filter_list {
                                             self.build_file_list_from_array(
                                                 ui,
