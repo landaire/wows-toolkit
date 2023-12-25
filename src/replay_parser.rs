@@ -15,8 +15,10 @@ use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use wows_replays::{
     analyzer::{
-        battle_controller::{self, BattleController, ChatChannel, EventHandler, GameMessage},
-        Analyzer, AnalyzerBuilder,
+        battle_controller::{
+            self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage,
+        },
+        AnalyzerBuilder, AnalyzerMut,
     },
     packet2::{Packet, PacketType, PacketTypeKind},
     parse_scripts,
@@ -37,36 +39,18 @@ const CHAT_VIEW_WIDTH: f32 = 200.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
-#[self_referencing]
 pub struct Replay {
     replay_file: ReplayFile,
 
     resource_loader: Rc<GameMetadataProvider>,
 
-    #[borrows(replay_file, resource_loader)]
-    #[not_covariant]
-    battle_controller: BattleController<'this, 'this, GameMetadataProvider>,
+    battle_report: Option<BattleReport>,
 }
 
 impl Replay {
     pub fn parse(&mut self, file_tree: &FileNode, pkg_loader: Arc<PkgFileLoader>) {
-        let data_file_loader = wows_replays::version::DataFileWithCallback::new(|path| {
-            println!("requesting file: {path}");
-
-            let path = Path::new(path);
-
-            let mut file_data = Vec::new();
-            file_tree
-                .read_file_at_path(path, &*pkg_loader, &mut file_data)
-                .expect("failed to read file");
-
-            Ok(Cow::Owned(file_data))
-        });
-
-        let specs = parse_scripts(&data_file_loader).unwrap();
-
         let version_parts: Vec<_> = self
-            .borrow_replay_file()
+            .replay_file
             .meta
             .clientVersionFromExe
             .split(",")
@@ -74,16 +58,18 @@ impl Replay {
         assert!(version_parts.len() == 4);
 
         // Parse packets
-        self.with_battle_controller(|controller| {
-            let mut p = wows_replays::packet2::Parser::new(&specs);
+        let packet_data = &self.replay_file.packet_data;
+        let mut controller =
+            BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
+        let mut p = wows_replays::packet2::Parser::new(&self.resource_loader.entity_specs());
 
-            match p.parse_packets(&self.borrow_replay_file().packet_data, controller) {
-                Ok(()) => {
-                    controller.finish();
-                }
-                Err(e) => panic!("{:?}", e),
+        match p.parse_packets_mut(packet_data, &mut controller) {
+            Ok(()) => {
+                controller.finish();
+                self.battle_report = Some(controller.build_report());
             }
-        });
+            Err(e) => panic!("{:?}", e),
+        }
     }
 }
 
@@ -117,7 +103,7 @@ impl ToolkitTabViewer<'_> {
                         ReplayFile::from_file(&self.tab_state.settings.current_replay_path)
                             .unwrap();
 
-                    let mut replay = ReplayBuilder {
+                    let mut replay = Replay {
                         replay_file,
                         resource_loader: self
                             .tab_state
@@ -125,11 +111,8 @@ impl ToolkitTabViewer<'_> {
                             .game_metadata
                             .clone()
                             .unwrap(),
-                        battle_controller_builder: |replay_file, resource_loader| {
-                            BattleController::new(&replay_file.meta, resource_loader)
-                        },
-                    }
-                    .build();
+                        battle_report: None,
+                    };
 
                     if let (Some(file_tree), Some(pkg_loader)) = (
                         self.tab_state.world_of_warships_data.file_tree.as_ref(),
@@ -159,13 +142,13 @@ impl ToolkitTabViewer<'_> {
                 .current_replay
                 .as_ref()
             {
-                replay_file.with_battle_controller(|battle_controller| {
+                if let Some(report) = replay_file.battle_report.as_ref() {
                     ui.horizontal(|ui| {
-                        ui.heading(battle_controller.player_name());
-                        ui.label(battle_controller.match_group());
-                        ui.label(battle_controller.game_version());
-                        ui.label(battle_controller.game_mode());
-                        ui.label(battle_controller.map_name());
+                        ui.heading(report.self_entity().player().unwrap().name());
+                        ui.label(report.match_group());
+                        ui.label(report.version().to_path());
+                        ui.label(report.game_mode());
+                        ui.label(report.map_name());
                     });
 
                     StripBuilder::new(ui)
@@ -207,13 +190,15 @@ impl ToolkitTabViewer<'_> {
                                         });
                                     })
                                     .body(|mut body| {
-                                        let mut sorted_players =
-                                            battle_controller.players().to_vec();
+                                        let mut sorted_players = report.player_entities().to_vec();
                                         sorted_players.sort_by(|a, b| {
-                                            a.borrow().relation().cmp(&b.borrow().relation())
+                                            a.player()
+                                                .unwrap()
+                                                .relation()
+                                                .cmp(&b.player().unwrap().relation())
                                         });
-                                        for player in &sorted_players {
-                                            let player = player.borrow();
+                                        for entity in &sorted_players {
+                                            let player = entity.player().unwrap();
                                             let ship = player.vehicle();
                                             body.row(30.0, |mut ui| {
                                                 ui.col(|ui| {
@@ -229,7 +214,7 @@ impl ToolkitTabViewer<'_> {
                                                     });
                                                 });
                                                 ui.col(|ui| {
-                                                    ui.label(format!("{}", player.id()));
+                                                    ui.label(format!("{}", player.avatar_id()));
                                                 });
                                                 ui.col(|ui| {
                                                     let ship_name = self
@@ -266,34 +251,31 @@ impl ToolkitTabViewer<'_> {
                                                     ui.label(species);
                                                 });
 
-                                                ui.col(|ui| {
-                                                    ui.label("foo");
-                                                    // let replay_tab = self
-                                                    //     .tab_state
-                                                    //     .replay_parser_tab
-                                                    //     .lock()
-                                                    //     .unwrap();
-                                                    // let entity_id = replay_tab
-                                                    //     .vehicle_id_to_entity_id
-                                                    //     .get(&(player.id as u32))
-                                                    //     .expect("failed to get entity ID");
+                                                let captain = entity
+                                                    .captain()
+                                                    .data()
+                                                    .crew_ref()
+                                                    .expect("captain is not a crew?");
+                                                let species =
+                                                    ship.species().expect("ship has no species?");
+                                                let skill_points = entity
+                                                    .commander_skills()
+                                                    .iter()
+                                                    .fold(0usize, |accum, skill_type| {
+                                                        accum
+                                                            + captain
+                                                                .skill_by_type(*skill_type as u32)
+                                                                .expect("could not get skill type")
+                                                                .tier()
+                                                                .get_for_species(species.clone())
+                                                    });
 
-                                                    // let ship_loadouts =
-                                                    //     replay_tab.ship_configs.get(entity_id).unwrap();
-                                                    // let skills = [
-                                                    //     &ship_loadouts.skills.aircraft_carrier,
-                                                    //     &ship_loadouts.skills.auxiliary,
-                                                    //     &ship_loadouts.skills.battleship,
-                                                    //     &ship_loadouts.skills.cruiser,
-                                                    //     &ship_loadouts.skills.destroyer,
-                                                    //     &ship_loadouts.skills.submarine,
-                                                    // ];
-                                                    // for skillset in skills {
-                                                    //     if !skillset.is_empty() {
-                                                    //         ui.label(format!("{}", skillset.len()));
-                                                    //         break;
-                                                    //     }
-                                                    // }
+                                                ui.col(|ui| {
+                                                    ui.label(format!(
+                                                        "{}pts ({} skills)",
+                                                        skill_points,
+                                                        entity.commander_skills().len()
+                                                    ));
                                                 });
                                             });
                                         }
@@ -309,8 +291,10 @@ impl ToolkitTabViewer<'_> {
                                             .num_columns(1)
                                             .striped(true)
                                             .show(ui, |ui| {
-                                                replay_file.with_battle_controller(|controller| {
-                                                    for message in &*controller.game_chat() {
+                                                if let Some(report) =
+                                                    replay_file.battle_report.as_ref()
+                                                {
+                                                    for message in report.game_chat() {
                                                         let GameMessage {
                                                             sender_relation,
                                                             sender_name,
@@ -392,12 +376,12 @@ impl ToolkitTabViewer<'_> {
                                                         }
                                                         ui.end_row();
                                                     }
-                                                });
+                                                }
                                             });
                                     });
                             });
                         });
-                });
+                }
             }
         });
     }

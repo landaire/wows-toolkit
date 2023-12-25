@@ -1,7 +1,9 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     io::Cursor,
     path::Path,
+    rc::Rc,
     str::FromStr,
     time::Instant,
 };
@@ -13,8 +15,17 @@ use itertools::Itertools;
 use ouroboros::self_referencing;
 use serde_pickle::{DeOptions, HashableValue, Value};
 use wows_replays::{
-    game_params::{GameParamProvider, GameParams, Param, ParamBuilder, ParamData, Species},
-    resource_loader::{ParamType, ResourceLoader, Vehicle, VehicleBuilder},
+    game_params::{
+        Crew, CrewBuilder, CrewPersonality, CrewPersonalityBuilder, CrewPersonalityBuilderError,
+        CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder, CrewSkillBuilderError,
+        CrewSkillLogicTrigger, CrewSkillLogicTriggerBuilder, CrewSkillModifier,
+        CrewSkillModifierBuilder, CrewSkillModifierBuilderError, CrewSkillTiersBuilder,
+        GameParamProvider, GameParams, Param, ParamBuilder, ParamData, ParamType, Species, Vehicle,
+        VehicleBuilder,
+    },
+    parse_scripts,
+    resource_loader::ResourceLoader,
+    rpc::entitydefs::EntitySpec,
 };
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
@@ -24,18 +35,19 @@ pub struct GameMetadataProvider {
     params: wows_replays::game_params::GameParams,
     param_id_to_translation_id: HashMap<u32, String>,
     translations: Option<Catalog>,
+    specs: Rc<Vec<EntitySpec>>,
 }
 
 impl GameParamProvider for GameMetadataProvider {
-    fn by_id(&self, id: u32) -> Option<&Param> {
-        self.params.by_id(id)
+    fn game_param_by_id(&self, id: u32) -> Option<Rc<Param>> {
+        self.params.game_param_by_id(id)
     }
 
-    fn by_index(&self, index: &str) -> Option<&Param> {
+    fn game_param_by_index(&self, index: &str) -> Option<Rc<Param>> {
         todo!()
     }
 
-    fn by_name(&self, name: &str) -> Option<&Param> {
+    fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
         todo!()
     }
 }
@@ -55,9 +67,380 @@ impl ResourceLoader for GameMetadataProvider {
             .map(move |catalog| catalog.gettext(id).to_string())
     }
 
-    fn param_by_id(&self, id: u32) -> Option<&Param> {
-        self.params.by_id(id)
+    fn game_param_by_id(&self, id: u32) -> Option<Rc<Param>> {
+        self.params.game_param_by_id(id)
     }
+
+    fn entity_specs(&self) -> &[EntitySpec] {
+        self.specs.as_slice()
+    }
+}
+
+macro_rules! game_param_to_type {
+    ($params:ident, $key:expr, String) => {
+        game_param_to_type!($params, $key, string_ref, String).clone()
+    };
+    ($params:ident, $key:expr, i8) => {
+        game_param_to_type!($params, $key, i64) as i8
+    };
+    ($params:ident, $key:expr, i16) => {
+        game_param_to_type!($params, $key, i64) as i16
+    };
+    ($params:ident, $key:expr, i32) => {
+        game_param_to_type!($params, $key, i64) as i32
+    };
+    ($params:ident, $key:expr, u8) => {
+        game_param_to_type!($params, $key, i64) as u8
+    };
+    ($params:ident, $key:expr, u16) => {
+        game_param_to_type!($params, $key, i64) as u16
+    };
+    ($params:ident, $key:expr, u32) => {
+        game_param_to_type!($params, $key, i64) as u32
+    };
+    ($params:ident, $key:expr, u64) => {
+        game_param_to_type!($params, $key, i64) as u64
+    };
+    ($params:ident, $key:expr, usize) => {
+        game_param_to_type!($params, $key, i64) as usize
+    };
+    ($params:ident, $key:expr, f32) => {
+        game_param_to_type!($params, $key, f64) as f32
+    };
+    ($params:ident, $key:expr, i64) => {
+        *game_param_to_type!($params, $key, i64_ref, i64)
+    };
+    ($params:ident, $key:expr, f64) => {
+        *game_param_to_type!($params, $key, f64_ref, f64)
+    };
+    ($params:ident, $key:expr, bool) => {
+        *game_param_to_type!($params, $key, bool_ref, bool)
+    };
+    ($params:ident, $key:expr, Option<HashMap<(), ()>>) => {
+        if
+        $params
+            .get(&HashableValue::String($key.to_string()))
+            .unwrap_or_else(|| panic!("could not get {}", $key))
+            .is_none() {
+                None
+            } else {
+                Some(game_param_to_type!($params, $key, HashMap<(), ()>))
+            }
+    };
+    ($params:ident, $key:expr, Option<$ty:tt>) => {
+
+        $params
+            .get(&HashableValue::String($key.to_string()))
+            .and_then(|value| {
+                if value.is_none() {
+                    None
+                } else {
+                    Some(game_param_to_type!($params, $key, $ty))
+                }
+            })
+    };
+    ($params:ident, $key:expr, HashMap<(), ()>) => {
+        game_param_to_type!($params, $key, dict_ref, HashMap<(), ()>)
+    };
+    ($params:ident, $key:expr, &[()]) => {
+        game_param_to_type!($params, $key, list_ref, &[()]).as_slice()
+    };
+    ($args:ident, $key:expr, $conversion_func:ident, $ty:ty) => {
+        $args
+            .get(&HashableValue::String($key.to_string()))
+            .unwrap_or_else(|| panic!("could not get {}", $key))
+            .$conversion_func()
+            .unwrap_or_else(|| panic!("{} is not a {}", $key, stringify!($ty)))
+    };
+}
+
+fn build_skill_modifiers(
+    modifiers: &BTreeMap<HashableValue, Value>,
+) -> Result<Vec<CrewSkillModifier>, CrewSkillModifierBuilderError> {
+    eprintln!("{:#?}", modifiers);
+    modifiers
+        .iter()
+        .filter_map(|(modifier_name, modifier_data)| {
+            let modifier_name = modifier_name
+                .string_ref()
+                .expect("modifier name is not a string")
+                .to_owned();
+
+            // TODO
+            if matches!(
+                modifier_name.as_ref(),
+                "excludedConsumables"
+                    | "fireResistanceEnabled"
+                    | "priorityTargetEnabled"
+                    | "artilleryAlertEnabled"
+                    | "nearEnemyIntuitionEnabled"
+                    | "GMRotationSpeed"
+            ) {
+                return None;
+            }
+            let modifier =
+                if let Some(common_value) = modifier_data.i64_ref().cloned() {
+                    let common_value = common_value as f32;
+                    CrewSkillModifierBuilder::default()
+                        .aircraft_carrier(common_value)
+                        .auxiliary(common_value)
+                        .battleship(common_value)
+                        .cruiser(common_value)
+                        .destroyer(common_value)
+                        .submarine(common_value)
+                        .name(modifier_name)
+                        .build()
+                } else if let Some(common_value) = modifier_data.f64_ref().cloned() {
+                    let common_value = common_value as f32;
+                    CrewSkillModifierBuilder::default()
+                        .aircraft_carrier(common_value)
+                        .auxiliary(common_value)
+                        .battleship(common_value)
+                        .cruiser(common_value)
+                        .destroyer(common_value)
+                        .submarine(common_value)
+                        .name(modifier_name)
+                        .build()
+                } else {
+                    let modifier_data = modifier_data
+                        .dict_ref()
+                        .expect("skill modifier data is not a dict");
+
+                    if modifier_data
+                        .get(&HashableValue::String("AirCarrier".to_owned()))
+                        .expect("could not get AirCarrier")
+                        .is_i64()
+                    {
+                        CrewSkillModifierBuilder::default()
+                    .aircraft_carrier(game_param_to_type!(modifier_data, "AirCarrier", i64) as f32)
+                    .auxiliary(game_param_to_type!(modifier_data, "Auxiliary", i64) as f32)
+                    .battleship(game_param_to_type!(modifier_data, "Battleship", i64) as f32)
+                    .cruiser(game_param_to_type!(modifier_data, "Cruiser", i64) as f32)
+                    .destroyer(game_param_to_type!(modifier_data, "Destroyer", i64) as f32)
+                    .submarine(game_param_to_type!(modifier_data, "Submarine", i64) as f32)
+                    .name(modifier_name)
+                    .build()
+                    } else {
+                        CrewSkillModifierBuilder::default()
+                            .aircraft_carrier(game_param_to_type!(modifier_data, "AirCarrier", f32))
+                            .auxiliary(game_param_to_type!(modifier_data, "Auxiliary", f32))
+                            .battleship(game_param_to_type!(modifier_data, "Battleship", f32))
+                            .cruiser(game_param_to_type!(modifier_data, "Cruiser", f32))
+                            .destroyer(game_param_to_type!(modifier_data, "Destroyer", f32))
+                            .submarine(game_param_to_type!(modifier_data, "Submarine", f32))
+                            .name(modifier_name)
+                            .build()
+                    }
+                };
+
+            Some(modifier)
+        })
+        .collect()
+}
+
+fn build_crew_skills(
+    skills: &BTreeMap<HashableValue, Value>,
+) -> Result<Vec<CrewSkill>, CrewSkillBuilderError> {
+    skills
+        .iter()
+        .map(|(skill_name, skill_data)| {
+            let skill_name = skill_name
+                .string_ref()
+                .expect("skill_name is not a String")
+                .to_owned();
+
+            let skill_data = skill_data.dict_ref().expect("skill data is not dictionary");
+
+            let logic_modifiers =
+                game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
+
+            let logic_modifiers = None;
+            // logic_modifiers.map(|modifiers| {
+            //     build_skill_modifiers(modifiers).expect("failed to build logic modifiers")
+            // });
+
+            let logic_trigger_data =
+                game_param_to_type!(skill_data, "LogicTrigger", HashMap<(), ()>);
+            eprintln!("{:#?}", logic_trigger_data);
+            eprintln!("{}", skill_name);
+            let logic_trigger = CrewSkillLogicTriggerBuilder::default()
+                .burn_count(game_param_to_type!(
+                    logic_trigger_data,
+                    "burnCount",
+                    Option<usize>
+                ))
+                .change_priority_target_penalty(game_param_to_type!(
+                    logic_trigger_data,
+                    "changePriorityTargetPenalty",
+                    f32
+                ))
+                .consumable_type(game_param_to_type!(
+                    logic_trigger_data,
+                    "consumableType",
+                    String
+                ))
+                .cooling_delay(game_param_to_type!(logic_trigger_data, "coolingDelay", f32))
+                .cooling_interpolator(Vec::default())
+                .divider_type(game_param_to_type!(
+                    logic_trigger_data,
+                    "dividerType",
+                    Option<String>
+                ))
+                .divider_value(game_param_to_type!(
+                    logic_trigger_data,
+                    "dividerValue",
+                    Option<f32>
+                ))
+                .duration(game_param_to_type!(logic_trigger_data, "duration", f32))
+                .energy_coeff(game_param_to_type!(logic_trigger_data, "energyCoeff", f32))
+                .flood_count(game_param_to_type!(
+                    logic_trigger_data,
+                    "floodCount",
+                    Option<usize>
+                ))
+                .health_factor(game_param_to_type!(
+                    logic_trigger_data,
+                    "healthFactor",
+                    Option<f32>
+                ))
+                .heat_interpolator(Vec::default())
+                .modifiers(logic_modifiers)
+                .trigger_desc_ids(game_param_to_type!(
+                    logic_trigger_data,
+                    "triggerDescIds",
+                    String
+                ))
+                .trigger_type(game_param_to_type!(
+                    logic_trigger_data,
+                    "triggerType",
+                    String
+                ))
+                .build()
+                .expect("failed to build logic trigger");
+
+            let modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
+            let modifiers = None;
+
+            // modifiers.map(|modifiers| {
+            //     build_skill_modifiers(modifiers).expect("failed to build skill modifiers")
+            // });
+
+            let tier_data = game_param_to_type!(skill_data, "tier", HashMap<(), ()>);
+            let tier = CrewSkillTiersBuilder::default()
+                .aircraft_carrier(game_param_to_type!(tier_data, "AirCarrier", usize))
+                .auxiliary(game_param_to_type!(tier_data, "Auxiliary", usize))
+                .battleship(game_param_to_type!(tier_data, "Battleship", usize))
+                .cruiser(game_param_to_type!(tier_data, "Cruiser", usize))
+                .destroyer(game_param_to_type!(tier_data, "Destroyer", usize))
+                .submarine(game_param_to_type!(tier_data, "Submarine", usize))
+                .build()
+                .expect("failed to build skill tiers");
+
+            CrewSkillBuilder::default()
+                .name(skill_name)
+                .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", bool))
+                .is_epic(game_param_to_type!(skill_data, "isEpic", bool))
+                .skill_type(game_param_to_type!(skill_data, "skillType", usize))
+                .ui_treat_as_trigger(game_param_to_type!(skill_data, "uiTreatAsTrigger", bool))
+                .tier(tier)
+                .modifiers(modifiers)
+                .logic_trigger(logic_trigger)
+                .build()
+        })
+        .collect()
+}
+
+fn build_crew_personality(
+    personality: &BTreeMap<HashableValue, Value>,
+) -> Result<CrewPersonality, CrewPersonalityBuilderError> {
+    let ships = game_param_to_type!(personality, "ships", HashMap<(), ()>);
+    let ships = CrewPersonalityShipsBuilder::default()
+        .groups(
+            game_param_to_type!(ships, "groups", &[()])
+                .iter()
+                .map(|value| {
+                    value
+                        .string_ref()
+                        .expect("group entry is not a string")
+                        .to_owned()
+                })
+                .collect(),
+        )
+        .nation(
+            game_param_to_type!(ships, "nation", &[()])
+                .iter()
+                .map(|value| {
+                    value
+                        .string_ref()
+                        .expect("nation entry is not a string")
+                        .to_owned()
+                })
+                .collect(),
+        )
+        .peculiarity(
+            game_param_to_type!(ships, "peculiarity", &[()])
+                .iter()
+                .map(|value| {
+                    value
+                        .string_ref()
+                        .expect("peculiarity entry is not a string")
+                        .to_owned()
+                })
+                .collect(),
+        )
+        .ships(
+            game_param_to_type!(ships, "ships", &[()])
+                .iter()
+                .map(|value| {
+                    value
+                        .string_ref()
+                        .expect("ships entry is not a string")
+                        .to_owned()
+                })
+                .collect(),
+        )
+        .build()
+        .expect("failed to build CrewPersonalityShips");
+
+    CrewPersonalityBuilder::default()
+        .can_reset_skills_for_free(game_param_to_type!(
+            personality,
+            "canResetSkillsForFree",
+            bool
+        ))
+        .cost_credits(game_param_to_type!(personality, "costCR", usize))
+        .cost_elite_xp(game_param_to_type!(personality, "costELXP", usize))
+        .cost_gold(game_param_to_type!(personality, "costGold", usize))
+        .cost_xp(game_param_to_type!(personality, "costXP", usize))
+        .has_custom_background(game_param_to_type!(
+            personality,
+            "hasCustomBackground",
+            bool
+        ))
+        .has_overlay(game_param_to_type!(personality, "hasOverlay", bool))
+        .has_rank(game_param_to_type!(personality, "hasRank", bool))
+        .has_sample_voiceover(game_param_to_type!(personality, "hasSampleVO", bool))
+        .is_animated(game_param_to_type!(personality, "isAnimated", bool))
+        .is_person(game_param_to_type!(personality, "isPerson", bool))
+        .is_retrainable(game_param_to_type!(personality, "isRetrainable", bool))
+        .is_unique(game_param_to_type!(personality, "isUnique", bool))
+        .peculiarity(game_param_to_type!(personality, "peculiarity", String))
+        .permissions(game_param_to_type!(personality, "permissions", u32))
+        .person_name(game_param_to_type!(personality, "personName", String))
+        .subnation(game_param_to_type!(personality, "subnation", String))
+        .tags(
+            game_param_to_type!(personality, "tags", &[()])
+                .iter()
+                .map(|value| {
+                    value
+                        .string_ref()
+                        .expect("peculiarity entry is not a string")
+                        .to_owned()
+                })
+                .collect(),
+        )
+        .ships(ships)
+        .build()
 }
 
 impl GameMetadataProvider {
@@ -134,19 +517,9 @@ impl GameMetadataProvider {
 
                                 let parsed_param_data = match param_type {
                                     ParamType::Ship => {
-                                        let level = *param_data
-                                            .get(&HashableValue::String("level".to_string()))
-                                            .expect("vehicle does not have level attribute")
-                                            .i64_ref()
-                                            .expect("vehicle level is not an int64")
-                                            as u32;
-
-                                        let group = param_data
-                                            .get(&HashableValue::String("group".to_string()))
-                                            .expect("vehicle does not have group attribute")
-                                            .string_ref()
-                                            .cloned()
-                                            .expect("vehicle group is not a string");
+                                        let level = game_param_to_type!(param_data, "level", u32);
+                                        let group =
+                                            game_param_to_type!(param_data, "group", String);
 
                                         VehicleBuilder::default()
                                             .level(level)
@@ -154,6 +527,27 @@ impl GameMetadataProvider {
                                             .build()
                                             .ok()
                                             .map(|v| ParamData::Vehicle(v))
+                                    }
+                                    ParamType::Crew => {
+                                        let money_training_level = game_param_to_type!(
+                                            param_data,
+                                            "moneyTrainingLevel",
+                                            usize
+                                        );
+
+                                        let personality = game_param_to_type!(param_data, "CrewPersonality", HashMap<(), ()>);
+                                        let crew_personality = build_crew_personality(personality).expect("failed to build crew personality");
+
+                                        let skills = game_param_to_type!(param_data, "Skills", Option<HashMap<(), ()>>);
+                                        let skills = skills.map(|skills| build_crew_skills(skills).expect("failed to build crew skills"));
+
+                                        CrewBuilder::default()
+                                            .money_training_level(money_training_level)
+                                            .personality(crew_personality)
+                                            .skills(skills)
+                                            .build()
+                                            .ok()
+                                            .map(|v| ParamData::Crew(v))
                                     }
                                     _ => None,
                                 }?;
@@ -273,10 +667,26 @@ impl GameMetadataProvider {
                 .map(|param| (param.id(), format!("IDS_{}", param.index()))),
         );
 
+        let data_file_loader = wows_replays::version::DataFileWithCallback::new(|path| {
+            println!("requesting file: {path}");
+
+            let path = Path::new(path);
+
+            let mut file_data = Vec::new();
+            file_tree
+                .read_file_at_path(path, &*pkg_loader, &mut file_data)
+                .expect("failed to read file");
+
+            Ok(Cow::Owned(file_data))
+        });
+
+        let specs = Rc::new(parse_scripts(&data_file_loader).unwrap());
+
         Ok(GameMetadataProvider {
             params: params.into(),
             param_id_to_translation_id,
             translations: None,
+            specs,
         })
     }
 
