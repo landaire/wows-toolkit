@@ -223,22 +223,6 @@ impl TabState {
             }
 
             if let Some(number) = highest_number {
-                let locale = get_locale().unwrap_or_else(|| String::from("en"));
-                let language_tag: LanguageTag = locale.parse().unwrap();
-                let attempted_dirs = [locale.as_str(), language_tag.primary_language(), "en"];
-                for dir in attempted_dirs {
-                    let localization_path = wows_directory.join(format!(
-                        "bin/{}/res/texts/{}/LC_MESSAGES/global.mo",
-                        number, dir
-                    ));
-                    if !localization_path.exists() {
-                        continue;
-                    }
-                    let global =
-                        File::open(localization_path).expect("failed to open localization file");
-                    let catalog = Catalog::parse(global).expect("could not parse catalog");
-                    self.translations = Some(catalog);
-                }
                 for file in read_dir(
                     wows_directory
                         .join("bin")
@@ -263,11 +247,39 @@ impl TabState {
                 let file_tree = idx::build_file_tree(idx_files.as_slice());
                 let files = file_tree.paths();
 
+                let locale = get_locale().unwrap_or_else(|| String::from("en"));
+                let language_tag: LanguageTag = locale.parse().unwrap();
+                let attempted_dirs = [locale.as_str(), language_tag.primary_language(), "en"];
+                let mut found_catalog = None;
+                for dir in attempted_dirs {
+                    let localization_path = wows_directory.join(format!(
+                        "bin/{}/res/texts/{}/LC_MESSAGES/global.mo",
+                        number, dir
+                    ));
+                    if !localization_path.exists() {
+                        continue;
+                    }
+                    let global =
+                        File::open(localization_path).expect("failed to open localization file");
+                    let catalog = Catalog::parse(global).expect("could not parse catalog");
+                    found_catalog = Some(catalog);
+                    break;
+                }
+
                 // Try loading GameParams.data
+                let mut metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
+                    .ok()
+                    .and_then(|mut metadata_provider| {
+                        if let Some(catalog) = found_catalog {
+                            metadata_provider.set_translations(catalog)
+                        }
+
+                        Some(metadata_provider)
+                    })
+                    .map(Rc::new);
+
                 let data = WorldOfWarshipsData {
-                    game_metadata: GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
-                        .ok()
-                        .map(Rc::new),
+                    game_metadata: metadata_provider,
                     file_tree: Some(file_tree),
                     pkg_loader: Some(pkg_loader),
                     files: Some(files),
