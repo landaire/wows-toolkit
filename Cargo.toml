@@ -1,5 +1,5 @@
 [package]
-name = "eframe_template"
+name = "wows_toolkit"
 version = "0.1.0"
 authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
 edition = "2021"
@@ -37,6 +37,7 @@ ouroboros = "0.18"
 byteorder = "1.5.0"
 bincode = "1.0"
 tap = "1.0"
+thousands = "0.2.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

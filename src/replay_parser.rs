@@ -4,19 +4,22 @@ use std::{
     io::{self, Cursor},
     path::Path,
     rc::Rc,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{text::LayoutJob, Color32, Label, Sense, Separator, TextFormat};
+use egui::{text::LayoutJob, Color32, Label, RichText, Sense, Separator, TextFormat};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use language_tags::LanguageTag;
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
+use thousands::Separable;
 use wows_replays::{
     analyzer::{
         battle_controller::{
-            self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage,
+            self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage, Player,
         },
         AnalyzerBuilder, AnalyzerMut,
     },
@@ -33,6 +36,7 @@ use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
+    util::separate_number,
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -45,6 +49,14 @@ pub struct Replay {
     resource_loader: Rc<GameMetadataProvider>,
 
     battle_report: Option<BattleReport>,
+}
+
+fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
+    if player.clan().is_empty() {
+        Cow::Borrowed(player.name())
+    } else {
+        Cow::Owned(format!("[{}] {}", player.clan(), player.name()))
+    }
 }
 
 impl Replay {
@@ -79,12 +91,13 @@ impl ToolkitTabViewer<'_> {
             .striped(true)
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(Column::initial(100.0).range(40.0..=300.0))
-            .column(Column::initial(100.0).at_least(40.0).clip(true))
-            .column(Column::initial(100.0).at_least(40.0).clip(true))
-            .column(Column::initial(100.0).at_least(40.0).clip(true))
-            .column(Column::remainder())
+            .column(Column::auto().clip(true))
+            .column(Column::initial(100.0).range(40.0..=300.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::remainder().clip(true))
             .min_scrolled_height(0.0);
 
         table
@@ -105,6 +118,9 @@ impl ToolkitTabViewer<'_> {
                     ui.strong("Ship Class");
                 });
                 header.col(|ui| {
+                    ui.strong("Observed Damage").on_hover_text("Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.");
+                });
+                header.col(|ui| {
                     ui.strong("Allocated Skills");
                 });
             })
@@ -121,7 +137,7 @@ impl ToolkitTabViewer<'_> {
                     let ship = player.vehicle();
                     body.row(30.0, |mut ui| {
                         ui.col(|ui| {
-                            ui.label(player.name());
+                            ui.label(player_name_with_clan(&*player));
                         });
                         ui.col(|ui| {
                             ui.label(match player.relation() {
@@ -164,6 +180,13 @@ impl ToolkitTabViewer<'_> {
                             ui.label(species);
                         });
 
+                        ui.col(|ui| {
+                            ui.label(separate_number(
+                                entity.damage(),
+                                self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()),
+                            ));
+                        });
+
                         let captain = entity
                             .captain()
                             .data()
@@ -196,114 +219,130 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .id_source("game_chat_scroll_area")
+        egui::Grid::new("filtered_files_grid")
+            .max_col_width(CHAT_VIEW_WIDTH)
+            .num_columns(1)
+            .striped(true)
             .show(ui, |ui| {
-                egui::Grid::new("filtered_files_grid")
-                    .max_col_width(CHAT_VIEW_WIDTH)
-                    .num_columns(1)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for message in battle_report.game_chat() {
-                            let GameMessage {
-                                sender_relation,
-                                sender_name,
-                                channel,
-                                message,
-                            } = message;
+                for message in battle_report.game_chat() {
+                    let GameMessage {
+                        sender_relation,
+                        sender_name,
+                        channel,
+                        message,
+                    } = message;
 
-                            let text = format!("{sender_name} ({channel:?}): {message}");
+                    let text = format!("{sender_name} ({channel:?}): {message}");
 
-                            let is_dark_mode = ui.visuals().dark_mode;
-                            let name_color = match *sender_relation {
-                                0 => Color32::GOLD,
-                                1 => {
-                                    if is_dark_mode {
-                                        Color32::LIGHT_GREEN
-                                    } else {
-                                        Color32::DARK_GREEN
-                                    }
-                                }
-                                _ => {
-                                    if is_dark_mode {
-                                        Color32::LIGHT_RED
-                                    } else {
-                                        Color32::DARK_RED
-                                    }
-                                }
-                            };
-
-                            let mut job = LayoutJob::default();
-                            job.append(
-                                &format!("{sender_name}: "),
-                                0.0,
-                                TextFormat {
-                                    color: name_color,
-                                    ..Default::default()
-                                },
-                            );
-
-                            let text_color = match channel {
-                                ChatChannel::Division => Color32::GOLD,
-                                ChatChannel::Global => {
-                                    if is_dark_mode {
-                                        Color32::WHITE
-                                    } else {
-                                        Color32::BLACK
-                                    }
-                                }
-                                ChatChannel::Team => {
-                                    if is_dark_mode {
-                                        Color32::LIGHT_GREEN
-                                    } else {
-                                        Color32::DARK_GREEN
-                                    }
-                                }
-                            };
-
-                            job.append(
-                                message,
-                                0.0,
-                                TextFormat {
-                                    color: text_color,
-                                    ..Default::default()
-                                },
-                            );
-
-                            if ui
-                                .add(Label::new(job).sense(Sense::click()))
-                                .on_hover_text(format!("Click to copy"))
-                                .clicked()
-                            {
-                                ui.output_mut(|output| output.copied_text = text);
+                    let is_dark_mode = ui.visuals().dark_mode;
+                    let name_color = match *sender_relation {
+                        0 => Color32::GOLD,
+                        1 => {
+                            if is_dark_mode {
+                                Color32::LIGHT_GREEN
+                            } else {
+                                Color32::DARK_GREEN
                             }
-                            ui.end_row();
                         }
-                    });
+                        _ => {
+                            if is_dark_mode {
+                                Color32::LIGHT_RED
+                            } else {
+                                Color32::DARK_RED
+                            }
+                        }
+                    };
+
+                    let mut job = LayoutJob::default();
+                    job.append(
+                        &format!("{sender_name}:\n"),
+                        0.0,
+                        TextFormat {
+                            color: name_color,
+                            ..Default::default()
+                        },
+                    );
+
+                    let text_color = match channel {
+                        ChatChannel::Division => Color32::GOLD,
+                        ChatChannel::Global => {
+                            if is_dark_mode {
+                                Color32::WHITE
+                            } else {
+                                Color32::BLACK
+                            }
+                        }
+                        ChatChannel::Team => {
+                            if is_dark_mode {
+                                Color32::LIGHT_GREEN
+                            } else {
+                                Color32::DARK_GREEN
+                            }
+                        }
+                    };
+
+                    job.append(
+                        message,
+                        0.0,
+                        TextFormat {
+                            color: text_color,
+                            ..Default::default()
+                        },
+                    );
+
+                    if ui
+                        .add(Label::new(job).sense(Sense::click()))
+                        .on_hover_text(format!("Click to copy"))
+                        .clicked()
+                    {
+                        ui.output_mut(|output| output.copied_text = text);
+                    }
+                    ui.end_row();
+                }
             });
     }
 
     fn build_replay_view(&self, replay_file: &Replay, ui: &mut egui::Ui) {
         if let Some(report) = replay_file.battle_report.as_ref() {
+            let self_entity = report.self_entity();
+            let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
-                ui.heading(report.self_entity().player().unwrap().name());
+                ui.heading(player_name_with_clan(&*self_player));
                 ui.label(report.match_group());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
             });
 
-            StripBuilder::new(ui)
-                .size(Size::remainder())
-                .size(Size::exact(CHAT_VIEW_WIDTH))
-                .horizontal(|mut strip| {
-                    strip.cell(|ui| {
+            egui::SidePanel::left("replay_view_chat")
+                .default_width(CHAT_VIEW_WIDTH)
+                .show_inside(ui, |ui| {
+                    egui::ScrollArea::both()
+                        .id_source("replay_chat_scroll_area")
+                        .show(ui, |ui| {
+                            self.build_replay_chat(report, ui);
+                        });
+                });
+
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                egui::ScrollArea::both()
+                    .id_source("replay_player_list_scroll_area")
+                    .show(ui, |ui| {
                         self.build_replay_player_list(report, ui);
                     });
-                    strip.cell(|ui| {
-                        self.build_replay_chat(report, ui);
-                    });
-                });
+            });
+
+            // StripBuilder::new(ui)
+            //     .size(Size::remainder())
+            //     .size(Size::exact(CHAT_VIEW_WIDTH))
+            //     .horizontal(|mut strip| {
+            //         strip.cell(|ui| {
+            //             self.build_replay_player_list(report, ui);
+            //         });
+            //         strip.cell(|ui| {
+            //             self.build_replay_chat(report, ui);
+            //         });
+            //     });
         }
     }
 

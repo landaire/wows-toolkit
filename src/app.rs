@@ -126,7 +126,8 @@ pub struct WorldOfWarshipsData {
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
-    wows_dir: String,
+    pub wows_dir: String,
+    pub locale: Option<String>,
 }
 
 #[derive(Default)]
@@ -266,6 +267,8 @@ impl TabState {
                     break;
                 }
 
+                self.settings.locale = Some(locale.clone());
+
                 // Try loading GameParams.data
                 let mut metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
                     .ok()
@@ -314,7 +317,7 @@ impl Default for WowsToolkitApp {
             label: "Hello World!".to_owned(),
             value: 2.7,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::Unpacker, Tab::ReplayParser, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
         }
     }
 }
@@ -430,36 +433,9 @@ impl eframe::App for WowsToolkitApp {
                         tab_state: &mut self.tab_state,
                     },
                 );
-
-            // ui.vertical(|ui| {
-
-            //     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            //     });
-            // });
-
-            // ui.horizontal(|ui| {
-            //     ui.label("Write something: ");
-            //     ui.text_edit_singleline(&mut self.label);
-            // });
-
-            // ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            // if ui.button("Increment").clicked() {
-            //     self.value += 1.0;
-            // }
-
-            // ui.separator();
-
-            // ui.add(egui::github_link_file!(
-            //     "https://github.com/emilk/eframe_template/blob/master/",
-            //     "Source code."
-            // ));
-
-            // ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            //     powered_by_egui_and_eframe(ui);
-            //     egui::warn_if_debug_build(ui);
-            // });
         });
 
+        // Pop open something to view the clicked file from the unpacker tab
         let mut file_viewer = self.tab_state.file_viewer.lock();
         let mut remove_viewers = Vec::new();
         for (idx, file_viewer) in file_viewer.iter_mut().enumerate() {

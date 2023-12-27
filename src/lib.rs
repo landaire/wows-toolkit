@@ -6,4 +6,5 @@ mod file_unpacker;
 mod game_params;
 mod plaintext_viewer;
 mod replay_parser;
+mod util;
 pub use app::WowsToolkitApp;
