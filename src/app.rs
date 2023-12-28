@@ -17,6 +17,7 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 use language_tags::LanguageTag;
+use notify::RecommendedWatcher;
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
@@ -164,6 +165,15 @@ pub struct TabState {
 
     #[serde(skip)]
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
+
+    #[serde(skip)]
+    pub file_watcher: Option<RecommendedWatcher>,
+
+    #[serde(skip)]
+    pub file_receiver: Option<mpsc::Receiver<PathBuf>>,
+
+    #[serde(skip)]
+    pub replay_files: Option<Vec<PathBuf>>,
 }
 
 impl Default for TabState {
@@ -185,6 +195,9 @@ impl Default for TabState {
             last_progress: Default::default(),
             replay_parser_tab: Default::default(),
             file_viewer: Default::default(),
+            file_watcher: None,
+            replay_files: None,
+            file_receiver: None,
         }
     }
 }

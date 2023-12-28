@@ -1,18 +1,20 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
+    ffi::OsStr,
     io::{self, Cursor},
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
 };
 
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{text::LayoutJob, Color32, Label, RichText, Sense, Separator, TextFormat};
+use egui::{text::LayoutJob, Color32, Grid, Label, RichText, Sense, Separator, TextFormat};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use language_tags::LanguageTag;
+use notify::{EventKind, RecursiveMode, Watcher};
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use thousands::Separable;
@@ -339,6 +341,128 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    fn build_file_listing(&mut self, ui: &mut egui::Ui) {
+        let replay_dir = Path::new(self.tab_state.settings.wows_dir.as_str()).join("replays");
+        if self.tab_state.file_watcher.is_none() && replay_dir.exists() {
+            let (tx, rx) = mpsc::channel();
+            // Automatically select the best implementation for your platform.
+            let mut watcher =
+                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                    match res {
+                        Ok(event) => {
+                            eprintln!("{:?}", event);
+                            if event.kind == EventKind::Create(notify::event::CreateKind::File) {
+                                for path in event.paths {
+                                    tx.send(path);
+                                }
+                            }
+                        }
+                        Err(e) => println!("watch error: {:?}", e),
+                        _ => {
+                            // ignore other events
+                        }
+                    }
+                })
+                .expect("failed to create fs watcher for replays dir");
+
+            // Add a path to be watched. All files and directories at that path and
+            // below will be monitored for changes.
+            watcher
+                .watch(replay_dir.as_ref(), RecursiveMode::NonRecursive)
+                .expect("failed to watch directory");
+
+            self.tab_state.file_watcher = Some(watcher);
+            self.tab_state.file_receiver = Some(rx);
+        }
+        if let Some(replay_files) = &mut self.tab_state.replay_files {
+            if let Some(file) = self.tab_state.file_receiver.as_ref() {
+                while let Ok(new_file) = file.try_recv() {
+                    replay_files.insert(0, new_file);
+                }
+            }
+        } else {
+            let mut files = Vec::new();
+            if replay_dir.exists() {
+                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
+                    if let Ok(file) = file {
+                        if !file.file_type().expect("failed to get file type").is_file() {
+                            continue;
+                        }
+
+                        let file_path = file.path();
+
+                        if let Some("wowsreplay") = file_path
+                            .extension()
+                            .map(|s| s.to_str().expect("failed to convert extension to str"))
+                        {
+                            files.push(file_path)
+                        }
+                    }
+                }
+            }
+            self.tab_state.replay_files = Some(files);
+        };
+
+        ui.vertical(|ui| {
+            egui::Grid::new("replay_files_grid")
+                .max_col_width(CHAT_VIEW_WIDTH)
+                .num_columns(1)
+                .striped(true)
+                .show(ui, |ui| {
+                    if let Some(files) = self.tab_state.replay_files.clone() {
+                        for file in files {
+                            if ui
+                                .add(
+                                    Label::new(
+                                        file.to_str().expect("failed to convert path to string"),
+                                    )
+                                    .sense(Sense::click()),
+                                )
+                                .double_clicked()
+                            {
+                                self.parse_replay(file);
+                            }
+                            ui.end_row();
+                        }
+                    }
+                });
+        });
+    }
+
+    fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) {
+        let path = replay_path.as_ref();
+
+        {
+            self.tab_state
+                .replay_parser_tab
+                .lock()
+                .unwrap()
+                .game_chat
+                .clear();
+        }
+        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
+
+        let mut replay = Replay {
+            replay_file,
+            resource_loader: self
+                .tab_state
+                .world_of_warships_data
+                .game_metadata
+                .clone()
+                .unwrap(),
+            battle_report: None,
+        };
+
+        if let (Some(file_tree), Some(pkg_loader)) = (
+            self.tab_state.world_of_warships_data.file_tree.as_ref(),
+            self.tab_state.world_of_warships_data.pkg_loader.as_ref(),
+        ) {
+            replay.parse(file_tree, pkg_loader.clone());
+        }
+
+        self.tab_state.world_of_warships_data.current_replay = Some(replay);
+    }
+
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
@@ -356,37 +480,7 @@ impl ToolkitTabViewer<'_> {
                 );
 
                 if ui.button("reparse").clicked() {
-                    {
-                        self.tab_state
-                            .replay_parser_tab
-                            .lock()
-                            .unwrap()
-                            .game_chat
-                            .clear();
-                    }
-                    let replay_file: ReplayFile =
-                        ReplayFile::from_file(&self.tab_state.settings.current_replay_path)
-                            .unwrap();
-
-                    let mut replay = Replay {
-                        replay_file,
-                        resource_loader: self
-                            .tab_state
-                            .world_of_warships_data
-                            .game_metadata
-                            .clone()
-                            .unwrap(),
-                        battle_report: None,
-                    };
-
-                    if let (Some(file_tree), Some(pkg_loader)) = (
-                        self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                        self.tab_state.world_of_warships_data.pkg_loader.as_ref(),
-                    ) {
-                        replay.parse(file_tree, pkg_loader.clone());
-                    }
-
-                    self.tab_state.world_of_warships_data.current_replay = Some(replay);
+                    self.parse_replay(self.tab_state.settings.current_replay_path.clone());
                 }
 
                 if ui.button("parse").clicked() {
@@ -401,14 +495,24 @@ impl ToolkitTabViewer<'_> {
                 }
             });
 
-            if let Some(replay_file) = self
-                .tab_state
-                .world_of_warships_data
-                .current_replay
-                .as_ref()
-            {
-                self.build_replay_view(replay_file, ui);
-            }
+            egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {
+                egui::ScrollArea::both()
+                    .id_source("replay_chat_scroll_area")
+                    .show(ui, |ui| {
+                        self.build_file_listing(ui);
+                    });
+            });
+
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                if let Some(replay_file) = self
+                    .tab_state
+                    .world_of_warships_data
+                    .current_replay
+                    .as_ref()
+                {
+                    self.build_replay_view(replay_file, ui);
+                }
+            });
         });
     }
 }
