@@ -343,7 +343,41 @@ impl ToolkitTabViewer<'_> {
 
     fn build_file_listing(&mut self, ui: &mut egui::Ui) {
         let replay_dir = Path::new(self.tab_state.settings.wows_dir.as_str()).join("replays");
-        if self.tab_state.file_watcher.is_none() && replay_dir.exists() {
+        if let Some(replay_files) = &mut self.tab_state.replay_files {
+            if let Some(file) = self.tab_state.file_receiver.as_ref() {
+                while let Ok(new_file) = file.try_recv() {
+                    replay_files.insert(0, new_file);
+                }
+            }
+        } else {
+            let mut files = Vec::new();
+            if replay_dir.exists() {
+                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
+                    if let Ok(file) = file {
+                        if !file.file_type().expect("failed to get file type").is_file() {
+                            continue;
+                        }
+
+                        let file_path = file.path();
+
+                        if let Some("wowsreplay") = file_path
+                            .extension()
+                            .map(|s| s.to_str().expect("failed to convert extension to str"))
+                        {
+                            files.push(file_path)
+                        }
+                    }
+                }
+            }
+            if !files.is_empty() {
+                self.tab_state.replay_files = Some(files);
+            }
+        };
+
+        if self.tab_state.replay_files.is_none()
+            && self.tab_state.file_watcher.is_none()
+            && replay_dir.exists()
+        {
             let (tx, rx) = mpsc::channel();
             // Automatically select the best implementation for your platform.
             let mut watcher =
@@ -374,34 +408,6 @@ impl ToolkitTabViewer<'_> {
             self.tab_state.file_watcher = Some(watcher);
             self.tab_state.file_receiver = Some(rx);
         }
-        if let Some(replay_files) = &mut self.tab_state.replay_files {
-            if let Some(file) = self.tab_state.file_receiver.as_ref() {
-                while let Ok(new_file) = file.try_recv() {
-                    replay_files.insert(0, new_file);
-                }
-            }
-        } else {
-            let mut files = Vec::new();
-            if replay_dir.exists() {
-                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
-                    if let Ok(file) = file {
-                        if !file.file_type().expect("failed to get file type").is_file() {
-                            continue;
-                        }
-
-                        let file_path = file.path();
-
-                        if let Some("wowsreplay") = file_path
-                            .extension()
-                            .map(|s| s.to_str().expect("failed to convert extension to str"))
-                        {
-                            files.push(file_path)
-                        }
-                    }
-                }
-            }
-            self.tab_state.replay_files = Some(files);
-        };
 
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid")
