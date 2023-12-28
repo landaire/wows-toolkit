@@ -187,21 +187,14 @@ impl ToolkitTabViewer<'_> {
                             ));
                         });
 
-                        let captain = entity
-                            .captain()
-                            .data()
-                            .crew_ref()
-                            .expect("captain is not a crew?");
                         let species = ship.species().expect("ship has no species?");
                         let skill_points =
                             entity
                                 .commander_skills()
                                 .iter()
-                                .fold(0usize, |accum, skill_type| {
+                                .fold(0usize, |accum, skill| {
                                     accum
-                                        + captain
-                                            .skill_by_type(*skill_type as u32)
-                                            .expect("could not get skill type")
+                                        + skill
                                             .tier()
                                             .get_for_species(species.clone())
                                 });

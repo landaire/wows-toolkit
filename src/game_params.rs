@@ -16,12 +16,13 @@ use ouroboros::self_referencing;
 use serde_pickle::{DeOptions, HashableValue, Value};
 use wows_replays::{
     game_params::{
-        Crew, CrewBuilder, CrewPersonality, CrewPersonalityBuilder, CrewPersonalityBuilderError,
-        CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder, CrewSkillBuilderError,
-        CrewSkillLogicTrigger, CrewSkillLogicTriggerBuilder, CrewSkillModifier,
-        CrewSkillModifierBuilder, CrewSkillModifierBuilderError, CrewSkillTiersBuilder,
-        GameParamProvider, GameParams, Param, ParamBuilder, ParamData, ParamType, Species, Vehicle,
-        VehicleBuilder,
+        Ability, AbilityBuilder, AbilityBuilderError, AbilityCategory, AbilityCategoryBuilder,
+        AbilityCategoryBuilderError, Crew, CrewBuilder, CrewPersonality, CrewPersonalityBuilder,
+        CrewPersonalityBuilderError, CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder,
+        CrewSkillBuilderError, CrewSkillLogicTrigger, CrewSkillLogicTriggerBuilder,
+        CrewSkillModifier, CrewSkillModifierBuilder, CrewSkillModifierBuilderError,
+        CrewSkillTiersBuilder, GameParamProvider, GameParams, Param, ParamBuilder, ParamData,
+        ParamType, Species, Vehicle, VehicleBuilder, VehicleBuilderError,
     },
     parse_scripts,
     resource_loader::ResourceLoader,
@@ -103,6 +104,9 @@ macro_rules! game_param_to_type {
     };
     ($params:ident, $key:expr, usize) => {
         game_param_to_type!($params, $key, i64) as usize
+    };
+    ($params:ident, $key:expr, isize) => {
+        game_param_to_type!($params, $key, i64) as isize
     };
     ($params:ident, $key:expr, f32) => {
         game_param_to_type!($params, $key, f64) as f32
@@ -443,6 +447,87 @@ fn build_crew_personality(
         .build()
 }
 
+fn build_ability_category(
+    category_data: &BTreeMap<HashableValue, Value>,
+) -> Result<AbilityCategory, AbilityCategoryBuilderError> {
+    let reload_time = if let Some(reload_time) =
+        category_data.get(&HashableValue::String("reloadTime".to_owned()))
+    {
+        if let Some(reload_time) = reload_time.i64_ref() {
+            *reload_time as f32
+        } else {
+            *reload_time.f64_ref().expect("workTime is not a f64") as f32
+        }
+    } else {
+        panic!("could not get reloadTime");
+    };
+
+    let work_time =
+        if let Some(work_time) = category_data.get(&HashableValue::String("workTime".to_owned())) {
+            if let Some(work_time) = work_time.i64_ref() {
+                *work_time as f32
+            } else {
+                *work_time.f64_ref().expect("workTime is not a f64") as f32
+            }
+        } else {
+            panic!("could not get reloadTime");
+        };
+    AbilityCategoryBuilder::default()
+        .special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", String))
+        .consumable_type(game_param_to_type!(category_data, "consumableType", String))
+        .description_id(game_param_to_type!(category_data, "descIDs", String))
+        .group(game_param_to_type!(category_data, "group", String))
+        .icon_id(game_param_to_type!(category_data, "iconIDs", String))
+        .num_consumables(game_param_to_type!(category_data, "numConsumables", isize))
+        .preparation_time(game_param_to_type!(category_data, "preparationTime", f32))
+        .reload_time(reload_time)
+        .title_id(game_param_to_type!(category_data, "titleIDs", String))
+        .work_time(work_time)
+        .build()
+}
+
+fn build_ability(
+    ability_data: &BTreeMap<HashableValue, Value>,
+) -> Result<Ability, AbilityBuilderError> {
+    let test_key = HashableValue::String("numConsumables".to_string());
+    let categories: HashMap<_, _> =
+        HashMap::from_iter(ability_data.iter().filter_map(|(key, value)| {
+            if value.is_not_dict() {
+                return None;
+            }
+
+            let value = value.dict_ref().unwrap();
+            if value.contains_key(&test_key) {
+                Some((
+                    key.string_ref().unwrap().to_owned(),
+                    build_ability_category(value).expect("failed to build ability category"),
+                ))
+            } else {
+                None
+            }
+        }));
+
+    AbilityBuilder::default()
+        .can_buy(game_param_to_type!(ability_data, "canBuy", bool))
+        .cost_credits(game_param_to_type!(ability_data, "costCR", isize))
+        .cost_gold(game_param_to_type!(ability_data, "costGold", isize))
+        .is_free(game_param_to_type!(ability_data, "freeOfCharge", bool))
+        .categories(categories)
+        .build()
+}
+
+fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Result<Vehicle, VehicleBuilderError> {
+    let ability_data = game_param_to_type!(ship_data, "ShipAbilities", HashMap<(), ()>);
+    // let abilities = ability_data.iter().map(|(slot_name, slot_data) {
+
+    // })
+
+    let level = game_param_to_type!(ship_data, "level", u32);
+    let group = game_param_to_type!(ship_data, "group", String);
+
+    VehicleBuilder::default().level(level).group(group).build()
+}
+
 impl GameMetadataProvider {
     pub fn from_pkg(
         file_tree: &FileNode,
@@ -517,16 +602,9 @@ impl GameMetadataProvider {
 
                                 let parsed_param_data = match param_type {
                                     ParamType::Ship => {
-                                        let level = game_param_to_type!(param_data, "level", u32);
-                                        let group =
-                                            game_param_to_type!(param_data, "group", String);
-
-                                        VehicleBuilder::default()
-                                            .level(level)
-                                            .group(group)
-                                            .build()
-                                            .ok()
-                                            .map(|v| ParamData::Vehicle(v))
+                                        Some(build_ship(param_data)
+                                            .map(|a| ParamData::Vehicle(a))
+                                            .expect("failed to build Vehicle"))
                                     }
                                     ParamType::Crew => {
                                         let money_training_level = game_param_to_type!(
@@ -548,6 +626,12 @@ impl GameMetadataProvider {
                                             .build()
                                             .ok()
                                             .map(|v| ParamData::Crew(v))
+                                    }
+                                    ParamType::Ability => {
+                                        Some(build_ability(param_data)
+                                            .map(|a| ParamData::Ability(a))
+                                            .expect("failed to build Ability")
+                                        )
                                     }
                                     _ => None,
                                 }?;
@@ -598,68 +682,6 @@ impl GameMetadataProvider {
 
         let now = Instant::now();
         println!("took {} seconds to load", (now - start).as_secs());
-
-        // println!("loading ships");
-
-        // let mut ship_id_to_translation_id = HashMap::new();
-        // // let mut ship_id_to_ship = HashMap::new();
-        // if let Value::List(mut list) = params {
-        //     params = list.remove(0);
-        // }
-        // if let Value::Dict(dict) = &params {
-        //     for (key, value) in dict {
-        //         if let Value::Dict(ship_dict) = value {
-        //             let id = ship_dict
-        //                 .get(&HashableValue::String("id".to_string()))
-        //                 .unwrap();
-        //             let id = if let Value::I64(id) = id {
-        //                 *id
-        //             } else {
-        //                 panic!("ID is not an i64")
-        //             };
-
-        //             let index = ship_dict
-        //                 .get(&HashableValue::String("index".to_string()))
-        //                 .unwrap();
-        //             let index = if let Value::String(index) = index {
-        //                 index.clone()
-        //             } else {
-        //                 panic!("ID is not an i64")
-        //             };
-
-        //             ship_id_to_translation_id.insert(id, format!("IDS_{index}"));
-        //             // ship_id_to_ship.insert(id, dict);
-        //         }
-        //     }
-        // }
-        // panic!("???");
-
-        // Ok(GameParamsBuilder {
-        //     params,
-        //     param_id_to_translation_id: ship_id_to_translation_id,
-        //     param_id_to_dict_builder: |params| {
-        //         let mut param_id_to_dict = HashMap::new();
-        //         if let Value::Dict(root_dict) = &params {
-        //             for (key, value) in root_dict {
-        //                 if let Value::Dict(ship_dict) = value {
-        //                     let id = ship_dict
-        //                         .get(&HashableValue::String("id".to_string()))
-        //                         .unwrap();
-        //                     let id = if let Value::I64(id) = id {
-        //                         *id
-        //                     } else {
-        //                         panic!("ID is not an i64")
-        //                     };
-
-        //                     param_id_to_dict.insert(id, ship_dict);
-        //                 }
-        //             }
-        //         }
-
-        //         param_id_to_dict
-        //     },
-        // }
-        // .build())
 
         let param_id_to_translation_id = HashMap::from_iter(
             params
