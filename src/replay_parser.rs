@@ -154,11 +154,9 @@ impl ToolkitTabViewer<'_> {
             })
             .body(|mut body| {
                 let mut sorted_players = report.player_entities().to_vec();
-                sorted_players.sort_by(|a, b| {
-                    a.player()
-                        .unwrap()
-                        .relation()
-                        .cmp(&b.player().unwrap().relation())
+                sorted_players.sort_unstable_by_key(|item| {
+                    let player = item.player().unwrap();
+                    (player.relation(), player.vehicle().species(), player.entity_id())
                 });
                 for entity in &sorted_players {
                     let player = entity.player().unwrap();
