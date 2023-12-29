@@ -357,6 +357,8 @@ impl ToolkitTabViewer<'_> {
                 }
             }
             if !files.is_empty() {
+                files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
+                files.reverse();
                 self.tab_state.replay_files = Some(files);
             }
         };
@@ -368,9 +370,11 @@ impl ToolkitTabViewer<'_> {
                 match res {
                     Ok(event) => {
                         eprintln!("{:?}", event);
-                        if event.kind == EventKind::Create(notify::event::CreateKind::File) {
+                        if let EventKind::Create(_) = event.kind {
                             for path in event.paths {
-                                tx.send(path).expect("failed to send file creation event");
+                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                    tx.send(path).expect("failed to send file creation event");
+                                }
                             }
                         }
                     }
