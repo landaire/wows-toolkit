@@ -267,11 +267,12 @@ impl ToolkitTabViewer<'_> {
                                 let json_blob = serde_json::to_string(&json).expect("failed to serialize ship config");
                                 let mut deflated_json = Vec::new();
                                 {
-                                    let mut encoder = DeflateEncoder ::new(&mut deflated_json, Compression::best());
+                                    let mut encoder = DeflateEncoder::new(&mut deflated_json, Compression::best());
                                     encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
                                 }
                                 eprintln!("{}", json_blob);
-                                let encoded_data = data_encoding::BASE64_NOPAD.encode(&deflated_json);
+                                std::fs::write("data.bin", &deflated_json);
+                                let encoded_data = data_encoding::BASE64.encode(&deflated_json);
                                 let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
                                 let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
                                 eprintln!("{}", url);
