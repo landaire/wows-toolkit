@@ -59,6 +59,7 @@ pub struct ToolkitTabViewer<'a> {
 impl ToolkitTabViewer<'_> {
     fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
+            ui.label("World of Warships Settings");
             ui.group(|ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
@@ -89,6 +90,21 @@ impl ToolkitTabViewer<'_> {
                     });
                 })
             });
+            ui.label("Replay Settings");
+            ui.group(|ui| {
+                ui.checkbox(
+                    &mut self.tab_state.settings.replay_settings.show_game_chat,
+                    "Show Game Chat",
+                );
+                ui.checkbox(
+                    &mut self.tab_state.settings.replay_settings.show_entity_id,
+                    "Show Entity ID Column",
+                );
+                ui.checkbox(
+                    &mut self.tab_state.settings.replay_settings.show_observed_damage,
+                    "Show Observed Damage Column",
+                );
+            })
         });
     }
 }
@@ -124,11 +140,30 @@ pub struct WorldOfWarshipsData {
     pub current_replay: Option<Replay>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ReplaySettings {
+    pub show_game_chat: bool,
+    pub show_entity_id: bool,
+    pub show_observed_damage: bool,
+}
+
+impl Default for ReplaySettings {
+    fn default() -> Self {
+        Self {
+            show_game_chat: true,
+            show_entity_id: false,
+            show_observed_damage: true,
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
     pub wows_dir: String,
     pub locale: Option<String>,
+    #[serde(default)]
+    pub replay_settings: ReplaySettings,
 }
 
 #[derive(Default)]
@@ -410,6 +445,8 @@ impl eframe::App for WowsToolkitApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
+
+        egui_extras::install_image_loaders(ctx);
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:

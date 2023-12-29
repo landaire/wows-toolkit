@@ -12,9 +12,11 @@ use std::{
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
 use egui::{
-    text::LayoutJob, Color32, Grid, Label, OpenUrl, RichText, Sense, Separator, TextFormat,
+    text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator,
+    TextFormat, Vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use env_logger::fmt::Color;
 use flate2::{
     write::{DeflateEncoder, ZlibEncoder},
     Compression,
@@ -24,6 +26,7 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use ouroboros::self_referencing;
 use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use serde_json::json;
+use tap::{Pipe, Tap};
 use thousands::Separable;
 use wows_replays::{
     analyzer::{
@@ -45,7 +48,7 @@ use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
-    util::separate_number,
+    util::{player_color_for_team_relation, separate_number},
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -101,11 +104,22 @@ impl ToolkitTabViewer<'_> {
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto().clip(true))
-            .column(Column::initial(100.0).range(40.0..=300.0).clip(true))
+            .pipe(|table| {
+                if self.tab_state.settings.replay_settings.show_entity_id {
+                    table.column(Column::initial(100.0).clip(true))
+                } else {
+                    table
+                }
+            })
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
+            .pipe(|table| {
+                if self.tab_state.settings.replay_settings.show_observed_damage {
+                    table.column(Column::initial(100.0).clip(true))
+                } else {
+                    table
+                }
+            })
             .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
@@ -115,21 +129,22 @@ impl ToolkitTabViewer<'_> {
                 header.col(|ui| {
                     ui.strong("Player Name");
                 });
-                header.col(|ui| {
-                    ui.strong("Relation");
-                });
-                header.col(|ui| {
-                    ui.strong("ID");
-                });
+                if self.tab_state.settings.replay_settings.show_entity_id {
+                    header.col(|ui| {
+                        ui.strong("ID");
+                    });
+                }
                 header.col(|ui| {
                     ui.strong("Ship Name");
                 });
                 header.col(|ui| {
                     ui.strong("Ship Class");
                 });
-                header.col(|ui| {
-                    ui.strong("Observed Damage").on_hover_text("Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.");
-                });
+                if self.tab_state.settings.replay_settings.show_observed_damage {
+                    header.col(|ui| {
+                        ui.strong("Observed Damage").on_hover_text("Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.");
+                    });
+                }
                 header.col(|ui| {
                     ui.strong("Allocated Skills");
                 });
@@ -150,20 +165,17 @@ impl ToolkitTabViewer<'_> {
                     let ship = player.vehicle();
                     body.row(30.0, |mut ui| {
                         ui.col(|ui| {
-                            ui.label(player_name_with_clan(&*player));
+                            let is_dark_mode = ui.visuals().dark_mode;
+                            let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+                            ui.label(RichText::new(player_name_with_clan(&*player)).color(
+                                name_color
+                            ));
                         });
-                        ui.col(|ui| {
-                            ui.label(match player.relation() {
-                                0 => "Self".to_string(),
-                                1 => "Friendly".to_string(),
-                                other => {
-                                    format!("Enemy Team ({other})")
-                                }
-                            });
-                        });
+                if self.tab_state.settings.replay_settings.show_entity_id {
                         ui.col(|ui| {
                             ui.label(format!("{}", player.avatar_id()));
                         });
+                    }
                         ui.col(|ui| {
                             let ship_name = self
                                 .tab_state
@@ -190,15 +202,44 @@ impl ToolkitTabViewer<'_> {
                                         .localized_name_from_id(&id)
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
+        if let (Some(file_tree), Some(pkg_loader)) = (
+            self.tab_state.world_of_warships_data.file_tree.as_ref(),
+            self.tab_state.world_of_warships_data.pkg_loader.as_ref(),
+        ) {
+            let path =format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(ship.species().unwrap()).to_ascii_lowercase());
+            // eprintln!("{:?}", path);
+            let icon_node = file_tree.find(&path).expect("failed to find file");
+
+            let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
+            icon_node.read_file(&*pkg_loader, &mut icon_data);
+
+                let color = match player.relation() {
+                    0 => Color32::GOLD,
+                    1 => Color32::LIGHT_GREEN,
+                    _ => Color32::LIGHT_RED
+                };
+
+            let image = Image::new(ImageSource::Bytes{
+                    uri: path.into(),
+                    bytes: icon_data.into()
+                })
+.tint(color).fit_to_exact_size((20.0, 20.0).into()).rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
+
+            ui.add(image).on_hover_text(species);
+        } else {
+
                             ui.label(species);
+        }
                         });
 
+                if self.tab_state.settings.replay_settings.show_observed_damage {
                         ui.col(|ui| {
                             ui.label(separate_number(
                                 entity.damage(),
                                 self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()),
                             ));
                         });
+                    }
 
                         let species = ship.species().expect("ship has no species?");
                         let skill_points =
@@ -270,12 +311,9 @@ impl ToolkitTabViewer<'_> {
                                     let mut encoder = DeflateEncoder::new(&mut deflated_json, Compression::best());
                                     encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
                                 }
-                                eprintln!("{}", json_blob);
-                                std::fs::write("data.bin", &deflated_json);
                                 let encoded_data = data_encoding::BASE64.encode(&deflated_json);
                                 let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
                                 let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
-                                eprintln!("{}", url);
 
                                 ui.ctx().open_url(OpenUrl::new_tab(url));
                             }
@@ -302,23 +340,7 @@ impl ToolkitTabViewer<'_> {
                     let text = format!("{sender_name} ({channel:?}): {message}");
 
                     let is_dark_mode = ui.visuals().dark_mode;
-                    let name_color = match *sender_relation {
-                        0 => Color32::GOLD,
-                        1 => {
-                            if is_dark_mode {
-                                Color32::LIGHT_GREEN
-                            } else {
-                                Color32::DARK_GREEN
-                            }
-                        }
-                        _ => {
-                            if is_dark_mode {
-                                Color32::LIGHT_RED
-                            } else {
-                                Color32::DARK_RED
-                            }
-                        }
-                    };
+                    let name_color = player_color_for_team_relation(*sender_relation, is_dark_mode);
 
                     let mut job = LayoutJob::default();
                     job.append(
@@ -381,15 +403,17 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.map_name());
             });
 
-            egui::SidePanel::left("replay_view_chat")
-                .default_width(CHAT_VIEW_WIDTH)
-                .show_inside(ui, |ui| {
-                    egui::ScrollArea::both()
-                        .id_source("replay_chat_scroll_area")
-                        .show(ui, |ui| {
-                            self.build_replay_chat(report, ui);
-                        });
-                });
+            if self.tab_state.settings.replay_settings.show_game_chat {
+                egui::SidePanel::left("replay_view_chat")
+                    .default_width(CHAT_VIEW_WIDTH)
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::both()
+                            .id_source("replay_chat_scroll_area")
+                            .show(ui, |ui| {
+                                self.build_replay_chat(report, ui);
+                            });
+                    });
+            }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal()
@@ -559,11 +583,11 @@ impl ToolkitTabViewer<'_> {
                     .hint_text("Current Replay File"),
                 );
 
-                if ui.button("reparse").clicked() {
+                if ui.button("Parse").clicked() {
                     self.parse_replay(self.tab_state.settings.current_replay_path.clone());
                 }
 
-                if ui.button("parse").clicked() {
+                if ui.button("Browse...").clicked() {
                     if let Some(file) = rfd::FileDialog::new()
                         .add_filter("WoWs Replays", &["wowsreplay"])
                         .pick_file()
