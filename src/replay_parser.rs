@@ -11,10 +11,7 @@ use std::{
 
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{
-    epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText,
-    Sense, Separator, TextFormat, Vec2,
-};
+use egui::{epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use env_logger::fmt::Color;
 use flate2::{
@@ -30,9 +27,7 @@ use tap::{Pipe, Tap};
 use thousands::Separable;
 use wows_replays::{
     analyzer::{
-        battle_controller::{
-            self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage, Player,
-        },
+        battle_controller::{self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage, Player},
         AnalyzerBuilder, AnalyzerMut,
     },
     packet2::{Packet, PacketType, PacketTypeKind},
@@ -73,18 +68,12 @@ fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
 
 impl Replay {
     pub fn parse(&mut self, file_tree: &FileNode, pkg_loader: Arc<PkgFileLoader>) {
-        let version_parts: Vec<_> = self
-            .replay_file
-            .meta
-            .clientVersionFromExe
-            .split(",")
-            .collect();
+        let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(",").collect();
         assert!(version_parts.len() == 4);
 
         // Parse packets
         let packet_data = &self.replay_file.packet_data;
-        let mut controller =
-            BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
+        let mut controller = BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
         let mut p = wows_replays::packet2::Parser::new(&self.resource_loader.entity_specs());
 
         match p.parse_packets_mut(packet_data, &mut controller) {
@@ -142,7 +131,9 @@ impl ToolkitTabViewer<'_> {
                 });
                 if self.tab_state.settings.replay_settings.show_observed_damage {
                     header.col(|ui| {
-                        ui.strong("Observed Damage").on_hover_text("Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.");
+                        ui.strong("Observed Damage").on_hover_text(
+                            "Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.",
+                        );
                     });
                 }
                 header.col(|ui| {
@@ -165,15 +156,15 @@ impl ToolkitTabViewer<'_> {
                         ui.col(|ui| {
                             let is_dark_mode = ui.visuals().dark_mode;
                             let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
-                            ui.label(RichText::new(player_name_with_clan(&*player)).color(
-                                name_color
-                            ));
+                            ui.label(RichText::new(player_name_with_clan(&*player)).color(name_color));
                         });
-                if self.tab_state.settings.replay_settings.show_entity_id {
-                        ui.col(|ui| {
-                            ui.label(format!("{}", player.avatar_id()));
-                        });
-                    }
+
+                        if self.tab_state.settings.replay_settings.show_entity_id {
+                            ui.col(|ui| {
+                                ui.label(format!("{}", player.avatar_id()));
+                            });
+                        }
+
                         ui.col(|ui| {
                             let ship_name = self
                                 .tab_state
@@ -192,79 +183,51 @@ impl ToolkitTabViewer<'_> {
                                 .and_then(|species| {
                                     let species: &'static str = species.into();
                                     let id = format!("IDS_{}", species.to_uppercase());
-                                    self.tab_state
-                                        .world_of_warships_data
-                                        .game_metadata
-                                        .as_ref()
-                                        .unwrap()
-                                        .localized_name_from_id(&id)
+                                    self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap().localized_name_from_id(&id)
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
-                                if let Some(icons) =
-                                    self.tab_state.world_of_warships_data.ship_icons.as_ref()
-                                {
+                            if let Some(icons) = self.tab_state.world_of_warships_data.ship_icons.as_ref() {
+                                let (path, icon_data) = icons.get(&ship.species().expect("ship has no species")).expect("failed to get ship icon for species");
 
-                                    let (path, icon_data) =
-                                            icons.get(&ship.species().expect("ship has no species"))
-                                                .expect("failed to get ship icon for species");
-                                            
-                                        let color = match player.relation() {
-                                            0 => Color32::GOLD,
-                                            1 => Color32::LIGHT_GREEN,
-                                            _ => Color32::LIGHT_RED
-                                        };
+                                let color = match player.relation() {
+                                    0 => Color32::GOLD,
+                                    1 => Color32::LIGHT_GREEN,
+                                    _ => Color32::LIGHT_RED,
+                                };
 
-                                    let image = Image::new(ImageSource::Bytes{
-                                            uri: path.clone().into(),
-                                            // the icon size is <1k, this clone is fairly cheap
-                                            bytes: icon_data.clone().into()
-                                        })
-                                        .tint(color)
-                                        .fit_to_exact_size((20.0, 20.0).into())
-                                        .rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
+                                let image = Image::new(ImageSource::Bytes {
+                                    uri: path.clone().into(),
+                                    // the icon size is <1k, this clone is fairly cheap
+                                    bytes: icon_data.clone().into(),
+                                })
+                                .tint(color)
+                                .fit_to_exact_size((20.0, 20.0).into())
+                                .rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
 
-                                    ui.add(image).on_hover_text(species);
-                                } else {
-                                    ui.label(species);
-                                }
+                                ui.add(image).on_hover_text(species);
+                            } else {
+                                ui.label(species);
+                            }
                         });
 
-                if self.tab_state.settings.replay_settings.show_observed_damage {
-                        ui.col(|ui| {
-                            ui.label(separate_number(
-                                entity.damage(),
-                                self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()),
-                            ));
-                        });
-                    }
+                        if self.tab_state.settings.replay_settings.show_observed_damage {
+                            ui.col(|ui| {
+                                ui.label(separate_number(entity.damage(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                            });
+                        }
 
                         let species = ship.species().expect("ship has no species?");
-                        let skill_points =
-                            entity
-                                .commander_skills()
-                                .iter()
-                                .fold(0usize, |accum, skill| {
-                                    accum
-                                        + skill
-                                            .tier()
-                                            .get_for_species(species.clone())
-                                });
+                        let skill_points = entity
+                            .commander_skills()
+                            .iter()
+                            .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
 
                         ui.col(|ui| {
-                            ui.label(format!(
-                                "{}pts ({} skills)",
-                                skill_points,
-                                entity.commander_skills().len()
-                            ));
+                            ui.label(format!("{}pts ({} skills)", skill_points, entity.commander_skills().len()));
                         });
                         ui.col(|ui| {
                             if ui.small_button("Build").clicked() {
-                                let metadata_provider = self
-                                .tab_state
-                                .world_of_warships_data
-                                .game_metadata
-                                .as_ref()
-                                .unwrap();
+                                let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
                                 let url = build_ship_config_url(entity, metadata_provider);
 
@@ -332,11 +295,7 @@ impl ToolkitTabViewer<'_> {
                         },
                     );
 
-                    if ui
-                        .add(Label::new(job).sense(Sense::click()))
-                        .on_hover_text(format!("Click to copy"))
-                        .clicked()
-                    {
+                    if ui.add(Label::new(job).sense(Sense::click())).on_hover_text(format!("Click to copy")).clicked() {
                         ui.output_mut(|output| output.copied_text = text);
                     }
                     ui.end_row();
@@ -357,36 +316,18 @@ impl ToolkitTabViewer<'_> {
             });
 
             if self.tab_state.settings.replay_settings.show_game_chat {
-                egui::SidePanel::left("replay_view_chat")
-                    .default_width(CHAT_VIEW_WIDTH)
-                    .show_inside(ui, |ui| {
-                        egui::ScrollArea::both()
-                            .id_source("replay_chat_scroll_area")
-                            .show(ui, |ui| {
-                                self.build_replay_chat(report, ui);
-                            });
+                egui::SidePanel::left("replay_view_chat").default_width(CHAT_VIEW_WIDTH).show_inside(ui, |ui| {
+                    egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
+                        self.build_replay_chat(report, ui);
                     });
+                });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::ScrollArea::horizontal()
-                    .id_source("replay_player_list_scroll_area")
-                    .show(ui, |ui| {
-                        self.build_replay_player_list(report, ui);
-                    });
+                egui::ScrollArea::horizontal().id_source("replay_player_list_scroll_area").show(ui, |ui| {
+                    self.build_replay_player_list(report, ui);
+                });
             });
-
-            // StripBuilder::new(ui)
-            //     .size(Size::remainder())
-            //     .size(Size::exact(CHAT_VIEW_WIDTH))
-            //     .horizontal(|mut strip| {
-            //         strip.cell(|ui| {
-            //             self.build_replay_player_list(report, ui);
-            //         });
-            //         strip.cell(|ui| {
-            //             self.build_replay_chat(report, ui);
-            //         });
-            //     });
         }
     }
 
@@ -409,10 +350,7 @@ impl ToolkitTabViewer<'_> {
 
                         let file_path = file.path();
 
-                        if let Some("wowsreplay") = file_path
-                            .extension()
-                            .map(|s| s.to_str().expect("failed to convert extension to str"))
-                        {
+                        if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
                             files.push(file_path)
                         }
                     }
@@ -423,66 +361,49 @@ impl ToolkitTabViewer<'_> {
             }
         };
 
-        if self.tab_state.replay_files.is_none()
-            && self.tab_state.file_watcher.is_none()
-            && replay_dir.exists()
-        {
+        if self.tab_state.replay_files.is_none() && self.tab_state.file_watcher.is_none() && replay_dir.exists() {
             let (tx, rx) = mpsc::channel();
             // Automatically select the best implementation for your platform.
-            let mut watcher =
-                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                    match res {
-                        Ok(event) => {
-                            eprintln!("{:?}", event);
-                            if event.kind == EventKind::Create(notify::event::CreateKind::File) {
-                                for path in event.paths {
-                                    tx.send(path).expect("failed to send file creation event");
-                                }
+            let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                match res {
+                    Ok(event) => {
+                        eprintln!("{:?}", event);
+                        if event.kind == EventKind::Create(notify::event::CreateKind::File) {
+                            for path in event.paths {
+                                tx.send(path).expect("failed to send file creation event");
                             }
                         }
-                        Err(e) => println!("watch error: {:?}", e),
-                        _ => {
-                            // ignore other events
-                        }
                     }
-                })
-                .expect("failed to create fs watcher for replays dir");
+                    Err(e) => println!("watch error: {:?}", e),
+                    _ => {
+                        // ignore other events
+                    }
+                }
+            })
+            .expect("failed to create fs watcher for replays dir");
 
             // Add a path to be watched. All files and directories at that path and
             // below will be monitored for changes.
-            watcher
-                .watch(replay_dir.as_ref(), RecursiveMode::NonRecursive)
-                .expect("failed to watch directory");
+            watcher.watch(replay_dir.as_ref(), RecursiveMode::NonRecursive).expect("failed to watch directory");
 
             self.tab_state.file_watcher = Some(watcher);
             self.tab_state.file_receiver = Some(rx);
         }
 
         ui.vertical(|ui| {
-            egui::Grid::new("replay_files_grid")
-                .num_columns(1)
-                .striped(true)
-                .show(ui, |ui| {
-                    if let Some(files) = self.tab_state.replay_files.clone() {
-                        for file in files {
-                            if ui
-                                .add(
-                                    Label::new(
-                                        file.file_name()
-                                            .expect("no filename?")
-                                            .to_str()
-                                            .expect("failed to convert path to string"),
-                                    )
-                                    .sense(Sense::click()),
-                                )
-                                .double_clicked()
-                            {
-                                self.parse_replay(file);
-                            }
-                            ui.end_row();
+            egui::Grid::new("replay_files_grid").num_columns(1).striped(true).show(ui, |ui| {
+                if let Some(files) = self.tab_state.replay_files.clone() {
+                    for file in files {
+                        if ui
+                            .add(Label::new(file.file_name().expect("no filename?").to_str().expect("failed to convert path to string")).sense(Sense::click()))
+                            .double_clicked()
+                        {
+                            self.parse_replay(file);
                         }
+                        ui.end_row();
                     }
-                });
+                }
+            });
         });
     }
 
@@ -490,23 +411,13 @@ impl ToolkitTabViewer<'_> {
         let path = replay_path.as_ref();
 
         {
-            self.tab_state
-                .replay_parser_tab
-                .lock()
-                .unwrap()
-                .game_chat
-                .clear();
+            self.tab_state.replay_parser_tab.lock().unwrap().game_chat.clear();
         }
         let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
 
         let mut replay = Replay {
             replay_file,
-            resource_loader: self
-                .tab_state
-                .world_of_warships_data
-                .game_metadata
-                .clone()
-                .unwrap(),
+            resource_loader: self.tab_state.world_of_warships_data.game_metadata.clone().unwrap(),
             battle_report: None,
         };
 
@@ -524,27 +435,14 @@ impl ToolkitTabViewer<'_> {
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(
-                        &mut self
-                            .tab_state
-                            .settings
-                            .current_replay_path
-                            .to_string_lossy()
-                            .to_owned(),
-                    )
-                    .hint_text("Current Replay File"),
-                );
+                ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().to_owned()).hint_text("Current Replay File"));
 
                 if ui.button("Parse").clicked() {
                     self.parse_replay(self.tab_state.settings.current_replay_path.clone());
                 }
 
                 if ui.button("Browse...").clicked() {
-                    if let Some(file) = rfd::FileDialog::new()
-                        .add_filter("WoWs Replays", &["wowsreplay"])
-                        .pick_file()
-                    {
+                    if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
                         //println!("{:#?}", ReplayFile::from_file(&file));
 
                         self.tab_state.settings.current_replay_path = file;
@@ -553,20 +451,13 @@ impl ToolkitTabViewer<'_> {
             });
 
             egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {
-                egui::ScrollArea::both()
-                    .id_source("replay_chat_scroll_area")
-                    .show(ui, |ui| {
-                        self.build_file_listing(ui);
-                    });
+                egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
+                    self.build_file_listing(ui);
+                });
             });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                if let Some(replay_file) = self
-                    .tab_state
-                    .world_of_warships_data
-                    .current_replay
-                    .as_ref()
-                {
+                if let Some(replay_file) = self.tab_state.world_of_warships_data.current_replay.as_ref() {
                     self.build_replay_view(replay_file, ui);
                 }
             });
