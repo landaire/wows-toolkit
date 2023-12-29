@@ -158,6 +158,8 @@ macro_rules! game_param_to_type {
     };
 }
 
+/// TODO: Too many unpredictable schema differences >:(
+/// Need to just create structs for everything.
 fn build_skill_modifiers(
     modifiers: &BTreeMap<HashableValue, Value>,
 ) -> Result<Vec<CrewSkillModifier>, CrewSkillModifierBuilderError> {
@@ -518,14 +520,47 @@ fn build_ability(
 
 fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Result<Vehicle, VehicleBuilderError> {
     let ability_data = game_param_to_type!(ship_data, "ShipAbilities", HashMap<(), ()>);
-    // let abilities = ability_data.iter().map(|(slot_name, slot_data) {
+    let abilities: Vec<Vec<(String, String)>> = ability_data
+        .iter()
+        .map(|(slot_name, slot_data)| {
+            let _slot_name = slot_name
+                .string_ref()
+                .expect("ship ability slot name is not a string");
+            let slot_data = slot_data.dict_ref().expect("slot data is nto a dictionary");
+            let slot = game_param_to_type!(slot_data, "slot", usize);
+            let abils = game_param_to_type!(slot_data, "abils", &[()]);
+            let abils: Vec<(String, String)> = abils
+                .iter()
+                .map(|abil| {
+                    let abil = abil.list_ref().expect("ability is not a list");
+                    (
+                        abil[0]
+                            .string_ref()
+                            .expect("abil[0] is not a string")
+                            .clone(),
+                        abil[1]
+                            .string_ref()
+                            .expect("abil[1] is not a string")
+                            .clone(),
+                    )
+                })
+                .collect();
 
-    // })
+            (slot, abils)
+        })
+        .sorted_by(|a, b| a.0.cmp(&b.0))
+        // drop the slot
+        .map(|abil| abil.1)
+        .collect();
 
     let level = game_param_to_type!(ship_data, "level", u32);
     let group = game_param_to_type!(ship_data, "group", String);
 
-    VehicleBuilder::default().level(level).group(group).build()
+    VehicleBuilder::default()
+        .level(level)
+        .group(group)
+        .abilities(abilities)
+        .build()
 }
 
 impl GameMetadataProvider {
@@ -633,6 +668,11 @@ impl GameMetadataProvider {
                                             .expect("failed to build Ability")
                                         )
                                     }
+                                    ParamType::Exterior => {
+                                        Some(ParamData::Exterior)
+                                    },
+                                    ParamType::Modernization => Some(ParamData::Modernization),
+                                    ParamType::Unit => Some(ParamData::Unit),
                                     _ => None,
                                 }?;
 

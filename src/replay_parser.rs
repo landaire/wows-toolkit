@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ffi::OsStr,
-    io::{self, Cursor},
+    io::{self, Cursor, Write},
     path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
@@ -11,12 +11,19 @@ use std::{
 
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{text::LayoutJob, Color32, Grid, Label, RichText, Sense, Separator, TextFormat};
+use egui::{
+    text::LayoutJob, Color32, Grid, Label, OpenUrl, RichText, Sense, Separator, TextFormat,
+};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use flate2::{
+    write::{DeflateEncoder, ZlibEncoder},
+    Compression,
+};
 use language_tags::LanguageTag;
 use notify::{EventKind, RecursiveMode, Watcher};
 use ouroboros::self_referencing;
-use serde::{Deserialize, Serialize};
+use serde::{de::IntoDeserializer, Deserialize, Serialize};
+use serde_json::json;
 use thousands::Separable;
 use wows_replays::{
     analyzer::{
@@ -99,7 +106,8 @@ impl ToolkitTabViewer<'_> {
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
-            .column(Column::remainder().clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::remainder())
             .min_scrolled_height(0.0);
 
         table
@@ -124,6 +132,9 @@ impl ToolkitTabViewer<'_> {
                 });
                 header.col(|ui| {
                     ui.strong("Allocated Skills");
+                });
+                header.col(|ui| {
+                    ui.strong("Actions");
                 });
             })
             .body(|mut body| {
@@ -207,6 +218,66 @@ impl ToolkitTabViewer<'_> {
                                 skill_points,
                                 entity.commander_skills().len()
                             ));
+                        });
+                        ui.col(|ui| {
+                            if ui.small_button("Build").clicked() {
+                                let config = entity.props().ship_config();
+                                let mut dict: HashMap<&str, serde_json::Value> = HashMap::new();
+                                let metadata_provider = self
+                                .tab_state
+                                .world_of_warships_data
+                                .game_metadata.as_ref().expect("could not get game metadata provider");
+
+                            let json = json!({
+                                "BuildName": format!("replay_{}", player.name()),
+                                "ShipIndex": ship.index(),
+                                "Nation": ship.nation(),
+                                "Modules": config.units().iter().filter_map(|id| {
+                                    Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
+                                }).collect::<Vec<_>>(),
+                                "Upgrades": config.modernization().iter().filter_map(|id| {
+                                    Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
+                                }).collect::<Vec<_>>(),
+                                "Captain": entity.captain().index(),
+                                "Skills": entity.commander_skills_raw(),
+                                "Consumables": config.abilities().iter().filter_map(|id| {
+                                    Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
+                                }).collect::<Vec<_>>(),
+                                "Signals": config.signals().iter().filter_map(|id| {
+                                    Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
+                                }).collect::<Vec<_>>(),
+                                "BuildVersion": 2
+                            });
+
+
+                                // dict.insert("BuildName", .into());
+                                // dict.insert("ShipIndex", ship.index().into());
+                                // dict.insert("Nation", ship.nation().into());
+                                // dict.insert("Modules", .into());
+                                // dict.insert("Upgrades", .into());
+                                // dict.insert("Captain", entity.captain().index().into());
+                                // dict.insert("Skills",
+                                // entity.commander_skills_raw().into());
+                                // dict.insert("Consumables",
+                                // .into());
+                                // dict.insert("Signals",
+                                // .into());
+                                // dict.insert("BuildVersion", 2.into());
+
+                                let json_blob = serde_json::to_string(&json).expect("failed to serialize ship config");
+                                let mut deflated_json = Vec::new();
+                                {
+                                    let mut encoder = DeflateEncoder ::new(&mut deflated_json, Compression::best());
+                                    encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
+                                }
+                                eprintln!("{}", json_blob);
+                                let encoded_data = data_encoding::BASE64_NOPAD.encode(&deflated_json);
+                                let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
+                                let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
+                                eprintln!("{}", url);
+
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                            }
                         });
                     });
                 }
@@ -320,7 +391,7 @@ impl ToolkitTabViewer<'_> {
                 });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::ScrollArea::both()
+                egui::ScrollArea::horizontal()
                     .id_source("replay_player_list_scroll_area")
                     .show(ui, |ui| {
                         self.build_replay_player_list(report, ui);
@@ -387,7 +458,7 @@ impl ToolkitTabViewer<'_> {
                             eprintln!("{:?}", event);
                             if event.kind == EventKind::Create(notify::event::CreateKind::File) {
                                 for path in event.paths {
-                                    tx.send(path);
+                                    tx.send(path).expect("failed to send file creation event");
                                 }
                             }
                         }
@@ -411,7 +482,6 @@ impl ToolkitTabViewer<'_> {
 
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid")
-                .max_col_width(CHAT_VIEW_WIDTH)
                 .num_columns(1)
                 .striped(true)
                 .show(ui, |ui| {
@@ -420,7 +490,10 @@ impl ToolkitTabViewer<'_> {
                             if ui
                                 .add(
                                     Label::new(
-                                        file.to_str().expect("failed to convert path to string"),
+                                        file.file_name()
+                                            .expect("no filename?")
+                                            .to_str()
+                                            .expect("failed to convert path to string"),
                                     )
                                     .sense(Sense::click()),
                                 )
