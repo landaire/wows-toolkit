@@ -21,7 +21,7 @@ use notify::RecommendedWatcher;
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
+use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
 use wowsunpack::{
     game_params,
     idx::{self, FileNode},
@@ -138,6 +138,8 @@ pub struct WorldOfWarshipsData {
     pub game_metadata: Option<Rc<GameMetadataProvider>>,
 
     pub current_replay: Option<Replay>,
+
+    pub ship_icons: Option<HashMap<Species, (String, Vec<u8>)>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -220,6 +222,7 @@ impl Default for TabState {
                 files: None,
                 game_metadata: None,
                 current_replay: Default::default(),
+                ship_icons: None,
             },
             filter: Default::default(),
             items_to_extract: Default::default(),
@@ -318,7 +321,7 @@ impl TabState {
                 self.settings.locale = Some(locale.clone());
 
                 // Try loading GameParams.data
-                let mut metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
+                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
                     .ok()
                     .and_then(|mut metadata_provider| {
                         if let Some(catalog) = found_catalog {
@@ -329,12 +332,41 @@ impl TabState {
                     })
                     .map(Rc::new);
 
+                // Try loading ship icons
+                let species = [
+                    Species::AirCarrier,
+                    Species::Battleship,
+                    Species::Cruiser,
+                    Species::Destroyer,
+                    Species::Submarine,
+                    Species::Auxiliary,
+                ];
+
+                let icons: HashMap<Species, (String, Vec<u8>)> =
+                    HashMap::from_iter(species.iter().map(|species| {
+                        let path = format!(
+                            "gui/fla/minimap/ship_icons/minimap_{}.svg",
+                            <&'static str>::from(species).to_ascii_lowercase()
+                        );
+                        let icon_node = file_tree.find(&path).expect("failed to find file");
+
+                        let mut icon_data = Vec::with_capacity(
+                            icon_node.file_info().unwrap().unpacked_size as usize,
+                        );
+                        icon_node
+                            .read_file(&*pkg_loader, &mut icon_data)
+                            .expect("failed to read ship icon");
+
+                        (species.clone(), (path, icon_data))
+                    }));
+
                 let data = WorldOfWarshipsData {
                     game_metadata: metadata_provider,
                     file_tree: Some(file_tree),
                     pkg_loader: Some(pkg_loader),
                     files: Some(files),
                     current_replay: Default::default(),
+                    ship_icons: Some(icons),
                 };
 
                 self.world_of_warships_data = data;

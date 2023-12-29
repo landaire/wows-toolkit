@@ -12,8 +12,8 @@ use std::{
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
 use egui::{
-    text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator,
-    TextFormat, Vec2,
+    epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText,
+    Sense, Separator, TextFormat, Vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use env_logger::fmt::Color;
@@ -48,7 +48,7 @@ use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
-    util::{player_color_for_team_relation, separate_number},
+    util::{build_ship_config_url, player_color_for_team_relation, separate_number},
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -200,34 +200,33 @@ impl ToolkitTabViewer<'_> {
                                         .localized_name_from_id(&id)
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
-        if let (Some(file_tree), Some(pkg_loader)) = (
-            self.tab_state.world_of_warships_data.file_tree.as_ref(),
-            self.tab_state.world_of_warships_data.pkg_loader.as_ref(),
-        ) {
-            let path =format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(ship.species().unwrap()).to_ascii_lowercase());
-            // eprintln!("{:?}", path);
-            let icon_node = file_tree.find(&path).expect("failed to find file");
+                                if let Some(icons) =
+                                    self.tab_state.world_of_warships_data.ship_icons.as_ref()
+                                {
 
-            let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
-            icon_node.read_file(&*pkg_loader, &mut icon_data);
+                                    let (path, icon_data) =
+                                            icons.get(&ship.species().expect("ship has no species"))
+                                                .expect("failed to get ship icon for species");
+                                            
+                                        let color = match player.relation() {
+                                            0 => Color32::GOLD,
+                                            1 => Color32::LIGHT_GREEN,
+                                            _ => Color32::LIGHT_RED
+                                        };
 
-                let color = match player.relation() {
-                    0 => Color32::GOLD,
-                    1 => Color32::LIGHT_GREEN,
-                    _ => Color32::LIGHT_RED
-                };
+                                    let image = Image::new(ImageSource::Bytes{
+                                            uri: path.clone().into(),
+                                            // the icon size is <1k, this clone is fairly cheap
+                                            bytes: icon_data.clone().into()
+                                        })
+                                        .tint(color)
+                                        .fit_to_exact_size((20.0, 20.0).into())
+                                        .rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
 
-            let image = Image::new(ImageSource::Bytes{
-                    uri: path.into(),
-                    bytes: icon_data.into()
-                })
-.tint(color).fit_to_exact_size((20.0, 20.0).into()).rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
-
-            ui.add(image).on_hover_text(species);
-        } else {
-
-                            ui.label(species);
-        }
+                                    ui.add(image).on_hover_text(species);
+                                } else {
+                                    ui.label(species);
+                                }
                         });
 
                 if self.tab_state.settings.replay_settings.show_observed_damage {
@@ -260,58 +259,14 @@ impl ToolkitTabViewer<'_> {
                         });
                         ui.col(|ui| {
                             if ui.small_button("Build").clicked() {
-                                let config = entity.props().ship_config();
-                                let mut dict: HashMap<&str, serde_json::Value> = HashMap::new();
                                 let metadata_provider = self
                                 .tab_state
                                 .world_of_warships_data
-                                .game_metadata.as_ref().expect("could not get game metadata provider");
+                                .game_metadata
+                                .as_ref()
+                                .unwrap();
 
-                            let json = json!({
-                                "BuildName": format!("replay_{}", player.name()),
-                                "ShipIndex": ship.index(),
-                                "Nation": ship.nation(),
-                                "Modules": config.units().iter().filter_map(|id| {
-                                    Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
-                                }).collect::<Vec<_>>(),
-                                "Upgrades": config.modernization().iter().filter_map(|id| {
-                                    Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-                                }).collect::<Vec<_>>(),
-                                "Captain": entity.captain().index(),
-                                "Skills": entity.commander_skills_raw(),
-                                "Consumables": config.abilities().iter().filter_map(|id| {
-                                    Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
-                                }).collect::<Vec<_>>(),
-                                "Signals": config.signals().iter().filter_map(|id| {
-                                    Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
-                                }).collect::<Vec<_>>(),
-                                "BuildVersion": 2
-                            });
-
-
-                                // dict.insert("BuildName", .into());
-                                // dict.insert("ShipIndex", ship.index().into());
-                                // dict.insert("Nation", ship.nation().into());
-                                // dict.insert("Modules", .into());
-                                // dict.insert("Upgrades", .into());
-                                // dict.insert("Captain", entity.captain().index().into());
-                                // dict.insert("Skills",
-                                // entity.commander_skills_raw().into());
-                                // dict.insert("Consumables",
-                                // .into());
-                                // dict.insert("Signals",
-                                // .into());
-                                // dict.insert("BuildVersion", 2.into());
-
-                                let json_blob = serde_json::to_string(&json).expect("failed to serialize ship config");
-                                let mut deflated_json = Vec::new();
-                                {
-                                    let mut encoder = DeflateEncoder::new(&mut deflated_json, Compression::best());
-                                    encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
-                                }
-                                let encoded_data = data_encoding::BASE64.encode(&deflated_json);
-                                let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
-                                let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
+                                let url = build_ship_config_url(entity, metadata_provider);
 
                                 ui.ctx().open_url(OpenUrl::new_tab(url));
                             }
