@@ -217,13 +217,17 @@ impl ToolkitTabViewer<'_> {
                         }
 
                         let species = ship.species().expect("ship has no species?");
-                        let skill_points = entity
+                        let (skill_points, num_skills) = entity
                             .commander_skills()
-                            .iter()
-                            .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
+                            .map(|skills| {
+                                let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
+
+                                (points, skills.len())
+                            })
+                            .unwrap_or((0, 0));
 
                         ui.col(|ui| {
-                            ui.label(format!("{}pts ({} skills)", skill_points, entity.commander_skills().len()));
+                            ui.label(format!("{}pts ({} skills)", skill_points, num_skills));
                         });
                         ui.col(|ui| {
                             if ui.small_button("Build").clicked() {
@@ -363,25 +367,23 @@ impl ToolkitTabViewer<'_> {
             }
         };
 
-        if self.tab_state.replay_files.is_none() && self.tab_state.file_watcher.is_none() && replay_dir.exists() {
+        if self.tab_state.replay_files.is_some() && self.tab_state.file_watcher.is_none() && replay_dir.exists() {
             let (tx, rx) = mpsc::channel();
             // Automatically select the best implementation for your platform.
-            let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                match res {
-                    Ok(event) => {
-                        eprintln!("{:?}", event);
-                        if let EventKind::Create(_) = event.kind {
-                            for path in event.paths {
-                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                    tx.send(path).expect("failed to send file creation event");
-                                }
+            let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    eprintln!("{:?}", event);
+                    if let EventKind::Create(_) = event.kind {
+                        for path in event.paths {
+                            if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                tx.send(path).expect("failed to send file creation event");
                             }
                         }
                     }
-                    Err(e) => println!("watch error: {:?}", e),
-                    _ => {
-                        // ignore other events
-                    }
+                }
+                Err(e) => println!("watch error: {:?}", e),
+                _ => {
+                    // ignore other events
                 }
             })
             .expect("failed to create fs watcher for replays dir");

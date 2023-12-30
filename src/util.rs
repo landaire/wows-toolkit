@@ -13,9 +13,7 @@ use wows_replays::{
 use crate::{app::WorldOfWarshipsData, game_params::GameMetadataProvider};
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
-    let language: LanguageTag = locale
-        .and_then(|locale| locale.parse().ok())
-        .unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
+    let language: LanguageTag = locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
 
     match language.primary_language() {
         "fr" => num.separate_with_spaces(),
@@ -43,10 +41,7 @@ pub fn player_color_for_team_relation(relation: u32, is_dark_mode: bool) -> Colo
     }
 }
 
-pub fn build_ship_config_url(
-    entity: &VehicleEntity,
-    metadata_provider: &GameMetadataProvider,
-) -> String {
+pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {
     let config = entity.props().ship_config();
     let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
@@ -66,7 +61,8 @@ pub fn build_ship_config_url(
             Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
-        "Captain": entity.captain().index(),
+        // If no captain is present, we use the default captain (wowssb does not allow for no captain to be used)
+        "Captain": entity.captain().map(|captain| captain.index()).unwrap_or("PCW001"),
 
         "Skills": entity.commander_skills_raw(),
 
@@ -85,17 +81,11 @@ pub fn build_ship_config_url(
     let mut deflated_json = Vec::new();
     {
         let mut encoder = DeflateEncoder::new(&mut deflated_json, Compression::best());
-        encoder
-            .write_all(json_blob.as_bytes())
-            .expect("failed to deflate JSON blob");
+        encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
     }
     let encoded_data = data_encoding::BASE64.encode(&deflated_json);
     let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
-    let url = format!(
-        "https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire",
-        ship.index(),
-        encoded_data
-    );
+    let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
 
     url
 }
