@@ -11,7 +11,7 @@ use std::{
 
 use bounded_vec_deque::BoundedVecDeque;
 use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
+use egui::{epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, Layout, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use env_logger::fmt::Color;
 use flate2::{
@@ -101,7 +101,6 @@ impl ToolkitTabViewer<'_> {
                 }
             })
             .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_observed_damage {
                     table.column(Column::initial(100.0).clip(true))
@@ -125,9 +124,6 @@ impl ToolkitTabViewer<'_> {
                 }
                 header.col(|ui| {
                     ui.strong("Ship Name");
-                });
-                header.col(|ui| {
-                    ui.strong("Ship Class");
                 });
                 if self.tab_state.settings.replay_settings.show_observed_damage {
                     header.col(|ui| {
@@ -153,30 +149,6 @@ impl ToolkitTabViewer<'_> {
                     let player = entity.player().unwrap();
                     let ship = player.vehicle();
                     body.row(30.0, |mut ui| {
-                        ui.col(|ui| {
-                            let is_dark_mode = ui.visuals().dark_mode;
-                            let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
-                            ui.label(RichText::new(player_name_with_clan(&*player)).color(name_color));
-                        });
-
-                        if self.tab_state.settings.replay_settings.show_entity_id {
-                            ui.col(|ui| {
-                                ui.label(format!("{}", player.avatar_id()));
-                            });
-                        }
-
-                        ui.col(|ui| {
-                            let ship_name = self
-                                .tab_state
-                                .world_of_warships_data
-                                .game_metadata
-                                .as_ref()
-                                .unwrap()
-                                .localized_name_from_param(ship)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("{}", ship.id()));
-                            ui.label(ship_name);
-                        });
                         ui.col(|ui| {
                             let species: String = ship
                                 .species()
@@ -208,6 +180,29 @@ impl ToolkitTabViewer<'_> {
                             } else {
                                 ui.label(species);
                             }
+
+                            let is_dark_mode = ui.visuals().dark_mode;
+                            let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+                            ui.label(RichText::new(player_name_with_clan(&*player)).color(name_color));
+                        });
+
+                        if self.tab_state.settings.replay_settings.show_entity_id {
+                            ui.col(|ui| {
+                                ui.label(format!("{}", player.avatar_id()));
+                            });
+                        }
+
+                        ui.col(|ui| {
+                            let ship_name = self
+                                .tab_state
+                                .world_of_warships_data
+                                .game_metadata
+                                .as_ref()
+                                .unwrap()
+                                .localized_name_from_param(ship)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("{}", ship.id()));
+                            ui.label(ship_name);
                         });
 
                         if self.tab_state.settings.replay_settings.show_observed_damage {
