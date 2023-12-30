@@ -63,47 +63,31 @@ impl ToolkitTabViewer<'_> {
             ui.group(|ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        StripBuilder::new(ui)
-                            .size(Size::remainder())
-                            .size(Size::exact(50.0))
-                            .horizontal(|mut strip| {
-                                strip.cell(|ui| {
-                                    ui.add_sized(
-                                        ui.available_size(),
-                                        egui::TextEdit::singleline(
-                                            &mut self.tab_state.settings.wows_dir,
-                                        )
-                                        .hint_text("World of Warships Directory"),
-                                    );
-                                });
-                                strip.cell(|ui| {
-                                    if ui.button("Open...").clicked() {
-                                        let folder = rfd::FileDialog::new().pick_folder();
-                                        if let Some(folder) = folder {
-                                            self.tab_state.settings.wows_dir =
-                                                folder.to_string_lossy().into_owned();
-                                            self.tab_state.load_wows_files();
-                                        }
-                                    }
-                                });
+                        StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(50.0)).horizontal(|mut strip| {
+                            strip.cell(|ui| {
+                                ui.add_sized(
+                                    ui.available_size(),
+                                    egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir).hint_text("World of Warships Directory"),
+                                );
                             });
+                            strip.cell(|ui| {
+                                if ui.button("Open...").clicked() {
+                                    let folder = rfd::FileDialog::new().pick_folder();
+                                    if let Some(folder) = folder {
+                                        self.tab_state.settings.wows_dir = folder.to_string_lossy().into_owned();
+                                        self.tab_state.load_wows_files();
+                                    }
+                                }
+                            });
+                        });
                     });
                 })
             });
             ui.label("Replay Settings");
             ui.group(|ui| {
-                ui.checkbox(
-                    &mut self.tab_state.settings.replay_settings.show_game_chat,
-                    "Show Game Chat",
-                );
-                ui.checkbox(
-                    &mut self.tab_state.settings.replay_settings.show_entity_id,
-                    "Show Entity ID Column",
-                );
-                ui.checkbox(
-                    &mut self.tab_state.settings.replay_settings.show_observed_damage,
-                    "Show Observed Damage Column",
-                );
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Show Game Chat");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Show Observed Damage Column");
             })
         });
     }
@@ -140,6 +124,8 @@ pub struct WorldOfWarshipsData {
     pub current_replay: Option<Replay>,
 
     pub ship_icons: Option<HashMap<Species, (String, Vec<u8>)>>,
+
+    pub game_version: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,6 +209,7 @@ impl Default for TabState {
                 game_metadata: None,
                 current_replay: Default::default(),
                 ship_icons: None,
+                game_version: None,
             },
             filter: Default::default(),
             items_to_extract: Default::default(),
@@ -257,17 +244,8 @@ impl TabState {
                         continue;
                     }
 
-                    if let Some(build_num) = file
-                        .file_name()
-                        .to_str()
-                        .and_then(|name| usize::from_str_radix(name, 10).ok())
-                    {
-                        if highest_number.is_none()
-                            || highest_number
-                                .clone()
-                                .map(|number| number < build_num)
-                                .unwrap_or(false)
-                        {
+                    if let Some(build_num) = file.file_name().to_str().and_then(|name| usize::from_str_radix(name, 10).ok()) {
+                        if highest_number.is_none() || highest_number.clone().map(|number| number < build_num).unwrap_or(false) {
                             highest_number = Some(build_num)
                         }
                     }
@@ -275,12 +253,7 @@ impl TabState {
             }
 
             if let Some(number) = highest_number {
-                for file in read_dir(
-                    wows_directory
-                        .join("bin")
-                        .join(format!("{}", number))
-                        .join("idx"),
-                )? {
+                for file in read_dir(wows_directory.join("bin").join(format!("{}", number)).join("idx"))? {
                     let file = file.unwrap();
                     if file.file_type().unwrap().is_file() {
                         let file_data = std::fs::read(file.path()).unwrap();
@@ -304,15 +277,11 @@ impl TabState {
                 let attempted_dirs = [locale.as_str(), language_tag.primary_language(), "en"];
                 let mut found_catalog = None;
                 for dir in attempted_dirs {
-                    let localization_path = wows_directory.join(format!(
-                        "bin/{}/res/texts/{}/LC_MESSAGES/global.mo",
-                        number, dir
-                    ));
+                    let localization_path = wows_directory.join(format!("bin/{}/res/texts/{}/LC_MESSAGES/global.mo", number, dir));
                     if !localization_path.exists() {
                         continue;
                     }
-                    let global =
-                        File::open(localization_path).expect("failed to open localization file");
+                    let global = File::open(localization_path).expect("failed to open localization file");
                     let catalog = Catalog::parse(global).expect("could not parse catalog");
                     found_catalog = Some(catalog);
                     break;
@@ -321,7 +290,7 @@ impl TabState {
                 self.settings.locale = Some(locale.clone());
 
                 // Try loading GameParams.data
-                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader)
+                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number)
                     .ok()
                     .and_then(|mut metadata_provider| {
                         if let Some(catalog) = found_catalog {
@@ -342,23 +311,15 @@ impl TabState {
                     Species::Auxiliary,
                 ];
 
-                let icons: HashMap<Species, (String, Vec<u8>)> =
-                    HashMap::from_iter(species.iter().map(|species| {
-                        let path = format!(
-                            "gui/fla/minimap/ship_icons/minimap_{}.svg",
-                            <&'static str>::from(species).to_ascii_lowercase()
-                        );
-                        let icon_node = file_tree.find(&path).expect("failed to find file");
+                let icons: HashMap<Species, (String, Vec<u8>)> = HashMap::from_iter(species.iter().map(|species| {
+                    let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
+                    let icon_node = file_tree.find(&path).expect("failed to find file");
 
-                        let mut icon_data = Vec::with_capacity(
-                            icon_node.file_info().unwrap().unpacked_size as usize,
-                        );
-                        icon_node
-                            .read_file(&*pkg_loader, &mut icon_data)
-                            .expect("failed to read ship icon");
+                    let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
+                    icon_node.read_file(&*pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
-                        (species.clone(), (path, icon_data))
-                    }));
+                    (species.clone(), (path, icon_data))
+                }));
 
                 let data = WorldOfWarshipsData {
                     game_metadata: metadata_provider,
@@ -366,6 +327,7 @@ impl TabState {
                     pkg_loader: Some(pkg_loader),
                     files: Some(files),
                     current_replay: Default::default(),
+                    game_version: Some(number),
                     ship_icons: Some(icons),
                 };
 
@@ -411,8 +373,7 @@ impl WowsToolkitApp {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
-            let mut saved_state: Self =
-                eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 match saved_state.tab_state.load_wows_files() {
                     Ok(_) => {
@@ -444,10 +405,7 @@ impl WowsToolkitApp {
                         }
                         Err(TryRecvError::Empty) => {
                             if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
-                                ui.add(
-                                    egui::ProgressBar::new(last_progress.progress)
-                                        .text(last_progress.file_name.as_str()),
-                                );
+                                ui.add(egui::ProgressBar::new(last_progress.progress).text(last_progress.file_name.as_str()));
                             }
                             break;
                         }
@@ -509,12 +467,7 @@ impl eframe::App for WowsToolkitApp {
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_close_buttons(false)
-                .show_inside(
-                    ui,
-                    &mut ToolkitTabViewer {
-                        tab_state: &mut self.tab_state,
-                    },
-                );
+                .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
 
         // Pop open something to view the clicked file from the unpacker tab
@@ -530,13 +483,7 @@ impl eframe::App for WowsToolkitApp {
         *file_viewer = file_viewer
             .drain(..)
             .enumerate()
-            .filter_map(|(idx, viewer)| {
-                if !remove_viewers.contains(&idx) {
-                    Some(viewer)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None })
             .collect();
     }
 }
@@ -547,10 +494,7 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
         ui.label("Powered by ");
         ui.hyperlink_to("egui", "https://github.com/emilk/egui");
         ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
+        ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
         ui.label(".");
     });
 }
