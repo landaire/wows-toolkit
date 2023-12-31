@@ -3,45 +3,51 @@ use std::sync::{
     Arc,
 };
 
-use egui::{mutex::Mutex, FontFamily, RichText, TextEdit, ViewportBuilder};
+use egui::{mutex::Mutex, FontFamily, Image, ImageSource, RichText, TextEdit, ViewportBuilder};
 use serde::{Deserialize, Serialize};
+
+pub enum FileType {
+    PlainTextFile { ext: String, contents: String },
+    Image { ext: String, contents: Vec<u8> },
+}
 
 pub struct PlaintextFileViewer {
     pub title: Arc<String>,
-    pub text: Arc<Mutex<String>>,
+    pub file_info: Arc<Mutex<FileType>>,
     pub open: Arc<AtomicBool>,
 }
 
 impl PlaintextFileViewer {
     pub fn draw(&mut self, ctx: &egui::Context) {
         let title = self.title.clone();
-        let text = self.text.clone();
+        let info = self.file_info.clone();
         let window_open = self.open.clone();
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
             ViewportBuilder::default().with_title(&*self.title),
             move |ctx, ui| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
-                        let mut theme =
-                            egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx());
-                        let mut layout_job = egui_extras::syntax_highlighting::highlight(
-                            ui.ctx(),
-                            &theme,
-                            string,
-                            "xml",
-                        );
-                        layout_job.wrap.max_width = wrap_width;
-                        ui.fonts(|f| f.layout_job(layout_job))
-                    };
-                    let mut text = text.lock();
-                    let mut text_editor = TextEdit::multiline(&mut *text)
-                        .code_editor()
-                        .desired_width(f32::INFINITY)
-                        .layouter(&mut layouter);
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.add(text_editor);
-                    });
+                let mut file_info = info.lock();
+                egui::CentralPanel::default().show(ctx, |ui| match &mut *file_info {
+                    FileType::PlainTextFile { ext, contents } => {
+                        let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                            let mut theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx());
+                            let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), &theme, string, &ext[1..]);
+                            layout_job.wrap.max_width = wrap_width;
+                            ui.fonts(|f| f.layout_job(layout_job))
+                        };
+                        let mut text_editor = TextEdit::multiline(contents).code_editor().desired_width(f32::INFINITY).layouter(&mut layouter);
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.add(text_editor);
+                        });
+                    }
+                    FileType::Image { ext, contents } => {
+                        let image = Image::new(ImageSource::Bytes {
+                            uri: format!("bytes://{}", &*title).into(),
+                            // the icon size is <1k, this clone is fairly cheap
+                            bytes: contents.clone().into(),
+                        });
+                        ui.add(image);
+                    }
                 });
                 if ctx.input(|i| i.viewport().close_requested()) {
                     // Tell parent to close us.

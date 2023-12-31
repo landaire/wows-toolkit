@@ -9,11 +9,14 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, CollapsingHeader, Label, Sense, TextEdit, Ui};
+use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, TextEdit, Ui};
 use egui_extras::{Size, StripBuilder};
 use wowsunpack::idx::FileNode;
 
-use crate::{app::ToolkitTabViewer, plaintext_viewer};
+use crate::{
+    app::ToolkitTabViewer,
+    plaintext_viewer::{self, FileType},
+};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -21,73 +24,72 @@ pub struct UnpackerProgress {
     pub progress: f32,
 }
 
+const IMAGE_FILE_TYPES: [&'static str; 3] = [".jpg", ".png", ".svg"];
 const PLAINTEXT_FILE_TYPES: [&'static str; 3] = [".xml", ".json", ".txt"];
 
 impl ToolkitTabViewer<'_> {
+    fn add_view_file_menu(&self, file_label: Response, node: &FileNode) -> Response {
+        let is_plaintext_file = PLAINTEXT_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
+        let is_image_file = IMAGE_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
+
+        let file_label = if is_plaintext_file.is_some() || is_image_file.is_some() {
+            file_label.context_menu(|ui| {
+                if let Some(pkg_loader) = self.tab_state.world_of_warships_data.pkg_loader.as_ref() {
+                    if ui.button("View Contents").clicked() {
+                        let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
+
+                        node.read_file(&*pkg_loader, &mut file_contents).expect("failed to read file");
+
+                        let file_type = match (is_plaintext_file, is_image_file) {
+                            (Some(ext), None) => String::from_utf8(file_contents)
+                                .ok()
+                                .map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
+                            (None, Some(ext)) => Some(FileType::Image {
+                                ext: ext.to_string(),
+                                contents: file_contents,
+                            }),
+                            (None, None) => None,
+                            _ => unreachable!("this should be impossible"),
+                        };
+
+                        if let Some(file_type) = file_type {
+                            let viewer = plaintext_viewer::PlaintextFileViewer {
+                                title: Arc::new(Path::new("res").join(node.path().unwrap()).to_str().unwrap().to_string()),
+                                file_info: Arc::new(Mutex::new(file_type)),
+                                open: Arc::new(AtomicBool::new(true)),
+                            };
+
+                            self.tab_state.file_viewer.lock().push(viewer);
+                        }
+                    }
+                }
+            })
+        } else {
+            file_label
+        };
+
+        file_label
+    }
     /// Builds a resource tree node from a [FileNode]
     fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
-        let header = CollapsingHeader::new(if file_tree.is_root() {
-            "res"
-        } else {
-            file_tree.filename()
-        })
-        .default_open(file_tree.is_root())
-        .show(ui, |ui| {
-            for (name, node) in file_tree.children() {
-                if node.is_file() {
-                    let file_label = ui.add(Label::new(name).sense(Sense::click()));
-                    let is_plaintext_file = PLAINTEXT_FILE_TYPES
-                        .iter()
-                        .find(|extension| node.filename().ends_with(**extension));
-
-                    let file_label = if is_plaintext_file.is_some() {
-                        file_label.context_menu(|ui| {
-                            if let Some(pkg_loader) =
-                                self.tab_state.world_of_warships_data.pkg_loader.as_ref()
-                            {
-                                if ui.button("View Contents").clicked() {
-                                    let mut file_contents: Vec<u8> = Vec::with_capacity(
-                                        node.file_info().unwrap().unpacked_size as usize,
-                                    );
-
-                                    node.read_file(&*pkg_loader, &mut file_contents)
-                                        .expect("failed to read file");
-
-                                    if let Some(text) = String::from_utf8(file_contents).ok() {
-                                        let viewer = plaintext_viewer::PlaintextFileViewer {
-                                            title: Arc::new(
-                                                Path::new("res")
-                                                    .join(node.path().unwrap())
-                                                    .to_str()
-                                                    .unwrap()
-                                                    .to_string(),
-                                            ),
-                                            text: Arc::new(Mutex::new(text)),
-                                            open: Arc::new(AtomicBool::new(true)),
-                                        };
-
-                                        self.tab_state.file_viewer.lock().push(viewer);
-                                    }
-                                }
-                            }
-                        })
+        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() })
+            .default_open(file_tree.is_root())
+            .show(ui, |ui| {
+                for (name, node) in file_tree.children() {
+                    if node.is_file() {
+                        let file_label = ui.add(Label::new(name).sense(Sense::click()));
+                        let file_label = self.add_view_file_menu(file_label, node);
+                        if file_label.double_clicked() {
+                            self.tab_state.items_to_extract.lock().push(node.clone());
+                        }
                     } else {
-                        file_label
-                    };
-                    if file_label.double_clicked() {
-                        self.tab_state.items_to_extract.lock().push(node.clone());
+                        self.build_resource_tree_node(ui, node);
                     }
-                } else {
-                    self.build_resource_tree_node(ui, node);
                 }
-            }
-        });
+            });
 
         if header.header_response.double_clicked() {
-            self.tab_state
-                .items_to_extract
-                .lock()
-                .push(file_tree.clone());
+            self.tab_state.items_to_extract.lock().push(file_tree.clone());
         }
     }
 
@@ -96,37 +98,26 @@ impl ToolkitTabViewer<'_> {
     where
         I: IntoIterator<Item = &'i (Rc<PathBuf>, FileNode)>,
     {
-        egui::Grid::new("filtered_files_grid")
-            .num_columns(1)
-            .striped(true)
-            .show(ui, |ui| {
-                let files = files.into_iter();
-                for file in files {
-                    let label = ui.add(
-                        Label::new(Path::new("res").join(&*file.0).to_string_lossy().to_owned())
-                            .sense(Sense::click()),
-                    );
+        egui::Grid::new("filtered_files_grid").num_columns(1).striped(true).show(ui, |ui| {
+            let files = files.into_iter();
+            for file in files {
+                let label = ui.add(Label::new(Path::new("res").join(&*file.0).to_string_lossy().to_owned()).sense(Sense::click()));
+                let label = self.add_view_file_menu(label, &file.1);
 
-                    let text = if file.1.is_file() {
-                        format!(
-                            "File ({})",
-                            humansize::format_size(
-                                file.1.file_info().unwrap().size,
-                                humansize::DECIMAL
-                            )
-                        )
-                    } else {
-                        format!("Folder")
-                    };
+                let text = if file.1.is_file() {
+                    format!("File ({})", humansize::format_size(file.1.file_info().unwrap().size, humansize::DECIMAL))
+                } else {
+                    format!("Folder")
+                };
 
-                    let label = label.on_hover_text(text);
+                let label = label.on_hover_text(text);
 
-                    if label.double_clicked() {
-                        self.tab_state.items_to_extract.lock().push(file.1.clone());
-                    }
-                    ui.end_row();
+                if label.double_clicked() {
+                    self.tab_state.items_to_extract.lock().push(file.1.clone());
                 }
-            });
+                ui.end_row();
+            }
+        });
     }
 
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
@@ -172,11 +163,9 @@ impl ToolkitTabViewer<'_> {
                             folders_created.insert(path.clone());
                         }
 
-                        let mut out_file =
-                            File::create(file_path).expect("failed to create output file");
+                        let mut out_file = File::create(file_path).expect("failed to create output file");
 
-                        file.read_file(&*pkg_loader, &mut out_file)
-                            .expect("Failed to read file");
+                        file.read_file(&*pkg_loader, &mut out_file).expect("Failed to read file");
                         files_written += 1;
                     }
                 }));
@@ -196,21 +185,13 @@ impl ToolkitTabViewer<'_> {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
                         if self.tab_state.filter.contains("*") && glob.is_ok() {
                             let glob = glob.unwrap();
-                            let leafs: Vec<_> = files
-                                .iter()
-                                .filter(|(path, _node)| glob.matches_path(&*path))
-                                .cloned()
-                                .collect();
+                            let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(&*path)).cloned().collect();
 
                             Some(leafs)
                         } else {
                             let leafs = files
                                 .iter()
-                                .filter(|(path, _node)| {
-                                    path.to_str()
-                                        .map(|path| path.contains(self.tab_state.filter.as_str()))
-                                        .unwrap_or(false)
-                                })
+                                .filter(|(path, _node)| path.to_str().map(|path| path.contains(self.tab_state.filter.as_str())).unwrap_or(false))
                                 .cloned()
                                 .collect();
 
@@ -223,130 +204,100 @@ impl ToolkitTabViewer<'_> {
                     None
                 };
 
-                StripBuilder::new(ui)
-                    .size(Size::exact(25.0))
-                    .size(Size::remainder())
-                    .vertical(|mut strip| {
-                        strip.strip(|builder| {
-                            builder
-                                .size(Size::remainder())
-                                .size(Size::exact(50.0))
-                                .horizontal(|mut strip| {
-                                    strip.cell(|ui| {
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut self.tab_state.filter)
-                                                .hint_text("Filter"),
-                                        );
-                                    });
-                                    strip.cell(|ui| {
-                                        if let Some(filter_list) = &filter_list {
-                                            if ui.button("Add All").clicked() {
-                                                println!("button clicked");
-                                                let mut items_to_extract =
-                                                    self.tab_state.items_to_extract.lock();
-                                                println!("filter_list: {}", filter_list.len());
-                                                for file in filter_list {
-                                                    items_to_extract.push(file.1.clone());
-                                                }
-                                            }
-                                        }
-                                    });
-                                });
-                        });
-                        strip.cell(|ui| {
-                            egui::ScrollArea::both()
-                                .id_source("file_tree_scroll_area")
-                                .show(ui, |ui| {
-                                    if let (Some(file_tree), Some(files)) = (
-                                        self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                                        self.tab_state.world_of_warships_data.files.as_ref(),
-                                    ) {
-                                        if let Some(filtered_files) = &filter_list {
-                                            self.build_file_list_from_array(
-                                                ui,
-                                                filtered_files.iter(),
-                                            );
-                                        } else {
-                                            self.build_resource_tree_node(ui, file_tree);
+                StripBuilder::new(ui).size(Size::exact(25.0)).size(Size::remainder()).vertical(|mut strip| {
+                    strip.strip(|builder| {
+                        builder.size(Size::remainder()).size(Size::exact(50.0)).horizontal(|mut strip| {
+                            strip.cell(|ui| {
+                                ui.add(egui::TextEdit::singleline(&mut self.tab_state.filter).hint_text("Filter"));
+                            });
+                            strip.cell(|ui| {
+                                if let Some(filter_list) = &filter_list {
+                                    if ui.button("Add All").clicked() {
+                                        println!("button clicked");
+                                        let mut items_to_extract = self.tab_state.items_to_extract.lock();
+                                        println!("filter_list: {}", filter_list.len());
+                                        for file in filter_list {
+                                            items_to_extract.push(file.1.clone());
                                         }
                                     }
-                                });
+                                }
+                            });
                         });
                     });
+                    strip.cell(|ui| {
+                        egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
+                            if let (Some(file_tree), Some(files)) = (
+                                self.tab_state.world_of_warships_data.file_tree.as_ref(),
+                                self.tab_state.world_of_warships_data.files.as_ref(),
+                            ) {
+                                if let Some(filtered_files) = &filter_list {
+                                    self.build_file_list_from_array(ui, filtered_files.iter());
+                                } else {
+                                    self.build_resource_tree_node(ui, file_tree);
+                                }
+                            }
+                        });
+                    });
+                });
             });
         });
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            StripBuilder::new(ui)
-                .size(Size::remainder())
-                .size(Size::exact(20.0))
-                .vertical(|mut strip| {
-                    strip.cell(|ui| {
-                        ui.vertical(|ui| {
-                            egui::ScrollArea::both()
-                                .id_source("selected_files_scroll_area")
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.heading("Selected Files");
-                                    });
+            StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(20.0)).vertical(|mut strip| {
+                strip.cell(|ui| {
+                    ui.vertical(|ui| {
+                        egui::ScrollArea::both().id_source("selected_files_scroll_area").show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.heading("Selected Files");
+                            });
 
-                                    ui.separator();
+                            ui.separator();
 
-                                    let mut items = self.tab_state.items_to_extract.lock();
-                                    let mut remove_idx = None;
-                                    for (i, item) in items.iter().enumerate() {
-                                        if ui
-                                            .add(
-                                                Label::new(
-                                                    Path::new("res")
-                                                        .join(item.path().unwrap())
-                                                        .to_string_lossy()
-                                                        .to_owned(),
-                                                )
-                                                .sense(Sense::click()),
-                                            )
-                                            .double_clicked()
-                                        {
-                                            remove_idx = Some(i);
-                                        }
-                                    }
+                            let mut items = self.tab_state.items_to_extract.lock();
+                            let mut remove_idx = None;
+                            for (i, item) in items.iter().enumerate() {
+                                if ui
+                                    .add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().to_owned()).sense(Sense::click()))
+                                    .double_clicked()
+                                {
+                                    remove_idx = Some(i);
+                                }
+                            }
 
-                                    if let Some(remove_idx) = remove_idx {
-                                        items.remove(remove_idx);
-                                    }
-                                });
+                            if let Some(remove_idx) = remove_idx {
+                                items.remove(remove_idx);
+                            }
                         });
                     });
-
-                    strip.strip(|builder| {
-                        builder
-                            .size(Size::remainder())
-                            .size(Size::exact(60.0))
-                            .size(Size::exact(60.0))
-                            .horizontal(|mut strip| {
-                                strip.cell(|ui| {
-                                    ui.add_sized(
-                                        ui.available_size(),
-                                        egui::TextEdit::singleline(&mut self.tab_state.output_dir)
-                                            .hint_text("Output Path"),
-                                    );
-                                });
-                                strip.cell(|ui| {
-                                    if ui.button("Choose...").clicked() {
-                                        let folder = rfd::FileDialog::new().pick_folder();
-                                        if let Some(folder) = folder {
-                                            self.tab_state.output_dir =
-                                                folder.to_string_lossy().into_owned();
-                                        }
-                                    }
-                                });
-                                strip.cell(|ui| {
-                                    if ui.button("Extract").clicked() {
-                                        self.extract_files_clicked(ui);
-                                    }
-                                });
-                            });
-                    });
                 });
+
+                strip.strip(|builder| {
+                    builder
+                        .size(Size::remainder())
+                        .size(Size::exact(60.0))
+                        .size(Size::exact(60.0))
+                        .horizontal(|mut strip| {
+                            strip.cell(|ui| {
+                                ui.add_sized(
+                                    ui.available_size(),
+                                    egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"),
+                                );
+                            });
+                            strip.cell(|ui| {
+                                if ui.button("Choose...").clicked() {
+                                    let folder = rfd::FileDialog::new().pick_folder();
+                                    if let Some(folder) = folder {
+                                        self.tab_state.output_dir = folder.to_string_lossy().into_owned();
+                                    }
+                                }
+                            });
+                            strip.cell(|ui| {
+                                if ui.button("Extract").clicked() {
+                                    self.extract_files_clicked(ui);
+                                }
+                            });
+                        });
+                });
+            });
         });
     }
 }

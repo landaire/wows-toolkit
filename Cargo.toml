@@ -41,6 +41,7 @@ thousands = "0.2.0"
 notify = "6.1.1"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 data-encoding = "2.5.0"
+image = { version = "0.24", features = ["jpeg", "png"] }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
