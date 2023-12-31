@@ -240,8 +240,6 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Result<Vec<Crew
             // });
 
             let logic_trigger_data = game_param_to_type!(skill_data, "LogicTrigger", HashMap<(), ()>);
-            eprintln!("{:#?}", logic_trigger_data);
-            eprintln!("{}", skill_name);
             let logic_trigger = CrewSkillLogicTriggerBuilder::default()
                 .burn_count(game_param_to_type!(logic_trigger_data, "burnCount", Option<usize>))
                 .change_priority_target_penalty(game_param_to_type!(logic_trigger_data, "changePriorityTargetPenalty", f32))

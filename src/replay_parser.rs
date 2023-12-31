@@ -19,7 +19,10 @@ use flate2::{
     Compression,
 };
 use language_tags::LanguageTag;
-use notify::{EventKind, RecursiveMode, Watcher};
+use notify::{
+    event::{ModifyKind, RenameMode},
+    EventKind, RecursiveMode, Watcher,
+};
 use ouroboros::self_referencing;
 use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use serde_json::json;
@@ -148,6 +151,7 @@ impl ToolkitTabViewer<'_> {
                 for entity in &sorted_players {
                     let player = entity.player().unwrap();
                     let ship = player.vehicle();
+
                     body.row(30.0, |mut ui| {
                         ui.col(|ui| {
                             let species: String = ship
@@ -350,7 +354,9 @@ impl ToolkitTabViewer<'_> {
                         let file_path = file.path();
 
                         if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                            files.push(file_path)
+                            if file.file_name() != "temp.wowsreplay" {
+                                files.push(file_path);
+                            }
                         }
                     }
                 }
@@ -367,12 +373,18 @@ impl ToolkitTabViewer<'_> {
             // Automatically select the best implementation for your platform.
             let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) => {
-                    eprintln!("{:?}", event);
-                    if let EventKind::Create(_) = event.kind {
-                        for path in event.paths {
-                            if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                tx.send(path).expect("failed to send file creation event");
+                    // TODO: maybe properly handle moves?
+                    println!("{:?}", event);
+                    match event.kind {
+                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                            for path in event.paths {
+                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                    tx.send(path).expect("failed to send file creation event");
+                                }
                             }
+                        }
+                        _ => {
+                            // TODO: handle RenameMode::From for proper file moves
                         }
                     }
                 }
