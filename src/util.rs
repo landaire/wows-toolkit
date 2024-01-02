@@ -7,7 +7,7 @@ use serde_json::json;
 use thousands::Separable;
 use wows_replays::{
     analyzer::battle_controller::{ShipConfig, VehicleEntity},
-    game_params::GameParamProvider,
+    game_params::{GameParamProvider, Vehicle},
 };
 
 use crate::{app::WorldOfWarshipsData, game_params::GameMetadataProvider};
@@ -39,6 +39,11 @@ pub fn player_color_for_team_relation(relation: u32, is_dark_mode: bool) -> Colo
             }
         }
     }
+}
+
+pub fn build_wows_numbers_url(entity: &VehicleEntity) -> Option<String> {
+    let player = entity.player()?;
+    Some(format!("https://{}.wows-numbers.com/player/{},{}", player.realm(), player.db_id(), player.name()))
 }
 
 pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {

@@ -47,7 +47,7 @@ use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
-    util::{build_ship_config_url, player_color_for_team_relation, separate_number},
+    util::{build_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -240,6 +240,12 @@ impl ToolkitTabViewer<'_> {
                                 let url = build_ship_config_url(entity, metadata_provider);
 
                                 ui.ctx().open_url(OpenUrl::new_tab(url));
+                            }
+
+                            if ui.small_button("WoWs Numbers").clicked() {
+                                if let Some(url) = build_wows_numbers_url(entity) {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
                             }
                         });
                     });
