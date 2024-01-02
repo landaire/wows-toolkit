@@ -17,7 +17,10 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 use language_tags::LanguageTag;
-use notify::RecommendedWatcher;
+use notify::{
+    event::{ModifyKind, RenameMode},
+    EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
@@ -193,6 +196,9 @@ pub struct TabState {
     pub file_watcher: Option<RecommendedWatcher>,
 
     #[serde(skip)]
+    pub replays_dir: Option<PathBuf>,
+
+    #[serde(skip)]
     pub file_receiver: Option<mpsc::Receiver<PathBuf>>,
 
     #[serde(skip)]
@@ -221,6 +227,7 @@ impl Default for TabState {
             replay_parser_tab: Default::default(),
             file_viewer: Default::default(),
             file_watcher: None,
+            replays_dir: None,
             replay_files: None,
             file_receiver: None,
         }
@@ -228,6 +235,88 @@ impl Default for TabState {
 }
 
 impl TabState {
+    fn load_replays(&mut self) {
+        if let Some(watcher) = self.file_watcher.as_mut() {
+            let _ = watcher.unwatch(self.replays_dir.as_ref().unwrap());
+        }
+        let replay_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
+        if let Some(replay_files) = &mut self.replay_files {
+            if let Some(file) = self.file_receiver.as_ref() {
+                while let Ok(new_file) = file.try_recv() {
+                    replay_files.insert(0, new_file);
+                }
+            }
+        } else {
+            let mut files = Vec::new();
+            if replay_dir.exists() {
+                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
+                    if let Ok(file) = file {
+                        if !file.file_type().expect("failed to get file type").is_file() {
+                            continue;
+                        }
+
+                        let file_path = file.path();
+
+                        if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
+                            if file.file_name() != "temp.wowsreplay" {
+                                files.push(file_path);
+                            }
+                        }
+                    }
+                }
+            }
+            if !files.is_empty() {
+                files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
+                files.reverse();
+                self.replay_files = Some(files);
+            }
+        };
+
+        if self.replay_files.is_some() && self.file_watcher.is_none() && replay_dir.exists() {
+            let (tx, rx) = mpsc::channel();
+            // Automatically select the best implementation for your platform.
+            let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
+                watcher
+            } else {
+                let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+                    Ok(event) => {
+                        // TODO: maybe properly handle moves?
+                        println!("{:?}", event);
+                        match event.kind {
+                            EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                                for path in event.paths {
+                                    if path.is_file()
+                                        && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                        && path.file_name().unwrap() != "temp.wowsreplay"
+                                    {
+                                        tx.send(path).expect("failed to send file creation event");
+                                    }
+                                }
+                            }
+                            _ => {
+                                // TODO: handle RenameMode::From for proper file moves
+                            }
+                        }
+                    }
+                    Err(e) => println!("watch error: {:?}", e),
+                    _ => {
+                        // ignore other events
+                    }
+                })
+                .expect("failed to create fs watcher for replays dir");
+
+                self.file_watcher = Some(watcher);
+                self.file_watcher.as_mut().unwrap()
+            };
+
+            // Add a path to be watched. All files and directories at that path and
+            // below will be monitored for changes.
+            watcher.watch(replay_dir.as_ref(), RecursiveMode::NonRecursive).expect("failed to watch directory");
+
+            self.file_receiver = Some(rx);
+            self.replays_dir = Some(replay_dir);
+        }
+    }
     pub fn load_wows_files(&mut self) -> std::io::Result<()> {
         let mut idx_files = Vec::new();
         let wows_directory = Path::new(self.settings.wows_dir.as_str());
@@ -332,6 +421,8 @@ impl TabState {
                 };
 
                 self.world_of_warships_data = data;
+
+                self.load_replays();
             }
         }
 

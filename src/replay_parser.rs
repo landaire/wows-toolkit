@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
-    sync::{mpsc, Arc, Mutex},
+    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
 };
 
 use bounded_vec_deque::BoundedVecDeque;
@@ -46,6 +46,7 @@ use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
+    plaintext_viewer::{self, FileType},
     util::{build_ship_config_url, player_color_for_team_relation, separate_number},
 };
 
@@ -84,7 +85,11 @@ impl Replay {
                 controller.finish();
                 self.battle_report = Some(controller.build_report());
             }
-            Err(e) => panic!("{:?}", e),
+            Err(e) => {
+                eprintln!("{:?}", e);
+                controller.finish();
+                self.battle_report = Some(controller.build_report());
+            }
         }
     }
 }
@@ -316,6 +321,20 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
+                if ui.button("Raw Metadata").clicked() {
+                    let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
+                    let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
+                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                        title: Arc::new("metadata.json".to_owned()),
+                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                            ext: ".json".to_owned(),
+                            contents: pretty_meta,
+                        })),
+                        open: Arc::new(AtomicBool::new(true)),
+                    };
+
+                    self.tab_state.file_viewer.lock().push(viewer);
+                }
             });
 
             if self.tab_state.settings.replay_settings.show_game_chat {
@@ -335,74 +354,6 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing(&mut self, ui: &mut egui::Ui) {
-        let replay_dir = Path::new(self.tab_state.settings.wows_dir.as_str()).join("replays");
-        if let Some(replay_files) = &mut self.tab_state.replay_files {
-            if let Some(file) = self.tab_state.file_receiver.as_ref() {
-                while let Ok(new_file) = file.try_recv() {
-                    replay_files.insert(0, new_file);
-                }
-            }
-        } else {
-            let mut files = Vec::new();
-            if replay_dir.exists() {
-                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
-                    if let Ok(file) = file {
-                        if !file.file_type().expect("failed to get file type").is_file() {
-                            continue;
-                        }
-
-                        let file_path = file.path();
-
-                        if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                            if file.file_name() != "temp.wowsreplay" {
-                                files.push(file_path);
-                            }
-                        }
-                    }
-                }
-            }
-            if !files.is_empty() {
-                files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
-                files.reverse();
-                self.tab_state.replay_files = Some(files);
-            }
-        };
-
-        if self.tab_state.replay_files.is_some() && self.tab_state.file_watcher.is_none() && replay_dir.exists() {
-            let (tx, rx) = mpsc::channel();
-            // Automatically select the best implementation for your platform.
-            let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-                Ok(event) => {
-                    // TODO: maybe properly handle moves?
-                    println!("{:?}", event);
-                    match event.kind {
-                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
-                            for path in event.paths {
-                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
-                                    tx.send(path).expect("failed to send file creation event");
-                                }
-                            }
-                        }
-                        _ => {
-                            // TODO: handle RenameMode::From for proper file moves
-                        }
-                    }
-                }
-                Err(e) => println!("watch error: {:?}", e),
-                _ => {
-                    // ignore other events
-                }
-            })
-            .expect("failed to create fs watcher for replays dir");
-
-            // Add a path to be watched. All files and directories at that path and
-            // below will be monitored for changes.
-            watcher.watch(replay_dir.as_ref(), RecursiveMode::NonRecursive).expect("failed to watch directory");
-
-            self.tab_state.file_watcher = Some(watcher);
-            self.tab_state.file_receiver = Some(rx);
-        }
-
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid").num_columns(1).striped(true).show(ui, |ui| {
                 if let Some(files) = self.tab_state.replay_files.clone() {
@@ -420,14 +371,36 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
+    fn parse_live_replay(&mut self) {
+        if let Some(replays_dir) = self.tab_state.replays_dir.as_ref() {
+            let meta = replays_dir.join("tempArenaInfo.json");
+            let replay = replays_dir.join("temp.wowsreplay");
+
+            let meta_data = std::fs::read(meta);
+            let replay_data = std::fs::read(replay);
+
+            if meta_data.is_err() || replay_data.is_err() {
+                return;
+            }
+
+            let replay_file: ReplayFile = ReplayFile::from_decrypted_parts(meta_data.unwrap(), replay_data.unwrap()).unwrap();
+
+            self.load_replay(replay_file);
+        }
+    }
+
     fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) {
         let path = replay_path.as_ref();
 
+        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
+
+        self.load_replay(replay_file);
+    }
+
+    fn load_replay(&mut self, replay_file: ReplayFile) {
         {
             self.tab_state.replay_parser_tab.lock().unwrap().game_chat.clear();
         }
-        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-
         let mut replay = Replay {
             replay_file,
             resource_loader: self.tab_state.world_of_warships_data.game_metadata.clone().unwrap(),
@@ -459,6 +432,12 @@ impl ToolkitTabViewer<'_> {
                         //println!("{:#?}", ReplayFile::from_file(&file));
 
                         self.tab_state.settings.current_replay_path = file;
+                    }
+                }
+
+                if let Some(replays_dir) = self.tab_state.replays_dir.as_ref() {
+                    if ui.button("Load Live Game").clicked() {
+                        self.parse_live_replay();
                     }
                 }
             });
