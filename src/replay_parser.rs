@@ -234,19 +234,33 @@ impl ToolkitTabViewer<'_> {
                             ui.label(format!("{}pts ({} skills)", skill_points, num_skills));
                         });
                         ui.col(|ui| {
-                            if ui.small_button("Build").clicked() {
-                                let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+                            ui.menu_button("Actions", |ui| {
+                                if ui.small_button("Open Build in Browser").clicked() {
+                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
-                                let url = build_ship_config_url(entity, metadata_provider);
+                                    let url = build_ship_config_url(entity, metadata_provider);
 
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                            }
-
-                            if ui.small_button("WoWs Numbers").clicked() {
-                                if let Some(url) = build_wows_numbers_url(entity) {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    ui.close_menu();
                                 }
-                            }
+
+                                if ui.small_button("Copy Build Link").clicked() {
+                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+
+                                    let url = build_ship_config_url(entity, metadata_provider);
+                                    ui.output_mut(|output| output.copied_text = url);
+
+                                    ui.close_menu();
+                                }
+
+                                if ui.small_button("Open WoWs Numbers Page").clicked() {
+                                    if let Some(url) = build_wows_numbers_url(entity) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
+
+                                    ui.close_menu();
+                                }
+                            });
                         });
                     });
                 }
