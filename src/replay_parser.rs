@@ -117,6 +117,8 @@ impl ToolkitTabViewer<'_> {
                 }
             })
             .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
@@ -140,6 +142,12 @@ impl ToolkitTabViewer<'_> {
                         );
                     });
                 }
+                header.col(|ui| {
+                    ui.strong("Time Lived");
+                });
+                header.col(|ui| {
+                    ui.strong("Max HP");
+                });
                 header.col(|ui| {
                     ui.strong("Allocated Skills");
                 });
@@ -197,7 +205,7 @@ impl ToolkitTabViewer<'_> {
 
                         if self.tab_state.settings.replay_settings.show_entity_id {
                             ui.col(|ui| {
-                                ui.label(format!("{}", player.avatar_id()));
+                                ui.label(format!("{}", entity.id()));
                             });
                         }
 
@@ -220,6 +228,19 @@ impl ToolkitTabViewer<'_> {
                             });
                         }
 
+                        ui.col(|ui| {
+                            if let Some(death_info) = entity.death_info() {
+                                let secs = death_info.time_lived().as_secs();
+                                ui.label(format!("{}:{:02}", secs / 60, secs % 60));
+                            } else {
+                                ui.label("-");
+                            }
+                        });
+
+                        ui.col(|ui| {
+                            ui.label(separate_number(player.max_health(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                        });
+
                         let species = ship.species().expect("ship has no species?");
                         let (skill_points, num_skills) = entity
                             .commander_skills()
@@ -229,7 +250,6 @@ impl ToolkitTabViewer<'_> {
                                 (points, skills.len())
                             })
                             .unwrap_or((0, 0));
-
                         ui.col(|ui| {
                             ui.label(format!("{}pts ({} skills)", skill_points, num_skills));
                         });
