@@ -173,6 +173,11 @@ pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
 }
 
+pub enum NotifyFileEvent {
+    Added(PathBuf),
+    Removed(PathBuf),
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabState {
@@ -210,7 +215,7 @@ pub struct TabState {
     pub replays_dir: Option<PathBuf>,
 
     #[serde(skip)]
-    pub file_receiver: Option<mpsc::Receiver<PathBuf>>,
+    pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
 
     #[serde(skip)]
     pub replay_files: Option<Vec<PathBuf>>,
@@ -246,44 +251,58 @@ impl Default for TabState {
 }
 
 impl TabState {
-    fn load_replays(&mut self) {
-        if let Some(watcher) = self.file_watcher.as_mut() {
-            let _ = watcher.unwatch(self.replays_dir.as_ref().unwrap());
-        }
-        let replay_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
+    fn try_update_replays(&mut self) {
         if let Some(replay_files) = &mut self.replay_files {
             if let Some(file) = self.file_receiver.as_ref() {
-                while let Ok(new_file) = file.try_recv() {
-                    replay_files.insert(0, new_file);
-                }
-            }
-        } else {
-            let mut files = Vec::new();
-            if replay_dir.exists() {
-                for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
-                    if let Ok(file) = file {
-                        if !file.file_type().expect("failed to get file type").is_file() {
-                            continue;
+                while let Ok(file_event) = file.try_recv() {
+                    match file_event {
+                        NotifyFileEvent::Added(new_file) => {
+                            replay_files.insert(0, new_file);
                         }
-
-                        let file_path = file.path();
-
-                        if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                            if file.file_name() != "temp.wowsreplay" {
-                                files.push(file_path);
+                        NotifyFileEvent::Removed(old_file) => {
+                            if let Some(pos) = replay_files.iter().position(|file_path| file_path == &old_file) {
+                                replay_files.remove(pos);
                             }
                         }
                     }
                 }
             }
-            if !files.is_empty() {
-                files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
-                files.reverse();
-                self.replay_files = Some(files);
+        }
+    }
+
+    fn reload_replays(&mut self) {
+        if let Some(watcher) = self.file_watcher.as_mut() {
+            let _ = watcher.unwatch(self.replays_dir.as_ref().unwrap());
+        }
+        let replay_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
+        let mut files = Vec::new();
+        self.replay_files = None;
+
+        if replay_dir.exists() {
+            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
+                if let Ok(file) = file {
+                    if !file.file_type().expect("failed to get file type").is_file() {
+                        continue;
+                    }
+
+                    let file_path = file.path();
+
+                    if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
+                        if file.file_name() != "temp.wowsreplay" {
+                            files.push(file_path);
+                        }
+                    }
+                }
             }
-        };
+        }
+        if !files.is_empty() {
+            files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
+            files.reverse();
+            self.replay_files = Some(files);
+        }
 
         if self.replay_files.is_some() && self.file_watcher.is_none() && replay_dir.exists() {
+            eprintln!("creating filesystem watcher");
             let (tx, rx) = mpsc::channel();
             // Automatically select the best implementation for your platform.
             let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
@@ -300,8 +319,13 @@ impl TabState {
                                         && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
                                         && path.file_name().unwrap() != "temp.wowsreplay"
                                     {
-                                        tx.send(path).expect("failed to send file creation event");
+                                        tx.send(NotifyFileEvent::Added(path)).expect("failed to send file creation event");
                                     }
+                                }
+                            }
+                            EventKind::Remove(_) => {
+                                for path in event.paths {
+                                    tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
                                 }
                             }
                             _ => {
@@ -433,7 +457,7 @@ impl TabState {
 
                 self.world_of_warships_data = data;
 
-                self.load_replays();
+                self.reload_replays();
             }
         }
 
@@ -571,6 +595,8 @@ impl eframe::App for WowsToolkitApp {
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
         egui_extras::install_image_loaders(ctx);
+
+        self.tab_state.try_update_replays();
 
         if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
             self.check_for_updates();
