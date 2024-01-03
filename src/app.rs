@@ -12,7 +12,7 @@ use std::{
     thread::LocalKey,
 };
 
-use egui::{mutex::Mutex, Ui, WidgetText};
+use egui::{mutex::Mutex, OpenUrl, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
@@ -21,6 +21,7 @@ use notify::{
     event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
+use octocrab::models::repos::Release;
 use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
@@ -434,9 +435,9 @@ impl TabState {
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct WowsToolkitApp {
-    label: String,
-
-    value: f32,
+    checked_for_updates: bool,
+    update_window_open: bool,
+    latest_release: Option<Release>,
 
     tab_state: TabState,
     #[serde(skip)]
@@ -446,9 +447,9 @@ pub struct WowsToolkitApp {
 impl Default for WowsToolkitApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            checked_for_updates: false,
+            update_window_open: false,
+            latest_release: None,
             tab_state: Default::default(),
             dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
         }
@@ -514,6 +515,35 @@ impl WowsToolkitApp {
             }
         });
     }
+
+    fn check_for_updates(&mut self) {
+        let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        let result = rt.block_on(async {
+            octocrab::instance()
+                .repos("owner", "repo")
+                .releases()
+                .list()
+                // Optional Parameters
+                .per_page(1)
+                // Send the request
+                .send()
+                .await
+        });
+
+        if let Ok(result) = result {
+            if !result.items.is_empty() {
+                let latest_release = result.items[0].clone();
+                if let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..]) {
+                    let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+                    if app_version < version {
+                        self.update_window_open = true;
+                        self.latest_release = Some(latest_release);
+                    }
+                }
+            }
+        }
+        self.checked_for_updates = true;
+    }
 }
 
 impl eframe::App for WowsToolkitApp {
@@ -528,6 +558,23 @@ impl eframe::App for WowsToolkitApp {
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
         egui_extras::install_image_loaders(ctx);
+
+        if !self.checked_for_updates {
+            self.check_for_updates();
+        }
+
+        if self.update_window_open {
+            if let Some(latest_release) = self.latest_release.take() {
+                egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.label("Version {} of WoWs Toolkit is available");
+                        if ui.button("View Release").clicked() {
+                            ui.ctx().open_url(OpenUrl::new_tab(latest_release.html_url));
+                        }
+                    });
+                });
+            }
+        }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
