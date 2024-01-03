@@ -2055,7 +2055,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.9",
+ "socket2 0.5.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -3017,6 +3017,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
+name = "pickled"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c01521ef80e2ff9bc52e7142be1dd7664391168f076f620373eaaf913a9cd211"
+dependencies = [
+ "byteorder",
+ "iter-read",
+ "num-bigint",
+ "num-traits",
+ "serde",
+ "variantly",
+]
+
+[[package]]
 name = "pico-args"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3657,18 +3671,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25dd9975e68d0cb5aa1120c288333fc98731bd1dd12f561e468ea4728c042b89"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde-pickle"
-version = "1.1.1"
-dependencies = [
- "byteorder",
- "iter-read",
- "num-bigint",
- "num-traits",
- "serde",
- "variantly",
 ]
 
 [[package]]
@@ -5120,7 +5122,7 @@ dependencies = [
  "rust-crypto",
  "rust-embed",
  "serde",
- "serde-pickle 1.1.1 (git+https://github.com/landaire/serde-pickle)",
+ "serde-pickle",
  "serde_json",
  "strum",
  "strum_macros",
@@ -5152,10 +5154,10 @@ dependencies = [
  "notify",
  "octocrab",
  "ouroboros",
+ "pickled",
  "rfd",
  "semver",
  "serde",
- "serde-pickle 1.1.1",
  "serde_json",
  "sys-locale",
  "tap",
@@ -5168,15 +5170,17 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.1.4"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed095c3d41660cf2a63b09aa62a0ac661f41b17ad0be96275e81daee4ab7534b"
 dependencies = [
  "binrw",
  "byteorder",
  "flate2",
  "memmap",
+ "pickled",
  "rayon",
  "serde",
- "serde-pickle 1.1.1 (git+https://github.com/landaire/serde-pickle)",
  "serde_json",
  "thiserror",
 ]

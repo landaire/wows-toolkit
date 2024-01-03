@@ -13,7 +13,7 @@ pub enum DataLoadError {
     #[error("I/O")]
     Io(#[from] io::Error),
     #[error("Could not deserialize GameParams.data")]
-    GameParamsDeserialization(#[from] serde_pickle::Error),
+    GameParamsDeserialization(#[from] pickled::Error),
     #[error("Unexpected field type for {0:?}")]
     GameParamsUnexpectedType(&'static str),
 }

@@ -19,7 +19,7 @@ log = "0.4"
 # You only need serde if you want app persistence:
 wows-replays = { version = "0.1", git = "https://github.com/landaire/wows-replays.git" }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.1.3", default-features = false, path = "../wowsunpack" }
+wowsunpack = { version = "0.1", default-features = false }
 egui_extras = { version = "0.24.0", features = ["syntect", "all_loaders"] }
 egui_dock = "0.9.0"
 rfd = "0.12.1"
@@ -31,7 +31,7 @@ bounded-vec-deque = "0.1.1"
 gettext = "0.4"
 sys-locale = "0.3"
 language-tags = "0.3"
-serde-pickle = { version = "1.0", features = ["variantly"] }
+pickled = { version = "1.0", features = ["variantly"] }
 flate2 = "1.0.28"
 ouroboros = "0.18"
 byteorder = "1.5.0"

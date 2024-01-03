@@ -13,8 +13,8 @@ use flate2::read::ZlibDecoder;
 use gettext::Catalog;
 use itertools::Itertools;
 use ouroboros::self_referencing;
+use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
-use serde_pickle::{DeOptions, HashableValue, Value};
 use wows_replays::{
     game_params::{
         Ability, AbilityBuilder, AbilityBuilderError, AbilityCategory, AbilityCategoryBuilder, AbilityCategoryBuilderError, Crew, CrewBuilder, CrewPersonality,
@@ -482,8 +482,8 @@ impl GameMetadataProvider {
             let mut decoder = ZlibDecoder::new(Cursor::new(game_params_data));
             std::io::copy(&mut decoder, &mut decompressed_data)?;
             decompressed_data.set_position(0);
-            let pickled_params: Value = serde_pickle::from_reader(&mut decompressed_data, DeOptions::default().replace_unresolved_globals().decode_strings())
-                .expect("failed to load game params");
+            let pickled_params: Value =
+                pickled::from_reader(&mut decompressed_data, DeOptions::default().replace_unresolved_globals().decode_strings()).expect("failed to load game params");
 
             let params_list = pickled_params.list_ref().expect("Root game params is not a list");
 
@@ -620,10 +620,10 @@ impl GameMetadataProvider {
         self.param_id_to_translation_id.get(&ship_id).map(|s| s.as_str())
     }
 
-    // pub fn get(&self, path: &str) -> Option<&serde_pickle::Value> {
+    // pub fn get(&self, path: &str) -> Option<&pickled::Value> {
     //     let path_parts = path.split("/");
     //     let mut current = Some(&self.0);
-    //     while let Some(serde_pickle::Value::Dict(dict)) = current {
+    //     while let Some(pickled::Value::Dict(dict)) = current {
 
     //     }
     //     None
