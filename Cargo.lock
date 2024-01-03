@@ -5096,6 +5096,7 @@ dependencies = [
 [[package]]
 name = "wows-replays"
 version = "0.1.0"
+source = "git+https://github.com/landaire/wows-replays.git#8dae3669ceb576afb69f715fa042de3821abf204"
 dependencies = [
  "bitreader",
  "derive_builder",

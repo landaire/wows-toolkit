@@ -66,7 +66,7 @@ debug = true
 [patch.crates-io]
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
 [patch."https://github.com/landaire/wows-replays.git"]
-wows-replays = { path = "../wows-replays/parser" }
+# wows-replays = { path = "../wows-replays/parser" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }
