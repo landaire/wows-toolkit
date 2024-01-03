@@ -20,8 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.3
       - run: sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+        uses: rust-build/rust-build.action@v1.4.3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -38,8 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.3
       - run: sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+        uses: rust-build/rust-build.action@v1.4.3
         with:
           RUSTTARGET: ${{ matrix.target }}
           UPLOAD_MODE: none
