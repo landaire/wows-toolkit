@@ -3674,19 +3674,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-pickle"
-version = "1.1.1"
-source = "git+https://github.com/landaire/serde-pickle#2e02192aff04f1f01ec7b67bc384e7a70aec88f6"
-dependencies = [
- "byteorder",
- "iter-read",
- "num-bigint",
- "num-traits",
- "serde",
- "variantly",
-]
-
-[[package]]
 name = "serde_derive"
 version = "1.0.193"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5109,7 +5096,6 @@ dependencies = [
 [[package]]
 name = "wows-replays"
 version = "0.1.0"
-source = "git+https://github.com/landaire/wows-replays.git#63ad03c639c42dda422263b532f9418c4d8d3c92"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -5118,11 +5104,11 @@ dependencies = [
  "kinded",
  "modular-bitfield",
  "nom",
+ "pickled",
  "roxmltree 0.14.1",
  "rust-crypto",
  "rust-embed",
  "serde",
- "serde-pickle",
  "serde_json",
  "strum",
  "strum_macros",
