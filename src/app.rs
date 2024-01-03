@@ -63,6 +63,10 @@ pub struct ToolkitTabViewer<'a> {
 impl ToolkitTabViewer<'_> {
     fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
+            ui.label("Application Settings");
+            ui.group(|ui| {
+                ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
+            });
             ui.label("World of Warships Settings");
             ui.group(|ui| {
                 ui.vertical(|ui| {
@@ -149,6 +153,10 @@ impl Default for ReplaySettings {
     }
 }
 
+pub const fn default_bool<const V: bool>() -> bool {
+    V
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
@@ -156,6 +164,8 @@ pub struct Settings {
     pub locale: Option<String>,
     #[serde(default)]
     pub replay_settings: ReplaySettings,
+    #[serde(default = "default_bool::<true>")]
+    pub check_for_updates: bool,
 }
 
 #[derive(Default)]
@@ -435,8 +445,11 @@ impl TabState {
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct WowsToolkitApp {
+    #[serde(skip)]
     checked_for_updates: bool,
+    #[serde(skip)]
     update_window_open: bool,
+    #[serde(skip)]
     latest_release: Option<Release>,
 
     tab_state: TabState,
@@ -520,7 +533,7 @@ impl WowsToolkitApp {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let result = rt.block_on(async {
             octocrab::instance()
-                .repos("owner", "repo")
+                .repos("landaire", "wows-toolkit")
                 .releases()
                 .list()
                 // Optional Parameters
@@ -559,17 +572,23 @@ impl eframe::App for WowsToolkitApp {
 
         egui_extras::install_image_loaders(ctx);
 
-        if !self.checked_for_updates {
+        if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
             self.check_for_updates();
         }
 
         if self.update_window_open {
-            if let Some(latest_release) = self.latest_release.take() {
+            if let Some(latest_release) = self.latest_release.as_ref() {
+                let url = latest_release.html_url.clone();
+                let mut notes = latest_release.body.clone();
+                let tag = latest_release.tag_name.clone();
                 egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
                     ui.vertical(|ui| {
-                        ui.label("Version {} of WoWs Toolkit is available");
+                        ui.label(format!("Version {} of WoWs Toolkit is available", tag));
+                        if let Some(notes) = notes.as_mut() {
+                            ui.text_edit_multiline(notes);
+                        }
                         if ui.button("View Release").clicked() {
-                            ui.ctx().open_url(OpenUrl::new_tab(latest_release.html_url));
+                            ui.ctx().open_url(OpenUrl::new_tab(url));
                         }
                     });
                 });
