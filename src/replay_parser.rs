@@ -1,43 +1,31 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
-    ffi::OsStr,
-    io::{self, Cursor, Write},
-    path::{Path, PathBuf},
+    path::{Path},
     rc::Rc,
-    str::FromStr,
-    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
-use bounded_vec_deque::BoundedVecDeque;
-use byteorder::{LittleEndian, ReadBytesExt};
-use egui::{epaint::util, text::LayoutJob, Color32, Grid, Image, ImageSource, Label, Layout, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
-use egui_extras::{Column, Size, StripBuilder, TableBuilder};
-use env_logger::fmt::Color;
-use flate2::{
-    write::{DeflateEncoder, ZlibEncoder},
-    Compression,
-};
-use language_tags::LanguageTag;
+
+
+use egui::{text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2};
+use egui_extras::{Column, TableBuilder};
+
+
+
 use notify::{
-    event::{ModifyKind, RenameMode},
-    EventKind, RecursiveMode, Watcher,
+    Watcher,
 };
-use ouroboros::self_referencing;
-use serde::{de::IntoDeserializer, Deserialize, Serialize};
-use serde_json::json;
-use tap::{Pipe, Tap};
-use thousands::Separable;
+
+
+
+use tap::{Pipe};
+
 use wows_replays::{
     analyzer::{
-        battle_controller::{self, BattleController, BattleReport, ChatChannel, EventHandler, GameMessage, Player},
-        AnalyzerBuilder, AnalyzerMut,
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player}, AnalyzerMut,
     },
-    packet2::{Packet, PacketType, PacketTypeKind},
-    parse_scripts,
     resource_loader::ResourceLoader,
-    rpc::typedefs::ArgValue,
-    ReplayFile, ReplayMeta,
+    ReplayFile,
 };
 
 use itertools::Itertools;
@@ -71,7 +59,7 @@ fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
 }
 
 impl Replay {
-    pub fn parse(&mut self, file_tree: &FileNode, pkg_loader: Arc<PkgFileLoader>) {
+    pub fn parse(&mut self, _file_tree: &FileNode, _pkg_loader: Arc<PkgFileLoader>) {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(",").collect();
         assert!(version_parts.len() == 4);
 
@@ -475,7 +463,7 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if let Some(replays_dir) = self.tab_state.replays_dir.as_ref() {
+                if let Some(_replays_dir) = self.tab_state.replays_dir.as_ref() {
                     if ui.button("Load Live Game").clicked() {
                         self.parse_live_replay();
                     }

@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, TextEdit, Ui};
+use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
 use wowsunpack::idx::FileNode;
 
@@ -226,7 +226,7 @@ impl ToolkitTabViewer<'_> {
                     });
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
-                            if let (Some(file_tree), Some(files)) = (
+                            if let (Some(file_tree), Some(_files)) = (
                                 self.tab_state.world_of_warships_data.file_tree.as_ref(),
                                 self.tab_state.world_of_warships_data.files.as_ref(),
                             ) {

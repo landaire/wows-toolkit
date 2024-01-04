@@ -6,11 +6,11 @@ use language_tags::LanguageTag;
 use serde_json::json;
 use thousands::Separable;
 use wows_replays::{
-    analyzer::battle_controller::{ShipConfig, VehicleEntity},
-    game_params::{GameParamProvider, Vehicle},
+    analyzer::battle_controller::{VehicleEntity},
+    game_params::{GameParamProvider},
 };
 
-use crate::{app::WorldOfWarshipsData, game_params::GameMetadataProvider};
+use crate::{game_params::GameMetadataProvider};
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     let language: LanguageTag = locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());

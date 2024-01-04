@@ -4,10 +4,10 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
-    use std::io::Cursor;
+    
 
-    use eframe::icon_data::from_png_bytes;
-    use egui::IconData;
+    
+    
 
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 

@@ -9,7 +9,6 @@ use std::{
         mpsc::{self, TryRecvError},
         Arc,
     },
-    thread::LocalKey,
 };
 
 use egui::{mutex::Mutex, OpenUrl, Ui, WidgetText};
@@ -22,12 +21,11 @@ use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use octocrab::models::repos::Release;
-use ouroboros::self_referencing;
+
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
+use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species};
 use wowsunpack::{
-    game_params,
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };

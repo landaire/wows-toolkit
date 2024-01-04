@@ -12,14 +12,14 @@ use egui::ahash::HashMapExt;
 use flate2::read::ZlibDecoder;
 use gettext::Catalog;
 use itertools::Itertools;
-use ouroboros::self_referencing;
+
 use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
 use wows_replays::{
     game_params::{
-        Ability, AbilityBuilder, AbilityBuilderError, AbilityCategory, AbilityCategoryBuilder, AbilityCategoryBuilderError, Crew, CrewBuilder, CrewPersonality,
-        CrewPersonalityBuilder, CrewPersonalityBuilderError, CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder, CrewSkillBuilderError, CrewSkillLogicTrigger,
-        CrewSkillLogicTriggerBuilder, CrewSkillModifier, CrewSkillModifierBuilder, CrewSkillModifierBuilderError, CrewSkillTiersBuilder, GameParamProvider, GameParams,
+        Ability, AbilityBuilder, AbilityBuilderError, AbilityCategory, AbilityCategoryBuilder, AbilityCategoryBuilderError, CrewBuilder, CrewPersonality,
+        CrewPersonalityBuilder, CrewPersonalityBuilderError, CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder, CrewSkillBuilderError,
+        CrewSkillLogicTriggerBuilder, CrewSkillModifier, CrewSkillModifierBuilder, CrewSkillModifierBuilderError, CrewSkillTiersBuilder, GameParamProvider,
         Param, ParamBuilder, ParamData, ParamType, Species, Vehicle, VehicleBuilder, VehicleBuilderError,
     },
     parse_scripts,
@@ -42,11 +42,11 @@ impl GameParamProvider for GameMetadataProvider {
         self.params.game_param_by_id(id)
     }
 
-    fn game_param_by_index(&self, index: &str) -> Option<Rc<Param>> {
+    fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
         todo!()
     }
 
-    fn game_param_by_name(&self, name: &str) -> Option<Rc<Param>> {
+    fn game_param_by_name(&self, _name: &str) -> Option<Rc<Param>> {
         todo!()
     }
 }
@@ -232,7 +232,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Result<Vec<Crew
 
             let skill_data = skill_data.dict_ref().expect("skill data is not dictionary");
 
-            let logic_modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
+            let _logic_modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
 
             let logic_modifiers = None;
             // logic_modifiers.map(|modifiers| {
@@ -259,7 +259,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Result<Vec<Crew
                 .build()
                 .expect("failed to build logic trigger");
 
-            let modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
+            let _modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
             let modifiers = None;
 
             // modifiers.map(|modifiers| {
