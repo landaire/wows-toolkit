@@ -466,6 +466,8 @@ pub struct WowsToolkitApp {
     update_window_open: bool,
     #[serde(skip)]
     latest_release: Option<Release>,
+    #[serde(skip)]
+    show_about_window: bool,
 
     tab_state: TabState,
     #[serde(skip)]
@@ -478,6 +480,7 @@ impl Default for WowsToolkitApp {
             checked_for_updates: false,
             update_window_open: false,
             latest_release: None,
+            show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
         }
@@ -612,6 +615,12 @@ impl eframe::App for WowsToolkitApp {
             }
         }
 
+        if self.show_about_window {
+            egui::Window::new("About").open(&mut self.show_about_window).show(ctx, |ui| {
+                show_about_window(ui);
+            });
+        }
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
@@ -620,6 +629,10 @@ impl eframe::App for WowsToolkitApp {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
+                        if ui.button("About").clicked() {
+                            self.show_about_window = true;
+                            ui.close_menu();
+                        }
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
@@ -662,13 +675,21 @@ impl eframe::App for WowsToolkitApp {
     }
 }
 
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
-        ui.label(".");
+fn show_about_window(ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.label("Made by landaire.");
+        ui.label("Thanks to Trackpad, TTaro, lkolby for their contributions.");
+        if ui.button("View on GitHub").clicked() {
+            ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
+        }
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label("Powered by ");
+            ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+            ui.label(" and ");
+            ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
+            ui.label(".");
+        });
     });
 }
