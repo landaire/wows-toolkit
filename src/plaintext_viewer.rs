@@ -3,8 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use egui::{mutex::Mutex, FontFamily, Image, ImageSource, RichText, TextEdit, ViewportBuilder};
-use serde::{Deserialize, Serialize};
+use egui::{mutex::Mutex, Image, ImageSource, TextEdit, ViewportBuilder};
 
 pub enum FileType {
     PlainTextFile { ext: String, contents: String },
@@ -25,22 +24,22 @@ impl PlaintextFileViewer {
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
             ViewportBuilder::default().with_title(&*self.title),
-            move |ctx, ui| {
+            move |ctx, _ui| {
                 let mut file_info = info.lock();
                 egui::CentralPanel::default().show(ctx, |ui| match &mut *file_info {
                     FileType::PlainTextFile { ext, contents } => {
                         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
-                            let mut theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx());
+                            let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx());
                             let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), &theme, string, &ext[1..]);
                             layout_job.wrap.max_width = wrap_width;
                             ui.fonts(|f| f.layout_job(layout_job))
                         };
-                        let mut text_editor = TextEdit::multiline(contents).code_editor().desired_width(f32::INFINITY).layouter(&mut layouter);
+                        let text_editor = TextEdit::multiline(contents).code_editor().desired_width(f32::INFINITY).layouter(&mut layouter);
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.add(text_editor);
                         });
                     }
-                    FileType::Image { ext, contents } => {
+                    FileType::Image { ext: _, contents } => {
                         let image = Image::new(ImageSource::Bytes {
                             uri: format!("bytes://{}", &*title).into(),
                             // the icon size is <1k, this clone is fairly cheap

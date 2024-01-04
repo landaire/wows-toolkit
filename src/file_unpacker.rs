@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, TextEdit, Ui};
+use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
 use wowsunpack::idx::FileNode;
 
@@ -24,8 +24,8 @@ pub struct UnpackerProgress {
     pub progress: f32,
 }
 
-const IMAGE_FILE_TYPES: [&'static str; 3] = [".jpg", ".png", ".svg"];
-const PLAINTEXT_FILE_TYPES: [&'static str; 3] = [".xml", ".json", ".txt"];
+const IMAGE_FILE_TYPES: [&str; 3] = [".jpg", ".png", ".svg"];
+const PLAINTEXT_FILE_TYPES: [&str; 3] = [".xml", ".json", ".txt"];
 
 impl ToolkitTabViewer<'_> {
     fn add_view_file_menu(&self, file_label: Response, node: &FileNode) -> Response {
@@ -38,7 +38,7 @@ impl ToolkitTabViewer<'_> {
                     if ui.button("View Contents").clicked() {
                         let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
 
-                        node.read_file(&*pkg_loader, &mut file_contents).expect("failed to read file");
+                        node.read_file(pkg_loader, &mut file_contents).expect("failed to read file");
 
                         let file_type = match (is_plaintext_file, is_image_file) {
                             (Some(ext), None) => String::from_utf8(file_contents)
@@ -101,13 +101,13 @@ impl ToolkitTabViewer<'_> {
         egui::Grid::new("filtered_files_grid").num_columns(1).striped(true).show(ui, |ui| {
             let files = files.into_iter();
             for file in files {
-                let label = ui.add(Label::new(Path::new("res").join(&*file.0).to_string_lossy().to_owned()).sense(Sense::click()));
+                let label = ui.add(Label::new(Path::new("res").join(&*file.0).to_string_lossy().into_owned()).sense(Sense::click()));
                 let label = self.add_view_file_menu(label, &file.1);
 
                 let text = if file.1.is_file() {
                     format!("File ({})", humansize::format_size(file.1.file_info().unwrap().size, humansize::DECIMAL))
                 } else {
-                    format!("Folder")
+                    "Folder".to_string()
                 };
 
                 let label = label.on_hover_text(text);
@@ -138,15 +138,14 @@ impl ToolkitTabViewer<'_> {
                         if file.is_file() {
                             files_to_extract.insert(file);
                         } else {
-                            for (_, child) in file.children() {
+                            for child in file.children().values() {
                                 file_queue.push(child.clone());
                             }
                         }
                     }
                     let file_count = files_to_extract.len();
-                    let mut files_written = 0;
 
-                    for file in files_to_extract {
+                    for (files_written, file) in files_to_extract.iter().enumerate() {
                         if UNPACKER_STOP.load(Ordering::Relaxed) {
                             break;
                         }
@@ -165,8 +164,7 @@ impl ToolkitTabViewer<'_> {
 
                         let mut out_file = File::create(file_path).expect("failed to create output file");
 
-                        file.read_file(&*pkg_loader, &mut out_file).expect("Failed to read file");
-                        files_written += 1;
+                        file.read_file(&pkg_loader, &mut out_file).expect("Failed to read file");
                     }
                 }));
             }
@@ -183,9 +181,9 @@ impl ToolkitTabViewer<'_> {
                 ) {
                     if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
-                        if self.tab_state.filter.contains("*") && glob.is_ok() {
+                        if self.tab_state.filter.contains('*') && glob.is_ok() {
                             let glob = glob.unwrap();
-                            let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(&*path)).cloned().collect();
+                            let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
 
                             Some(leafs)
                         } else {
@@ -226,7 +224,7 @@ impl ToolkitTabViewer<'_> {
                     });
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
-                            if let (Some(file_tree), Some(files)) = (
+                            if let (Some(file_tree), Some(_files)) = (
                                 self.tab_state.world_of_warships_data.file_tree.as_ref(),
                                 self.tab_state.world_of_warships_data.files.as_ref(),
                             ) {
@@ -256,7 +254,7 @@ impl ToolkitTabViewer<'_> {
                             let mut remove_idx = None;
                             for (i, item) in items.iter().enumerate() {
                                 if ui
-                                    .add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().to_owned()).sense(Sense::click()))
+                                    .add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned()).sense(Sense::click()))
                                     .double_clicked()
                                 {
                                     remove_idx = Some(i);

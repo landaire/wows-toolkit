@@ -4,11 +4,6 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
-    use std::io::Cursor;
-
-    use eframe::icon_data::from_png_bytes;
-    use egui::IconData;
-
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
     let icon_data: &[u8] = &include_bytes!("../assets/wows_toolkit.png")[..];
@@ -17,17 +12,10 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([600.0, 400.0])
             .with_min_inner_size([400.0, 300.0])
-            .with_icon(
-                eframe::icon_data::from_png_bytes(icon_data)
-                    .expect("failed to load application icon"),
-            ),
+            .with_icon(eframe::icon_data::from_png_bytes(icon_data).expect("failed to load application icon")),
         ..Default::default()
     };
-    eframe::run_native(
-        "WoWs Toolkit",
-        native_options,
-        Box::new(|cc| Box::new(wows_toolkit::WowsToolkitApp::new(cc))),
-    )
+    eframe::run_native("WoWs Toolkit", native_options, Box::new(|cc| Box::new(wows_toolkit::WowsToolkitApp::new(cc))))
 }
 
 // When compiling to web using trunk:

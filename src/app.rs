@@ -9,7 +9,6 @@ use std::{
         mpsc::{self, TryRecvError},
         Arc,
     },
-    thread::LocalKey,
 };
 
 use egui::{mutex::Mutex, OpenUrl, Ui, WidgetText};
@@ -22,12 +21,11 @@ use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use octocrab::models::repos::Release;
-use ouroboros::self_referencing;
+
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
+use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species};
 use wowsunpack::{
-    game_params,
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
@@ -83,7 +81,8 @@ impl ToolkitTabViewer<'_> {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
                                         self.tab_state.settings.wows_dir = folder.to_string_lossy().into_owned();
-                                        self.tab_state.load_wows_files();
+                                        // TODO: Handle loading error
+                                        let _ = self.tab_state.load_wows_files();
                                     }
                                 }
                             });
@@ -279,24 +278,22 @@ impl TabState {
         self.replay_files = None;
 
         if replay_dir.exists() {
-            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
-                if let Ok(file) = file {
-                    if !file.file_type().expect("failed to get file type").is_file() {
-                        continue;
-                    }
+            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir").flatten() {
+                if !file.file_type().expect("failed to get file type").is_file() {
+                    continue;
+                }
 
-                    let file_path = file.path();
+                let file_path = file.path();
 
-                    if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                        if file.file_name() != "temp.wowsreplay" {
-                            files.push(file_path);
-                        }
+                if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
+                    if file.file_name() != "temp.wowsreplay" {
+                        files.push(file_path);
                     }
                 }
             }
         }
         if !files.is_empty() {
-            files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
+            files.sort_by_key(|a| a.metadata().unwrap().created().unwrap());
             files.reverse();
             self.replay_files = Some(files);
         }
@@ -334,9 +331,6 @@ impl TabState {
                         }
                     }
                     Err(e) => println!("watch error: {:?}", e),
-                    _ => {
-                        // ignore other events
-                    }
                 })
                 .expect("failed to create fs watcher for replays dir");
 
@@ -368,8 +362,8 @@ impl TabState {
                         continue;
                     }
 
-                    if let Some(build_num) = file.file_name().to_str().and_then(|name| usize::from_str_radix(name, 10).ok()) {
-                        if highest_number.is_none() || highest_number.clone().map(|number| number < build_num).unwrap_or(false) {
+                    if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
+                        if highest_number.is_none() || highest_number.map(|number| number < build_num).unwrap_or(false) {
                             highest_number = Some(build_num)
                         }
                     }
@@ -414,16 +408,13 @@ impl TabState {
                 self.settings.locale = Some(locale.clone());
 
                 // Try loading GameParams.data
-                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number)
-                    .ok()
-                    .and_then(|mut metadata_provider| {
-                        if let Some(catalog) = found_catalog {
-                            metadata_provider.set_translations(catalog)
-                        }
+                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
+                    if let Some(catalog) = found_catalog {
+                        metadata_provider.set_translations(catalog)
+                    }
 
-                        Some(metadata_provider)
-                    })
-                    .map(Rc::new);
+                    Rc::new(metadata_provider)
+                });
 
                 // Try loading ship icons
                 let species = [
@@ -440,7 +431,7 @@ impl TabState {
                     let icon_node = file_tree.find(&path).expect("failed to find file");
 
                     let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
-                    icon_node.read_file(&*pkg_loader, &mut icon_data).expect("failed to read ship icon");
+                    icon_node.read_file(&pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
                     (species.clone(), (path, icon_data))
                 }));
@@ -475,6 +466,8 @@ pub struct WowsToolkitApp {
     update_window_open: bool,
     #[serde(skip)]
     latest_release: Option<Release>,
+    #[serde(skip)]
+    show_about_window: bool,
 
     tab_state: TabState,
     #[serde(skip)]
@@ -487,6 +480,7 @@ impl Default for WowsToolkitApp {
             checked_for_updates: false,
             update_window_open: false,
             latest_release: None,
+            show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
         }
@@ -621,6 +615,12 @@ impl eframe::App for WowsToolkitApp {
             }
         }
 
+        if self.show_about_window {
+            egui::Window::new("About").open(&mut self.show_about_window).show(ctx, |ui| {
+                show_about_window(ui);
+            });
+        }
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
@@ -629,6 +629,10 @@ impl eframe::App for WowsToolkitApp {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
+                        if ui.button("About").clicked() {
+                            self.show_about_window = true;
+                            ui.close_menu();
+                        }
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
@@ -671,13 +675,21 @@ impl eframe::App for WowsToolkitApp {
     }
 }
 
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
-        ui.label(".");
+fn show_about_window(ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.label("Made by landaire.");
+        ui.label("Thanks to Trackpad, TTaro, lkolby for their contributions.");
+        if ui.button("View on GitHub").clicked() {
+            ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
+        }
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label("Powered by ");
+            ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+            ui.label(" and ");
+            ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
+            ui.label(".");
+        });
     });
 }
