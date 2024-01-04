@@ -5,7 +5,6 @@ use std::sync::{
 
 use egui::{mutex::Mutex, Image, ImageSource, TextEdit, ViewportBuilder};
 
-
 pub enum FileType {
     PlainTextFile { ext: String, contents: String },
     Image { ext: String, contents: Vec<u8> },

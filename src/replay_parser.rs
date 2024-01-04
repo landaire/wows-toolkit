@@ -1,28 +1,21 @@
 use std::{
     borrow::Cow,
-    path::{Path},
+    path::Path,
     rc::Rc,
     sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
-
-
 use egui::{text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder};
 
+use notify::Watcher;
 
-
-use notify::{
-    Watcher,
-};
-
-
-
-use tap::{Pipe};
+use tap::Pipe;
 
 use wows_replays::{
     analyzer::{
-        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player}, AnalyzerMut,
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
+        AnalyzerMut,
     },
     resource_loader::ResourceLoader,
     ReplayFile,
