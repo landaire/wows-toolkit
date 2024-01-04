@@ -69,11 +69,11 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
         "Skills": entity.commander_skills_raw(),
 
         "Consumables": config.abilities().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
+            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
         "Signals": config.signals().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
+            Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
         }).collect::<Vec<_>>(),
 
         "BuildVersion": 2
@@ -86,7 +86,7 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
         encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
     }
     let encoded_data = data_encoding::BASE64.encode(&deflated_json);
-    let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
+    let encoded_data = encoded_data.replace('/', "%2F").replace('+', "%2B");
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
 
     url

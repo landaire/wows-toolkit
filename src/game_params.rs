@@ -508,12 +508,12 @@ impl GameMetadataProvider {
                         })
                         .and_then(|(nation, species, typ)| {
                             if let (Value::String(nation), Value::String(typ)) = (nation, typ) {
-                                let param_type = ParamType::from_str(&typ).ok()?;
+                                let param_type = ParamType::from_str(typ).ok()?;
                                 let nation = nation.clone();
                                 let species = species.string_ref().and_then(|s| Species::from_str(s).ok());
 
                                 let parsed_param_data = match param_type {
-                                    ParamType::Ship => Some(build_ship(param_data).map(|a| ParamData::Vehicle(a)).expect("failed to build Vehicle")),
+                                    ParamType::Ship => Some(build_ship(param_data).map(ParamData::Vehicle).expect("failed to build Vehicle")),
                                     ParamType::Crew => {
                                         let money_training_level = game_param_to_type!(param_data, "moneyTrainingLevel", usize);
 
@@ -529,9 +529,9 @@ impl GameMetadataProvider {
                                             .skills(skills)
                                             .build()
                                             .ok()
-                                            .map(|v| ParamData::Crew(v))
+                                            .map(ParamData::Crew)
                                     }
-                                    ParamType::Ability => Some(build_ability(param_data).map(|a| ParamData::Ability(a)).expect("failed to build Ability")),
+                                    ParamType::Ability => Some(build_ability(param_data).map(ParamData::Ability).expect("failed to build Ability")),
                                     ParamType::Exterior => Some(ParamData::Exterior),
                                     ParamType::Modernization => Some(ParamData::Modernization),
                                     ParamType::Unit => Some(ParamData::Unit),
@@ -597,7 +597,7 @@ impl GameMetadataProvider {
             let path = Path::new(path);
 
             let mut file_data = Vec::new();
-            file_tree.read_file_at_path(path, &*pkg_loader, &mut file_data).expect("failed to read file");
+            file_tree.read_file_at_path(path, pkg_loader, &mut file_data).expect("failed to read file");
 
             Ok(Cow::Owned(file_data))
         });

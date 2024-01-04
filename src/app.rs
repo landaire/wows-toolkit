@@ -81,7 +81,8 @@ impl ToolkitTabViewer<'_> {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
                                         self.tab_state.settings.wows_dir = folder.to_string_lossy().into_owned();
-                                        self.tab_state.load_wows_files();
+                                        // TODO: Handle loading error
+                                        let _ = self.tab_state.load_wows_files();
                                     }
                                 }
                             });
@@ -277,24 +278,22 @@ impl TabState {
         self.replay_files = None;
 
         if replay_dir.exists() {
-            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir") {
-                if let Ok(file) = file {
-                    if !file.file_type().expect("failed to get file type").is_file() {
-                        continue;
-                    }
+            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir").flatten() {
+                if !file.file_type().expect("failed to get file type").is_file() {
+                    continue;
+                }
 
-                    let file_path = file.path();
+                let file_path = file.path();
 
-                    if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                        if file.file_name() != "temp.wowsreplay" {
-                            files.push(file_path);
-                        }
+                if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
+                    if file.file_name() != "temp.wowsreplay" {
+                        files.push(file_path);
                     }
                 }
             }
         }
         if !files.is_empty() {
-            files.sort_by(|a, b| a.metadata().unwrap().created().unwrap().cmp(&b.metadata().unwrap().created().unwrap()));
+            files.sort_by_key(|a| a.metadata().unwrap().created().unwrap());
             files.reverse();
             self.replay_files = Some(files);
         }
@@ -332,9 +331,6 @@ impl TabState {
                         }
                     }
                     Err(e) => println!("watch error: {:?}", e),
-                    _ => {
-                        // ignore other events
-                    }
                 })
                 .expect("failed to create fs watcher for replays dir");
 
@@ -366,8 +362,8 @@ impl TabState {
                         continue;
                     }
 
-                    if let Some(build_num) = file.file_name().to_str().and_then(|name| usize::from_str_radix(name, 10).ok()) {
-                        if highest_number.is_none() || highest_number.clone().map(|number| number < build_num).unwrap_or(false) {
+                    if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
+                        if highest_number.is_none() || highest_number.map(|number| number < build_num).unwrap_or(false) {
                             highest_number = Some(build_num)
                         }
                     }
@@ -412,16 +408,13 @@ impl TabState {
                 self.settings.locale = Some(locale.clone());
 
                 // Try loading GameParams.data
-                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number)
-                    .ok()
-                    .and_then(|mut metadata_provider| {
-                        if let Some(catalog) = found_catalog {
-                            metadata_provider.set_translations(catalog)
-                        }
+                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
+                    if let Some(catalog) = found_catalog {
+                        metadata_provider.set_translations(catalog)
+                    }
 
-                        Some(metadata_provider)
-                    })
-                    .map(Rc::new);
+                    Rc::new(metadata_provider)
+                });
 
                 // Try loading ship icons
                 let species = [
@@ -438,7 +431,7 @@ impl TabState {
                     let icon_node = file_tree.find(&path).expect("failed to find file");
 
                     let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
-                    icon_node.read_file(&*pkg_loader, &mut icon_data).expect("failed to read ship icon");
+                    icon_node.read_file(&pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
                     (species.clone(), (path, icon_data))
                 }));

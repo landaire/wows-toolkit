@@ -53,13 +53,13 @@ fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
 
 impl Replay {
     pub fn parse(&mut self, _file_tree: &FileNode, _pkg_loader: Arc<PkgFileLoader>) {
-        let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(",").collect();
+        let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
 
         // Parse packets
         let packet_data = &self.replay_file.packet_data;
         let mut controller = BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
-        let mut p = wows_replays::packet2::Parser::new(&self.resource_loader.entity_specs());
+        let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
 
         match p.parse_packets_mut(packet_data, &mut controller) {
             Ok(()) => {
@@ -172,7 +172,7 @@ impl ToolkitTabViewer<'_> {
                                 })
                                 .tint(color)
                                 .fit_to_exact_size((20.0, 20.0).into())
-                                .rotate(90.0_f32.to_radians() as f32, Vec2::splat(0.5));
+                                .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
 
                                 ui.add(image).on_hover_text(species);
                             } else {
@@ -181,7 +181,7 @@ impl ToolkitTabViewer<'_> {
 
                             let is_dark_mode = ui.visuals().dark_mode;
                             let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
-                            ui.label(RichText::new(player_name_with_clan(&*player)).color(name_color));
+                            ui.label(RichText::new(player_name_with_clan(player)).color(name_color));
                         });
 
                         if self.tab_state.settings.replay_settings.show_entity_id {
@@ -324,7 +324,7 @@ impl ToolkitTabViewer<'_> {
                         },
                     );
 
-                    if ui.add(Label::new(job).sense(Sense::click())).on_hover_text(format!("Click to copy")).clicked() {
+                    if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                         ui.output_mut(|output| output.copied_text = text);
                     }
                     ui.end_row();
@@ -337,7 +337,7 @@ impl ToolkitTabViewer<'_> {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
-                ui.heading(player_name_with_clan(&*self_player));
+                ui.heading(player_name_with_clan(self_player));
                 ui.label(report.match_group());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
@@ -442,7 +442,7 @@ impl ToolkitTabViewer<'_> {
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().to_owned()).hint_text("Current Replay File"));
+                ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().into_owned()).hint_text("Current Replay File"));
 
                 if ui.button("Parse").clicked() {
                     self.parse_replay(self.tab_state.settings.current_replay_path.clone());
