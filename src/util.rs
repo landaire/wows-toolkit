@@ -106,18 +106,14 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     parts[0] = ship.index().to_string();
 
     // Modules
-    for val in config.units().iter().filter_map(|id| {
+    parts[1] = config.units().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
-        }).intersperse_with(||",".to_string()) {
-        parts[1] = format!("{}{}",parts[1], val);
-    }
+        }).collect::<Vec<_>>().join(",");
 
     // Upgrades
-    for val in config.modernization().iter().filter_map(|id| {
+    parts[2] = config.modernization().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-        }).intersperse_with(||",".to_string()) {
-        parts[2] = format!("{}{}",parts[2], val);
-    }
+        }).collect::<Vec<_>>().join(",");
     // Captain
     parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
 
@@ -125,18 +121,14 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     parts[4] = entity.commander_skills_raw().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
     
     // Consumables
-    for val in config.abilities().iter().filter_map(|id| {
+    parts[5] = config.abilities().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
-        }).intersperse_with(||",".to_string()) {
-        parts[5] = format!("{}{}",parts[5], val);
-    }
+        }).collect::<Vec<_>>().join(",");
 
     // Signals
-    for val in config.signals().iter().filter_map(|id| {
+    parts[6] = config.signals().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
-        }).intersperse_with(||",".to_string()) {
-    parts[6] = format!("{}{}",parts[6], val);
-    }
+        }).collect::<Vec<_>>().join(",");
 
     // Build Version
     parts[7] = "2".to_string();
