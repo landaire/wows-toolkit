@@ -1,5 +1,5 @@
 use std::io::Write;
-
+use log::{debug};
 use egui::Color32;
 use flate2::{write::DeflateEncoder, Compression};
 use language_tags::LanguageTag;
@@ -91,6 +91,62 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
     let encoded_data = data_encoding::BASE64.encode(&deflated_json);
     let encoded_data = encoded_data.replace("/", "%2F").replace("+", "%2B");
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
+
+    url
+}
+
+pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {
+
+    let config = entity.props().ship_config();
+    let player = entity.player().expect("entity has no player?");
+    let ship = player.vehicle();
+    let mut parts: Vec<String> = vec![String::new(); 9];
+    
+    // Ship
+    parts[0] = ship.index().to_string();
+
+    // Modules
+    for val in config.units().iter().filter_map(|id| {
+            Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
+        }).intersperse_with(||",".to_string()) {
+        parts[1] = format!("{}{}",parts[1], val);
+    }
+
+    // Upgrades
+    for val in config.modernization().iter().filter_map(|id| {
+            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
+        }).intersperse_with(||",".to_string()) {
+        parts[2] = format!("{}{}",parts[2], val);
+    }
+    // Captain
+    parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
+
+    // Skills
+    parts[4] = entity.commander_skills_raw().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+    
+    // Consumables
+    for val in config.abilities().iter().filter_map(|id| {
+            Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
+        }).intersperse_with(||",".to_string()) {
+        parts[5] = format!("{}{}",parts[5], val);
+    }
+
+    // Signals
+    for val in config.signals().iter().filter_map(|id| {
+            Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
+        }).intersperse_with(||",".to_string()) {
+    parts[6] = format!("{}{}",parts[6], val);
+    }
+
+    // Build Version
+    parts[7] = "2".to_string();
+
+    // Build Name
+    parts[8] = format!("replay_{}", player.name());
+
+    debug!("{:?}",parts.join(";"));
+
+    let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
     url
 }
