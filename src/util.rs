@@ -104,7 +104,7 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
 
     // Modules
     parts[1] = config.units().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
+                Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
             }).collect::<Vec<_>>().join(",");
 
     // Upgrades
@@ -124,7 +124,7 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
 
     // Signals
     parts[6] = config.signals().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id as u32)?.name().to_owned())
+                Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
             }).collect::<Vec<_>>().join(",");
 
     // Build Version
