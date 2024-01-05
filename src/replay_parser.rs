@@ -28,7 +28,7 @@ use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
-    util::{build_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
+    util::{build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -249,6 +249,15 @@ impl ToolkitTabViewer<'_> {
                                     let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
                                     let url = build_ship_config_url(entity, metadata_provider);
+                                    ui.output_mut(|output| output.copied_text = url);
+
+                                    ui.close_menu();
+                                }
+
+                                if ui.small_button("Copy Short Build Link").clicked() {
+                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+
+                                    let url = build_short_ship_config_url(entity, metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
 
                                     ui.close_menu();
