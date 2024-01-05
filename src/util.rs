@@ -1,9 +1,9 @@
-use std::io::Write;
-use log::{debug};
 use egui::Color32;
 use flate2::{write::DeflateEncoder, Compression};
 use language_tags::LanguageTag;
+use log::debug;
 use serde_json::json;
+use std::io::Write;
 use thousands::Separable;
 use wows_replays::{analyzer::battle_controller::VehicleEntity, game_params::GameParamProvider};
 
@@ -93,39 +93,50 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
 }
 
 pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {
-
     let config = entity.props().ship_config();
     let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
     let mut parts: Vec<String> = vec![String::new(); 9];
-    
+
     // Ship
     parts[0] = ship.index().to_string();
 
     // Modules
-    parts[1] = config.units().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-            }).collect::<Vec<_>>().join(",");
+    parts[1] = config
+        .units()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Upgrades
-    parts[2] = config.modernization().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-            }).collect::<Vec<_>>().join(",");
+    parts[2] = config
+        .modernization()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
     // Captain
     parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
 
     // Skills
     parts[4] = entity.commander_skills_raw().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
-    
+
     // Consumables
-    parts[5] = config.abilities().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
-            }).collect::<Vec<_>>().join(",");
+    parts[5] = config
+        .abilities()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Signals
-    parts[6] = config.signals().iter().filter_map(|id| {
-                Some(metadata_provider.game_param_by_id(*id as u32)?.index().to_owned())
-            }).collect::<Vec<_>>().join(",");
+    parts[6] = config
+        .signals()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Build Version
     parts[7] = "2".to_string();
@@ -133,7 +144,7 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     // Build Name
     parts[8] = format!("replay_{}", player.name());
 
-    debug!("{:?}",parts.join(";"));
+    debug!("{:?}", parts.join(";"));
 
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
