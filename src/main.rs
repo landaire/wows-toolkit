@@ -15,7 +15,7 @@ fn main() -> eframe::Result<()> {
             .with_icon(eframe::icon_data::from_png_bytes(icon_data).expect("failed to load application icon")),
         ..Default::default()
     };
-    eframe::run_native("WoWs Toolkit", native_options, Box::new(|cc| Box::new(wows_toolkit::WowsToolkitApp::new(cc))))
+    eframe::run_native(wows_toolkit::APP_NAME, native_options, Box::new(|cc| Box::new(wows_toolkit::WowsToolkitApp::new(cc))))
 }
 
 // When compiling to web using trunk:

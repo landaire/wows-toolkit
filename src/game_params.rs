@@ -453,14 +453,28 @@ struct CachedGameParams {
 impl GameMetadataProvider {
     pub fn from_pkg(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, DataLoadError> {
         println!("loading game params");
-        let cache_path = Path::new("game_params.bin");
+        let old_cache_path = Path::new("game_params.bin");
+
+        let cache_path = if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+            let new_cache_path = storage_dir.join(&old_cache_path);
+            if !new_cache_path.exists() && old_cache_path.exists() {
+                // Doesn't matter if this fails, we want to only use the new cache path.
+                // The implication of failure here is that the user re-generates
+                // the cache.
+                let _ = std::fs::rename(old_cache_path, &new_cache_path);
+            }
+
+            new_cache_path
+        } else {
+            old_cache_path.to_path_buf()
+        };
         println!("deserializing gameparams");
 
         let start = Instant::now();
         let params = cache_path
             .exists()
             .then(|| {
-                let cache_data = std::fs::File::open(cache_path).ok()?;
+                let cache_data = std::fs::File::open(&cache_path).ok()?;
                 let cached_params: CachedGameParams = bincode::deserialize_from(cache_data).ok()?;
                 if cached_params.game_version == game_version {
                     Some(cached_params.params)

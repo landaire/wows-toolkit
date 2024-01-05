@@ -7,3 +7,4 @@ mod plaintext_viewer;
 mod replay_parser;
 mod util;
 pub use app::WowsToolkitApp;
+pub const APP_NAME: &str = "WoWs Toolkit";
