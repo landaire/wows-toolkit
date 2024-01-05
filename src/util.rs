@@ -53,10 +53,10 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
 
         "ShipIndex": ship.index(),
 
-        "Nation": ship.nation(),
+        "Nation": ship.nation().replace('_', ""),
 
         "Modules": config.units().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
+            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
         "Upgrades": config.modernization().iter().filter_map(|id| {
@@ -73,7 +73,7 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
         }).collect::<Vec<_>>(),
 
         "Signals": config.signals().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.name().to_owned())
+            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
         "BuildVersion": 2
