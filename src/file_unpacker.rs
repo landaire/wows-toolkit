@@ -96,7 +96,7 @@ impl ToolkitTabViewer<'_> {
     /// Builds a flat list of resource files from a [FileNode] iterator.
     fn build_file_list_from_array<'i, I>(&self, ui: &mut egui::Ui, files: I)
     where
-        I: IntoIterator<Item = &'i (Rc<PathBuf>, FileNode)>,
+        I: IntoIterator<Item = &'i (wowsunpack::Rc<PathBuf>, FileNode)>,
     {
         egui::Grid::new("filtered_files_grid").num_columns(1).striped(true).show(ui, |ui| {
             let files = files.into_iter();
@@ -177,7 +177,7 @@ impl ToolkitTabViewer<'_> {
             ui.vertical(|ui| {
                 let filter_list = if let (Some(_file_tree), Some(files)) = (
                     self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                    &self.tab_state.world_of_warships_data.files.as_ref(),
+                    &self.tab_state.world_of_warships_data.filtered_files.as_ref(),
                 ) {
                     if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
@@ -226,7 +226,7 @@ impl ToolkitTabViewer<'_> {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
                             if let (Some(file_tree), Some(_files)) = (
                                 self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                                self.tab_state.world_of_warships_data.files.as_ref(),
+                                self.tab_state.world_of_warships_data.filtered_files.as_ref(),
                             ) {
                                 if let Some(filtered_files) = &filter_list {
                                     self.build_file_list_from_array(ui, filtered_files.iter());

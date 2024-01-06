@@ -3,29 +3,18 @@ use std::{
     collections::{BTreeMap, HashMap},
     io::Cursor,
     path::Path,
-    rc::Rc,
     str::FromStr,
+    sync::Arc,
     time::Instant,
 };
 
-use egui::ahash::HashMapExt;
 use flate2::read::ZlibDecoder;
 use gettext::Catalog;
 use itertools::Itertools;
 
 use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
-use wows_replays::{
-    game_params::{
-        Ability, AbilityBuilder, AbilityBuilderError, AbilityCategory, AbilityCategoryBuilder, AbilityCategoryBuilderError, CrewBuilder, CrewPersonality,
-        CrewPersonalityBuilder, CrewPersonalityBuilderError, CrewPersonalityShipsBuilder, CrewSkill, CrewSkillBuilder, CrewSkillBuilderError,
-        CrewSkillLogicTriggerBuilder, CrewSkillModifier, CrewSkillModifierBuilder, CrewSkillModifierBuilderError, CrewSkillTiersBuilder, GameParamProvider, Param,
-        ParamBuilder, ParamData, ParamType, Species, Vehicle, VehicleBuilder, VehicleBuilderError,
-    },
-    parse_scripts,
-    resource_loader::ResourceLoader,
-    rpc::entitydefs::EntitySpec,
-};
+use wows_replays::{game_params::*, parse_scripts, resource_loader::ResourceLoader, rpc::entitydefs::EntitySpec, Rc};
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::error::DataLoadError;
@@ -34,19 +23,19 @@ pub struct GameMetadataProvider {
     params: wows_replays::game_params::GameParams,
     param_id_to_translation_id: HashMap<u32, String>,
     translations: Option<Catalog>,
-    specs: Rc<Vec<EntitySpec>>,
+    specs: Arc<Vec<EntitySpec>>,
 }
 
 impl GameParamProvider for GameMetadataProvider {
-    fn game_param_by_id(&self, id: u32) -> Option<Rc<Param>> {
+    fn game_param_by_id(&self, id: u32) -> Option<wows_replays::Rc<Param>> {
         self.params.game_param_by_id(id)
     }
 
-    fn game_param_by_index(&self, _index: &str) -> Option<Rc<Param>> {
+    fn game_param_by_index(&self, _index: &str) -> Option<wows_replays::Rc<Param>> {
         todo!()
     }
 
-    fn game_param_by_name(&self, _name: &str) -> Option<Rc<Param>> {
+    fn game_param_by_name(&self, _name: &str) -> Option<wows_replays::Rc<Param>> {
         todo!()
     }
 }
@@ -616,7 +605,7 @@ impl GameMetadataProvider {
             Ok(Cow::Owned(file_data))
         });
 
-        let specs = Rc::new(parse_scripts(&data_file_loader).unwrap());
+        let specs = Arc::new(parse_scripts(&data_file_loader).unwrap());
 
         Ok(GameMetadataProvider {
             params: params.into(),

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    error::Error,
     fs::{read_dir, File},
     io::Cursor,
     path::{Path, PathBuf},
@@ -31,10 +32,12 @@ use wowsunpack::{
 };
 
 use crate::{
+    error::DataLoadError,
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
     game_params::GameMetadataProvider,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},
+    task::{self, BackgroundTaskCompletion, ShipIcon},
 };
 
 #[derive(Clone)]
@@ -73,16 +76,17 @@ impl ToolkitTabViewer<'_> {
                             strip.cell(|ui| {
                                 ui.add_sized(
                                     ui.available_size(),
-                                    egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir).hint_text("World of Warships Directory"),
+                                    egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
+                                        .interactive(self.tab_state.can_change_wows_dir)
+                                        .hint_text("World of Warships Directory"),
                                 );
                             });
                             strip.cell(|ui| {
-                                if ui.button("Open...").clicked() {
+                                if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Open...")).clicked() {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
-                                        self.tab_state.settings.wows_dir = folder.to_string_lossy().into_owned();
-                                        // TODO: Handle loading error
-                                        let _ = self.tab_state.load_wows_files();
+                                        self.tab_state.prevent_changing_wows_dir();
+                                        self.tab_state.load_game_data(folder);
                                     }
                                 }
                             });
@@ -122,15 +126,15 @@ impl TabViewer for ToolkitTabViewer<'_> {
 pub struct WorldOfWarshipsData {
     pub file_tree: Option<FileNode>,
 
+    pub filtered_files: Option<Vec<(wowsunpack::Rc<PathBuf>, FileNode)>>,
+
     pub pkg_loader: Option<Arc<PkgFileLoader>>,
 
-    pub files: Option<Vec<(Rc<PathBuf>, FileNode)>>,
-
-    pub game_metadata: Option<Rc<GameMetadataProvider>>,
+    pub game_metadata: Option<Arc<GameMetadataProvider>>,
 
     pub current_replay: Option<Replay>,
 
-    pub ship_icons: Option<HashMap<Species, (String, Vec<u8>)>>,
+    pub ship_icons: Option<HashMap<Species, ShipIcon>>,
 
     pub game_version: Option<usize>,
 }
@@ -172,6 +176,7 @@ pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
 }
 
+#[derive(Debug)]
 pub enum NotifyFileEvent {
     Added(PathBuf),
     Removed(PathBuf),
@@ -218,6 +223,12 @@ pub struct TabState {
 
     #[serde(skip)]
     pub replay_files: Option<Vec<PathBuf>>,
+
+    #[serde(skip)]
+    pub background_task_channel: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, DataLoadError>>>,
+
+    #[serde(skip)]
+    pub can_change_wows_dir: bool,
 }
 
 impl Default for TabState {
@@ -225,8 +236,8 @@ impl Default for TabState {
         Self {
             world_of_warships_data: WorldOfWarshipsData {
                 file_tree: None,
+                filtered_files: None,
                 pkg_loader: None,
-                files: None,
                 game_metadata: None,
                 current_replay: Default::default(),
                 ship_icons: None,
@@ -245,6 +256,8 @@ impl Default for TabState {
             replays_dir: None,
             replay_files: None,
             file_receiver: None,
+            background_task_channel: None,
+            can_change_wows_dir: false,
         }
     }
 }
@@ -269,190 +282,71 @@ impl TabState {
         }
     }
 
-    fn reload_replays(&mut self) {
-        if let Some(watcher) = self.file_watcher.as_mut() {
-            let _ = watcher.unwatch(self.replays_dir.as_ref().unwrap());
-        }
-        let replay_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
-        let mut files = Vec::new();
-        self.replay_files = None;
+    fn prevent_changing_wows_dir(&mut self) {
+        self.can_change_wows_dir = false;
+    }
 
-        if replay_dir.exists() {
-            for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir").flatten() {
-                if !file.file_type().expect("failed to get file type").is_file() {
-                    continue;
-                }
+    fn allow_changing_wows_dir(&mut self) {
+        self.can_change_wows_dir = true;
+    }
 
-                let file_path = file.path();
+    fn update_wows_dir(&mut self, wows_dir: &Path) {
+        let replay_dir = wows_dir.join("replays");
 
-                if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                    if file.file_name() != "temp.wowsreplay" {
-                        files.push(file_path);
-                    }
-                }
-            }
-        }
-        if !files.is_empty() {
-            files.sort_by_key(|a| a.metadata().unwrap().created().unwrap());
-            files.reverse();
-            self.replay_files = Some(files);
-        }
-
-        if self.replay_files.is_some() && self.file_watcher.is_none() && replay_dir.exists() {
+        let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
+            let old_replays_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
+            let _ = watcher.unwatch(&old_replays_dir);
+            watcher
+        } else {
             eprintln!("creating filesystem watcher");
             let (tx, rx) = mpsc::channel();
-            // Automatically select the best implementation for your platform.
-            let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
-                watcher
-            } else {
-                let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-                    Ok(event) => {
-                        // TODO: maybe properly handle moves?
-                        println!("{:?}", event);
-                        match event.kind {
-                            EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
-                                for path in event.paths {
-                                    if path.is_file()
-                                        && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                        && path.file_name().unwrap() != "temp.wowsreplay"
-                                    {
-                                        tx.send(NotifyFileEvent::Added(path)).expect("failed to send file creation event");
-                                    }
+            let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    // TODO: maybe properly handle moves?
+                    println!("{:?}", event);
+                    match event.kind {
+                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                            for path in event.paths {
+                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                    tx.send(NotifyFileEvent::Added(path)).expect("failed to send file creation event");
                                 }
-                            }
-                            EventKind::Remove(_) => {
-                                for path in event.paths {
-                                    tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
-                                }
-                            }
-                            _ => {
-                                // TODO: handle RenameMode::From for proper file moves
                             }
                         }
+                        EventKind::Remove(_) => {
+                            for path in event.paths {
+                                tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                            }
+                        }
+                        _ => {
+                            // TODO: handle RenameMode::From for proper file moves
+                        }
                     }
-                    Err(e) => println!("watch error: {:?}", e),
-                })
-                .expect("failed to create fs watcher for replays dir");
+                }
+                Err(e) => println!("watch error: {:?}", e),
+            })
+            .expect("failed to create fs watcher for replays dir");
 
-                self.file_watcher = Some(watcher);
-                self.file_watcher.as_mut().unwrap()
-            };
-
-            // Add a path to be watched. All files and directories at that path and
-            // below will be monitored for changes.
-            watcher.watch(replay_dir.as_ref(), RecursiveMode::NonRecursive).expect("failed to watch directory");
-
+            self.file_watcher = Some(watcher);
             self.file_receiver = Some(rx);
-            self.replays_dir = Some(replay_dir);
-        }
+            self.file_watcher.as_mut().unwrap()
+        };
+
+        // Add a path to be watched. All files and directories at that path and
+        // below will be monitored for changes.
+        watcher.watch(replay_dir.as_ref(), RecursiveMode::NonRecursive).expect("failed to watch directory");
+
+        self.replays_dir = Some(replay_dir);
+        self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
     }
-    pub fn load_wows_files(&mut self) -> std::io::Result<()> {
-        let mut idx_files = Vec::new();
-        let wows_directory = Path::new(self.settings.wows_dir.as_str());
-        if wows_directory.exists() {
-            let mut highest_number = None;
-            for file in read_dir(wows_directory.join("bin"))? {
-                if file.is_err() {
-                    continue;
-                }
 
-                let file = file.unwrap();
-                if let Ok(ty) = file.file_type() {
-                    if ty.is_file() {
-                        continue;
-                    }
+    pub fn load_game_data(&mut self, wows_directory: PathBuf) {
+        let (tx, rx) = mpsc::channel();
+        let locale = self.settings.locale.clone().unwrap();
+        let _join_handle = std::thread::spawn(move || {
+            let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
+        });
 
-                    if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
-                        if highest_number.is_none() || highest_number.map(|number| number < build_num).unwrap_or(false) {
-                            highest_number = Some(build_num)
-                        }
-                    }
-                }
-            }
-
-            if let Some(number) = highest_number {
-                for file in read_dir(wows_directory.join("bin").join(format!("{}", number)).join("idx"))? {
-                    let file = file.unwrap();
-                    if file.file_type().unwrap().is_file() {
-                        let file_data = std::fs::read(file.path()).unwrap();
-                        let mut file = Cursor::new(file_data.as_slice());
-                        idx_files.push(idx::parse(&mut file).unwrap());
-                    }
-                }
-
-                let pkgs_path = wows_directory.join("res_packages");
-                if !pkgs_path.exists() {
-                    return Ok(());
-                }
-
-                let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
-
-                let file_tree = idx::build_file_tree(idx_files.as_slice());
-                let files = file_tree.paths();
-
-                let locale = get_locale().unwrap_or_else(|| String::from("en"));
-                let language_tag: LanguageTag = locale.parse().unwrap();
-                let attempted_dirs = [locale.as_str(), language_tag.primary_language(), "en"];
-                let mut found_catalog = None;
-                for dir in attempted_dirs {
-                    let localization_path = wows_directory.join(format!("bin/{}/res/texts/{}/LC_MESSAGES/global.mo", number, dir));
-                    if !localization_path.exists() {
-                        continue;
-                    }
-                    let global = File::open(localization_path).expect("failed to open localization file");
-                    let catalog = Catalog::parse(global).expect("could not parse catalog");
-                    found_catalog = Some(catalog);
-                    break;
-                }
-
-                self.settings.locale = Some(locale.clone());
-
-                // Try loading GameParams.data
-                let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
-                    if let Some(catalog) = found_catalog {
-                        metadata_provider.set_translations(catalog)
-                    }
-
-                    Rc::new(metadata_provider)
-                });
-
-                // Try loading ship icons
-                let species = [
-                    Species::AirCarrier,
-                    Species::Battleship,
-                    Species::Cruiser,
-                    Species::Destroyer,
-                    Species::Submarine,
-                    Species::Auxiliary,
-                ];
-
-                let icons: HashMap<Species, (String, Vec<u8>)> = HashMap::from_iter(species.iter().map(|species| {
-                    let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
-                    let icon_node = file_tree.find(&path).expect("failed to find file");
-
-                    let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
-                    icon_node.read_file(&pkg_loader, &mut icon_data).expect("failed to read ship icon");
-
-                    (species.clone(), (path, icon_data))
-                }));
-
-                let data = WorldOfWarshipsData {
-                    game_metadata: metadata_provider,
-                    file_tree: Some(file_tree),
-                    pkg_loader: Some(pkg_loader),
-                    files: Some(files),
-                    current_replay: Default::default(),
-                    game_version: Some(number),
-                    ship_icons: Some(icons),
-                };
-
-                self.world_of_warships_data = data;
-
-                self.reload_replays();
-            }
-        }
-
-        Ok(())
+        self.background_task_channel = Some(rx);
     }
 }
 
@@ -468,6 +362,10 @@ pub struct WowsToolkitApp {
     latest_release: Option<Release>,
     #[serde(skip)]
     show_about_window: bool,
+    #[serde(skip)]
+    show_error_window: bool,
+    #[serde(skip)]
+    error_to_show: Option<Box<dyn Error>>,
 
     tab_state: TabState,
     #[serde(skip)]
@@ -483,6 +381,8 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
+            show_error_window: false,
+            error_to_show: None,
         }
     }
 }
@@ -498,25 +398,52 @@ impl WowsToolkitApp {
         if let Some(storage) = cc.storage {
             let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                match saved_state.tab_state.load_wows_files() {
-                    Ok(_) => {
-                        // do nothing
-                    }
-                    Err(_) => {
-                        // TODO: handle errors
-                    }
-                }
+                saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone()));
             }
 
             return saved_state;
         }
 
-        Default::default()
+        let mut this: Self = Default::default();
+        this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
+
+        this
     }
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if let Some(rx) = &self.tab_state.unpacker_progress {
+            // TODO: Merge these channels
+            if let Some(rx) = &self.tab_state.background_task_channel {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        match result {
+                            Ok(data) => match data {
+                                BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
+                                    self.tab_state.update_wows_dir(&new_dir);
+                                    self.tab_state.world_of_warships_data = wows_data;
+                                    self.tab_state.replay_files = replays;
+                                }
+                            },
+                            Err(e) => {
+                                self.show_error_window = true;
+                                self.error_to_show = Some(Box::new(e));
+                            }
+                        }
+
+                        // Regardless of whether it's success or failure, we now need to allow
+                        // the user to change the WoWs directory.
+                        self.tab_state.allow_changing_wows_dir();
+                        self.tab_state.background_task_channel = None;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        ui.label("Loading game data...");
+                        ui.spinner();
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        self.tab_state.background_task_channel = None;
+                    }
+                }
+            } else if let Some(rx) = &self.tab_state.unpacker_progress {
                 if ui.button("Stop").clicked() {
                     UNPACKER_STOP.store(true, Ordering::Relaxed);
                 }
@@ -615,9 +542,19 @@ impl eframe::App for WowsToolkitApp {
             }
         }
 
+        if let Some(error) = self.error_to_show.as_ref() {
+            if self.show_error_window {
+                egui::Window::new("Error").open(&mut self.show_error_window).show(ctx, |ui| {
+                    build_error_window(ui, error.as_ref());
+                });
+            } else {
+                self.error_to_show = None;
+            }
+        }
+
         if self.show_about_window {
             egui::Window::new("About").open(&mut self.show_about_window).show(ctx, |ui| {
-                show_about_window(ui);
+                build_about_window(ui);
             });
         }
 
@@ -675,7 +612,7 @@ impl eframe::App for WowsToolkitApp {
     }
 }
 
-fn show_about_window(ui: &mut egui::Ui) {
+fn build_about_window(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.label("Made by landaire.");
         ui.label("Thanks to Trackpad, TTaro, lkolby for their contributions.");
@@ -691,5 +628,12 @@ fn show_about_window(ui: &mut egui::Ui) {
             ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
             ui.label(".");
         });
+    });
+}
+
+fn build_error_window(ui: &mut egui::Ui, error: &dyn Error) {
+    ui.vertical(|ui| {
+        ui.label("An error occurred:");
+        ui.label(error.to_string());
     });
 }

@@ -5096,7 +5096,7 @@ dependencies = [
 [[package]]
 name = "wows-replays"
 version = "0.1.0"
-source = "git+https://github.com/landaire/wows-replays.git#8dae3669ceb576afb69f715fa042de3821abf204"
+source = "git+https://github.com/landaire/wows-replays.git#73bfc7cb24fcf40185b903457bf6a5962d725ede"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -5157,9 +5157,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed095c3d41660cf2a63b09aa62a0ac661f41b17ad0be96275e81daee4ab7534b"
+version = "0.1.6"
 dependencies = [
  "binrw",
  "byteorder",

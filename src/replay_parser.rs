@@ -38,7 +38,7 @@ pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 pub struct Replay {
     replay_file: ReplayFile,
 
-    resource_loader: Rc<GameMetadataProvider>,
+    resource_loader: Arc<GameMetadataProvider>,
 
     battle_report: Option<BattleReport>,
 }
@@ -157,7 +157,7 @@ impl ToolkitTabViewer<'_> {
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
                             if let Some(icons) = self.tab_state.world_of_warships_data.ship_icons.as_ref() {
-                                let (path, icon_data) = icons.get(&ship.species().expect("ship has no species")).expect("failed to get ship icon for species");
+                                let icon = icons.get(&ship.species().expect("ship has no species")).expect("failed to get ship icon for species");
 
                                 let color = match player.relation() {
                                     0 => Color32::GOLD,
@@ -166,9 +166,9 @@ impl ToolkitTabViewer<'_> {
                                 };
 
                                 let image = Image::new(ImageSource::Bytes {
-                                    uri: path.clone().into(),
+                                    uri: icon.path.clone().into(),
                                     // the icon size is <1k, this clone is fairly cheap
-                                    bytes: icon_data.clone().into(),
+                                    bytes: icon.data.clone().into(),
                                 })
                                 .tint(color)
                                 .fit_to_exact_size((20.0, 20.0).into())

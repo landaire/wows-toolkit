@@ -1,11 +1,11 @@
-use std::io;
+use std::{io, path::PathBuf};
 use thiserror::Error;
 use wowsunpack::idx::IdxError;
 
 #[derive(Error, Debug)]
 pub enum DataLoadError {
-    #[error("Invalid World of Warships directory specified")]
-    InvalidWowsDirectory,
+    #[error("Invalid World of Warships directory {0:?} specified")]
+    InvalidWowsDirectory(PathBuf),
     #[error("Invalid GameParams.data")]
     InvalidGameParams,
     #[error("Could not read IDX file")]
