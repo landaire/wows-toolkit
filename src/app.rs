@@ -425,6 +425,15 @@ impl WowsToolkitApp {
             // TODO: Merge these channels
             if let Some(task) = &self.tab_state.background_task {
                 if let Some(result) = task.build_description(ui) {
+                    match task.kind {
+                        BackgroundTaskKind::LoadingData => {
+                            self.tab_state.allow_changing_wows_dir();
+                        }
+                        BackgroundTaskKind::LoadingReplay => {
+                            // nothing to do
+                        }
+                    }
+
                     match result {
                         Ok(data) => match data {
                             BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
@@ -445,15 +454,6 @@ impl WowsToolkitApp {
                         Err(e) => {
                             self.show_error_window = true;
                             self.error_to_show = Some(Box::new(e));
-                        }
-                    }
-
-                    match task.kind {
-                        BackgroundTaskKind::LoadingData => {
-                            self.tab_state.allow_changing_wows_dir();
-                        }
-                        BackgroundTaskKind::LoadingReplay => {
-                            // nothing to do
                         }
                     }
                 }
