@@ -22,11 +22,8 @@ use octocrab::models::repos::Release;
 
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species};
-use wowsunpack::{
-    idx::{FileNode},
-    pkg::PkgFileLoader,
-};
+use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
+use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::{
     error::ToolkitError,
@@ -129,7 +126,7 @@ pub struct WorldOfWarshipsData {
 
     pub game_metadata: Option<Arc<GameMetadataProvider>>,
 
-    pub current_replay: Option<Replay>,
+    pub current_replay: Option<Arc<Mutex<Replay>>>,
 
     pub ship_icons: Option<HashMap<Species, ShipIcon>>,
 
@@ -227,7 +224,7 @@ pub struct TabState {
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
 
     #[serde(skip)]
-    pub replay_files: Option<Vec<PathBuf>>,
+    pub replay_files: Option<HashMap<PathBuf, Arc<Mutex<Replay>>>>,
 
     #[serde(skip)]
     pub background_task: Option<BackgroundTask>,
@@ -274,12 +271,14 @@ impl TabState {
                 while let Ok(file_event) = file.try_recv() {
                     match file_event {
                         NotifyFileEvent::Added(new_file) => {
-                            replay_files.insert(0, new_file);
+                            let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
+                            let game_metadata = self.world_of_warships_data.game_metadata.clone().unwrap();
+                            let replay = Replay::new(replay_file, game_metadata);
+                            let replay = Arc::new(Mutex::new(replay));
+                            replay_files.insert(new_file, replay);
                         }
                         NotifyFileEvent::Removed(old_file) => {
-                            if let Some(pos) = replay_files.iter().position(|file_path| file_path == &old_file) {
-                                replay_files.remove(pos);
-                            }
+                            replay_files.remove(&old_file);
                         }
                     }
                 }
@@ -432,7 +431,7 @@ impl WowsToolkitApp {
                             }
                             BackgroundTaskCompletion::ReplayLoaded { replay } => {
                                 {
-                                    self.tab_state.replay_parser_tab.lock().unwrap().game_chat.clear();
+                                    self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                 }
                                 self.tab_state.world_of_warships_data.current_replay = Some(replay);
                             }

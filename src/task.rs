@@ -9,9 +9,10 @@ use std::{
     },
 };
 
+use egui::mutex::Mutex;
 use gettext::Catalog;
 use language_tags::LanguageTag;
-use wows_replays::{game_params::Species};
+use wows_replays::{game_params::Species, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
@@ -63,14 +64,14 @@ pub enum BackgroundTaskCompletion {
     DataLoaded {
         new_dir: PathBuf,
         wows_data: WorldOfWarshipsData,
-        replays: Option<Vec<PathBuf>>,
+        replays: Option<HashMap<PathBuf, Arc<Mutex<Replay>>>>,
     },
     ReplayLoaded {
-        replay: Replay,
+        replay: Arc<Mutex<Replay>>,
     },
 }
 
-fn load_replays(wows_dir: &Path) -> Option<Vec<PathBuf>> {
+fn replay_filepaths(wows_dir: &Path) -> Option<Vec<PathBuf>> {
     let replay_dir = wows_dir.join("replays");
     let mut files = Vec::new();
 
@@ -200,7 +201,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
 
     let data = WorldOfWarshipsData {
-        game_metadata: metadata_provider,
+        game_metadata: metadata_provider.clone(),
         file_tree: Some(file_tree),
         pkg_loader: Some(pkg_loader),
         filtered_files: Some(files),
@@ -209,7 +210,21 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         ship_icons: Some(icons),
     };
 
-    let replays = load_replays(&wows_directory);
+    let replays = replay_filepaths(&wows_directory).map(|replays| {
+        let iter = replays.into_iter().filter_map(|path| {
+            // Filter out any replays that don't parse correctly
+            let replay_file = ReplayFile::from_file(&path).ok()?;
+            let replay = Arc::new(Mutex::new(Replay {
+                replay_file,
+                resource_loader: metadata_provider.clone().unwrap(),
+                battle_report: None,
+            }));
+
+            Some((path, replay))
+        });
+
+        HashMap::from_iter(iter)
+    });
 
     Ok(BackgroundTaskCompletion::DataLoaded {
         new_dir: wows_directory,
