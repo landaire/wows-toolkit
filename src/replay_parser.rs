@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     path::Path,
     rc::Rc,
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
 };
 
 use egui::{text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2};
@@ -26,8 +26,10 @@ use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
+    error::ToolkitError,
     game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
+    task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     util::{build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
@@ -52,9 +54,15 @@ fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
 }
 
 impl Replay {
-    pub fn parse(&mut self, _file_tree: &FileNode, _pkg_loader: Arc<PkgFileLoader>) {
+    pub fn parse(&mut self, expected_build: &str) -> Result<(), ToolkitError> {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
+        if version_parts[3] != expected_build {
+            return Err(ToolkitError::ReplayVersionMismatch {
+                expected: expected_build.to_string(),
+                actual: version_parts[3].to_string(),
+            });
+        }
 
         // Parse packets
         let packet_data = &self.replay_file.packet_data;
@@ -72,6 +80,8 @@ impl Replay {
                 self.battle_report = Some(controller.build_report());
             }
         }
+
+        Ok(())
     }
 }
 
@@ -420,31 +430,43 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) {
-        let path = replay_path.as_ref();
+        if self.tab_state.world_of_warships_data.is_ready() {
+            let path = replay_path.as_ref();
 
-        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
+            let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
 
-        self.load_replay(replay_file);
+            self.load_replay(replay_file);
+        }
     }
 
     fn load_replay(&mut self, replay_file: ReplayFile) {
+        let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
+        let game_version = self.tab_state.world_of_warships_data.game_version.clone().unwrap();
         {
+            // Reset the chat state
             self.tab_state.replay_parser_tab.lock().unwrap().game_chat.clear();
         }
-        let mut replay = Replay {
-            replay_file,
-            resource_loader: self.tab_state.world_of_warships_data.game_metadata.clone().unwrap(),
-            battle_report: None,
-        };
 
-        if let (Some(file_tree), Some(pkg_loader)) = (
-            self.tab_state.world_of_warships_data.file_tree.as_ref(),
-            self.tab_state.world_of_warships_data.pkg_loader.as_ref(),
-        ) {
-            replay.parse(file_tree, pkg_loader.clone());
-        }
+        let (tx, rx) = mpsc::channel();
 
-        self.tab_state.world_of_warships_data.current_replay = Some(replay);
+        let _join_handle = std::thread::spawn(move || {
+            let mut replay = Replay {
+                replay_file,
+                resource_loader: game_metadata,
+                battle_report: None,
+            };
+
+            let res = replay
+                .parse(game_version.to_string().as_str())
+                .map(move |_| BackgroundTaskCompletion::ReplayLoaded { replay });
+
+            let _ = tx.send(res);
+        });
+
+        self.tab_state.background_task = Some(BackgroundTask {
+            receiver: rx,
+            kind: BackgroundTaskKind::LoadingReplay,
+        });
     }
 
     /// Builds the replay parser tab

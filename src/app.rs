@@ -32,12 +32,12 @@ use wowsunpack::{
 };
 
 use crate::{
-    error::DataLoadError,
+    error::ToolkitError,
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
     game_params::GameMetadataProvider,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},
-    task::{self, BackgroundTaskCompletion, ShipIcon},
+    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, ShipIcon},
 };
 
 #[derive(Clone)]
@@ -139,6 +139,14 @@ pub struct WorldOfWarshipsData {
     pub game_version: Option<usize>,
 }
 
+impl WorldOfWarshipsData {
+    /// Indicates whether or not enough game data has been loaded to interact
+    /// with the PKG filesystem or replays
+    pub fn is_ready(&self) -> bool {
+        self.file_tree.is_some() && self.pkg_loader.is_some()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ReplaySettings {
     pub show_game_chat: bool,
@@ -225,7 +233,7 @@ pub struct TabState {
     pub replay_files: Option<Vec<PathBuf>>,
 
     #[serde(skip)]
-    pub background_task_channel: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, DataLoadError>>>,
+    pub background_task: Option<BackgroundTask>,
 
     #[serde(skip)]
     pub can_change_wows_dir: bool,
@@ -256,7 +264,7 @@ impl Default for TabState {
             replays_dir: None,
             replay_files: None,
             file_receiver: None,
-            background_task_channel: None,
+            background_task: None,
             can_change_wows_dir: false,
         }
     }
@@ -346,7 +354,10 @@ impl TabState {
             let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
         });
 
-        self.background_task_channel = Some(rx);
+        self.background_task = Some(BackgroundTask {
+            receiver: rx,
+            kind: BackgroundTaskKind::LoadingData,
+        });
     }
 }
 
@@ -413,34 +424,29 @@ impl WowsToolkitApp {
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // TODO: Merge these channels
-            if let Some(rx) = &self.tab_state.background_task_channel {
-                match rx.try_recv() {
-                    Ok(result) => {
-                        match result {
-                            Ok(data) => match data {
-                                BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
-                                    self.tab_state.update_wows_dir(&new_dir);
-                                    self.tab_state.world_of_warships_data = wows_data;
-                                    self.tab_state.replay_files = replays;
-                                }
-                            },
-                            Err(e) => {
-                                self.show_error_window = true;
-                                self.error_to_show = Some(Box::new(e));
+            if let Some(task) = &self.tab_state.background_task {
+                if let Some(result) = task.build_description(ui) {
+                    match result {
+                        Ok(data) => match data {
+                            BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
+                                self.tab_state.update_wows_dir(&new_dir);
+                                self.tab_state.world_of_warships_data = wows_data;
+                                self.tab_state.replay_files = replays;
                             }
+                            BackgroundTaskCompletion::ReplayLoaded { replay } => {
+                                {
+                                    self.tab_state.replay_parser_tab.lock().unwrap().game_chat.clear();
+                                }
+                                self.tab_state.world_of_warships_data.current_replay = Some(replay);
+                            }
+                        },
+                        Err(ToolkitError::BackgroundTaskCompleted) => {
+                            self.tab_state.background_task = None;
                         }
-
-                        // Regardless of whether it's success or failure, we now need to allow
-                        // the user to change the WoWs directory.
-                        self.tab_state.allow_changing_wows_dir();
-                        self.tab_state.background_task_channel = None;
-                    }
-                    Err(TryRecvError::Empty) => {
-                        ui.label("Loading game data...");
-                        ui.spinner();
-                    }
-                    Err(TryRecvError::Disconnected) => {
-                        self.tab_state.background_task_channel = None;
+                        Err(e) => {
+                            self.show_error_window = true;
+                            self.error_to_show = Some(Box::new(e));
+                        }
                     }
                 }
             } else if let Some(rx) = &self.tab_state.unpacker_progress {

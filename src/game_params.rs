@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use wows_replays::{game_params::*, parse_scripts, resource_loader::ResourceLoader, rpc::entitydefs::EntitySpec, Rc};
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
-use crate::error::DataLoadError;
+use crate::error::ToolkitError;
 
 pub struct GameMetadataProvider {
     params: wows_replays::game_params::GameParams,
@@ -440,7 +440,7 @@ struct CachedGameParams {
 }
 
 impl GameMetadataProvider {
-    pub fn from_pkg(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, DataLoadError> {
+    pub fn from_pkg(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
         println!("loading game params");
         let old_cache_path = Path::new("game_params.bin");
 

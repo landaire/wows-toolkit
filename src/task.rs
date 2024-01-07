@@ -4,22 +4,60 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        mpsc::{self, TryRecvError},
+        Arc,
+    },
 };
 
 use gettext::Catalog;
 use language_tags::LanguageTag;
-use wows_replays::game_params::Species;
+use wows_replays::{analyzer::battle_controller::BattleReport, game_params::Species, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
 
-use crate::{app::WorldOfWarshipsData, game_params::GameMetadataProvider};
+use crate::{app::WorldOfWarshipsData, error::ToolkitError, game_params::GameMetadataProvider, replay_parser::Replay};
 
 pub struct ShipIcon {
     pub path: String,
     pub data: Vec<u8>,
+}
+
+pub struct BackgroundTask {
+    pub receiver: mpsc::Receiver<Result<BackgroundTaskCompletion, ToolkitError>>,
+    pub kind: BackgroundTaskKind,
+}
+
+#[derive(Clone, Copy)]
+pub enum BackgroundTaskKind {
+    LoadingData,
+    LoadingReplay,
+}
+
+impl BackgroundTask {
+    pub fn build_description(&self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
+        match self.receiver.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => {
+                match self.kind {
+                    BackgroundTaskKind::LoadingData => {
+                        ui.spinner();
+                        ui.label("Loading game data...");
+                    }
+                    BackgroundTaskKind::LoadingReplay => {
+                        ui.spinner();
+                        ui.label("Loading replay...");
+                    }
+                }
+                None
+            }
+            Err(TryRecvError::Disconnected) => {
+                return Some(Err(ToolkitError::BackgroundTaskCompleted));
+            }
+        }
+    }
 }
 
 pub enum BackgroundTaskCompletion {
@@ -27,6 +65,9 @@ pub enum BackgroundTaskCompletion {
         new_dir: PathBuf,
         wows_data: WorldOfWarshipsData,
         replays: Option<Vec<PathBuf>>,
+    },
+    ReplayLoaded {
+        replay: Replay,
     },
 }
 
@@ -83,11 +124,11 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
     icons
 }
 
-pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, crate::error::DataLoadError> {
+pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, crate::error::ToolkitError> {
     let mut idx_files = Vec::new();
     let bin_dir = wows_directory.join("bin");
     if !wows_directory.exists() || !bin_dir.exists() {
-        return Err(crate::error::DataLoadError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
     let mut highest_number = None;
@@ -111,7 +152,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     if highest_number.is_none() {
-        return Err(crate::error::DataLoadError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
     let number = highest_number.unwrap();
@@ -126,7 +167,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     let pkgs_path = wows_directory.join("res_packages");
     if !pkgs_path.exists() {
-        return Err(crate::error::DataLoadError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
     let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
