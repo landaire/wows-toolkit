@@ -447,6 +447,15 @@ impl WowsToolkitApp {
                             self.error_to_show = Some(Box::new(e));
                         }
                     }
+
+                    match task.kind {
+                        BackgroundTaskKind::LoadingData => {
+                            self.tab_state.allow_changing_wows_dir();
+                        }
+                        BackgroundTaskKind::LoadingReplay => {
+                            // nothing to do
+                        }
+                    }
                 }
             } else if let Some(rx) = &self.tab_state.unpacker_progress {
                 if ui.button("Stop").clicked() {
