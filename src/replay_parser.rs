@@ -11,8 +11,6 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 
-use notify::Watcher;
-
 use tap::Pipe;
 
 use wows_replays::{

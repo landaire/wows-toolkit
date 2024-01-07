@@ -53,9 +53,7 @@ impl BackgroundTask {
                 }
                 None
             }
-            Err(TryRecvError::Disconnected) => {
-                return Some(Err(ToolkitError::BackgroundTaskCompleted));
-            }
+            Err(TryRecvError::Disconnected) => Some(Err(ToolkitError::BackgroundTaskCompleted)),
         }
     }
 }

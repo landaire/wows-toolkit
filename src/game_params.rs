@@ -445,7 +445,7 @@ impl GameMetadataProvider {
         let old_cache_path = Path::new("game_params.bin");
 
         let cache_path = if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-            let new_cache_path = storage_dir.join(&old_cache_path);
+            let new_cache_path = storage_dir.join(old_cache_path);
             if !new_cache_path.exists() && old_cache_path.exists() {
                 // Doesn't matter if this fails, we want to only use the new cache path.
                 // The implication of failure here is that the user re-generates
