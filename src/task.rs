@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use egui::mutex::Mutex;
+use egui::mutex::{Mutex, RwLock};
 use gettext::Catalog;
 use language_tags::LanguageTag;
 use wows_replays::{game_params::Species, ReplayFile};
@@ -64,10 +64,10 @@ pub enum BackgroundTaskCompletion {
     DataLoaded {
         new_dir: PathBuf,
         wows_data: WorldOfWarshipsData,
-        replays: Option<HashMap<PathBuf, Arc<Mutex<Replay>>>>,
+        replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
     },
     ReplayLoaded {
-        replay: Arc<Mutex<Replay>>,
+        replay: Arc<RwLock<Replay>>,
     },
 }
 
@@ -214,7 +214,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         let iter = replays.into_iter().filter_map(|path| {
             // Filter out any replays that don't parse correctly
             let replay_file = ReplayFile::from_file(&path).ok()?;
-            let replay = Arc::new(Mutex::new(Replay {
+            let replay = Arc::new(RwLock::new(Replay {
                 replay_file,
                 resource_loader: metadata_provider.clone().unwrap(),
                 battle_report: None,

@@ -9,7 +9,10 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, OpenUrl, Ui, WidgetText};
+use egui::{
+    mutex::{Mutex, RwLock},
+    OpenUrl, Ui, WidgetText,
+};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
@@ -126,7 +129,7 @@ pub struct WorldOfWarshipsData {
 
     pub game_metadata: Option<Arc<GameMetadataProvider>>,
 
-    pub current_replay: Option<Arc<Mutex<Replay>>>,
+    pub current_replay: Option<Arc<RwLock<Replay>>>,
 
     pub ship_icons: Option<HashMap<Species, ShipIcon>>,
 
@@ -224,7 +227,7 @@ pub struct TabState {
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
 
     #[serde(skip)]
-    pub replay_files: Option<HashMap<PathBuf, Arc<Mutex<Replay>>>>,
+    pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
 
     #[serde(skip)]
     pub background_task: Option<BackgroundTask>,
@@ -274,7 +277,7 @@ impl TabState {
                             let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
                             let game_metadata = self.world_of_warships_data.game_metadata.clone().unwrap();
                             let replay = Replay::new(replay_file, game_metadata);
-                            let replay = Arc::new(Mutex::new(replay));
+                            let replay = Arc::new(RwLock::new(replay));
                             replay_files.insert(new_file, replay);
                         }
                         NotifyFileEvent::Removed(old_file) => {

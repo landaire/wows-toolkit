@@ -6,7 +6,11 @@ use std::{
 };
 
 use chrono::Local;
-use egui::{mutex::Mutex, text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2};
+use egui::{
+    mutex::{Mutex, RwLock},
+    text::LayoutJob,
+    Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2,
+};
 use egui_extras::{Column, TableBuilder};
 
 use notify::Watcher;
@@ -62,7 +66,7 @@ impl Replay {
             battle_report: None,
         }
     }
-    pub fn parse(&mut self, expected_build: &str) -> Result<(), ToolkitError> {
+    pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
         if version_parts[3] != expected_build {
@@ -80,16 +84,14 @@ impl Replay {
         match p.parse_packets_mut(packet_data, &mut controller) {
             Ok(()) => {
                 controller.finish();
-                self.battle_report = Some(controller.build_report());
+                Ok(controller.build_report())
             }
             Err(e) => {
                 eprintln!("{:?}", e);
                 controller.finish();
-                self.battle_report = Some(controller.build_report());
+                Ok(controller.build_report())
             }
         }
-
-        Ok(())
     }
 }
 
@@ -415,7 +417,7 @@ impl ToolkitTabViewer<'_> {
                     let resource_provider = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
                     for (path, replay) in files {
                         let label = {
-                            let file = replay.lock();
+                            let file = replay.read();
                             let meta = &file.replay_file.meta;
                             let player_vehicle = meta.vehicles.iter().find(|vehicle| vehicle.relation == 0);
                             let vehicle_name = player_vehicle
@@ -472,7 +474,7 @@ impl ToolkitTabViewer<'_> {
             let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
-            self.load_replay(Arc::new(Mutex::new(replay)));
+            self.load_replay(Arc::new(RwLock::new(replay)));
         }
     }
 
@@ -484,11 +486,11 @@ impl ToolkitTabViewer<'_> {
             let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
-            self.load_replay(Arc::new(Mutex::new(replay)));
+            self.load_replay(Arc::new(RwLock::new(replay)));
         }
     }
 
-    fn load_replay(&mut self, replay: Arc<Mutex<Replay>>) {
+    fn load_replay(&mut self, replay: Arc<RwLock<Replay>>) {
         let game_version = self.tab_state.world_of_warships_data.game_version.unwrap();
         {
             // Reset the chat state
@@ -498,8 +500,11 @@ impl ToolkitTabViewer<'_> {
         let (tx, rx) = mpsc::channel();
 
         let _join_handle = std::thread::spawn(move || {
-            let res = { replay.lock().parse(game_version.to_string().as_str()) };
-            let res = res.map(move |_| BackgroundTaskCompletion::ReplayLoaded { replay });
+            let res = { replay.read().parse(game_version.to_string().as_str()) };
+            let res = res.map(move |report| {
+                replay.write().battle_report = Some(report);
+                BackgroundTaskCompletion::ReplayLoaded { replay }
+            });
 
             let _ = tx.send(res);
         });
@@ -543,7 +548,7 @@ impl ToolkitTabViewer<'_> {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 if let Some(replay_file) = self.tab_state.world_of_warships_data.current_replay.as_ref() {
-                    let replay_file = replay_file.lock();
+                    let replay_file = replay_file.read();
                     self.build_replay_view(&replay_file, ui);
                 }
             });
