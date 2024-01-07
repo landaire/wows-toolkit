@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     path::Path,
-    rc::Rc,
     sync::{atomic::AtomicBool, mpsc, Arc, Mutex},
 };
 
@@ -22,7 +21,7 @@ use wows_replays::{
 };
 
 use itertools::Itertools;
-use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
+
 
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},

@@ -1,10 +1,7 @@
 use std::{
     collections::HashMap,
     error::Error,
-    fs::{read_dir, File},
-    io::Cursor,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         atomic::Ordering,
         mpsc::{self, TryRecvError},
@@ -16,7 +13,7 @@ use egui::{mutex::Mutex, OpenUrl, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
-use language_tags::LanguageTag;
+
 use notify::{
     event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
@@ -27,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
 use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species};
 use wowsunpack::{
-    idx::{self, FileNode},
+    idx::{FileNode},
     pkg::PkgFileLoader,
 };
 

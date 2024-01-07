@@ -2,7 +2,6 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,

@@ -3,7 +3,6 @@ use std::{
     fs::{read_dir, File},
     io::Cursor,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         mpsc::{self, TryRecvError},
         Arc,
@@ -12,7 +11,7 @@ use std::{
 
 use gettext::Catalog;
 use language_tags::LanguageTag;
-use wows_replays::{analyzer::battle_controller::BattleReport, game_params::Species, ReplayFile};
+use wows_replays::{game_params::Species};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
