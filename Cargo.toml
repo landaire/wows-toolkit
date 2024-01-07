@@ -21,9 +21,7 @@ wows-replays = { version = "0.1", git = "https://github.com/landaire/wows-replay
     "arc",
 ] }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.1", default-features = false, features = [
-    "arc",
-], path = "../wowsunpack" }
+wowsunpack = { version = "0.1", default-features = false, features = ["arc"] }
 egui_extras = { version = "0.24.0", features = ["syntect", "all_loaders"] }
 egui_dock = "0.9.0"
 rfd = "0.12.1"
