@@ -1,11 +1,10 @@
 use std::{
     borrow::Cow,
     path::Path,
-    rc::Rc,
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use chrono::Local;
+
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -19,7 +18,7 @@ use tap::Pipe;
 
 use wows_replays::{
     analyzer::{
-        battle_controller::{player, BattleController, BattleReport, ChatChannel, GameMessage, Player},
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
         AnalyzerMut,
     },
     resource_loader::ResourceLoader,
@@ -27,7 +26,7 @@ use wows_replays::{
 };
 
 use itertools::Itertools;
-use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
+
 
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
