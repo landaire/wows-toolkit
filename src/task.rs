@@ -11,12 +11,17 @@ use std::{
 
 use egui::mutex::RwLock;
 use gettext::Catalog;
+use image::EncodableLayout;
 use language_tags::LanguageTag;
+use octocrab::models::repos::{Asset, Release};
+use reqwest::Url;
+use tokio::runtime::Runtime;
 use wows_replays::{game_params::Species, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
 };
+use zip::ZipArchive;
 
 use crate::{app::WorldOfWarshipsData, error::ToolkitError, game_params::GameMetadataProvider, replay_parser::Replay};
 
@@ -25,23 +30,31 @@ pub struct ShipIcon {
     pub data: Vec<u8>,
 }
 
+pub struct DownloadProgress {
+    downloaded: u64,
+    total: u64,
+}
+
 pub struct BackgroundTask {
     pub receiver: mpsc::Receiver<Result<BackgroundTaskCompletion, ToolkitError>>,
     pub kind: BackgroundTaskKind,
 }
 
-#[derive(Clone, Copy)]
 pub enum BackgroundTaskKind {
     LoadingData,
     LoadingReplay,
+    Updating {
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
 }
 
 impl BackgroundTask {
-    pub fn build_description(&self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
+    pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => {
-                match self.kind {
+                match &mut self.kind {
                     BackgroundTaskKind::LoadingData => {
                         ui.spinner();
                         ui.label("Loading game data...");
@@ -49,6 +62,19 @@ impl BackgroundTask {
                     BackgroundTaskKind::LoadingReplay => {
                         ui.spinner();
                         ui.label("Loading replay...");
+                    }
+                    BackgroundTaskKind::Updating { rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => {
+                                *last_progress = Some(progress);
+                            }
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+
+                        if let Some(progress) = last_progress {
+                            ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text("Downloading Update"));
+                        }
                     }
                 }
                 None
@@ -67,6 +93,7 @@ pub enum BackgroundTaskCompletion {
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
     },
+    UpdateDownloaded(PathBuf),
 }
 
 fn replay_filepaths(wows_dir: &Path) -> Option<Vec<PathBuf>> {
@@ -229,4 +256,62 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         wows_data: data,
         replays,
     })
+}
+
+async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, ToolkitError> {
+    let mut body = reqwest::get(file).await?;
+
+    let total = body.content_length().expect("body has no content-length");
+    let mut downloaded = 0;
+    let file_path = Path::new("wows_toolkit.tmp.exe");
+
+    // We're going to be blocking here on I/O but it shouldn't matter since this
+    // application doesn't really use async
+    let mut zip_data = Vec::new();
+
+    while let Some(chunk) = body.chunk().await? {
+        downloaded += chunk.len();
+        let _ = tx.send(DownloadProgress {
+            downloaded: downloaded as u64,
+            total,
+        });
+
+        zip_data.extend_from_slice(chunk.as_bytes());
+    }
+
+    let cursor = Cursor::new(zip_data.as_slice());
+
+    let mut zip = ZipArchive::new(cursor)?;
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i)?;
+        if file.name().ends_with(".exe") {
+            let mut exe_data = Vec::with_capacity(file.size() as usize);
+            std::io::copy(&mut file, &mut exe_data)?;
+        }
+    }
+
+    std::fs::write(file_path, zip_data.as_slice())?;
+
+    Ok(file_path.to_path_buf())
+}
+
+pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let url = release.browser_download_url.clone();
+
+    runtime.spawn(async move {
+        let result = download_update(progress_tx, url).await.map(|path| BackgroundTaskCompletion::UpdateDownloaded(path));
+
+        tx.send(result);
+    });
+
+    BackgroundTask {
+        receiver: rx,
+        kind: BackgroundTaskKind::Updating {
+            rx: progress_rx,
+            last_progress: None,
+        },
+    }
 }

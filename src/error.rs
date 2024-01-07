@@ -13,7 +13,7 @@ pub enum ToolkitError {
     #[error("Could not read IDX file")]
     UnpackerIdx(#[from] IdxError),
 
-    #[error("I/O")]
+    #[error("An I/O error occurred: {0}")]
     Io(#[from] io::Error),
 
     #[error("Could not deserialize GameParams.data")]
@@ -27,4 +27,10 @@ pub enum ToolkitError {
 
     #[error("Background task completed")]
     BackgroundTaskCompleted,
+
+    #[error("A network error occurred while downloading an update: {0}")]
+    UpdateHttpError(#[from] reqwest::Error),
+
+    #[error("Could not not read update ZipArchive")]
+    ZipReadError(#[from] zip::result::ZipError),
 }

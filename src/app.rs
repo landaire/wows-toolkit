@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
+    env,
     error::Error,
     path::{Path, PathBuf},
+    process::Command,
     sync::{
         atomic::Ordering,
         mpsc::{self, TryRecvError},
@@ -25,6 +27,7 @@ use octocrab::models::repos::Release;
 
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
+use tokio::runtime::Runtime;
 use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
@@ -380,6 +383,9 @@ pub struct WowsToolkitApp {
     tab_state: TabState,
     #[serde(skip)]
     dock_state: DockState<Tab>,
+
+    #[serde(skip)]
+    runtime: Runtime,
 }
 
 impl Default for WowsToolkitApp {
@@ -393,6 +399,7 @@ impl Default for WowsToolkitApp {
             dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
+            runtime: Runtime::new().expect("failed to create tokio runtime"),
         }
     }
 }
@@ -423,14 +430,20 @@ impl WowsToolkitApp {
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // TODO: Merge these channels
-            if let Some(task) = &self.tab_state.background_task {
+            if let Some(task) = &mut self.tab_state.background_task {
                 if let Some(result) = task.build_description(ui) {
-                    match task.kind {
+                    match &task.kind {
                         BackgroundTaskKind::LoadingData => {
                             self.tab_state.allow_changing_wows_dir();
                         }
                         BackgroundTaskKind::LoadingReplay => {
                             // nothing to do
+                        }
+                        BackgroundTaskKind::Updating {
+                            rx: _rx,
+                            last_progress: _last_progress,
+                        } => {
+                            // do nothing
                         }
                     }
 
@@ -446,6 +459,21 @@ impl WowsToolkitApp {
                                     self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                 }
                                 self.tab_state.world_of_warships_data.current_replay = Some(replay);
+                            }
+                            BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
+                                let current_process = env::args().next().expect("current process has no path?");
+                                let current_process_new_path = format!("{}.old", current_process);
+                                // Rename this process
+                                std::fs::rename(current_process.clone(), &current_process_new_path).expect("failed to rename current process");
+                                // Rename the new exe
+                                std::fs::rename(new_exe, &current_process).expect("failed to rename new process");
+
+                                Command::new(current_process)
+                                    .arg(current_process_new_path)
+                                    .spawn()
+                                    .expect("failed to execute updated process");
+
+                                std::process::exit(0);
                             }
                         },
                         Err(ToolkitError::BackgroundTaskCompleted) => {
@@ -489,8 +517,7 @@ impl WowsToolkitApp {
     }
 
     fn check_for_updates(&mut self) {
-        let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        let result = rt.block_on(async {
+        let result = self.runtime.block_on(async {
             octocrab::instance()
                 .repos("landaire", "wows-toolkit")
                 .releases()
@@ -548,9 +575,23 @@ impl eframe::App for WowsToolkitApp {
                         if let Some(notes) = notes.as_mut() {
                             ui.text_edit_multiline(notes);
                         }
-                        if ui.button("View Release").clicked() {
-                            ui.ctx().open_url(OpenUrl::new_tab(url));
-                        }
+                        ui.horizontal(|ui| {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let asset = latest_release
+                                    .assets
+                                    .iter()
+                                    .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+                                if let Some(asset) = asset {
+                                    if ui.button("Install Update").clicked() {
+                                        self.tab_state.background_task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                    }
+                                }
+                            }
+                            if ui.button("View Release").clicked() {
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                            }
+                        });
                     });
                 });
             }
