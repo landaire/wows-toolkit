@@ -31,7 +31,7 @@ use crate::{
     game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
     task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
-    util::{build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
+    util::{self, build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
 const CHAT_VIEW_WIDTH: f32 = 200.0;
@@ -413,7 +413,7 @@ impl ToolkitTabViewer<'_> {
                     // Sort by filename -- WoWs puts the date first in a sortable format
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let resource_provider = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
-                    for (_path, replay) in files {
+                    for (path, replay) in files {
                         let label = {
                             let file = replay.lock();
                             let meta = &file.replay_file.meta;
@@ -433,7 +433,20 @@ impl ToolkitTabViewer<'_> {
                             [vehicle_name.as_str(), map_name.as_str(), match_type, mode, time].iter().join(" - ")
                         };
 
-                        if ui.add(Label::new(label).sense(Sense::click())).double_clicked() {
+                        if ui
+                            .add(Label::new(label).sense(Sense::click()))
+                            .context_menu(|ui| {
+                                if ui.button("Copy Path").clicked() {
+                                    ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
+                                    ui.close_menu();
+                                }
+                                if ui.button("Show in File Explorer").clicked() {
+                                    util::open_file_explorer(&path);
+                                    ui.close_menu();
+                                }
+                            })
+                            .double_clicked()
+                        {
                             self.load_replay(replay.clone());
                         }
                         ui.end_row();

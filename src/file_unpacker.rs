@@ -60,6 +60,8 @@ impl ToolkitTabViewer<'_> {
 
                             self.tab_state.file_viewer.lock().push(viewer);
                         }
+
+                        ui.close_menu();
                     }
                 }
             })

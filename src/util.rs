@@ -3,7 +3,7 @@ use flate2::{write::DeflateEncoder, Compression};
 use language_tags::LanguageTag;
 use log::debug;
 use serde_json::json;
-use std::io::Write;
+use std::{io::Write, path::Path, process::Command};
 use thousands::Separable;
 use wows_replays::{analyzer::battle_controller::VehicleEntity, game_params::GameParamProvider};
 
@@ -149,4 +149,24 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
     url
+}
+
+pub fn open_file_explorer(path: &Path) {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(path.parent().expect("failed to get replayparent directory"))
+            .spawn()
+            .unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg("--reveal").arg(path).spawn().unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(format!("/select,\"{}\"", path.to_str().unwrap())).spawn().unwrap();
+    }
 }
