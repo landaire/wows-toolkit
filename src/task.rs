@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use egui::mutex::{RwLock};
+use egui::mutex::RwLock;
 use gettext::Catalog;
 use language_tags::LanguageTag;
 use wows_replays::{game_params::Species, ReplayFile};

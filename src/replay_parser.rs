@@ -4,7 +4,6 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -26,7 +25,6 @@ use wows_replays::{
 };
 
 use itertools::Itertools;
-
 
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
