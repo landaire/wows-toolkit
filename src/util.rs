@@ -167,6 +167,6 @@ pub fn open_file_explorer(path: &Path) {
 
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer").arg(format!("/select,\"{}\"", path.to_str().unwrap())).spawn().unwrap();
+        Command::new("explorer.exe").arg("/select,").arg(path).spawn().unwrap();
     }
 }
