@@ -5412,7 +5412,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "bounded-vec-deque",
