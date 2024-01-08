@@ -4,6 +4,7 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
+use crate::icons;
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -251,7 +252,7 @@ impl ToolkitTabViewer<'_> {
                         });
                         ui.col(|ui| {
                             ui.menu_button("Actions", |ui| {
-                                if ui.small_button("Open Build in Browser").clicked() {
+                                if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
                                     let url = build_ship_config_url(entity, metadata_provider);
@@ -260,7 +261,7 @@ impl ToolkitTabViewer<'_> {
                                     ui.close_menu();
                                 }
 
-                                if ui.small_button("Copy Build Link").clicked() {
+                                if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
                                     let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
                                     let url = build_ship_config_url(entity, metadata_provider);
@@ -269,7 +270,7 @@ impl ToolkitTabViewer<'_> {
                                     ui.close_menu();
                                 }
 
-                                if ui.small_button("Copy Short Build Link").clicked() {
+                                if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
                                     let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
                                     let url = build_short_ship_config_url(entity, metadata_provider);
@@ -278,7 +279,7 @@ impl ToolkitTabViewer<'_> {
                                     ui.close_menu();
                                 }
 
-                                if ui.small_button("Open WoWs Numbers Page").clicked() {
+                                if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
                                     if let Some(url) = build_wows_numbers_url(entity) {
                                         ui.ctx().open_url(OpenUrl::new_tab(url));
                                     }
@@ -526,7 +527,7 @@ impl ToolkitTabViewer<'_> {
                     self.parse_replay(self.tab_state.settings.current_replay_path.clone());
                 }
 
-                if ui.button("Browse...").clicked() {
+                if ui.button(format!("{} Browse...", icons::FOLDER_OPEN)).clicked() {
                     if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
                         //println!("{:#?}", ReplayFile::from_file(&file));
 
@@ -535,7 +536,7 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 if let Some(_replays_dir) = self.tab_state.replays_dir.as_ref() {
-                    if ui.button("Load Live Game").clicked() {
+                    if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
                         self.parse_live_replay();
                     }
                 }

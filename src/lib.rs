@@ -10,3 +10,4 @@ mod task;
 mod util;
 pub use app::WowsToolkitApp;
 pub const APP_NAME: &str = "WoWs Toolkit";
+pub(crate) use egui_phosphor::regular as icons;

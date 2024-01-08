@@ -9,6 +9,7 @@ use std::{
         mpsc::{self, TryRecvError},
         Arc,
     },
+    time::{Duration, Instant},
 };
 
 use egui::{
@@ -35,6 +36,7 @@ use crate::{
     error::ToolkitError,
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
     game_params::GameMetadataProvider,
+    icons,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, ShipIcon},
@@ -48,11 +50,11 @@ pub enum Tab {
 }
 
 impl Tab {
-    fn tab_name(&self) -> &'static str {
+    fn tab_name(&self) -> String {
         match self {
-            Tab::Unpacker => "Resource Unpacker",
-            Tab::Settings => "Settings",
-            Tab::ReplayParser => "Replay Inspector",
+            Tab::Unpacker => format!("{} Resource Unpacker", icons::ARCHIVE),
+            Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
+            Tab::ReplayParser => format!("{} Replay Inspector", icons::MAGNIFYING_GLASS),
         }
     }
 }
@@ -190,6 +192,24 @@ pub enum NotifyFileEvent {
     Removed(PathBuf),
 }
 
+pub struct TimedMessage {
+    pub message: String,
+    pub expiration: Instant,
+}
+
+impl TimedMessage {
+    pub fn new(message: String) -> Self {
+        TimedMessage {
+            message,
+            expiration: Instant::now() + Duration::from_secs(10),
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.expiration < Instant::now()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabState {
@@ -236,6 +256,9 @@ pub struct TabState {
     pub background_task: Option<BackgroundTask>,
 
     #[serde(skip)]
+    pub timed_message: Option<TimedMessage>,
+
+    #[serde(skip)]
     pub can_change_wows_dir: bool,
 }
 
@@ -266,6 +289,7 @@ impl Default for TabState {
             file_receiver: None,
             background_task: None,
             can_change_wows_dir: false,
+            timed_message: None,
         }
     }
 }
@@ -410,6 +434,12 @@ impl WowsToolkitApp {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
+        // Include phosphor icons
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+
+        cc.egui_ctx.set_fonts(fonts);
+
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
@@ -453,12 +483,15 @@ impl WowsToolkitApp {
                                 self.tab_state.update_wows_dir(&new_dir);
                                 self.tab_state.world_of_warships_data = wows_data;
                                 self.tab_state.replay_files = replays;
+
+                                self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))
                             }
                             BackgroundTaskCompletion::ReplayLoaded { replay } => {
                                 {
                                     self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                 }
                                 self.tab_state.world_of_warships_data.current_replay = Some(replay);
+                                self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)))
                             }
                             BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
                                 let current_process = env::args().next().expect("current process has no path?");
@@ -511,6 +544,12 @@ impl WowsToolkitApp {
                 if done {
                     self.tab_state.unpacker_progress.take();
                     self.tab_state.last_progress.take();
+                }
+            } else if let Some(timed_message) = &self.tab_state.timed_message {
+                if !timed_message.is_expired() {
+                    ui.label(timed_message.message.as_str());
+                } else {
+                    self.tab_state.timed_message = None;
                 }
             }
         });
@@ -688,7 +727,7 @@ fn build_about_window(ui: &mut egui::Ui) {
 
 fn build_error_window(ui: &mut egui::Ui, error: &dyn Error) {
     ui.vertical(|ui| {
-        ui.label("An error occurred:");
+        ui.label(format!("{} An error occurred:", icons::WARNING));
         ui.label(error.to_string());
     });
 }
