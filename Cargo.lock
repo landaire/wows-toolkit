@@ -152,12 +152,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aliasable"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
-
-[[package]]
 name = "android-activity"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -600,12 +594,6 @@ dependencies = [
  "futures-lite",
  "log",
 ]
-
-[[package]]
-name = "bounded-vec-deque"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2225b558afc76c596898f5f1b3fc35cfce0eb1b13635cbd7d1b2a7177dc10ccd"
 
 [[package]]
 name = "bumpalo"
@@ -2374,15 +2362,6 @@ checksum = "c4a9b56eb56058f43dc66e58f40a214b2ccbc9f3df51861b63d51dec7b65bc3f"
 
 [[package]]
 name = "itertools"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
@@ -3088,31 +3067,6 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
-]
-
-[[package]]
-name = "ouroboros"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aab3e3891cfef81d47b93c6e0aeaf4828b2dc19c0bde389f4a988fbbfe5a8f4b"
-dependencies = [
- "aliasable",
- "ouroboros_macro",
- "static_assertions",
-]
-
-[[package]]
-name = "ouroboros_macro"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1dd5c45035b07108752f091edb8fcc13dcaffcdb8d9f40cc017e3c9afc1a5bd"
-dependencies = [
- "heck",
- "itertools 0.11.0",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 2.0.39",
 ]
 
 [[package]]
@@ -5415,8 +5369,6 @@ name = "wows_toolkit"
 version = "0.1.3"
 dependencies = [
  "bincode",
- "bounded-vec-deque",
- "byteorder",
  "data-encoding",
  "eframe",
  "egui",
@@ -5433,7 +5385,6 @@ dependencies = [
  "log",
  "notify",
  "octocrab",
- "ouroboros",
  "pickled",
  "reqwest",
  "rfd",
