@@ -362,7 +362,7 @@ impl ToolkitTabViewer<'_> {
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
                 ui.heading(player_name_with_clan(self_player));
-                ui.label(report.match_group());
+                ui.label(report.game_type());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
@@ -422,12 +422,17 @@ impl ToolkitTabViewer<'_> {
                             let map_id = format!("IDS_{}", meta.mapName.to_uppercase());
                             let map_name = resource_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone());
 
-                            let mode = meta.gameType.as_str();
-                            let scenario = meta.scenario.as_str();
+                            let mode = resource_provider
+                                .localized_name_from_id(&format!("IDS_{}", meta.gameType.to_ascii_uppercase()))
+                                .expect("failed to get game type translation");
+
+                            let scenario = resource_provider
+                                .localized_name_from_id(&format!("IDS_SCENARIO_{}", meta.scenario.to_ascii_uppercase()))
+                                .expect("failed to get scenario translation");
 
                             let time = meta.dateTime.as_str();
 
-                            [vehicle_name.as_str(), map_name.as_str(), scenario, mode, time].iter().join(" - ")
+                            [vehicle_name.as_str(), map_name.as_str(), scenario.as_str(), mode.as_str(), time].iter().join(" - ")
                         };
 
                         if ui
