@@ -362,7 +362,7 @@ impl ToolkitTabViewer<'_> {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
-                ui.heading(player_name_with_clan(self_player));
+                ui.label(player_name_with_clan(self_player));
                 ui.label(report.game_type());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
