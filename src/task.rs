@@ -13,7 +13,7 @@ use egui::mutex::RwLock;
 use gettext::Catalog;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
-use octocrab::models::repos::{Asset, Release};
+use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use wows_replays::{game_params::Species, ReplayFile};
