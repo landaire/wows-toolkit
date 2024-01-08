@@ -423,15 +423,16 @@ impl ToolkitTabViewer<'_> {
                             let map_name = resource_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone());
 
                             let mode = meta.gameType.as_str();
-                            let match_type = meta.matchGroup.as_str();
+                            let scenario = meta.scenario.as_str();
 
                             let time = meta.dateTime.as_str();
 
-                            [vehicle_name.as_str(), map_name.as_str(), match_type, mode, time].iter().join(" - ")
+                            [vehicle_name.as_str(), map_name.as_str(), scenario, mode, time].iter().join(" - ")
                         };
 
                         if ui
-                            .add(Label::new(label).sense(Sense::click()))
+                            .add(Label::new(label.as_str()).sense(Sense::click()))
+                            .on_hover_text(label.as_str())
                             .context_menu(|ui| {
                                 if ui.button("Copy Path").clicked() {
                                     ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
