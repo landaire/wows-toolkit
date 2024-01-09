@@ -243,16 +243,17 @@ impl ToolkitTabViewer<'_> {
                         });
 
                         let species = ship.species().expect("ship has no species?");
-                        let (skill_points, num_skills) = entity
+                        let (skill_points, num_skills, highest_tier) = entity
                             .commander_skills()
                             .map(|skills| {
                                 let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
+                                let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
 
-                                (points, skills.len())
+                                (points, skills.len(), highest_tier.unwrap_or(0))
                             })
-                            .unwrap_or((0, 0));
+                            .unwrap_or((0, 0, 0));
                         ui.col(|ui| {
-                            ui.label(util::colorize_captain_points(skill_points, num_skills));
+                            ui.label(util::colorize_captain_points(skill_points, num_skills, highest_tier));
                         });
                         ui.col(|ui| {
                             ui.label(entity.props().ship_config().modernization().len().to_string());
