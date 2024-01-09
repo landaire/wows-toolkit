@@ -200,13 +200,14 @@ impl ToolkitTabViewer<'_> {
                             }
 
                             let is_dark_mode = ui.visuals().dark_mode;
-                            let name_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+                            let name_color = if player.is_abuser() {
+                                Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
+                            } else {
+                                player_color_for_team_relation(player.relation(), is_dark_mode)
+                            };
                             ui.label(RichText::new(player_name_with_clan(player)).color(name_color));
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
-                            }
-                            if player.is_abuser() {
-                                ui.label(icons::RADIOACTIVE).on_hover_text("Player is marked as an \"abuser\"");
                             }
                         });
 
