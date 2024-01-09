@@ -251,7 +251,7 @@ impl ToolkitTabViewer<'_> {
                             ui.label(format!("{}pts ({} skills)", skill_points, num_skills));
                         });
                         ui.col(|ui| {
-                            ui.menu_button("Actions", |ui| {
+                            ui.menu_button(icons::DOTS_THREE, |ui| {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
 
