@@ -457,6 +457,12 @@ impl WowsToolkitApp {
         // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
         this.tab_state.settings.locale = Some("en".to_string());
 
+        let default_wows_dir = "C:\\Games\\World_of_Warships";
+        let default_wows_path = Path::new(default_wows_dir);
+        if default_wows_path.exists() {
+            this.tab_state.settings.wows_dir = default_wows_dir.to_string();
+        }
+
         this
     }
 
