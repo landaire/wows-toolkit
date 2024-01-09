@@ -722,7 +722,7 @@ impl eframe::App for WowsToolkitApp {
 fn build_about_window(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.label("Made by landaire.");
-        ui.label("Thanks to Trackpad, TTaro, lkolby for their contributions.");
+        ui.label("Thanks to Trackpad, TTaro, lkolbly for their contributions.");
         if ui.button("View on GitHub").clicked() {
             ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
         }
