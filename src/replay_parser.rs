@@ -116,7 +116,7 @@ impl ToolkitTabViewer<'_> {
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(50.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
@@ -250,17 +250,30 @@ impl ToolkitTabViewer<'_> {
                         });
 
                         let species = ship.species().expect("ship has no species?");
-                        let (skill_points, num_skills, highest_tier) = entity
+                        let (skill_points, num_skills, highest_tier, num_tier_1_skills) = entity
                             .commander_skills()
                             .map(|skills| {
                                 let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
                                 let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
+                                let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
+                                    if skill.tier().get_for_species(species.clone()) == 1 {
+                                        accum += 1;
+                                    }
+                                    accum
+                                });
 
-                                (points, skills.len(), highest_tier.unwrap_or(0))
+                                (points, skills.len(), highest_tier.unwrap_or(0), num_tier_1_skills)
                             })
-                            .unwrap_or((0, 0, 0));
+                            .unwrap_or((0, 0, 0, 0));
                         ui.col(|ui| {
-                            ui.label(util::colorize_captain_points(skill_points, num_skills, highest_tier));
+                            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills);
+                            ui.label(label).pipe(|label| {
+                                if let Some(hover_text) = hover_text {
+                                    label.on_hover_text(hover_text)
+                                } else {
+                                    label
+                                }
+                            });
                         });
                         ui.col(|ui| {
                             ui.label(entity.props().ship_config().modernization().len().to_string());
