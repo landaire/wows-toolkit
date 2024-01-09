@@ -15,6 +15,8 @@ This is a toolkit for interacting with World of Warships files
 3. ???
 4. Do things
 
+The application will automatically check for updates on startup and, if available, will present update details in-app.
+
 ## Pre-built Binaries
 
 Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases. For all other platforms you will have to compile yourself.

@@ -585,6 +585,8 @@ impl WowsToolkitApp {
                     if app_version < version {
                         self.update_window_open = true;
                         self.latest_release = Some(latest_release);
+                    } else {
+                        self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
                     }
                 }
             }
@@ -669,6 +671,10 @@ impl eframe::App for WowsToolkitApp {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
+                        if ui.button("Check for Updates").clicked() {
+                            self.checked_for_updates = false;
+                            ui.close_menu();
+                        }
                         if ui.button("About").clicked() {
                             self.show_about_window = true;
                             ui.close_menu();
