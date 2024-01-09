@@ -6,12 +6,18 @@ This is a toolkit for interacting with World of Warships files
 
 ![WoWs Toolkit Unpacker Tab](assets/wows_toolkit_unpacker_screenshot.png)
 
+![WoWs Toolkit Unpacker Tab With Filtering](assets/wows_toolkit_unpacker_filtering.png)
+
 ## Usage
 
 1. Run the application
-2. Set the World of Warships directory in the settings tab
+2. Set the World of Warships directory in the settings tab (defaults to `C:\Games\World_of_Warships` if it exists)
 3. ???
 4. Do things
+
+## Pre-built Binaries
+
+Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases. For all other platforms you will have to compile yourself.
 
 ## Building Locally
 
