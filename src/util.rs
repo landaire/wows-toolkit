@@ -1,4 +1,4 @@
-use egui::Color32;
+use egui::{Color32, RichText};
 use flate2::{write::DeflateEncoder, Compression};
 use language_tags::LanguageTag;
 use log::debug;
@@ -149,6 +149,17 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
     url
+}
+
+pub fn colorize_captain_points(points: usize, skills: usize) -> RichText {
+    let color = match points {
+        0..=9 => Color32::LIGHT_RED,
+        10..=12 => Color32::from_rgb(0xfc, 0xae, 0x1e), // orange
+        13..=16 => Color32::YELLOW,
+        _ => Color32::LIGHT_GREEN,
+    };
+
+    RichText::new(format!("{}pts ({} skills)", points, skills)).color(color)
 }
 
 pub fn open_file_explorer(path: &Path) {

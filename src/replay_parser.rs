@@ -116,6 +116,7 @@ impl ToolkitTabViewer<'_> {
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
@@ -147,6 +148,9 @@ impl ToolkitTabViewer<'_> {
                 });
                 header.col(|ui| {
                     ui.strong("Allocated Skills");
+                });
+                header.col(|ui| {
+                    ui.strong("Modules");
                 });
                 header.col(|ui| {
                     ui.strong("Actions");
@@ -248,7 +252,10 @@ impl ToolkitTabViewer<'_> {
                             })
                             .unwrap_or((0, 0));
                         ui.col(|ui| {
-                            ui.label(format!("{}pts ({} skills)", skill_points, num_skills));
+                            ui.label(util::colorize_captain_points(skill_points, num_skills));
+                        });
+                        ui.col(|ui| {
+                            ui.label(entity.props().ship_config().modernization().len().to_string());
                         });
                         ui.col(|ui| {
                             ui.menu_button(icons::DOTS_THREE, |ui| {
