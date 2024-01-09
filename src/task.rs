@@ -16,7 +16,7 @@ use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
-use wows_replays::{game_params::Species, ReplayFile};
+use wows_replays::{game_params::Species, version, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,
@@ -149,6 +149,18 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
     icons
 }
 
+fn current_build_from_preferences(path: &Path) -> Option<usize> {
+    let data = std::fs::read_to_string(path).ok()?;
+    let start_of_node = data.find("<last_server_version>")?;
+    let end_of_node = data[start_of_node..].find("</last_server_version>")?;
+    let version_str = &data[start_of_node + "<last_server_version>".len()..(start_of_node + end_of_node)].trim();
+
+    let mut parts = version_str.split(',');
+    let build_num = parts.nth(3)?;
+
+    build_num.parse().ok()
+}
+
 pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, crate::error::ToolkitError> {
     let mut idx_files = Vec::new();
     let bin_dir = wows_directory.join("bin");
@@ -156,31 +168,40 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
-    let mut highest_number = None;
-    for file in read_dir(wows_directory.join("bin"))? {
-        if file.is_err() {
-            continue;
-        }
+    let mut latest_build = None;
 
-        let file = file.unwrap();
-        if let Ok(ty) = file.file_type() {
-            if ty.is_file() {
+    // Check to see if we can get a build from the preferences file
+    let prefs_file = wows_directory.join("preferences.xml");
+    if prefs_file.exists() {
+        latest_build = current_build_from_preferences(&prefs_file);
+    }
+
+    if latest_build.is_none() {
+        for file in read_dir(wows_directory.join("bin"))? {
+            if file.is_err() {
                 continue;
             }
 
-            if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
-                if highest_number.is_none() || highest_number.map(|number| number < build_num).unwrap_or(false) {
-                    highest_number = Some(build_num)
+            let file = file.unwrap();
+            if let Ok(ty) = file.file_type() {
+                if ty.is_file() {
+                    continue;
+                }
+
+                if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
+                    if latest_build.is_none() || latest_build.map(|number| number < build_num).unwrap_or(false) {
+                        latest_build = Some(build_num)
+                    }
                 }
             }
         }
     }
 
-    if highest_number.is_none() {
+    if latest_build.is_none() {
         return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
-    let number = highest_number.unwrap();
+    let number = latest_build.unwrap();
     for file in read_dir(wows_directory.join("bin").join(format!("{}", number)).join("idx"))? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
