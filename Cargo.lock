@@ -5396,7 +5396,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bincode",
  "data-encoding",
