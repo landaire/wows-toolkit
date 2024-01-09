@@ -448,11 +448,14 @@ impl WowsToolkitApp {
                 saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone()));
             }
 
+            saved_state.tab_state.settings.locale = Some("en".to_string());
+
             return saved_state;
         }
 
         let mut this: Self = Default::default();
-        this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
+        // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
+        this.tab_state.settings.locale = Some("en".to_string());
 
         this
     }
