@@ -308,10 +308,10 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
         if file.name().ends_with(".exe") {
             let mut exe_data = Vec::with_capacity(file.size() as usize);
             std::io::copy(&mut file, &mut exe_data)?;
+            std::fs::write(file_path, exe_data.as_slice())?;
+            break;
         }
     }
-
-    std::fs::write(file_path, zip_data.as_slice())?;
 
     Ok(file_path.to_path_buf())
 }
