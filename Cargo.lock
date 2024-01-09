@@ -3764,15 +3764,6 @@ dependencies = [
 
 [[package]]
 name = "roxmltree"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "921904a62e410e37e215c40381b7117f830d9d89ba60ab5236170541dd25646b"
-dependencies = [
- "xmlparser",
-]
-
-[[package]]
-name = "roxmltree"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cd14fd5e3b777a7422cca79358c57a8f6e3a703d9ac187448d0daf220c2407f"
@@ -4882,7 +4873,7 @@ dependencies = [
  "imagesize",
  "kurbo",
  "log",
- "roxmltree 0.19.0",
+ "roxmltree",
  "simplecss",
  "siphasher",
  "svgtypes",
@@ -5563,7 +5554,7 @@ dependencies = [
 [[package]]
 name = "wows-replays"
 version = "0.1.0"
-source = "git+https://github.com/landaire/wows-replays.git#09e2d024964deaaea491a48b94b51c698b0c38bd"
+source = "git+https://github.com/landaire/wows-replays.git#f10cf936acca4d798d7b80ccd5b706da590faebe"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -5573,7 +5564,7 @@ dependencies = [
  "modular-bitfield",
  "nom",
  "pickled",
- "roxmltree 0.14.1",
+ "roxmltree",
  "rust-crypto",
  "rust-embed",
  "serde",
@@ -5736,12 +5727,6 @@ name = "xml-rs"
 version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d8f380ae16a37b30e6a2cf67040608071384b1450c189e61bea3ff57cde922d"
-
-[[package]]
-name = "xmlparser"
-version = "0.13.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xmlwriter"
