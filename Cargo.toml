@@ -1,6 +1,6 @@
 [package]
 name = "wows_toolkit"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["landaire"]
 edition = "2021"
 rust-version = "1.72"
@@ -68,7 +68,7 @@ debug = true
 [patch.crates-io]
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
 [patch."https://github.com/landaire/wows-replays.git"]
-# wows-replays = { path = "../wows-replays/parser" }
+#wows-replays = { path = "../wows-replays/parser" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }
