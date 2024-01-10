@@ -288,7 +288,7 @@ impl Default for TabState {
             replay_files: None,
             file_receiver: None,
             background_task: None,
-            can_change_wows_dir: false,
+            can_change_wows_dir: true,
             timed_message: None,
         }
     }
