@@ -39,7 +39,8 @@ use crate::{
     icons,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},
-    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, ShipIcon},
+    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
+    wows_data::WorldOfWarshipsData,
 };
 
 #[derive(Clone)]
@@ -125,23 +126,6 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
-pub struct WorldOfWarshipsData {
-    pub file_tree: FileNode,
-
-    pub filtered_files: Vec<(wowsunpack::Rc<PathBuf>, FileNode)>,
-
-    pub pkg_loader: Arc<PkgFileLoader>,
-
-    /// We may fail to load game params
-    pub game_metadata: Option<Arc<GameMetadataProvider>>,
-
-    pub ship_icons: HashMap<Species, Arc<ShipIcon>>,
-
-    pub game_version: usize,
-
-    pub replays_dir: PathBuf,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct ReplaySettings {
     pub show_game_chat: bool,
@@ -207,7 +191,7 @@ impl TimedMessage {
 #[serde(default)]
 pub struct TabState {
     #[serde(skip)]
-    pub world_of_warships_data: Option<Arc<RwLock<WorldOfWarshipsData>>>,
+    pub world_of_warships_data: Option<Arc<WorldOfWarshipsData>>,
 
     pub filter: String,
 
@@ -287,7 +271,6 @@ impl TabState {
                     match file_event {
                         NotifyFileEvent::Added(new_file) => {
                             if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                                let wows_data = wows_data.write();
                                 if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
                                     let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
                                     let replay = Replay::new(replay_file, game_metadata.clone());
@@ -477,7 +460,7 @@ impl WowsToolkitApp {
                         Ok(data) => match data {
                             BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
                                 self.tab_state.update_wows_dir(&new_dir, &wows_data.replays_dir);
-                                self.tab_state.world_of_warships_data = Some(Arc::new(RwLock::new(wows_data)));
+                                self.tab_state.world_of_warships_data = Some(Arc::new(wows_data));
                                 self.tab_state.replay_files = replays;
 
                                 self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))

@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use crate::{icons, task::ShipIcon, update_background_task};
+use crate::{icons, update_background_task, wows_data::ShipIcon};
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -97,18 +97,15 @@ impl ToolkitTabViewer<'_> {
         self.tab_state
             .world_of_warships_data
             .as_ref()
-            .and_then(|wows_data| wows_data.read().ship_icons.get(&species).cloned())
+            .and_then(|wows_data| wows_data.ship_icons.get(&species).cloned())
     }
 
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
-        self.tab_state
-            .world_of_warships_data
-            .as_ref()
-            .and_then(|wows_data| wows_data.read().game_metadata.clone())
+        self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.game_metadata.clone())
     }
 
     fn replays_dir(&self) -> Option<PathBuf> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.replays_dir.clone())
     }
 
     fn build_replay_player_list(&self, report: &BattleReport, ui: &mut egui::Ui) {
@@ -491,7 +488,9 @@ impl ToolkitTabViewer<'_> {
                             })
                             .double_clicked()
                         {
-                            update_background_task!(self.tab_state.background_task, self.load_replay(replay.clone()));
+                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                update_background_task!(self.tab_state.background_task, wows_data.load_replay(replay.clone()));
+                            }
                         }
                         ui.end_row();
                     }
@@ -500,66 +499,8 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn parse_live_replay(&mut self) -> Option<BackgroundTask> {
-        if let Some(replays_dir) = self.replays_dir() {
-            let meta = replays_dir.join("tempArenaInfo.json");
-            let replay = replays_dir.join("temp.wowsreplay");
-
-            let meta_data = std::fs::read(meta);
-            let replay_data = std::fs::read(replay);
-
-            if meta_data.is_err() || replay_data.is_err() {
-                return None;
-            }
-
-            let replay_file: ReplayFile = ReplayFile::from_decrypted_parts(meta_data.unwrap(), replay_data.unwrap()).unwrap();
-            let game_metadata = self.metadata_provider().unwrap();
-            let replay = Replay::new(replay_file, game_metadata);
-
-            self.load_replay(Arc::new(RwLock::new(replay)))
-        } else {
-            None
-        }
-    }
-
-    fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) -> Option<BackgroundTask> {
-        if self.tab_state.world_of_warships_data.is_some() {
-            let path = replay_path.as_ref();
-
-            let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-            let game_metadata = self.metadata_provider().clone().unwrap();
-            let replay = Replay::new(replay_file, game_metadata);
-
-            self.load_replay(Arc::new(RwLock::new(replay)))
-        } else {
-            None
-        }
-    }
-
-    #[must_use]
-    fn load_replay(&mut self, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
-        let game_version = self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().game_version).unwrap();
-        {
-            // Reset the chat state
-            self.tab_state.replay_parser_tab.lock().game_chat.clear();
-        }
-
-        let (tx, rx) = mpsc::channel();
-
-        let _join_handle = std::thread::spawn(move || {
-            let res = { replay.read().parse(game_version.to_string().as_str()) };
-            let res = res.map(move |report| {
-                replay.write().battle_report = Some(report);
-                BackgroundTaskCompletion::ReplayLoaded { replay }
-            });
-
-            let _ = tx.send(res);
-        });
-
-        Some(BackgroundTask {
-            receiver: rx,
-            kind: BackgroundTaskKind::LoadingReplay,
-        })
+    pub fn clear_chat(&mut self, replay: Arc<RwLock<Replay>>) {
+        self.tab_state.replay_parser_tab.lock().game_chat.clear();
     }
 
     /// Builds the replay parser tab
@@ -569,7 +510,12 @@ impl ToolkitTabViewer<'_> {
                 ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().into_owned()).hint_text("Current Replay File"));
 
                 if ui.button("Parse").clicked() {
-                    update_background_task!(self.tab_state.background_task, self.parse_replay(self.tab_state.settings.current_replay_path.clone()));
+                    if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                        update_background_task!(
+                            self.tab_state.background_task,
+                            wows_data.parse_replay(self.tab_state.settings.current_replay_path.clone())
+                        );
+                    }
                 }
 
                 if ui.button(format!("{} Browse...", icons::FOLDER_OPEN)).clicked() {
@@ -583,7 +529,9 @@ impl ToolkitTabViewer<'_> {
                 // Only show the live game button if the replays dir exists
                 if let Some(_replays_dir) = self.replays_dir() {
                     if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
-                        update_background_task!(self.tab_state.background_task, self.parse_live_replay());
+                        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                            update_background_task!(self.tab_state.background_task, wows_data.parse_live_replay());
+                        }
                     }
                 }
             });

@@ -8,6 +8,7 @@ mod plaintext_viewer;
 mod replay_parser;
 mod task;
 mod util;
+mod wows_data;
 pub use app::WowsToolkitApp;
 pub const APP_NAME: &str = "WoWs Toolkit";
 pub(crate) use egui_phosphor::regular as icons;

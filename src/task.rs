@@ -23,12 +23,12 @@ use wowsunpack::{
 };
 use zip::ZipArchive;
 
-use crate::{app::WorldOfWarshipsData, error::ToolkitError, game_params::GameMetadataProvider, replay_parser::Replay};
-
-pub struct ShipIcon {
-    pub path: String,
-    pub data: Vec<u8>,
-}
+use crate::{
+    error::ToolkitError,
+    game_params::GameMetadataProvider,
+    replay_parser::Replay,
+    wows_data::{ShipIcon, WorldOfWarshipsData},
+};
 
 pub struct DownloadProgress {
     downloaded: u64,

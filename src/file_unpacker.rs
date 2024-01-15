@@ -28,7 +28,7 @@ const PLAINTEXT_FILE_TYPES: [&str; 3] = [".xml", ".json", ".txt"];
 
 impl ToolkitTabViewer<'_> {
     fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().pkg_loader.clone())
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.pkg_loader.clone())
     }
 
     fn add_view_file_menu(&self, file_label: Response, node: &FileNode) -> Response {
@@ -181,7 +181,7 @@ impl ToolkitTabViewer<'_> {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
                 let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                    let files = &wows_data.read().filtered_files;
+                    let files = &wows_data.filtered_files;
                     if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
                         if self.tab_state.filter.contains('*') && glob.is_ok() {
@@ -228,7 +228,6 @@ impl ToolkitTabViewer<'_> {
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                let wows_data = wows_data.read();
                                 let file_tree = &wows_data.file_tree;
                                 if let Some(filtered_files) = &filter_list {
                                     self.build_file_list_from_array(ui, filtered_files.iter());
