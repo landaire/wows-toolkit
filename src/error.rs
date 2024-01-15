@@ -22,8 +22,8 @@ pub enum ToolkitError {
     #[error("Unexpected field type for {0:?}")]
     GameParamsUnexpectedType(&'static str),
 
-    #[error("Replay version {expected:?} does not match loaded game version {actual:?}")]
-    ReplayVersionMismatch { expected: String, actual: String },
+    #[error("Replay version {replay_version:?} does not match loaded game version {game_version:?}")]
+    ReplayVersionMismatch { game_version: String, replay_version: String },
 
     #[error("Background task completed")]
     BackgroundTaskCompleted,

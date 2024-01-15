@@ -67,8 +67,8 @@ impl Replay {
         assert!(version_parts.len() == 4);
         if version_parts[3] != expected_build {
             return Err(ToolkitError::ReplayVersionMismatch {
-                expected: expected_build.to_string(),
-                actual: version_parts[3].to_string(),
+                game_version: expected_build.to_string(),
+                replay_version: version_parts[3].to_string(),
             });
         }
 
