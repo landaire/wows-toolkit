@@ -549,12 +549,6 @@ impl ToolkitTabViewer<'_> {
         })
     }
 
-    fn update_background_task(&mut self, task: Option<BackgroundTask>) {
-        if task.is_some() {
-            self.tab_state.background_task = task;
-        }
-    }
-
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
