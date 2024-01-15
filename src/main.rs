@@ -1,12 +1,32 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::io::Write;
+
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
-    use std::{env, path::Path};
+    use std::{env, fs::File, path::Path};
 
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    use chrono::Local;
+    use log::LevelFilter;
+
+    let target = Box::new(File::create("log.txt").expect("Can't create file"));
+    env_logger::Builder::new()
+        .target(env_logger::Target::Pipe(target))
+        .filter(None, LevelFilter::Debug)
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "[{} {} {}:{}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+        })
+        .init();
 
     let icon_data: &[u8] = &include_bytes!("../assets/wows_toolkit.png")[..];
 

@@ -20,6 +20,7 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 
+use log::debug;
 use notify::{
     event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
@@ -303,12 +304,12 @@ impl TabState {
             let _ = watcher.unwatch(&old_replays_dir);
             watcher
         } else {
-            eprintln!("creating filesystem watcher");
+            debug!("creating filesystem watcher");
             let (tx, rx) = mpsc::channel();
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) => {
                     // TODO: maybe properly handle moves?
-                    println!("{:?}", event);
+                    debug!("filesytem event: {:?}", event);
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
@@ -327,7 +328,7 @@ impl TabState {
                         }
                     }
                 }
-                Err(e) => println!("watch error: {:?}", e),
+                Err(e) => debug!("watch error: {:?}", e),
             })
             .expect("failed to create fs watcher for replays dir");
 

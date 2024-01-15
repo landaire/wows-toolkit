@@ -12,6 +12,7 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 
+use log::debug;
 use tap::Pipe;
 
 use wows_replays::{
@@ -84,7 +85,7 @@ impl Replay {
                 Ok(controller.build_report())
             }
             Err(e) => {
-                eprintln!("{:?}", e);
+                debug!("{:?}", e);
                 controller.finish();
                 Ok(controller.build_report())
             }

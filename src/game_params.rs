@@ -12,6 +12,7 @@ use flate2::read::ZlibDecoder;
 use gettext::Catalog;
 use itertools::Itertools;
 
+use log::debug;
 use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
 use wows_replays::{game_params::*, parse_scripts, resource_loader::ResourceLoader, rpc::entitydefs::EntitySpec, Rc};
@@ -143,7 +144,6 @@ macro_rules! game_param_to_type {
 /// TODO: Too many unpredictable schema differences >:(
 /// Need to just create structs for everything.
 fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Result<Vec<CrewSkillModifier>, CrewSkillModifierBuilderError> {
-    eprintln!("{:#?}", modifiers);
     modifiers
         .iter()
         .filter_map(|(modifier_name, modifier_data)| {
@@ -441,7 +441,7 @@ struct CachedGameParams {
 
 impl GameMetadataProvider {
     pub fn from_pkg(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
-        println!("loading game params");
+        debug!("loading game params");
         let old_cache_path = Path::new("game_params.bin");
 
         let cache_path = if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
@@ -457,7 +457,7 @@ impl GameMetadataProvider {
         } else {
             old_cache_path.to_path_buf()
         };
-        println!("deserializing gameparams");
+        debug!("deserializing gameparams");
 
         let start = Instant::now();
         let params = cache_path
@@ -590,12 +590,12 @@ impl GameMetadataProvider {
         };
 
         let now = Instant::now();
-        println!("took {} seconds to load", (now - start).as_secs());
+        debug!("took {} seconds to load", (now - start).as_secs());
 
         let param_id_to_translation_id = HashMap::from_iter(params.iter().map(|param| (param.id(), format!("IDS_{}", param.index()))));
 
         let data_file_loader = wows_replays::version::DataFileWithCallback::new(|path| {
-            println!("requesting file: {path}");
+            debug!("requesting file: {path}");
 
             let path = Path::new(path);
 

@@ -214,9 +214,7 @@ impl ToolkitTabViewer<'_> {
                             strip.cell(|ui| {
                                 if let Some(filter_list) = &filter_list {
                                     if ui.button("Add All").clicked() {
-                                        println!("button clicked");
                                         let mut items_to_extract = self.tab_state.items_to_extract.lock();
-                                        println!("filter_list: {}", filter_list.len());
                                         for file in filter_list {
                                             items_to_extract.push(file.1.clone());
                                         }
