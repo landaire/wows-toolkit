@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use crate::icons;
+use crate::{icons, update_background_task};
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -488,7 +488,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn parse_live_replay(&mut self) {
+    fn parse_live_replay(&mut self) -> Option<BackgroundTask> {
         if let Some(replays_dir) = self.tab_state.replays_dir.as_ref() {
             let meta = replays_dir.join("tempArenaInfo.json");
             let replay = replays_dir.join("temp.wowsreplay");
@@ -497,18 +497,20 @@ impl ToolkitTabViewer<'_> {
             let replay_data = std::fs::read(replay);
 
             if meta_data.is_err() || replay_data.is_err() {
-                return;
+                return None;
             }
 
             let replay_file: ReplayFile = ReplayFile::from_decrypted_parts(meta_data.unwrap(), replay_data.unwrap()).unwrap();
             let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
-            self.load_replay(Arc::new(RwLock::new(replay)));
+            self.load_replay(Arc::new(RwLock::new(replay)))
+        } else {
+            None
         }
     }
 
-    fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) {
+    fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) -> Option<BackgroundTask> {
         if self.tab_state.world_of_warships_data.is_ready() {
             let path = replay_path.as_ref();
 
@@ -516,11 +518,13 @@ impl ToolkitTabViewer<'_> {
             let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
-            self.load_replay(Arc::new(RwLock::new(replay)));
+            self.load_replay(Arc::new(RwLock::new(replay)))
+        } else {
+            None
         }
     }
 
-    fn load_replay(&mut self, replay: Arc<RwLock<Replay>>) {
+    fn load_replay(&mut self, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
         let game_version = self.tab_state.world_of_warships_data.game_version.unwrap();
         {
             // Reset the chat state
@@ -539,10 +543,16 @@ impl ToolkitTabViewer<'_> {
             let _ = tx.send(res);
         });
 
-        self.tab_state.background_task = Some(BackgroundTask {
+        Some(BackgroundTask {
             receiver: rx,
             kind: BackgroundTaskKind::LoadingReplay,
-        });
+        })
+    }
+
+    fn update_background_task(&mut self, task: Option<BackgroundTask>) {
+        if task.is_some() {
+            self.tab_state.background_task = task;
+        }
     }
 
     /// Builds the replay parser tab
@@ -552,7 +562,7 @@ impl ToolkitTabViewer<'_> {
                 ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().into_owned()).hint_text("Current Replay File"));
 
                 if ui.button("Parse").clicked() {
-                    self.parse_replay(self.tab_state.settings.current_replay_path.clone());
+                    update_background_task!(self.tab_state.background_task, self.parse_replay(self.tab_state.settings.current_replay_path.clone()));
                 }
 
                 if ui.button(format!("{} Browse...", icons::FOLDER_OPEN)).clicked() {
@@ -565,7 +575,7 @@ impl ToolkitTabViewer<'_> {
 
                 if let Some(_replays_dir) = self.tab_state.replays_dir.as_ref() {
                     if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
-                        self.parse_live_replay();
+                        update_background_task!(self.tab_state.background_task, self.parse_live_replay());
                     }
                 }
             });

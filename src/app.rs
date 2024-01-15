@@ -750,3 +750,13 @@ fn build_error_window(ui: &mut egui::Ui, error: &dyn Error) {
         ui.label(error.to_string());
     });
 }
+
+#[macro_export]
+macro_rules! update_background_task {
+    ($saved_task:expr, $background_task:expr) => {
+        let task = $background_task;
+        if task.is_some() {
+            $saved_task = $background_task;
+        }
+    };
+}
