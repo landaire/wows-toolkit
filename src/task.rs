@@ -125,7 +125,7 @@ fn replay_filepaths(wows_dir: &Path) -> Option<Vec<PathBuf>> {
     }
 }
 
-fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, ShipIcon> {
+fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<ShipIcon>> {
     // Try loading ship icons
     let species = [
         Species::AirCarrier,
@@ -136,29 +136,26 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
         Species::Auxiliary,
     ];
 
-    let icons: HashMap<Species, ShipIcon> = HashMap::from_iter(species.iter().map(|species| {
+    let icons: HashMap<Species, Arc<ShipIcon>> = HashMap::from_iter(species.iter().map(|species| {
         let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
         let icon_node = file_tree.find(&path).expect("failed to find file");
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
-        (species.clone(), ShipIcon { path, data: icon_data })
+        (species.clone(), Arc::new(ShipIcon { path, data: icon_data }))
     }));
 
     icons
 }
 
-fn current_build_from_preferences(path: &Path) -> Option<usize> {
+fn current_build_from_preferences(path: &Path) -> Option<String> {
     let data = std::fs::read_to_string(path).ok()?;
     let start_of_node = data.find("<last_server_version>")?;
     let end_of_node = data[start_of_node..].find("</last_server_version>")?;
     let version_str = &data[start_of_node + "<last_server_version>".len()..(start_of_node + end_of_node)].trim();
 
-    let mut parts = version_str.split(',');
-    let build_num = parts.nth(3)?;
-
-    build_num.parse().ok()
+    Some(version_str.to_string())
 }
 
 pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, crate::error::ToolkitError> {
@@ -169,11 +166,25 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     let mut latest_build = None;
+    let mut replays_dir = wows_directory.join("replays");
 
     // Check to see if we can get a build from the preferences file
     let prefs_file = wows_directory.join("preferences.xml");
     if prefs_file.exists() {
-        latest_build = current_build_from_preferences(&prefs_file);
+        // Try getting the version string from the preferences file
+        if let Some(version_str) = current_build_from_preferences(&prefs_file) {
+            let parts: Vec<&str> = version_str.split(',').collect();
+            if let Some(build_num) = parts.get(3) {
+                latest_build = build_num.parse().ok();
+            }
+
+            // We want to build the version string without the build component to get the replays dir
+            let friendly_build = parts[..=2].join(".");
+            let temp_replays_dir = replays_dir.join(friendly_build);
+            if temp_replays_dir.exists() {
+                replays_dir = temp_replays_dir;
+            }
+        }
     }
 
     if latest_build.is_none() {
@@ -248,12 +259,12 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     let data = WorldOfWarshipsData {
         game_metadata: metadata_provider.clone(),
-        file_tree: Some(file_tree),
-        pkg_loader: Some(pkg_loader),
-        filtered_files: Some(files),
-        current_replay: Default::default(),
-        game_version: Some(number),
-        ship_icons: Some(icons),
+        file_tree: file_tree,
+        pkg_loader: pkg_loader,
+        filtered_files: files,
+        game_version: number,
+        ship_icons: icons,
+        replays_dir,
     };
 
     let replays = replay_filepaths(&wows_directory).map(|replays| {

@@ -1,10 +1,10 @@
 use std::{
     borrow::Cow,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use crate::{icons, update_background_task};
+use crate::{icons, task::ShipIcon, update_background_task};
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -19,6 +19,7 @@ use wows_replays::{
         battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
         AnalyzerMut,
     },
+    game_params::Species,
     resource_loader::ResourceLoader,
     ReplayFile,
 };
@@ -92,6 +93,24 @@ impl Replay {
 }
 
 impl ToolkitTabViewer<'_> {
+    fn ship_class_icon_from_species(&self, species: Species) -> Option<Arc<ShipIcon>> {
+        self.tab_state
+            .world_of_warships_data
+            .as_ref()
+            .and_then(|wows_data| wows_data.read().ship_icons.get(&species).cloned())
+    }
+
+    fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
+        self.tab_state
+            .world_of_warships_data
+            .as_ref()
+            .and_then(|wows_data| wows_data.read().game_metadata.clone())
+    }
+
+    fn replays_dir(&self) -> Option<PathBuf> {
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
+    }
+
     fn build_replay_player_list(&self, report: &BattleReport, ui: &mut egui::Ui) {
         let table = TableBuilder::new(ui)
             .striped(true)
@@ -173,12 +192,10 @@ impl ToolkitTabViewer<'_> {
                                 .and_then(|species| {
                                     let species: &'static str = species.into();
                                     let id = format!("IDS_{}", species.to_uppercase());
-                                    self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap().localized_name_from_id(&id)
+                                    self.metadata_provider().and_then(|metadata| metadata.localized_name_from_id(&id))
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
-                            if let Some(icons) = self.tab_state.world_of_warships_data.ship_icons.as_ref() {
-                                let icon = icons.get(&ship.species().expect("ship has no species")).expect("failed to get ship icon for species");
-
+                            if let Some(icon) = self.ship_class_icon_from_species(ship.species().expect("ship has no species")) {
                                 let color = match player.relation() {
                                     0 => Color32::GOLD,
                                     1 => Color32::LIGHT_GREEN,
@@ -219,13 +236,8 @@ impl ToolkitTabViewer<'_> {
 
                         ui.col(|ui| {
                             let ship_name = self
-                                .tab_state
-                                .world_of_warships_data
-                                .game_metadata
-                                .as_ref()
-                                .unwrap()
-                                .localized_name_from_param(ship)
-                                .map(|s| s.to_string())
+                                .metadata_provider()
+                                .and_then(|metadata| metadata.localized_name_from_param(ship).map(ToString::to_string))
                                 .unwrap_or_else(|| format!("{}", ship.id()));
                             ui.label(ship_name);
                         });
@@ -281,27 +293,27 @@ impl ToolkitTabViewer<'_> {
                         ui.col(|ui| {
                             ui.menu_button(icons::DOTS_THREE, |ui| {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
-                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+                                    let metadata_provider = self.metadata_provider().unwrap();
 
-                                    let url = build_ship_config_url(entity, metadata_provider);
+                                    let url = build_ship_config_url(entity, &metadata_provider);
 
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                     ui.close_menu();
                                 }
 
                                 if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
-                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+                                    let metadata_provider = self.metadata_provider().unwrap();
 
-                                    let url = build_ship_config_url(entity, metadata_provider);
+                                    let url = build_ship_config_url(entity, &metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
 
                                     ui.close_menu();
                                 }
 
                                 if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
-                                    let metadata_provider = self.tab_state.world_of_warships_data.game_metadata.as_ref().unwrap();
+                                    let metadata_provider = self.metadata_provider().unwrap();
 
-                                    let url = build_short_ship_config_url(entity, metadata_provider);
+                                    let url = build_short_ship_config_url(entity, &metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
 
                                     ui.close_menu();
@@ -438,24 +450,24 @@ impl ToolkitTabViewer<'_> {
                 {
                     // Sort by filename -- WoWs puts the date first in a sortable format
                     files.sort_by(|a, b| b.0.cmp(&a.0));
-                    let resource_provider = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
+                    let metadata_provider = self.metadata_provider().unwrap();
                     for (path, replay) in files {
                         let label = {
                             let file = replay.read();
                             let meta = &file.replay_file.meta;
                             let player_vehicle = meta.vehicles.iter().find(|vehicle| vehicle.relation == 0);
                             let vehicle_name = player_vehicle
-                                .and_then(|vehicle| resource_provider.param_localization_id(vehicle.shipId as u32))
-                                .and_then(|id| resource_provider.localized_name_from_id(id))
+                                .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId as u32))
+                                .and_then(|id| metadata_provider.localized_name_from_id(id))
                                 .unwrap_or_else(|| "Spectator".to_string());
                             let map_id = format!("IDS_{}", meta.mapName.to_uppercase());
-                            let map_name = resource_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone());
+                            let map_name = metadata_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone());
 
-                            let mode = resource_provider
+                            let mode = metadata_provider
                                 .localized_name_from_id(&format!("IDS_{}", meta.gameType.to_ascii_uppercase()))
                                 .expect("failed to get game type translation");
 
-                            let scenario = resource_provider
+                            let scenario = metadata_provider
                                 .localized_name_from_id(&format!("IDS_SCENARIO_{}", meta.scenario.to_ascii_uppercase()))
                                 .expect("failed to get scenario translation");
 
@@ -479,7 +491,7 @@ impl ToolkitTabViewer<'_> {
                             })
                             .double_clicked()
                         {
-                            self.load_replay(replay.clone());
+                            update_background_task!(self.tab_state.background_task, self.load_replay(replay.clone()));
                         }
                         ui.end_row();
                     }
@@ -489,7 +501,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn parse_live_replay(&mut self) -> Option<BackgroundTask> {
-        if let Some(replays_dir) = self.tab_state.replays_dir.as_ref() {
+        if let Some(replays_dir) = self.replays_dir() {
             let meta = replays_dir.join("tempArenaInfo.json");
             let replay = replays_dir.join("temp.wowsreplay");
 
@@ -501,7 +513,7 @@ impl ToolkitTabViewer<'_> {
             }
 
             let replay_file: ReplayFile = ReplayFile::from_decrypted_parts(meta_data.unwrap(), replay_data.unwrap()).unwrap();
-            let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
+            let game_metadata = self.metadata_provider().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
             self.load_replay(Arc::new(RwLock::new(replay)))
@@ -511,11 +523,11 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn parse_replay<P: AsRef<Path>>(&mut self, replay_path: P) -> Option<BackgroundTask> {
-        if self.tab_state.world_of_warships_data.is_ready() {
+        if self.tab_state.world_of_warships_data.is_some() {
             let path = replay_path.as_ref();
 
             let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-            let game_metadata = self.tab_state.world_of_warships_data.game_metadata.clone().unwrap();
+            let game_metadata = self.metadata_provider().clone().unwrap();
             let replay = Replay::new(replay_file, game_metadata);
 
             self.load_replay(Arc::new(RwLock::new(replay)))
@@ -524,8 +536,9 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    #[must_use]
     fn load_replay(&mut self, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
-        let game_version = self.tab_state.world_of_warships_data.game_version.unwrap();
+        let game_version = self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().game_version).unwrap();
         {
             // Reset the chat state
             self.tab_state.replay_parser_tab.lock().game_chat.clear();
@@ -567,7 +580,8 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if let Some(_replays_dir) = self.tab_state.replays_dir.as_ref() {
+                // Only show the live game button if the replays dir exists
+                if let Some(_replays_dir) = self.replays_dir() {
                     if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
                         update_background_task!(self.tab_state.background_task, self.parse_live_replay());
                     }
@@ -581,7 +595,7 @@ impl ToolkitTabViewer<'_> {
             });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                if let Some(replay_file) = self.tab_state.world_of_warships_data.current_replay.as_ref() {
+                if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
                     let replay_file = replay_file.read();
                     self.build_replay_view(&replay_file, ui);
                 }

@@ -10,7 +10,7 @@ use std::{
 
 use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
-use wowsunpack::idx::FileNode;
+use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::{
     app::ToolkitTabViewer,
@@ -27,17 +27,21 @@ const IMAGE_FILE_TYPES: [&str; 3] = [".jpg", ".png", ".svg"];
 const PLAINTEXT_FILE_TYPES: [&str; 3] = [".xml", ".json", ".txt"];
 
 impl ToolkitTabViewer<'_> {
+    fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().pkg_loader.clone())
+    }
+
     fn add_view_file_menu(&self, file_label: Response, node: &FileNode) -> Response {
         let is_plaintext_file = PLAINTEXT_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
         let is_image_file = IMAGE_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
 
         let file_label = if is_plaintext_file.is_some() || is_image_file.is_some() {
             file_label.context_menu(|ui| {
-                if let Some(pkg_loader) = self.tab_state.world_of_warships_data.pkg_loader.as_ref() {
+                if let Some(pkg_loader) = self.pkg_loader() {
                     if ui.button("View Contents").clicked() {
                         let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
 
-                        node.read_file(pkg_loader, &mut file_contents).expect("failed to read file");
+                        node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
 
                         let file_type = match (is_plaintext_file, is_image_file) {
                             (Some(ext), None) => String::from_utf8(file_contents)
@@ -124,7 +128,7 @@ impl ToolkitTabViewer<'_> {
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
         let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
-        if let Some(pkg_loader) = self.tab_state.world_of_warships_data.pkg_loader.clone() {
+        if let Some(pkg_loader) = self.pkg_loader() {
             let (tx, rx) = mpsc::channel();
 
             self.tab_state.unpacker_progress = Some(rx);
@@ -176,10 +180,8 @@ impl ToolkitTabViewer<'_> {
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
-                let filter_list = if let (Some(_file_tree), Some(files)) = (
-                    self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                    &self.tab_state.world_of_warships_data.filtered_files.as_ref(),
-                ) {
+                let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                    let files = &wows_data.read().filtered_files;
                     if self.tab_state.filter.len() >= 3 {
                         let glob = glob::Pattern::new(self.tab_state.filter.as_str());
                         if self.tab_state.filter.contains('*') && glob.is_ok() {
@@ -225,10 +227,9 @@ impl ToolkitTabViewer<'_> {
                     });
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
-                            if let (Some(file_tree), Some(_files)) = (
-                                self.tab_state.world_of_warships_data.file_tree.as_ref(),
-                                self.tab_state.world_of_warships_data.filtered_files.as_ref(),
-                            ) {
+                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                let wows_data = wows_data.read();
+                                let file_tree = &wows_data.file_tree;
                                 if let Some(filtered_files) = &filter_list {
                                     self.build_file_list_from_array(ui, filtered_files.iter());
                                 } else {
