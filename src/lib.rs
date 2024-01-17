@@ -3,6 +3,7 @@
 mod app;
 mod error;
 mod file_unpacker;
+mod twitch_builds;
 mod game_params;
 mod plaintext_viewer;
 mod replay_parser;

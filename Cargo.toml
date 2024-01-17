@@ -43,11 +43,12 @@ data-encoding = "2.5.0"
 image = { version = "0.24", features = ["jpeg", "png"] }
 octocrab = "0.32.0"
 semver = "1.0"
-tokio = { version = "1.35", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "time"] }
 zip = "0.6"
 reqwest = "0.11"
 egui-phosphor = "0.3"
 chrono = "0.4"
+twitch-irc = "5.0.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -29,7 +29,7 @@ use octocrab::models::repos::Release;
 
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
-use tokio::runtime::Runtime;
+use tokio::{runtime::Runtime, task::JoinHandle};
 use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
@@ -49,6 +49,7 @@ pub enum Tab {
     Unpacker,
     ReplayParser,
     Settings,
+    TwitchBuilds,
 }
 
 impl Tab {
@@ -57,11 +58,13 @@ impl Tab {
             Tab::Unpacker => format!("{} Resource Unpacker", icons::ARCHIVE),
             Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
             Tab::ReplayParser => format!("{} Replay Inspector", icons::MAGNIFYING_GLASS),
+            Tab::TwitchBuilds => format!("{} Twitch Builds", icons::TWITCH_LOGO),
         }
     }
 }
 
 pub struct ToolkitTabViewer<'a> {
+    pub runtime: &'a mut Runtime,
     pub tab_state: &'a mut TabState,
 }
 
@@ -123,6 +126,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),
             Tab::ReplayParser => self.build_replay_parser_tab(ui),
+            Tab::TwitchBuilds => self.build_twitch_builds_tab(ui),
         }
     }
 }
@@ -148,6 +152,29 @@ pub const fn default_bool<const V: bool>() -> bool {
     V
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct TwitchSettings {
+    pub login: String,
+    pub token: String,
+    pub command: String,
+    pub template: String,
+    pub unavailable: String,
+    pub error: String,
+}
+
+impl Default for TwitchSettings {
+    fn default() -> Self {
+        Self {
+            login: String::from(""),
+            token: String::from(""),
+            command: String::from("!build"),
+            template: String::from("{url}"),
+            unavailable: String::from("Build unavailable when not in battle."),
+            error: String::from("An error occurred during parsing."),
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
@@ -157,6 +184,7 @@ pub struct Settings {
     pub replay_settings: ReplaySettings,
     #[serde(default = "default_bool::<true>")]
     pub check_for_updates: bool,
+    pub twitch: TwitchSettings,
 }
 
 #[derive(Default)]
@@ -238,6 +266,12 @@ pub struct TabState {
 
     #[serde(skip)]
     pub current_replay: Option<Arc<RwLock<Replay>>>,
+
+    #[serde(skip)]
+    pub twitch_connection: bool,
+
+    #[serde(skip)]
+    pub twitch_handle: Option<JoinHandle<()>>,
 }
 
 impl Default for TabState {
@@ -260,6 +294,8 @@ impl Default for TabState {
             can_change_wows_dir: true,
             timed_message: None,
             current_replay: None,
+            twitch_connection: false,
+            twitch_handle: None,
         }
     }
 }
@@ -391,7 +427,7 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings, Tab::TwitchBuilds].to_vec()),
             show_error_window: false,
             error_to_show: None,
             runtime: Runtime::new().expect("failed to create tokio runtime"),
@@ -675,7 +711,7 @@ impl eframe::App for WowsToolkitApp {
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_close_buttons(false)
-                .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
+                .show_inside(ui, &mut ToolkitTabViewer { runtime: &mut self.runtime, tab_state: &mut self.tab_state });
         });
 
         // Pop open something to view the clicked file from the unpacker tab
