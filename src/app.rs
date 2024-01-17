@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::Ordering,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
         Arc,
     },
@@ -160,6 +160,7 @@ pub struct TwitchSettings {
     pub template: String,
     pub unavailable: String,
     pub error: String,
+    pub new_match_loaded: Arc<AtomicBool>,
 }
 
 impl Default for TwitchSettings {
@@ -171,6 +172,7 @@ impl Default for TwitchSettings {
             template: String::from("{url}"),
             unavailable: String::from("Build unavailable when not in battle."),
             error: String::from("An error occurred during parsing."),
+            new_match_loaded: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -342,6 +344,7 @@ impl TabState {
         } else {
             debug!("creating filesystem watcher");
             let (tx, rx) = mpsc::channel();
+            let new_match_loaded = self.settings.twitch.new_match_loaded.clone();
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) => {
                     // TODO: maybe properly handle moves?
@@ -349,7 +352,9 @@ impl TabState {
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                if path.file_name().unwrap() == "temp.wowsreplay" {
+                                    new_match_loaded.store(true, Ordering::Relaxed);
+                                } else if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
                                     tx.send(NotifyFileEvent::Added(path)).expect("failed to send file creation event");
                                 }
                             }
@@ -711,7 +716,13 @@ impl eframe::App for WowsToolkitApp {
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_close_buttons(false)
-                .show_inside(ui, &mut ToolkitTabViewer { runtime: &mut self.runtime, tab_state: &mut self.tab_state });
+                .show_inside(
+                    ui,
+                    &mut ToolkitTabViewer {
+                        runtime: &mut self.runtime,
+                        tab_state: &mut self.tab_state,
+                    },
+                );
         });
 
         // Pop open something to view the clicked file from the unpacker tab

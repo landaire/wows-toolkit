@@ -1,38 +1,19 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
-use egui::{
-    Button,
-    Color32,
-    RichText,
-    TextEdit,
-    Widget,
-};
+use egui::{Button, Color32, RichText, TextEdit, Widget};
 
 use twitch_irc::{
     login::StaticLoginCredentials,
     message::{IRCMessage, ServerMessage},
-    ClientConfig,
-    SecureTCPTransport,
-    TwitchIRCClient,
+    ClientConfig, SecureTCPTransport, TwitchIRCClient,
 };
 
-use tokio::time::{
-    sleep,
-    Duration,
-};
+use tokio::time::{sleep, Duration};
 
-use crate::{
-    app::ToolkitTabViewer,
-    replay_parser::Replay,
-    task::BackgroundTaskCompletion,
-    util::build_short_ship_config_url,
-    icons, wows_data::WorldOfWarshipsData,
-};
-
+use crate::{app::ToolkitTabViewer, icons, replay_parser::Replay, task::BackgroundTaskCompletion, util::build_short_ship_config_url, wows_data::WorldOfWarshipsData};
 
 const MAX_PARSE_ATTEMPTS: u8 = 3;
 const PARSE_RETRY_DELAY: u64 = 5000;
-
 
 fn parse_url(wows_data: &Arc<WorldOfWarshipsData>) -> Option<String> {
     let task = wows_data.parse_live_replay()?;
@@ -46,10 +27,9 @@ fn parse_url(wows_data: &Arc<WorldOfWarshipsData>) -> Option<String> {
                 &wows_data.game_metadata.clone().unwrap(),
             ))
         }
-        _ => {None}
+        _ => None,
     }
 }
-
 
 impl ToolkitTabViewer<'_> {
     fn toggle_twitch_connection(&mut self) {
@@ -60,6 +40,7 @@ impl ToolkitTabViewer<'_> {
         let template = settings.template.to_owned();
         let unavailable = settings.unavailable.to_owned();
         let error = settings.error.to_owned();
+        let new_match_loaded = settings.new_match_loaded.clone();
 
         if let Some(wows_data) = &self.tab_state.world_of_warships_data {
             let wows_data = wows_data.clone();
@@ -67,35 +48,47 @@ impl ToolkitTabViewer<'_> {
             self.runtime.spawn(async move {
                 let credentials = StaticLoginCredentials::new(login_name.clone(), Some(oauth_token));
                 let client_config = ClientConfig::new_simple(credentials);
-                let (mut incoming_messages, client) = 
-                    TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(client_config);
+                let (mut incoming_messages, client) = TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(client_config);
                 client.join(login_name.clone()).unwrap();
-    
+
                 let join_handle = tokio::spawn(async move {
+                    let mut cached_build_url = None;
                     while let Some(message) = incoming_messages.recv().await {
                         if let ServerMessage::Privmsg(msg) = message {
-                            if msg.message_text != command { continue }; 
+                            if msg.message_text != command {
+                                continue;
+                            };
 
-                            let mut url = None;
-                            for i in 0..MAX_PARSE_ATTEMPTS {
-                                url = parse_url(&wows_data);
-                                if url.is_none() && i < MAX_PARSE_ATTEMPTS - 1 {
-                                    sleep(Duration::from_millis(PARSE_RETRY_DELAY)).await;
-                                };
+                            // If a new match was loaded we need to invalidate our cached build
+                            let mut use_cached_build = cached_build_url.is_some();
+                            if let Ok(true) = new_match_loaded.compare_exchange(true, false, Ordering::Acquire, Ordering::Relaxed) {
+                                use_cached_build = false;
+                            };
+
+                            if !use_cached_build {
+                                for i in 0..MAX_PARSE_ATTEMPTS {
+                                    cached_build_url = parse_url(&wows_data);
+                                    if cached_build_url.is_none() && i < MAX_PARSE_ATTEMPTS - 1 {
+                                        sleep(Duration::from_millis(PARSE_RETRY_DELAY)).await;
+                                    };
+                                }
                             }
 
-                            if url.is_some() {
-                                client.say(login_name.clone(), template.replace("{url}", &url.unwrap()[..])).await.unwrap();
+                            if cached_build_url.is_some() {
+                                client
+                                    .say(login_name.clone(), template.replace("{url}", &cached_build_url.as_ref().unwrap()[..]))
+                                    .await
+                                    .unwrap();
                             } else {
                                 client.say(login_name.clone(), error.clone()).await.unwrap();
                             }
                         }
                     }
                 });
-    
+
                 join_handle.await.unwrap();
             });
-    
+
             self.tab_state.twitch_connection = true;
         }
     }
@@ -149,11 +142,16 @@ impl ToolkitTabViewer<'_> {
             ui.add_space(15.0);
 
             ui.label("Information");
-            ui.add(TextEdit::multiline(&mut concat!(
-                "You can make your active build available to a Twitch audience here.\n",
-                "Generate credentials using a service like https://twitchtokengenerator.com.\n",
-                "If the connection fails, you may need to generate a new token.\n",
-            )).interactive(false).frame(false).desired_width(500.0));
+            ui.add(
+                TextEdit::multiline(&mut concat!(
+                    "You can make your active build available to a Twitch audience here.\n",
+                    "Generate credentials using a service like https://twitchtokengenerator.com.\n",
+                    "If the connection fails, you may need to generate a new token.\n",
+                ))
+                .interactive(false)
+                .frame(false)
+                .desired_width(500.0),
+            );
         });
     }
 }
