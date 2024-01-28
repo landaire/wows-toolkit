@@ -132,8 +132,6 @@ impl ToolkitTabViewer<'_> {
             })
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(50.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
@@ -161,13 +159,7 @@ impl ToolkitTabViewer<'_> {
                     ui.strong("Time Lived");
                 });
                 header.col(|ui| {
-                    ui.strong("Max HP");
-                });
-                header.col(|ui| {
                     ui.strong("Allocated Skills");
-                });
-                header.col(|ui| {
-                    ui.strong("Modules");
                 });
                 header.col(|ui| {
                     ui.strong("Actions");
@@ -255,10 +247,6 @@ impl ToolkitTabViewer<'_> {
                             }
                         });
 
-                        ui.col(|ui| {
-                            ui.label(separate_number(player.max_health(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
-                        });
-
                         let species = ship.species().expect("ship has no species?");
                         let (skill_points, num_skills, highest_tier, num_tier_1_skills) = entity
                             .commander_skills()
@@ -284,9 +272,6 @@ impl ToolkitTabViewer<'_> {
                                     label
                                 }
                             });
-                        });
-                        ui.col(|ui| {
-                            ui.label(entity.props().ship_config().modernization().len().to_string());
                         });
                         ui.col(|ui| {
                             ui.menu_button(icons::DOTS_THREE, |ui| {
