@@ -727,7 +727,7 @@ macro_rules! update_background_task {
     ($saved_task:expr, $background_task:expr) => {
         let task = $background_task;
         if task.is_some() {
-            $saved_task = $background_task;
+            $saved_task = task;
         }
     };
 }
