@@ -12,8 +12,8 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 
-use log::debug;
 use tap::Pipe;
+use tracing::{debug, warn};
 
 use wows_replays::{
     analyzer::{

@@ -12,9 +12,9 @@ use flate2::read::ZlibDecoder;
 use gettext::Catalog;
 use itertools::Itertools;
 
-use log::debug;
 use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use wows_replays::{game_params::*, parse_scripts, resource_loader::ResourceLoader, rpc::entitydefs::EntitySpec, Rc};
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 

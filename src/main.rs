@@ -3,30 +3,57 @@
 
 use std::io::Write;
 
+use tracing_subscriber::{
+    field::RecordFields,
+    fmt::{
+        format::{Pretty, Writer},
+        FormatFields,
+    },
+};
+
+// Janky hack to address https://github.com/tokio-rs/tracing/issues/1817
+struct NewType(Pretty);
+
+impl<'writer> FormatFields<'writer> for NewType {
+    fn format_fields<R: RecordFields>(&self, writer: Writer<'writer>, fields: R) -> core::fmt::Result {
+        self.0.format_fields(writer, fields)
+    }
+}
+
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     use std::{env, fs::File, path::Path};
 
     use chrono::Local;
-    use log::LevelFilter;
+    use egui::EventFilter;
+    use tracing::{level_filters::LevelFilter, Level};
+    use tracing_subscriber::{
+        fmt::{self, time::LocalTime},
+        layer::SubscriberExt,
+        EnvFilter, FmtSubscriber, Layer,
+    };
 
-    let target = Box::new(File::create("log.txt").expect("Can't create file"));
-    env_logger::Builder::new()
-        .target(env_logger::Target::Pipe(target))
-        .filter(None, LevelFilter::Debug)
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "[{} {} {}:{}] {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                record.level(),
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                record.args()
-            )
-        })
-        .init();
+    let file_appender = tracing_appender::rolling::daily(".", "wows_toolkit.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            fmt::Layer::new()
+                .pretty()
+                // .with_writer(std::io::stdout)
+                // .with_timer(LocalTime::rfc_3339())
+                .fmt_fields(NewType(Pretty::default()))
+                .with_ansi(true)
+                .with_filter(LevelFilter::DEBUG),
+        )
+        .with(
+            fmt::Layer::new()
+                .with_writer(non_blocking)
+                .with_timer(LocalTime::rfc_3339())
+                .with_ansi(false)
+                .with_filter(LevelFilter::DEBUG),
+        );
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let icon_data: &[u8] = &include_bytes!("../assets/wows_toolkit.png")[..];
 

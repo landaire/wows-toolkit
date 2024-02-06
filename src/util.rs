@@ -1,10 +1,10 @@
 use egui::{Color32, RichText};
 use flate2::{write::DeflateEncoder, Compression};
 use language_tags::LanguageTag;
-use log::debug;
 use serde_json::json;
 use std::{io::Write, path::Path, process::Command};
 use thousands::Separable;
+use tracing::debug;
 use wows_replays::{analyzer::battle_controller::VehicleEntity, game_params::GameParamProvider};
 
 use crate::game_params::GameMetadataProvider;

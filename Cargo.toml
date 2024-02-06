@@ -14,7 +14,7 @@ eframe = { version = "0.25.0", default-features = false, features = [
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
 ] }
-log = "0.4"
+tracing = "0.1"
 
 # You only need serde if you want app persistence:
 wows-replays = { version = "0.1", git = "https://github.com/landaire/wows-replays.git", features = [
@@ -51,7 +51,12 @@ chrono = "0.4"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.10"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = [
+    "local-time",
+    "time",
+    "env-filter",
+] }
 
 
 [profile.release]

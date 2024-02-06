@@ -20,12 +20,12 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 
-use log::debug;
 use notify::{
     event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use octocrab::models::repos::Release;
+use tracing::debug;
 
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
