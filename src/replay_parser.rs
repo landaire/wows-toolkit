@@ -459,21 +459,19 @@ impl ToolkitTabViewer<'_> {
                             [vehicle_name.as_str(), map_name.as_str(), scenario.as_str(), mode.as_str(), time].iter().join(" - ")
                         };
 
-                        if ui
-                            .add(Label::new(label.as_str()).sense(Sense::click()))
-                            .on_hover_text(label.as_str())
-                            .context_menu(|ui| {
-                                if ui.button("Copy Path").clicked() {
-                                    ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
-                                    ui.close_menu();
-                                }
-                                if ui.button("Show in File Explorer").clicked() {
-                                    util::open_file_explorer(&path);
-                                    ui.close_menu();
-                                }
-                            })
-                            .double_clicked()
-                        {
+                        let label = ui.add(Label::new(label.as_str()).sense(Sense::click())).on_hover_text(label.as_str());
+                        label.context_menu(|ui| {
+                            if ui.button("Copy Path").clicked() {
+                                ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
+                                ui.close_menu();
+                            }
+                            if ui.button("Show in File Explorer").clicked() {
+                                util::open_file_explorer(&path);
+                                ui.close_menu();
+                            }
+                        });
+
+                        if label.double_clicked() {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                                 update_background_task!(self.tab_state.background_task, wows_data.load_replay(replay.clone()));
                             }

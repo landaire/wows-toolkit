@@ -10,6 +10,7 @@ use std::{
 
 use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
+use tracing::debug;
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::{
@@ -31,11 +32,11 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.pkg_loader.clone())
     }
 
-    fn add_view_file_menu(&self, file_label: Response, node: &FileNode) -> Response {
+    fn add_view_file_menu(&self, file_label: &Response, node: &FileNode) {
         let is_plaintext_file = PLAINTEXT_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
         let is_image_file = IMAGE_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
 
-        let file_label = if is_plaintext_file.is_some() || is_image_file.is_some() {
+        if is_plaintext_file.is_some() || is_image_file.is_some() {
             file_label.context_menu(|ui| {
                 if let Some(pkg_loader) = self.pkg_loader() {
                     if ui.button("View Contents").clicked() {
@@ -68,12 +69,8 @@ impl ToolkitTabViewer<'_> {
                         ui.close_menu();
                     }
                 }
-            })
-        } else {
-            file_label
-        };
-
-        file_label
+            });
+        }
     }
     /// Builds a resource tree node from a [FileNode]
     fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
@@ -83,7 +80,7 @@ impl ToolkitTabViewer<'_> {
                 for (name, node) in file_tree.children() {
                     if node.is_file() {
                         let file_label = ui.add(Label::new(name).sense(Sense::click()));
-                        let file_label = self.add_view_file_menu(file_label, node);
+                        self.add_view_file_menu(&file_label, node);
                         if file_label.double_clicked() {
                             self.tab_state.items_to_extract.lock().push(node.clone());
                         }
@@ -107,7 +104,7 @@ impl ToolkitTabViewer<'_> {
             let files = files.into_iter();
             for file in files {
                 let label = ui.add(Label::new(Path::new("res").join(&*file.0).to_string_lossy().into_owned()).sense(Sense::click()));
-                let label = self.add_view_file_menu(label, &file.1);
+                self.add_view_file_menu(&label, &file.1);
 
                 let text = if file.1.is_file() {
                     format!("File ({})", humansize::format_size(file.1.file_info().unwrap().size, humansize::DECIMAL))
@@ -180,30 +177,38 @@ impl ToolkitTabViewer<'_> {
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
-                let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                    let files = &wows_data.filtered_files;
-                    if self.tab_state.filter.len() >= 3 {
-                        let glob = glob::Pattern::new(self.tab_state.filter.as_str());
-                        if self.tab_state.filter.contains('*') && glob.is_ok() {
-                            let glob = glob.unwrap();
-                            let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
+                if self.tab_state.used_filter.is_none() || self.tab_state.filter.as_str() != self.tab_state.used_filter.as_ref().unwrap().as_str() {
+                    debug!("Filtering file listing again");
+                    let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                        let files = &wows_data.filtered_files;
+                        if self.tab_state.filter.len() >= 3 {
+                            let glob = glob::Pattern::new(self.tab_state.filter.as_str());
+                            if self.tab_state.filter.contains('*') && glob.is_ok() {
+                                let glob = glob.unwrap();
+                                let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
 
-                            Some(leafs)
+                                Some(leafs)
+                            } else {
+                                let leafs = files
+                                    .iter()
+                                    .filter(|(path, _node)| path.to_str().map(|path| path.contains(self.tab_state.filter.as_str())).unwrap_or(false))
+                                    .cloned()
+                                    .collect();
+
+                                Some(leafs)
+                            }
                         } else {
-                            let leafs = files
-                                .iter()
-                                .filter(|(path, _node)| path.to_str().map(|path| path.contains(self.tab_state.filter.as_str())).unwrap_or(false))
-                                .cloned()
-                                .collect();
-
-                            Some(leafs)
+                            None
                         }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
+
+                    self.tab_state.filtered_file_list = filter_list.map(Arc::new);
+                    self.tab_state.used_filter = Some(self.tab_state.filter.clone());
+                }
+
+                let filter_list = self.tab_state.filtered_file_list.clone();
 
                 StripBuilder::new(ui).size(Size::exact(25.0)).size(Size::remainder()).vertical(|mut strip| {
                     strip.strip(|builder| {
@@ -215,7 +220,7 @@ impl ToolkitTabViewer<'_> {
                                 if let Some(filter_list) = &filter_list {
                                     if ui.button("Add All").clicked() {
                                         let mut items_to_extract = self.tab_state.items_to_extract.lock();
-                                        for file in filter_list {
+                                        for file in filter_list.iter() {
                                             items_to_extract.push(file.1.clone());
                                         }
                                     }

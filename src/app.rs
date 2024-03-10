@@ -199,6 +199,11 @@ pub struct TabState {
     pub filter: String,
 
     #[serde(skip)]
+    pub used_filter: Option<String>,
+    #[serde(skip)]
+    pub filtered_file_list: Option<Arc<Vec<(Arc<PathBuf>, FileNode)>>>,
+
+    #[serde(skip)]
     pub items_to_extract: Mutex<Vec<FileNode>>,
 
     pub settings: Settings,
@@ -262,6 +267,8 @@ impl Default for TabState {
             can_change_wows_dir: true,
             timed_message: None,
             current_replay: None,
+            used_filter: None,
+            filtered_file_list: None,
         }
     }
 }
@@ -466,6 +473,8 @@ impl WowsToolkitApp {
                                 self.tab_state.update_wows_dir(&new_dir, &wows_data.replays_dir);
                                 self.tab_state.world_of_warships_data = Some(Arc::new(wows_data));
                                 self.tab_state.replay_files = replays;
+                                self.tab_state.filtered_file_list = None;
+                                self.tab_state.used_filter = None;
 
                                 self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))
                             }
