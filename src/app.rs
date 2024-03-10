@@ -152,6 +152,8 @@ pub const fn default_bool<const V: bool>() -> bool {
 pub struct Settings {
     pub current_replay_path: PathBuf,
     pub wows_dir: String,
+    #[serde(skip)]
+    pub replays_dir: Option<PathBuf>,
     pub locale: Option<String>,
     #[serde(default)]
     pub replay_settings: ReplaySettings,
@@ -300,8 +302,8 @@ impl TabState {
 
     fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
         let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
-            let old_replays_dir = Path::new(self.settings.wows_dir.as_str()).join("replays");
-            let _ = watcher.unwatch(&old_replays_dir);
+            let old_replays_dir = self.settings.replays_dir.as_ref().expect("watcher was created but replay dir was not assigned?");
+            let _ = watcher.unwatch(old_replays_dir);
             watcher
         } else {
             debug!("creating filesystem watcher");
@@ -342,6 +344,7 @@ impl TabState {
         watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
 
         self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
+        self.settings.replays_dir = Some(replay_dir.to_owned())
     }
 
     pub fn load_game_data(&mut self, wows_directory: PathBuf) {
