@@ -17,7 +17,7 @@ use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use tracing::debug;
-use wows_replays::{game_params::Species, version, ReplayFile};
+use wows_replays::{game_params::Species, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
     pkg::PkgFileLoader,

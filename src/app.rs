@@ -28,15 +28,14 @@ use octocrab::models::repos::Release;
 use tracing::debug;
 
 use serde::{Deserialize, Serialize};
-use sys_locale::get_locale;
+
 use tokio::runtime::Runtime;
-use wows_replays::{analyzer::battle_controller::GameMessage, game_params::Species, ReplayFile};
-use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
+use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
+use wowsunpack::{idx::FileNode};
 
 use crate::{
     error::ToolkitError,
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
-    game_params::GameMetadataProvider,
     icons,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},

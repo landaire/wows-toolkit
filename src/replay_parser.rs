@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
-    path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, mpsc, Arc},
+    path::{PathBuf},
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use crate::{icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
@@ -13,7 +13,7 @@ use egui::{
 use egui_extras::{Column, TableBuilder};
 
 use tap::Pipe;
-use tracing::{debug, warn};
+use tracing::{debug};
 
 use wows_replays::{
     analyzer::{
@@ -32,7 +32,6 @@ use crate::{
     error::ToolkitError,
     game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
-    task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     util::{self, build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
@@ -493,7 +492,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    pub fn clear_chat(&mut self, replay: Arc<RwLock<Replay>>) {
+    pub fn clear_chat(&mut self, _replay: Arc<RwLock<Replay>>) {
         self.tab_state.replay_parser_tab.lock().game_chat.clear();
     }
 
