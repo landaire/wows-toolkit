@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
 };
 
-use crate::{icons, update_background_task, wows_data::ShipIcon};
+use crate::{icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -298,6 +298,16 @@ impl ToolkitTabViewer<'_> {
 
                                     let url = build_short_ship_config_url(entity, &metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
+
+                                    ui.close_menu();
+                                }
+
+                                ui.separator();
+
+                                if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
+                                    if let Some(url) = build_tomato_gg_url(entity) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
 
                                     ui.close_menu();
                                 }

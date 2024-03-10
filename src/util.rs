@@ -38,6 +38,11 @@ pub fn player_color_for_team_relation(relation: u32, is_dark_mode: bool) -> Colo
     }
 }
 
+pub fn build_tomato_gg_url(entity: &VehicleEntity) -> Option<String> {
+    let player = entity.player()?;
+    Some(format!("https://tomato.gg/wows/stats/{}/{}={}", player.realm(), player.name(), player.db_id()))
+}
+
 pub fn build_wows_numbers_url(entity: &VehicleEntity) -> Option<String> {
     let player = entity.player()?;
     Some(format!("https://{}.wows-numbers.com/player/{},{}", player.realm(), player.db_id(), player.name()))
