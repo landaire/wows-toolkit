@@ -52,7 +52,7 @@ pub enum Tab {
 }
 
 impl Tab {
-    fn tab_name(&self) -> String {
+    fn title(&self) -> String {
         match self {
             Tab::Unpacker => format!("{} Resource Unpacker", icons::ARCHIVE),
             Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
@@ -114,7 +114,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
 
     // Returns the current `tab`'s title.
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
-        tab.tab_name().into()
+        tab.title().into()
     }
 
     // Defines the contents of a given `tab`.
