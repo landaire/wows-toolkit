@@ -16,6 +16,7 @@ use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
+use tracing::debug;
 use wows_replays::{game_params::Species, version, ReplayFile};
 use wowsunpack::{
     idx::{self, FileNode},
@@ -96,12 +97,11 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
 }
 
-fn replay_filepaths(wows_dir: &Path) -> Option<Vec<PathBuf>> {
-    let replay_dir = wows_dir.join("replays");
+fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
 
-    if replay_dir.exists() {
-        for file in std::fs::read_dir(&replay_dir).expect("failed to read replay dir").flatten() {
+    if replays_dir.exists() {
+        for file in std::fs::read_dir(&replays_dir).expect("failed to read replay dir").flatten() {
             if !file.file_type().expect("failed to get file type").is_file() {
                 continue;
             }
@@ -181,6 +181,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
             // We want to build the version string without the build component to get the replays dir
             let friendly_build = parts[..=2].join(".");
             let temp_replays_dir = replays_dir.join(friendly_build);
+            debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
             if temp_replays_dir.exists() {
                 replays_dir = temp_replays_dir;
             }
@@ -264,10 +265,10 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         filtered_files: files,
         game_version: number,
         ship_icons: icons,
-        replays_dir,
+        replays_dir: replays_dir.clone(),
     };
 
-    let replays = replay_filepaths(&wows_directory).map(|replays| {
+    let replays = replay_filepaths(&replays_dir).map(|replays| {
         let iter = replays.into_iter().filter_map(|path| {
             // Filter out any replays that don't parse correctly
             let replay_file = ReplayFile::from_file(&path).ok()?;
