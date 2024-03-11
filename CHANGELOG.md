@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- *(replays)* Replays in build-specific dirs should now work
+
+### ⚙️ Miscellaneous Tasks
+
+- Add changelog
+- Bump version
+
 ## [0.1.8] - 2024-03-10
 
 ### 🚀 Features
