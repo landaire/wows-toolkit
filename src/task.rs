@@ -180,10 +180,14 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
             // We want to build the version string without the build component to get the replays dir
             let friendly_build = parts[..=2].join(".");
-            let temp_replays_dir = replays_dir.join(friendly_build);
-            debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-            if temp_replays_dir.exists() {
-                replays_dir = temp_replays_dir;
+            let friendly_build_with_extra_component = friendly_build.clone() + ".0";
+
+            for temp_replays_dir in [replays_dir.join(friendly_build), replays_dir.join(friendly_build_with_extra_component)] {
+                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+                if temp_replays_dir.exists() {
+                    replays_dir = temp_replays_dir;
+                    break;
+                }
             }
         }
     }
