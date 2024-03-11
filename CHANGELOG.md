@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
+## [0.1.9] - 2024-03-11
 
 ### 🐛 Bug Fixes
 
@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - Add changelog
 - Bump version
+- Update changelog
 
 ## [0.1.8] - 2024-03-10
 
