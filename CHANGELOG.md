@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.10] - 2024-04-02
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fix incompatability with 13.2.0
+
+### ⚙️ Miscellaneous Tasks
+
+- Oops updated changelog before tagging
+- Bump version
+
 ## [0.1.9] - 2024-03-11
 
 ### 🐛 Bug Fixes
