@@ -7,8 +7,8 @@ rust-version = "1.72"
 
 
 [dependencies]
-egui = "0.26.0"
-eframe = { version = "0.26.0", default-features = false, features = [
+egui = "0.27.0"
+eframe = { version = "0.27.0", default-features = false, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
@@ -22,8 +22,8 @@ wows-replays = { version = "0.1", git = "https://github.com/landaire/wows-replay
 ] }
 serde = { version = "1", features = ["derive"] }
 wowsunpack = { version = "0.1", default-features = false, features = ["arc"] }
-egui_extras = { version = "0.26.0", features = ["syntect", "all_loaders"] }
-egui_dock = "0.11.0"
+egui_extras = { version = "0.27.0", features = ["syntect", "all_loaders"] }
+egui_dock = "0.12.0"
 rfd = "0.14"
 humansize = "2.1.3"
 thiserror = "1.0.50"
@@ -46,7 +46,7 @@ semver = "1.0"
 tokio = { version = "1.35", features = ["rt", "rt-multi-thread"] }
 zip = "0.6"
 reqwest = "0.11"
-egui-phosphor = "0.4"
+egui-phosphor = "0.5"
 chrono = "0.4"
 
 # native:
