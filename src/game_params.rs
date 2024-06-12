@@ -115,7 +115,6 @@ macro_rules! game_param_to_type {
             }
     };
     ($params:ident, $key:expr, Option<$ty:tt>) => {
-
         $params
             .get(&HashableValue::String($key.to_string()))
             .and_then(|value| {
@@ -358,8 +357,9 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Res
     } else {
         panic!("could not get reloadTime");
     };
+
     AbilityCategoryBuilder::default()
-        .special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", String))
+        .special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
         .consumable_type(game_param_to_type!(category_data, "consumableType", String))
         .description_id(game_param_to_type!(category_data, "descIDs", String))
         .group(game_param_to_type!(category_data, "group", String))
