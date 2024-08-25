@@ -8,13 +8,14 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
+use egui::{mutex::Mutex, output, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
 use tracing::debug;
 use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
 
 use crate::{
     app::ToolkitTabViewer,
+    game_params::{game_params_to_pickle, pickle_to_json},
     plaintext_viewer::{self, FileType},
 };
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
@@ -122,9 +123,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn extract_files_clicked(&mut self, _ui: &mut Ui) {
-        let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
-        let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
+    fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[FileNode]) {
         if let Some(pkg_loader) = self.pkg_loader() {
             let (tx, rx) = mpsc::channel();
 
@@ -132,8 +131,9 @@ impl ToolkitTabViewer<'_> {
             UNPACKER_STOP.store(false, Ordering::Relaxed);
 
             if !items_to_unpack.is_empty() {
+                let output_dir = output_dir.to_owned();
+                let mut file_queue = items_to_unpack.to_vec();
                 let _unpacker_thread = Some(std::thread::spawn(move || {
-                    let mut file_queue = items_to_unpack.clone();
                     let mut files_to_extract: HashSet<FileNode> = HashSet::default();
                     let mut folders_created: HashSet<PathBuf> = HashSet::default();
                     while let Some(file) = file_queue.pop() {
@@ -169,6 +169,53 @@ impl ToolkitTabViewer<'_> {
                         file.read_file(&pkg_loader, &mut out_file).expect("Failed to read file");
                     }
                 }));
+            }
+        }
+    }
+
+    fn extract_files_clicked(&mut self, _ui: &mut Ui) {
+        let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
+        let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
+
+        self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice());
+    }
+
+    fn dump_game_params(&mut self, _ui: &mut Ui) {
+        if let Some(pkg_loader) = self.pkg_loader() {
+            let (tx, rx) = mpsc::channel();
+
+            self.tab_state.unpacker_progress = Some(rx);
+            UNPACKER_STOP.store(false, Ordering::Relaxed);
+
+            // Find GameParams.json
+            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
+                    let output_dir = Path::new(self.tab_state.output_dir.as_str());
+                    let file_path = output_dir.join("GameParams.json");
+
+                    let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
+
+                    game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
+                    let _unpacker_thread = Some(std::thread::spawn(move || {
+                        tx.send(UnpackerProgress {
+                            file_name: file_path.to_string_lossy().into(),
+                            progress: 0.0,
+                        })
+                        .unwrap();
+
+                        let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
+                        let json = pickle_to_json(pickle);
+                        let mut file = File::create(&file_path).expect("failed to create GameParams.json file");
+
+                        serde_json::to_writer(&mut file, &json).expect("failed to write JSON data");
+
+                        tx.send(UnpackerProgress {
+                            file_name: file_path.to_string_lossy().into(),
+                            progress: 1.0,
+                        })
+                        .unwrap();
+                    }));
+                }
             }
         }
     }
@@ -277,6 +324,7 @@ impl ToolkitTabViewer<'_> {
                         .size(Size::remainder())
                         .size(Size::exact(60.0))
                         .size(Size::exact(60.0))
+                        .size(Size::exact(150.0))
                         .horizontal(|mut strip| {
                             strip.cell(|ui| {
                                 ui.add_sized(
@@ -295,6 +343,11 @@ impl ToolkitTabViewer<'_> {
                             strip.cell(|ui| {
                                 if ui.button("Extract").clicked() {
                                     self.extract_files_clicked(ui);
+                                }
+                            });
+                            strip.cell(|ui| {
+                                if ui.button("Dump GameParams.json").clicked() {
+                                    self.dump_game_params(ui);
                                 }
                             });
                         });
