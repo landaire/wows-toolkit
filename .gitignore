@@ -1,4 +1,5 @@
 /target
 /dist
 /.cargo/config.toml
+wows_toolkit.log.*
 
