@@ -17,11 +17,9 @@ eframe = { version = "0.27.0", default-features = false, features = [
 tracing = "0.1"
 
 # You only need serde if you want app persistence:
-wows-replays = { version = "0.1", git = "https://github.com/landaire/wows-replays.git", features = [
-    "arc",
-] }
+wows_replays = { version = "0.1", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.1", default-features = false, features = ["arc"] }
+wowsunpack = { version = "0.2", default-features = false, features = ["arc"] }
 egui_extras = { version = "0.27.0", features = ["syntect", "all_loaders"] }
 egui_dock = "0.12.0"
 rfd = "0.14"
@@ -73,8 +71,7 @@ debug = true
 
 [patch.crates-io]
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
-[patch."https://github.com/landaire/wows-replays.git"]
-#wows-replays = { path = "../wows-replays/parser" }
+#wows_replays = { path = "../wows-replays/parser" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }

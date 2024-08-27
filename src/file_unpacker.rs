@@ -11,11 +11,13 @@ use std::{
 use egui::{mutex::Mutex, output, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
 use tracing::debug;
-use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
+use wowsunpack::{
+    data::{idx::FileNode, pkg::PkgFileLoader},
+    game_params::convert::{game_params_to_pickle, pickle_to_json},
+};
 
 use crate::{
     app::ToolkitTabViewer,
-    game_params::{game_params_to_pickle, pickle_to_json},
     plaintext_viewer::{self, FileType},
 };
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
@@ -207,7 +209,7 @@ impl ToolkitTabViewer<'_> {
                         let json = pickle_to_json(pickle);
                         let mut file = File::create(&file_path).expect("failed to create GameParams.json file");
 
-                        serde_json::to_writer(&mut file, &json).expect("failed to write JSON data");
+                        serde_json::to_writer_pretty(&mut file, &json).expect("failed to write JSON data");
 
                         tx.send(UnpackerProgress {
                             file_name: file_path.to_string_lossy().into(),

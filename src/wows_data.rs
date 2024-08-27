@@ -6,11 +6,13 @@ use std::{
 
 use egui::mutex::RwLock;
 
-use wows_replays::{game_params::Species, ReplayFile};
-use wowsunpack::{idx::FileNode, pkg::PkgFileLoader};
+use wows_replays::ReplayFile;
+use wowsunpack::{
+    data::{idx::FileNode, pkg::PkgFileLoader},
+    game_params::{provider::GameMetadataProvider, types::Species},
+};
 
 use crate::{
-    game_params::GameMetadataProvider,
     replay_parser::Replay,
     task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
 };

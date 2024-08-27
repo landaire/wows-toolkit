@@ -5,9 +5,8 @@ use serde_json::json;
 use std::{io::Write, path::Path, process::Command};
 use thousands::Separable;
 use tracing::debug;
-use wows_replays::{analyzer::battle_controller::VehicleEntity, game_params::GameParamProvider};
-
-use crate::game_params::GameMetadataProvider;
+use wows_replays::analyzer::battle_controller::VehicleEntity;
+use wowsunpack::game_params::{provider::GameMetadataProvider, types::GameParamProvider};
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     let language: LanguageTag = locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
@@ -52,6 +51,8 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
     let config = entity.props().ship_config();
     let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
+
+    eprintln!("{:#?}", config);
 
     let json = json!({
         "BuildName": format!("replay_{}", player.name()),

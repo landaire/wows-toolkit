@@ -1,6 +1,6 @@
 use std::{io, path::PathBuf};
 use thiserror::Error;
-use wowsunpack::idx::IdxError;
+use wowsunpack::error::ErrorKind;
 
 #[derive(Error, Debug)]
 pub enum ToolkitError {
@@ -10,8 +10,8 @@ pub enum ToolkitError {
     #[error("Invalid GameParams.data")]
     InvalidGameParams,
 
-    #[error("Could not read IDX file")]
-    UnpackerIdx(#[from] IdxError),
+    #[error("Data unpacker error")]
+    UnpackerError(#[from] ErrorKind),
 
     #[error("An I/O error occurred: {0}")]
     Io(#[from] io::Error),

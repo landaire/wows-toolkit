@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    path::{PathBuf},
+    path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
 };
 
@@ -13,24 +13,25 @@ use egui::{
 use egui_extras::{Column, TableBuilder};
 
 use tap::Pipe;
-use tracing::{debug};
+use tracing::debug;
 
 use wows_replays::{
     analyzer::{
         battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
         AnalyzerMut,
     },
-    game_params::Species,
-    resource_loader::ResourceLoader,
     ReplayFile,
 };
 
 use itertools::Itertools;
+use wowsunpack::{
+    data::ResourceLoader,
+    game_params::{provider::GameMetadataProvider, types::Species},
+};
 
 use crate::{
     app::{ReplayParserTabState, ToolkitTabViewer},
     error::ToolkitError,
-    game_params::GameMetadataProvider,
     plaintext_viewer::{self, FileType},
     util::{self, build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };

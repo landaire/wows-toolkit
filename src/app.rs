@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use tokio::runtime::Runtime;
 use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
-use wowsunpack::{idx::FileNode};
+use wowsunpack::data::idx::FileNode;
 
 use crate::{
     error::ToolkitError,

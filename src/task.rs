@@ -17,16 +17,19 @@ use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use tracing::debug;
-use wows_replays::{game_params::Species, ReplayFile};
+use wows_replays::ReplayFile;
 use wowsunpack::{
-    idx::{self, FileNode},
-    pkg::PkgFileLoader,
+    data::{
+        idx::{self, FileNode},
+        pkg::PkgFileLoader,
+    },
+    game_params::{provider::GameMetadataProvider, types::Species},
 };
 use zip::ZipArchive;
 
 use crate::{
     error::ToolkitError,
-    game_params::GameMetadataProvider,
+    game_params::load_game_params,
     replay_parser::Replay,
     wows_data::{ShipIcon, WorldOfWarshipsData},
 };
@@ -252,7 +255,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     // Try loading GameParams.data
-    let metadata_provider = GameMetadataProvider::from_pkg(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
+    let metadata_provider = load_game_params(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
         if let Some(catalog) = found_catalog {
             metadata_provider.set_translations(catalog)
         }
