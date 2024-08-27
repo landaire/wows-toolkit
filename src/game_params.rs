@@ -1,8 +1,4 @@
-use std::{
-    path::Path,
-    sync::Arc,
-    time::Instant,
-};
+use std::{path::Path, sync::Arc, time::Instant};
 
 use itertools::Itertools;
 

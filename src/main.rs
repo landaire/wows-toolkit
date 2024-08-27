@@ -1,8 +1,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-
-
 use tracing_subscriber::{
     field::RecordFields,
     fmt::{
@@ -25,12 +23,11 @@ impl<'writer> FormatFields<'writer> for NewType {
 fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
-    
-    
-    use tracing::{level_filters::LevelFilter};
+    use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{
         fmt::{self, time::LocalTime},
-        layer::SubscriberExt, Layer,
+        layer::SubscriberExt,
+        Layer,
     };
 
     let file_appender = tracing_appender::rolling::daily(".", "wows_toolkit.log");
