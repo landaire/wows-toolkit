@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use egui::{mutex::Mutex, output, CollapsingHeader, Label, Response, Sense, Ui};
+use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
 use tracing::debug;
 use wowsunpack::{

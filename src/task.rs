@@ -23,7 +23,7 @@ use wowsunpack::{
         idx::{self, FileNode},
         pkg::PkgFileLoader,
     },
-    game_params::{provider::GameMetadataProvider, types::Species},
+    game_params::types::Species,
 };
 use zip::ZipArchive;
 

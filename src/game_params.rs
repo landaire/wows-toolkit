@@ -1,23 +1,15 @@
 use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashMap},
-    io::Cursor,
     path::Path,
-    str::FromStr,
     sync::Arc,
     time::Instant,
 };
 
-use flate2::read::ZlibDecoder;
-use gettext::Catalog;
 use itertools::Itertools;
 
-use pickled::{DeOptions, HashableValue, Value};
 use serde::{Deserialize, Serialize};
-use serde_json::Map;
 use tracing::debug;
 use wowsunpack::{
-    data::{idx::FileNode, pkg::PkgFileLoader, Version},
+    data::{idx::FileNode, pkg::PkgFileLoader},
     game_params::{
         provider::GameMetadataProvider,
         types::{GameParamProvider, Param},
