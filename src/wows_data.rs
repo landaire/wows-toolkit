@@ -121,20 +121,20 @@ impl WorldOfWarshipsData {
         let _join_handle = std::thread::spawn(move || {
             let res = { replay.read().parse(game_version.to_string().as_str()) };
             let res = res.map(move |report| {
-                // Send the replay builds to the remote server
-                for player in report.player_entities() {
-                    let client = reqwest::blocking::Client::new();
-                    client
-                        .post("http://192.168.1.215:5150/api/ship_builds")
-                        .json(&build_tracker::BuildTrackerPayload::build_from(
-                            player,
-                            player.player().unwrap().realm().to_owned(),
-                            report.version(),
-                            &metadata_provider,
-                        ))
-                        .send()
-                        .expect("failed to POST build data");
-                }
+                // // Send the replay builds to the remote server
+                // for player in report.player_entities() {
+                //     let client = reqwest::blocking::Client::new();
+                //     client
+                //         .post("http://192.168.1.215:5150/api/ship_builds")
+                //         .json(&build_tracker::BuildTrackerPayload::build_from(
+                //             player,
+                //             player.player().unwrap().realm().to_owned(),
+                //             report.version(),
+                //             &metadata_provider,
+                //         ))
+                //         .send()
+                //         .expect("failed to POST build data");
+                // }
                 replay.write().battle_report = Some(report);
                 BackgroundTaskCompletion::ReplayLoaded { replay }
             });
