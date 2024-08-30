@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.13] - 2024-08-30
+
+### 🐛 Bug Fixes
+
+- *(replays)* Replays would not show any data when parsing
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog
+
 ## [0.1.12] - 2024-08-30
 
 ### 🚀 Features
