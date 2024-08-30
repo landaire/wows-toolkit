@@ -6105,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "bincode",
  "chrono",
