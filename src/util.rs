@@ -52,7 +52,7 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
     let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
 
-    eprintln!("{:#?}", config);
+    eprintln!("{:#?}", entity.commander_skills());
 
     let json = json!({
         "BuildName": format!("replay_{}", player.name()),

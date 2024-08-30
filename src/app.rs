@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::Ordering,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
         Arc,
     },
@@ -70,6 +70,15 @@ impl ToolkitTabViewer<'_> {
             ui.label("Application Settings");
             ui.group(|ui| {
                 ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
+                if ui
+                    .checkbox(
+                        &mut self.tab_state.settings.send_replay_data,
+                        "Send Builds from Random Battles Replays to ShipBuilds.com",
+                    )
+                    .changed()
+                {
+                    self.tab_state.should_send_replays.store(self.tab_state.settings.send_replay_data, Ordering::Relaxed);
+                }
             });
             ui.label("World of Warships Settings");
             ui.group(|ui| {
@@ -158,6 +167,8 @@ pub struct Settings {
     pub replay_settings: ReplaySettings,
     #[serde(default = "default_bool::<true>")]
     pub check_for_updates: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub send_replay_data: bool,
 }
 
 #[derive(Default)]
@@ -244,6 +255,9 @@ pub struct TabState {
 
     #[serde(skip)]
     pub current_replay: Option<Arc<RwLock<Replay>>>,
+
+    #[serde(skip)]
+    pub should_send_replays: Arc<AtomicBool>,
 }
 
 impl Default for TabState {
@@ -268,6 +282,7 @@ impl Default for TabState {
             current_replay: None,
             used_filter: None,
             filtered_file_list: None,
+            should_send_replays: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -285,7 +300,10 @@ impl TabState {
                                     let replay = Replay::new(replay_file, game_metadata.clone());
                                     let replay = Arc::new(RwLock::new(replay));
 
-                                    replay_files.insert(new_file, replay);
+                                    replay_files.insert(new_file.clone(), replay);
+
+                                    // // Parse the replay file in the background
+                                    // wows_data.parse_replay_in_background(new_file);
                                 }
                             }
                         }
@@ -314,6 +332,13 @@ impl TabState {
         } else {
             debug!("creating filesystem watcher");
             let (tx, rx) = mpsc::channel();
+            let (background_tx, background_rx) = mpsc::channel();
+
+            if let Some(wows_data) = self.world_of_warships_data.clone() {
+                self.should_send_replays.store(true, Ordering::SeqCst);
+                task::start_background_parsing_thread(background_rx, wows_data, self.should_send_replays.clone());
+            }
+
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) => {
                     // TODO: maybe properly handle moves?
@@ -322,7 +347,8 @@ impl TabState {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
                                 if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
-                                    tx.send(NotifyFileEvent::Added(path)).expect("failed to send file creation event");
+                                    tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
+                                    let _ = background_tx.send(path);
                                 }
                             }
                         }
@@ -436,6 +462,7 @@ impl WowsToolkitApp {
         let mut this: Self = Default::default();
         // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
         this.tab_state.settings.locale = Some("en".to_string());
+        this.tab_state.should_send_replays.store(this.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
         let default_wows_dir = "C:\\Games\\World_of_Warships";
         let default_wows_path = Path::new(default_wows_dir);
@@ -469,8 +496,9 @@ impl WowsToolkitApp {
                     match result {
                         Ok(data) => match data {
                             BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
-                                self.tab_state.update_wows_dir(&new_dir, &wows_data.replays_dir);
+                                let replays_dir = wows_data.replays_dir.clone();
                                 self.tab_state.world_of_warships_data = Some(Arc::new(wows_data));
+                                self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                                 self.tab_state.replay_files = replays;
                                 self.tab_state.filtered_file_list = None;
                                 self.tab_state.used_filter = None;

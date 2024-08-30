@@ -4,9 +4,12 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
-        Arc,
+        Arc, Mutex,
     },
+    thread,
+    time::Duration,
 };
 
 use egui::mutex::RwLock;
@@ -16,18 +19,20 @@ use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
 use reqwest::Url;
 use tokio::runtime::Runtime;
-use tracing::debug;
+use tracing::{debug, error};
 use wows_replays::ReplayFile;
 use wowsunpack::{
     data::{
         idx::{self, FileNode},
         pkg::PkgFileLoader,
+        Version,
     },
-    game_params::types::Species,
+    game_params::{provider::GameMetadataProvider, types::Species},
 };
 use zip::ZipArchive;
 
 use crate::{
+    build_tracker,
     error::ToolkitError,
     game_params::load_game_params,
     replay_parser::Replay,
@@ -354,4 +359,64 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
             last_progress: None,
         },
     }
+}
+
+pub fn start_background_parsing_thread(rx: mpsc::Receiver<PathBuf>, wows_data: Arc<WorldOfWarshipsData>, should_send_replays: Arc<AtomicBool>) {
+    debug!("starting background parsing thread");
+    let _join_handle = std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::new();
+        while let Some(path) = rx.recv().ok() {
+            if !should_send_replays.load(Ordering::Relaxed) {
+                continue;
+            }
+
+            let path = path.as_ref();
+
+            // Files may be getting written to. If we fail to parse the replay,
+            // let's try try to parse this at least 3 times.
+            for _ in 0..3 {
+                match ReplayFile::from_file(path) {
+                    Ok(replay_file) => {
+                        // We only send back random battles
+                        if replay_file.meta.gameType != "RandomBattle" {
+                            break;
+                        }
+                        let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
+                        if let Some(metadata_provider) = metadata_provider {
+                            let replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
+                            match replay.parse(game_version.to_string().as_str()) {
+                                Ok(report) => {
+                                    // Send the replay builds to the remote server
+                                    for player in report.player_entities() {
+                                        // TODO: Bulk API
+                                        let res = client
+                                            .post("https://shipbuilds.com/api/ship_builds")
+                                            .json(&build_tracker::BuildTrackerPayload::build_from(
+                                                player,
+                                                player.player().map(|player| player.realm().to_string()).unwrap(),
+                                                report.version(),
+                                                &metadata_provider,
+                                            ))
+                                            .send();
+                                        if let Err(e) = res {
+                                            error!("error sending request: {:?}", e)
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(e) => error!("error parsing background replay: {:?}", e),
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("error attempting to parse replay in background thread: {:?}", e);
+                        thread::sleep(Duration::from_secs(5));
+                    }
+                }
+            }
+        }
+    });
 }

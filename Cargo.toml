@@ -43,7 +43,7 @@ octocrab = "0.34"
 semver = "1.0"
 tokio = { version = "1.35", features = ["rt", "rt-multi-thread"] }
 zip = "0.6"
-reqwest = "0.11"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
 egui-phosphor = "0.5"
 chrono = "0.4"
 

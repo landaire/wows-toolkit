@@ -1,6 +1,7 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![allow(clippy::blocks_in_if_conditions)]
 mod app;
+mod build_tracker;
 mod error;
 mod file_unpacker;
 mod game_params;
