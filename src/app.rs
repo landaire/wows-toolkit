@@ -156,7 +156,7 @@ pub const fn default_bool<const V: bool>() -> bool {
     V
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
     pub wows_dir: String,
@@ -169,6 +169,20 @@ pub struct Settings {
     pub check_for_updates: bool,
     #[serde(default = "default_bool::<true>")]
     pub send_replay_data: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            current_replay_path: Default::default(),
+            wows_dir: Default::default(),
+            replays_dir: Default::default(),
+            locale: Default::default(),
+            replay_settings: Default::default(),
+            check_for_updates: true,
+            send_replay_data: true,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -455,6 +469,15 @@ impl WowsToolkitApp {
             }
 
             saved_state.tab_state.settings.locale = Some("en".to_string());
+            if env!("CARGO_PKG_VERSION").split(".").last().unwrap().parse::<usize>().unwrap() == 14 {
+                saved_state.tab_state.settings.check_for_updates = true;
+                saved_state.tab_state.settings.send_replay_data = true;
+            }
+
+            saved_state
+                .tab_state
+                .should_send_replays
+                .store(saved_state.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
             return saved_state;
         }
