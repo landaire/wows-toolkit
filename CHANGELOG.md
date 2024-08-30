@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.12] - 2024-08-30
+
+### 🚀 Features
+
+- *(resource_unpacker)* Add button for dumping GameParams.json
+- Automatically send builds to ShipBuilds.com
+
+### 🚜 Refactor
+
+- Use crates.io versions of wowsunpack and wows_replays
+
+### ⚙️ Miscellaneous Tasks
+
+- Cargo fix
+- Cargo fmt
+
+## [0.1.11] - 2024-06-12
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog
+
 ## [0.1.10] - 2024-04-02
 
 ### 🐛 Bug Fixes
