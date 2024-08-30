@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.4
+        uses: rust-build/rust-build.action@v1.4.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PRE_BUILD: prebuild.sh
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.4
+        uses: rust-build/rust-build.action@v1.4.5
         with:
           RUSTTARGET: ${{ matrix.target }}
           UPLOAD_MODE: none
