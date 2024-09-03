@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    io::{BufWriter, Write},
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
 };
@@ -400,6 +401,47 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
+                ui.menu_button("Export Chat", |ui| {
+                    if ui.small_button(format!("{} Save To File", icons::FLOPPY_DISK)).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
+                            .save_file()
+                        {
+                            if let Ok(mut file) = std::fs::File::create(path) {
+                                for message in report.game_chat() {
+                                    let GameMessage {
+                                        sender_relation: _,
+                                        sender_name,
+                                        channel,
+                                        message,
+                                    } = message;
+                                    let _ = writeln!(file, "{} ({:?}): {}", sender_name, channel, message);
+                                }
+                            }
+                        }
+
+                        ui.close_menu();
+                    }
+
+                    if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
+                        let mut buf = BufWriter::new(Vec::new());
+                        for message in report.game_chat() {
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                            } = message;
+                            let _ = writeln!(&mut buf, "{} ({:?}): {}", sender_name, channel, message);
+                        }
+
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
+
+                        ui.output_mut(|output| output.copied_text = game_chat);
+
+                        ui.close_menu();
+                    }
+                });
                 if ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
