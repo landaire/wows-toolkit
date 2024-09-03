@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{read_dir, File},
     io::Cursor,
     path::{Path, PathBuf},
@@ -361,60 +361,124 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
     }
 }
 
-pub fn start_background_parsing_thread(rx: mpsc::Receiver<PathBuf>, wows_data: Arc<WorldOfWarshipsData>, should_send_replays: Arc<AtomicBool>) {
+fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwest::blocking::Client) -> Result<(), ()> {
+    // Files may be getting written to. If we fail to parse the replay,
+    // let's try try to parse this at least 3 times.
+    debug!("Sending replay data for: {:?}", path);
+    for _ in 0..3 {
+        match ReplayFile::from_file(path) {
+            Ok(replay_file) => {
+                // We only send back random battles
+                if replay_file.meta.gameType != "RandomBattle" {
+                    break;
+                }
+                let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
+                if let Some(metadata_provider) = metadata_provider {
+                    let replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
+                    match replay.parse(game_version.to_string().as_str()) {
+                        Ok(report) => {
+                            // Send the replay builds to the remote server
+                            for player in report.player_entities() {
+                                // TODO: Bulk API
+                                let res = client
+                                    .post("https://shipbuilds.com/api/ship_builds")
+                                    .json(&build_tracker::BuildTrackerPayload::build_from(
+                                        player,
+                                        player.player().map(|player| player.realm().to_string()).unwrap(),
+                                        report.version(),
+                                        &metadata_provider,
+                                    ))
+                                    .send();
+                                if let Err(e) = res {
+                                    error!("error sending request: {:?}", e);
+                                }
+                            }
+                            debug!("Successfully sent all builds");
+
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            error!("error parsing background replay: {:?}", e);
+                        }
+                    }
+                } else {
+                    return Err(());
+                }
+            }
+            Err(e) => {
+                error!("error attempting to parse replay in background thread: {:?}", e);
+                thread::sleep(Duration::from_secs(5));
+            }
+        }
+    }
+
+    Err(())
+}
+
+pub fn start_background_parsing_thread(
+    rx: mpsc::Receiver<PathBuf>,
+    sent_replays: Arc<Mutex<HashSet<String>>>,
+    wows_data: Arc<WorldOfWarshipsData>,
+    should_send_replays: Arc<AtomicBool>,
+) {
     debug!("starting background parsing thread");
     let _join_handle = std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
+
+        {
+            // Prune files that no longer exist to prevent the settings from growing too large
+            let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
+            let mut to_remove = Vec::new();
+            for file_path in &*sent_replays {
+                match std::fs::exists(file_path) {
+                    Ok(false) | Err(_) => {
+                        to_remove.push(file_path.clone());
+                    }
+                    _ => {
+                        // do nothing
+                    }
+                }
+            }
+
+            for file_path in to_remove {
+                sent_replays.remove(&file_path);
+            }
+        }
+
+        // Try to see if we have any historical replays we can send
+        match std::fs::read_dir(&wows_data.replays_dir) {
+            Ok(read_dir) => {
+                let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
+
+                for file in read_dir {
+                    if let Ok(file) = file {
+                        let path = file.path();
+                        let path_str = path.to_string_lossy();
+
+                        if !sent_replays.contains(path_str.as_ref()) {
+                            if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
+                                sent_replays.insert(path_str.into_owned());
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error reading replays dir from background parsing thread: {:?}", e)
+            }
+        }
+
         while let Some(path) = rx.recv().ok() {
             if !should_send_replays.load(Ordering::Relaxed) {
                 continue;
             }
 
-            let path = path.as_ref();
+            let path_str = path.to_string_lossy();
+            let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
 
-            // Files may be getting written to. If we fail to parse the replay,
-            // let's try try to parse this at least 3 times.
-            for _ in 0..3 {
-                match ReplayFile::from_file(path) {
-                    Ok(replay_file) => {
-                        // We only send back random battles
-                        if replay_file.meta.gameType != "RandomBattle" {
-                            break;
-                        }
-                        let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
-                        if let Some(metadata_provider) = metadata_provider {
-                            let replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
-                            match replay.parse(game_version.to_string().as_str()) {
-                                Ok(report) => {
-                                    // Send the replay builds to the remote server
-                                    for player in report.player_entities() {
-                                        // TODO: Bulk API
-                                        let res = client
-                                            .post("https://shipbuilds.com/api/ship_builds")
-                                            .json(&build_tracker::BuildTrackerPayload::build_from(
-                                                player,
-                                                player.player().map(|player| player.realm().to_string()).unwrap(),
-                                                report.version(),
-                                                &metadata_provider,
-                                            ))
-                                            .send();
-                                        if let Err(e) = res {
-                                            error!("error sending request: {:?}", e)
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                }
-                                Err(e) => error!("error parsing background replay: {:?}", e),
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        error!("error attempting to parse replay in background thread: {:?}", e);
-                        thread::sleep(Duration::from_secs(5));
-                    }
+            if !sent_replays.contains(path_str.as_ref()) {
+                if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
+                    sent_replays.insert(path_str.into_owned());
                 }
             }
         }

@@ -582,6 +582,10 @@ impl ToolkitTabViewer<'_> {
                 if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
                     let replay_file = replay_file.read();
                     self.build_replay_view(&replay_file, ui);
+                } else {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                        ui.heading("Double click or load a replay to view data");
+                    });
                 }
             });
         });

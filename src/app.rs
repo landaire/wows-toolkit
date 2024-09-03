@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     error::Error,
     path::{Path, PathBuf},
@@ -156,6 +156,10 @@ pub const fn default_bool<const V: bool>() -> bool {
     V
 }
 
+pub fn default_sent_replays() -> Arc<std::sync::Mutex<HashSet<String>>> {
+    Default::default()
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
     pub current_replay_path: PathBuf,
@@ -169,6 +173,10 @@ pub struct Settings {
     pub check_for_updates: bool,
     #[serde(default = "default_bool::<true>")]
     pub send_replay_data: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_default_value_fix_015: bool,
+    #[serde(default = "default_sent_replays")]
+    pub sent_replays: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl Default for Settings {
@@ -181,6 +189,8 @@ impl Default for Settings {
             replay_settings: Default::default(),
             check_for_updates: true,
             send_replay_data: true,
+            has_default_value_fix_015: true,
+            sent_replays: Default::default(),
         }
     }
 }
@@ -350,7 +360,7 @@ impl TabState {
 
             if let Some(wows_data) = self.world_of_warships_data.clone() {
                 self.should_send_replays.store(true, Ordering::SeqCst);
-                task::start_background_parsing_thread(background_rx, wows_data, self.should_send_replays.clone());
+                task::start_background_parsing_thread(background_rx, Arc::clone(&self.settings.sent_replays), wows_data, self.should_send_replays.clone());
             }
 
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
@@ -469,9 +479,10 @@ impl WowsToolkitApp {
             }
 
             saved_state.tab_state.settings.locale = Some("en".to_string());
-            if env!("CARGO_PKG_VERSION").split(".").last().unwrap().parse::<usize>().unwrap() == 14 {
+            if saved_state.tab_state.settings.has_default_value_fix_015 {
                 saved_state.tab_state.settings.check_for_updates = true;
                 saved_state.tab_state.settings.send_replay_data = true;
+                saved_state.tab_state.settings.has_default_value_fix_015 = true;
             }
 
             saved_state
