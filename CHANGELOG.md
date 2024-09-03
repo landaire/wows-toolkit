@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.15] - 2024-09-03
+
+### 🚀 Features
+
+- *(replays)* Add button for exporting game chat
+- *(replays)* Add support for sending replays that were created when app was closed
+
+### 🐛 Bug Fixes
+
+- Log files were not cleared
+
+## [0.1.14] - 2024-08-30
+
+### 🐛 Bug Fixes
+
+- *(settings)* Sending replay data was not enabled by default
+
 ## [0.1.13] - 2024-08-30
 
 ### 🐛 Bug Fixes
