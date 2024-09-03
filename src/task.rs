@@ -430,13 +430,9 @@ pub fn start_background_parsing_thread(
             let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
             let mut to_remove = Vec::new();
             for file_path in &*sent_replays {
-                match std::fs::exists(file_path) {
-                    Ok(false) | Err(_) => {
-                        to_remove.push(file_path.clone());
-                    }
-                    _ => {
-                        // do nothing
-                    }
+                if !Path::new(file_path).exists() {
+                    to_remove.push(file_path.clone());
+                    // do nothing
                 }
             }
 
