@@ -10,10 +10,14 @@ use std::{
 
 use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
 use egui_extras::{Size, StripBuilder};
+use egui_phosphor::regular as icons;
 use tracing::debug;
 use wowsunpack::{
     data::{idx::FileNode, pkg::PkgFileLoader},
-    game_params::convert::{game_params_to_pickle, pickle_to_json},
+    game_params::{
+        convert::{game_params_to_pickle, pickle_to_cbor, pickle_to_json},
+        types::GameParamProvider,
+    },
 };
 
 use crate::{
@@ -29,6 +33,14 @@ pub struct UnpackerProgress {
 
 const IMAGE_FILE_TYPES: [&str; 3] = [".jpg", ".png", ".svg"];
 const PLAINTEXT_FILE_TYPES: [&str; 3] = [".xml", ".json", ".txt"];
+
+#[derive(Eq, PartialEq)]
+enum GameParamsFormat {
+    Json,
+    Cbor,
+    MinimalJson,
+    MinimalCbor,
+}
 
 impl ToolkitTabViewer<'_> {
     fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
@@ -182,7 +194,7 @@ impl ToolkitTabViewer<'_> {
         self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice());
     }
 
-    fn dump_game_params(&mut self, _ui: &mut Ui) {
+    fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat) {
         if let Some(pkg_loader) = self.pkg_loader() {
             let (tx, rx) = mpsc::channel();
 
@@ -191,10 +203,9 @@ impl ToolkitTabViewer<'_> {
 
             // Find GameParams.json
             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
-                    let output_dir = Path::new(self.tab_state.output_dir.as_str());
-                    let file_path = output_dir.join("GameParams.json");
+                let metadata_provider = wows_data.game_metadata.clone();
 
+                if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
                     let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
 
                     game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
@@ -206,10 +217,28 @@ impl ToolkitTabViewer<'_> {
                         .unwrap();
 
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
-                        let json = pickle_to_json(pickle);
-                        let mut file = File::create(&file_path).expect("failed to create GameParams.json file");
 
-                        serde_json::to_writer_pretty(&mut file, &json).expect("failed to write JSON data");
+                        let mut file = File::create(&file_path).expect("failed to create GameParams.json file");
+                        match format {
+                            GameParamsFormat::Json => {
+                                let json = pickle_to_json(pickle);
+                                serde_json::to_writer_pretty(&mut file, &json).expect("failed to write JSON data");
+                            }
+                            GameParamsFormat::Cbor => {
+                                let cbor = pickle_to_cbor(pickle);
+                                serde_cbor::to_writer(file, &cbor).expect("failed to write CBOR data");
+                            }
+                            GameParamsFormat::MinimalJson => {
+                                if let Some(metadata_provider) = metadata_provider {
+                                    serde_json::to_writer(file, &metadata_provider.params()).expect("failed to write CBOR data");
+                                }
+                            }
+                            GameParamsFormat::MinimalCbor => {
+                                if let Some(metadata_provider) = metadata_provider {
+                                    serde_cbor::to_writer(file, &metadata_provider.params()).expect("failed to write CBOR data");
+                                }
+                            }
+                        }
 
                         tx.send(UnpackerProgress {
                             file_name: file_path.to_string_lossy().into(),
@@ -327,6 +356,7 @@ impl ToolkitTabViewer<'_> {
                         .size(Size::exact(60.0))
                         .size(Size::exact(60.0))
                         .size(Size::exact(150.0))
+                        .size(Size::exact(150.0))
                         .horizontal(|mut strip| {
                             strip.cell(|ui| {
                                 ui.add_sized(
@@ -348,9 +378,32 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             strip.cell(|ui| {
-                                if ui.button("Dump GameParams.json").clicked() {
-                                    self.dump_game_params(ui);
-                                }
+                                ui.menu_button(format!("{} Dump GameParams", icons::FLOPPY_DISK), |ui| {
+                                    if ui.small_button("As JSON").clicked() {
+                                        if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
+                                            self.dump_game_params(path, GameParamsFormat::Json);
+                                        }
+                                        ui.close_menu();
+                                    }
+                                    if ui.small_button("As CBOR").clicked() {
+                                        if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
+                                            self.dump_game_params(path, GameParamsFormat::Cbor);
+                                        }
+                                        ui.close_menu();
+                                    }
+                                    if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
+                                        if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
+                                            self.dump_game_params(path, GameParamsFormat::MinimalJson);
+                                        }
+                                        ui.close_menu();
+                                    }
+                                    if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
+                                        if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
+                                            self.dump_game_params(path, GameParamsFormat::MinimalCbor);
+                                        }
+                                        ui.close_menu();
+                                    }
+                                });
                             });
                         });
                 });

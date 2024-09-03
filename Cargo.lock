@@ -1789,7 +1789,7 @@ checksum = "887d93f60543e9a9362ef8a21beedd0a833c5d9610e18c67abe15a5963dcb1a4"
 dependencies = [
  "bit_field",
  "flume",
- "half",
+ "half 2.4.1",
  "lebe",
  "miniz_oxide",
  "rayon-core",
@@ -2244,6 +2244,12 @@ dependencies = [
  "tokio-util",
  "tracing",
 ]
+
+[[package]]
+name = "half"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
 name = "half"
@@ -4520,6 +4526,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half 1.8.3",
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6129,6 +6145,7 @@ dependencies = [
  "rfd",
  "semver",
  "serde",
+ "serde_cbor",
  "serde_json",
  "sys-locale",
  "tap",
@@ -6145,9 +6162,9 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.2.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4709ce0ea663fcf95f3ca25d660598ccfe95cabd60e9e15d7137f464a3b00b90"
+checksum = "b802420a400e4c16db47082f4e804f514da2fb474d3d289f4d1b12585d4af001"
 dependencies = [
  "binrw",
  "byteorder",
@@ -6165,6 +6182,7 @@ dependencies = [
  "rayon",
  "roxmltree",
  "serde",
+ "serde_cbor",
  "serde_json",
  "strum",
  "strum_macros",
