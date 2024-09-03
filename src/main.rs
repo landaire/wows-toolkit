@@ -24,13 +24,19 @@ fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
     use tracing::level_filters::LevelFilter;
+    use tracing_appender::rolling::Rotation;
     use tracing_subscriber::{
         fmt::{self, time::LocalTime},
         layer::SubscriberExt,
         Layer,
     };
 
-    let file_appender = tracing_appender::rolling::daily(".", "wows_toolkit.log");
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(Rotation::DAILY)
+        .max_log_files(2)
+        .filename_prefix("wows_toolkit.log")
+        .build(".")
+        .expect("failed to build file appender");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let subscriber = tracing_subscriber::registry()
         .with(
