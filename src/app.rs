@@ -338,8 +338,8 @@ impl TabState {
                         }
                     }
                     NotifyFileEvent::PreferencesChanged => {
-                        debug!("Preferences file changed -- reloading game data");
-                        self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
+                        // debug!("Preferences file changed -- reloading game data");
+                        // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                     }
                 }
             }
@@ -414,7 +414,7 @@ impl TabState {
 
         // Add a path to be watched. All files and directories at that path and
         // below will be monitored for changes.
-        watcher.watch(wows_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
+        watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
 
         self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
         self.settings.replays_dir = Some(replay_dir.to_owned())

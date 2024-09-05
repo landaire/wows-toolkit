@@ -372,6 +372,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
                 // We only send back random battles
                 let game_type = replay_file.meta.gameType.clone();
                 if !matches!(game_type.as_str(), "RandomBattle" | "RankedBattle") {
+                    debug!("game type is: {}, not sending", &game_type);
                     break;
                 }
                 let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
@@ -429,6 +430,8 @@ pub fn start_background_parsing_thread(
         let client = reqwest::blocking::Client::new();
 
         {
+            debug!("Attempting to prune old replay paths from settings");
+
             // Prune files that no longer exist to prevent the settings from growing too large
             let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
             let mut to_remove = Vec::new();
@@ -444,6 +447,7 @@ pub fn start_background_parsing_thread(
             }
         }
         {
+            debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
             let wows_data = wows_data.read();
 
             // Try to see if we have any historical replays we can send
@@ -454,6 +458,11 @@ pub fn start_background_parsing_thread(
                     for file in read_dir {
                         if let Ok(file) = file {
                             let path = file.path();
+                            if path.extension().map(|ext| ext != "wowsreplay").unwrap_or(false) || path.file_name().map(|name| name == "temp.wowsreplay").unwrap_or(false)
+                            {
+                                continue;
+                            }
+
                             let path_str = path.to_string_lossy();
 
                             if !sent_replays.contains(path_str.as_ref()) {
@@ -470,6 +479,7 @@ pub fn start_background_parsing_thread(
             }
         }
 
+        debug!("Beginning backgorund replay receive loop");
         while let Some(path) = rx.recv().ok() {
             if !should_send_replays.load(Ordering::Relaxed) {
                 continue;
@@ -479,10 +489,13 @@ pub fn start_background_parsing_thread(
             let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
 
             if !sent_replays.contains(path_str.as_ref()) {
+                debug!("Attempting to send replay at {}", path_str);
                 let wows_data = wows_data.read();
                 if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
                     sent_replays.insert(path_str.into_owned());
                 }
+            } else {
+                debug!("Not sending replay as it's already been sent");
             }
         }
     });
