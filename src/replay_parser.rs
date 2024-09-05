@@ -546,22 +546,18 @@ impl ToolkitTabViewer<'_> {
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.tab_state.settings.current_replay_path.to_string_lossy().into_owned()).hint_text("Current Replay File"));
-
-                if ui.button("Parse").clicked() {
-                    if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                        update_background_task!(
-                            self.tab_state.background_task,
-                            wows_data.read().parse_replay(self.tab_state.settings.current_replay_path.clone())
-                        );
-                    }
-                }
-
-                if ui.button(format!("{} Browse...", icons::FOLDER_OPEN)).clicked() {
+                if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked() {
                     if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
                         //println!("{:#?}", ReplayFile::from_file(&file));
 
                         self.tab_state.settings.current_replay_path = file;
+
+                        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                            update_background_task!(
+                                self.tab_state.background_task,
+                                wows_data.read().parse_replay(self.tab_state.settings.current_replay_path.clone())
+                            );
+                        }
                     }
                 }
 
