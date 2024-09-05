@@ -23,6 +23,7 @@ use wowsunpack::{
 use crate::{
     app::ToolkitTabViewer,
     plaintext_viewer::{self, FileType},
+    wows_data,
 };
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
@@ -44,7 +45,7 @@ enum GameParamsFormat {
 
 impl ToolkitTabViewer<'_> {
     fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.pkg_loader.clone())
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().pkg_loader.clone())
     }
 
     fn add_view_file_menu(&self, file_label: &Response, node: &FileNode) {
@@ -203,7 +204,8 @@ impl ToolkitTabViewer<'_> {
 
             // Find GameParams.json
             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                let metadata_provider = wows_data.game_metadata.clone();
+                let wows_data = wows_data.read();
+                let metadata_provider = { wows_data.game_metadata.clone() };
 
                 if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
                     let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
@@ -258,6 +260,7 @@ impl ToolkitTabViewer<'_> {
                 if self.tab_state.used_filter.is_none() || self.tab_state.filter.as_str() != self.tab_state.used_filter.as_ref().unwrap().as_str() {
                     debug!("Filtering file listing again");
                     let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                        let wows_data = wows_data.read();
                         let files = &wows_data.filtered_files;
                         if self.tab_state.filter.len() >= 3 {
                             let glob = glob::Pattern::new(self.tab_state.filter.as_str());
@@ -309,6 +312,7 @@ impl ToolkitTabViewer<'_> {
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                let wows_data = wows_data.read();
                                 let file_tree = &wows_data.file_tree;
                                 if let Some(filtered_files) = &filter_list {
                                     self.build_file_list_from_array(ui, filtered_files.iter());

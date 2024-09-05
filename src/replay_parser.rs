@@ -99,15 +99,18 @@ impl ToolkitTabViewer<'_> {
         self.tab_state
             .world_of_warships_data
             .as_ref()
-            .and_then(|wows_data| wows_data.ship_icons.get(&species).cloned())
+            .and_then(|wows_data| wows_data.read().ship_icons.get(&species).cloned())
     }
 
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
-        self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.game_metadata.clone())
+        self.tab_state
+            .world_of_warships_data
+            .as_ref()
+            .and_then(|wows_data| wows_data.read().game_metadata.clone())
     }
 
     fn replays_dir(&self) -> Option<PathBuf> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.replays_dir.clone())
+        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
     }
 
     fn build_replay_player_list(&self, report: &BattleReport, ui: &mut egui::Ui) {
@@ -525,7 +528,7 @@ impl ToolkitTabViewer<'_> {
 
                         if label.double_clicked() {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                update_background_task!(self.tab_state.background_task, wows_data.load_replay(replay.clone()));
+                                update_background_task!(self.tab_state.background_task, wows_data.read().load_replay(replay.clone()));
                             }
                         }
                         ui.end_row();
@@ -549,7 +552,7 @@ impl ToolkitTabViewer<'_> {
                     if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                         update_background_task!(
                             self.tab_state.background_task,
-                            wows_data.parse_replay(self.tab_state.settings.current_replay_path.clone())
+                            wows_data.read().parse_replay(self.tab_state.settings.current_replay_path.clone())
                         );
                     }
                 }
@@ -566,7 +569,7 @@ impl ToolkitTabViewer<'_> {
                 if let Some(_replays_dir) = self.replays_dir() {
                     if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
                         if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                            update_background_task!(self.tab_state.background_task, wows_data.parse_live_replay());
+                            update_background_task!(self.tab_state.background_task, wows_data.read().parse_live_replay());
                         }
                     }
                 }

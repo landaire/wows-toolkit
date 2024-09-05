@@ -204,6 +204,7 @@ pub struct ReplayParserTabState {
 pub enum NotifyFileEvent {
     Added(PathBuf),
     Removed(PathBuf),
+    PreferencesChanged,
 }
 
 pub struct TimedMessage {
@@ -228,7 +229,7 @@ impl TimedMessage {
 #[serde(default)]
 pub struct TabState {
     #[serde(skip)]
-    pub world_of_warships_data: Option<Arc<WorldOfWarshipsData>>,
+    pub world_of_warships_data: Option<Arc<RwLock<WorldOfWarshipsData>>>,
 
     pub filter: String,
 
@@ -313,27 +314,34 @@ impl Default for TabState {
 
 impl TabState {
     fn try_update_replays(&mut self) {
-        if let Some(replay_files) = &mut self.replay_files {
-            if let Some(file) = self.file_receiver.as_ref() {
-                while let Ok(file_event) = file.try_recv() {
-                    match file_event {
-                        NotifyFileEvent::Added(new_file) => {
-                            if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                                if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
-                                    let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
-                                    let replay = Replay::new(replay_file, game_metadata.clone());
-                                    let replay = Arc::new(RwLock::new(replay));
+        if let Some(file) = self.file_receiver.as_ref() {
+            while let Ok(file_event) = file.try_recv() {
+                match file_event {
+                    NotifyFileEvent::Added(new_file) => {
+                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                            let wows_data = wows_data.read();
 
+                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
+                                let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
+                                let replay = Replay::new(replay_file, game_metadata.clone());
+                                let replay = Arc::new(RwLock::new(replay));
+
+                                if let Some(replay_files) = &mut self.replay_files {
                                     replay_files.insert(new_file.clone(), replay);
-
-                                    // // Parse the replay file in the background
-                                    // wows_data.parse_replay_in_background(new_file);
                                 }
+
+                                // // Parse the replay file in the background
+                                // wows_data.parse_replay_in_background(new_file);
                             }
                         }
-                        NotifyFileEvent::Removed(old_file) => {
+                    }
+                    NotifyFileEvent::Removed(old_file) => {
+                        if let Some(replay_files) = &mut self.replay_files {
                             replay_files.remove(&old_file);
                         }
+                    }
+                    NotifyFileEvent::PreferencesChanged => {
+                        self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                     }
                 }
             }
@@ -370,9 +378,16 @@ impl TabState {
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
-                                    tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
-                                    let _ = background_tx.send(path);
+                                if path.is_file() {
+                                    if let Some(filename) = path.file_name() {
+                                        if filename == "preferences.xml" {
+                                            tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
+                                        }
+                                    }
+                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                        tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
+                                        let _ = background_tx.send(path);
+                                    }
                                 }
                             }
                         }
@@ -397,23 +412,24 @@ impl TabState {
 
         // Add a path to be watched. All files and directories at that path and
         // below will be monitored for changes.
-        watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
+        watcher.watch(wows_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
 
         self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
         self.settings.replays_dir = Some(replay_dir.to_owned())
     }
 
-    pub fn load_game_data(&mut self, wows_directory: PathBuf) {
+    #[must_use]
+    pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = mpsc::channel();
         let locale = self.settings.locale.clone().unwrap();
         let _join_handle = std::thread::spawn(move || {
             let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
         });
 
-        self.background_task = Some(BackgroundTask {
+        BackgroundTask {
             receiver: rx,
             kind: BackgroundTaskKind::LoadingData,
-        });
+        }
     }
 }
 
@@ -475,7 +491,7 @@ impl WowsToolkitApp {
         if let Some(storage) = cc.storage {
             let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone()));
+                saved_state.tab_state.background_task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
             }
 
             saved_state.tab_state.settings.locale = Some("en".to_string());
@@ -531,7 +547,11 @@ impl WowsToolkitApp {
                         Ok(data) => match data {
                             BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
                                 let replays_dir = wows_data.replays_dir.clone();
-                                self.tab_state.world_of_warships_data = Some(Arc::new(wows_data));
+                                if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
+                                    *old_wows_data.write() = wows_data;
+                                } else {
+                                    self.tab_state.world_of_warships_data = Some(Arc::new(RwLock::new(wows_data)));
+                                }
                                 self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                                 self.tab_state.replay_files = replays;
                                 self.tab_state.filtered_file_list = None;

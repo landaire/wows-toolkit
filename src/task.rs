@@ -36,7 +36,7 @@ use crate::{
     error::ToolkitError,
     game_params::load_game_params,
     replay_parser::Replay,
-    wows_data::{ShipIcon, WorldOfWarshipsData},
+    wows_data::{self, ShipIcon, WorldOfWarshipsData},
 };
 
 pub struct DownloadProgress {
@@ -418,7 +418,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
 pub fn start_background_parsing_thread(
     rx: mpsc::Receiver<PathBuf>,
     sent_replays: Arc<Mutex<HashSet<String>>>,
-    wows_data: Arc<WorldOfWarshipsData>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     should_send_replays: Arc<AtomicBool>,
 ) {
     debug!("starting background parsing thread");
@@ -440,27 +440,30 @@ pub fn start_background_parsing_thread(
                 sent_replays.remove(&file_path);
             }
         }
+        {
+            let wows_data = wows_data.read();
 
-        // Try to see if we have any historical replays we can send
-        match std::fs::read_dir(&wows_data.replays_dir) {
-            Ok(read_dir) => {
-                let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
+            // Try to see if we have any historical replays we can send
+            match std::fs::read_dir(&wows_data.replays_dir) {
+                Ok(read_dir) => {
+                    let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
 
-                for file in read_dir {
-                    if let Ok(file) = file {
-                        let path = file.path();
-                        let path_str = path.to_string_lossy();
+                    for file in read_dir {
+                        if let Ok(file) = file {
+                            let path = file.path();
+                            let path_str = path.to_string_lossy();
 
-                        if !sent_replays.contains(path_str.as_ref()) {
-                            if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
-                                sent_replays.insert(path_str.into_owned());
+                            if !sent_replays.contains(path_str.as_ref()) {
+                                if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
+                                    sent_replays.insert(path_str.into_owned());
+                                }
                             }
                         }
                     }
                 }
-            }
-            Err(e) => {
-                error!("Error reading replays dir from background parsing thread: {:?}", e)
+                Err(e) => {
+                    error!("Error reading replays dir from background parsing thread: {:?}", e)
+                }
             }
         }
 
@@ -473,6 +476,7 @@ pub fn start_background_parsing_thread(
             let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
 
             if !sent_replays.contains(path_str.as_ref()) {
+                let wows_data = wows_data.read();
                 if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
                     sent_replays.insert(path_str.into_owned());
                 }

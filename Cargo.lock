@@ -2965,7 +2965,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -6094,9 +6094,9 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09e182dc6033788cc47a7777a7d1a1a1f4604266b899689705498a770b62034e"
+checksum = "5c10c777cb0584473e4a47b8a60fcfa5b4ef279534c5169c7c7e78c5f86955ef"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -6162,9 +6162,9 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b802420a400e4c16db47082f4e804f514da2fb474d3d289f4d1b12585d4af001"
+checksum = "c5595ecf935e0d985535022e1eaf696f39fa3714c3e9bf75a3a86d0dd926a1ca"
 dependencies = [
  "binrw",
  "byteorder",
