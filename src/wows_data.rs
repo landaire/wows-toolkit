@@ -70,47 +70,6 @@ impl WorldOfWarshipsData {
         self.load_replay(Arc::new(RwLock::new(replay)))
     }
 
-    pub fn parse_replay_in_background<P: AsRef<Path>>(&self, replay_path: P) {
-        let path = replay_path.as_ref();
-
-        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-        let game_metadata = self.game_metadata.clone();
-        if game_metadata.is_none() {
-            return;
-        }
-
-        let replay = Replay::new(replay_file, game_metadata.unwrap());
-
-        self.upload_replay_player_builds(Arc::new(RwLock::new(replay)));
-    }
-
-    pub fn upload_replay_player_builds(&self, replay: Arc<RwLock<Replay>>) {
-        let game_version = self.game_version;
-
-        let metadata_provider = self.game_metadata.as_ref().unwrap().clone();
-        let _join_handle = std::thread::spawn(move || {
-            let res = { replay.read().parse(game_version.to_string().as_str()) };
-
-            let res = res.map(move |report| {
-                // Send the replay builds to the remote server
-                for player in report.player_entities() {
-                    let client = reqwest::blocking::Client::new();
-                    client
-                        .post("http://192.168.1.215:5150/api/ship_builds")
-                        .json(&build_tracker::BuildTrackerPayload::build_from(
-                            player,
-                            player.player().map(|player| player.realm().to_string()).unwrap(),
-                            report.version(),
-                            &metadata_provider,
-                        ))
-                        .send()
-                        .expect("failed to POST build data");
-                }
-                replay.write().battle_report = Some(report);
-            });
-        });
-    }
-
     #[must_use]
     pub fn load_replay(&self, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
         let game_version = self.game_version;

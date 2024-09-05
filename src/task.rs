@@ -170,6 +170,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let mut idx_files = Vec::new();
     let bin_dir = wows_directory.join("bin");
     if !wows_directory.exists() || !bin_dir.exists() {
+        debug!("WoWs or WoWs bin directory does not exist");
         return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
@@ -369,7 +370,8 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
         match ReplayFile::from_file(path) {
             Ok(replay_file) => {
                 // We only send back random battles
-                if replay_file.meta.gameType != "RandomBattle" {
+                let game_type = replay_file.meta.gameType.clone();
+                if !matches!(game_type.as_str(), "RandomBattle" | "RankedBattle") {
                     break;
                 }
                 let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
@@ -386,6 +388,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
                                         player,
                                         player.player().map(|player| player.realm().to_string()).unwrap(),
                                         report.version(),
+                                        game_type.clone(),
                                         &metadata_provider,
                                     ))
                                     .send();

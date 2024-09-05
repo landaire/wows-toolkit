@@ -29,6 +29,8 @@ pub(crate) struct BuildTrackerPayload {
     consumables: Vec<String>,
     // Signals GameParams ID
     signals: Vec<String>,
+    // Which game type this build was seen in
+    game_type: String,
 }
 
 fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> Vec<String> {
@@ -38,7 +40,7 @@ fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> V
 }
 
 impl BuildTrackerPayload {
-    pub fn build_from(entity: &VehicleEntity, realm: String, version: Version, metadata_provider: &GameMetadataProvider) -> Self {
+    pub fn build_from(entity: &VehicleEntity, realm: String, version: Version, game_type: String, metadata_provider: &GameMetadataProvider) -> Self {
         let config = entity.props().ship_config();
         let player = entity.player().expect("entity has no player?");
         let ship = player.vehicle();
@@ -55,6 +57,7 @@ impl BuildTrackerPayload {
             skills: entity.commander_skills_raw().to_vec(),
             consumables: indicies_to_index(config.abilities(), metadata_provider),
             signals: indicies_to_index(config.signals(), metadata_provider),
+            game_type: game_type,
         }
     }
 }

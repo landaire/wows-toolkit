@@ -329,9 +329,6 @@ impl TabState {
                                 if let Some(replay_files) = &mut self.replay_files {
                                     replay_files.insert(new_file.clone(), replay);
                                 }
-
-                                // // Parse the replay file in the background
-                                // wows_data.parse_replay_in_background(new_file);
                             }
                         }
                     }
@@ -341,6 +338,7 @@ impl TabState {
                         }
                     }
                     NotifyFileEvent::PreferencesChanged => {
+                        debug!("Preferences file changed -- reloading game data");
                         self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                     }
                 }
@@ -378,15 +376,19 @@ impl TabState {
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file() {
-                                    if let Some(filename) = path.file_name() {
-                                        if filename == "preferences.xml" {
-                                            tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
-                                        }
-                                    }
-                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
-                                        tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
-                                        let _ = background_tx.send(path);
+                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                    tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
+                                    // Send this path to the thread watching for replays in background
+                                    let _ = background_tx.send(path);
+                                }
+                            }
+                        }
+                        EventKind::Modify(_) => {
+                            for path in event.paths {
+                                if let Some(filename) = path.file_name() {
+                                    if filename == "preferences.xml" {
+                                        debug!("Sending preferences changed event");
+                                        tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
                                     }
                                 }
                             }
