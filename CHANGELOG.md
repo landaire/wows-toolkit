@@ -2,12 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
-
-### 🚀 Features
-
-- *(replays)* Consolidate the manual replay loading into a single button
-
 ## [0.1.16] - 2024-09-05
 
 ### 🚀 Features
@@ -15,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - *(file_unpacker)* Add support for serializing as JSON/CBOR, including for WoWs Toolkit's internal representation
 - Game version updates are auto-detected and new files will be auto-loaded
 - *(replays)* Add support for ranked and sending ranked builds back to ShipBuild
+- *(replays)* Consolidate the manual replay loading into a single button
 
 ## [0.1.15] - 2024-09-03
 
