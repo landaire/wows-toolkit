@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.17] - 2024-09-05
+
+### 🐛 Bug Fixes
+
+- *(replays)* Watch replays directory only
+
 ## [0.1.16] - 2024-09-05
 
 ### 🚀 Features
