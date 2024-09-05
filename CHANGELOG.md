@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- *(replays)* Consolidate the manual replay loading into a single button
+
 ## [0.1.16] - 2024-09-05
 
 ### 🚀 Features
