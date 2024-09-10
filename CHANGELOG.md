@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.18] - 2024-09-10
+
+### 🚀 Features
+
+- *(replays)* Add more statuses to indicate some action was done
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fix bug where app would crash if it was focused at the end of a match
+- *(settings)* Setting WoWs directory didn't work so well
+
 ## [0.1.17] - 2024-09-05
 
 ### 🐛 Bug Fixes
