@@ -25,7 +25,7 @@ use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use octocrab::models::repos::Release;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use serde::{Deserialize, Serialize};
 
