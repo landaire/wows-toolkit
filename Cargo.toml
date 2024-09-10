@@ -61,6 +61,9 @@ tracing-subscriber = { version = "0.3", features = [
     "env-filter",
 ] }
 
+[features]
+shipbuilds_debugging = []
+
 
 [profile.release]
 opt-level = 2 # fast and small wasm

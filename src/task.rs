@@ -366,7 +366,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
     // Files may be getting written to. If we fail to parse the replay,
     // let's try try to parse this at least 3 times.
     debug!("Sending replay data for: {:?}", path);
-    for _ in 0..3 {
+    'main_loop: for _ in 0..3 {
         match ReplayFile::from_file(path) {
             Ok(replay_file) => {
                 // We only send back random battles
@@ -382,9 +382,14 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
                         Ok(report) => {
                             // Send the replay builds to the remote server
                             for player in report.player_entities() {
+                                #[cfg(not(feature = "shipbuilds_debugging"))]
+                                let url = "https://shipbuilds.com/api/ship_builds";
+                                #[cfg(feature = "shipbuilds_debugging")]
+                                let url = "http://192.168.1.215:3000/api/ship_builds";
+
                                 // TODO: Bulk API
                                 let res = client
-                                    .post("https://shipbuilds.com/api/ship_builds")
+                                    .post(url)
                                     .json(&build_tracker::BuildTrackerPayload::build_from(
                                         player,
                                         player.player().map(|player| player.realm().to_string()).unwrap(),
@@ -395,6 +400,9 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
                                     .send();
                                 if let Err(e) = res {
                                     error!("error sending request: {:?}", e);
+                                    if e.is_connect() {
+                                        break 'main_loop;
+                                    }
                                 }
                             }
                             debug!("Successfully sent all builds");
@@ -429,6 +437,7 @@ pub fn start_background_parsing_thread(
     let _join_handle = std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
 
+        #[cfg(not(feature = "shipbuilds_debugging"))]
         {
             debug!("Attempting to prune old replay paths from settings");
 
@@ -446,6 +455,7 @@ pub fn start_background_parsing_thread(
                 sent_replays.remove(&file_path);
             }
         }
+
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
             let wows_data = wows_data.read();
@@ -465,7 +475,7 @@ pub fn start_background_parsing_thread(
 
                             let path_str = path.to_string_lossy();
 
-                            if !sent_replays.contains(path_str.as_ref()) {
+                            if !sent_replays.contains(path_str.as_ref()) || cfg!(feature = "shipbuilds_debugging") {
                                 if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
                                     sent_replays.insert(path_str.into_owned());
                                 }
