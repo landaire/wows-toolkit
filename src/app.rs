@@ -289,7 +289,7 @@ pub struct TabState {
     pub background_task: Option<BackgroundTask>,
 
     #[serde(skip)]
-    pub timed_message: Option<TimedMessage>,
+    pub timed_message: RwLock<Option<TimedMessage>>,
 
     #[serde(skip)]
     pub can_change_wows_dir: bool,
@@ -319,7 +319,7 @@ impl Default for TabState {
             file_receiver: None,
             background_task: None,
             can_change_wows_dir: true,
-            timed_message: None,
+            timed_message: RwLock::new(None),
             current_replay: None,
             used_filter: None,
             filtered_file_list: None,
@@ -558,7 +558,9 @@ impl WowsToolkitApp {
         ui.horizontal(|ui| {
             // TODO: Merge these channels
             if let Some(task) = &mut self.tab_state.background_task {
-                if let Some(result) = task.build_description(ui) {
+                let desc = task.build_description(ui);
+                trace!("Task description: {:?}", desc);
+                if let Some(result) = desc {
                     match &task.kind {
                         BackgroundTaskKind::LoadingData => {
                             self.tab_state.allow_changing_wows_dir();
@@ -588,14 +590,14 @@ impl WowsToolkitApp {
                                 self.tab_state.filtered_file_list = None;
                                 self.tab_state.used_filter = None;
 
-                                self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))
+                                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))
                             }
                             BackgroundTaskCompletion::ReplayLoaded { replay } => {
                                 {
                                     self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                 }
                                 self.tab_state.current_replay = Some(replay);
-                                self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)))
+                                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)))
                             }
                             BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
                                 let current_process = env::args().next().expect("current process has no path?");
@@ -649,11 +651,20 @@ impl WowsToolkitApp {
                     self.tab_state.unpacker_progress.take();
                     self.tab_state.last_progress.take();
                 }
-            } else if let Some(timed_message) = &self.tab_state.timed_message {
-                if !timed_message.is_expired() {
-                    ui.label(timed_message.message.as_str());
+            } else {
+                let reset_message = if let Some(timed_message) = &*self.tab_state.timed_message.read() {
+                    if !timed_message.is_expired() {
+                        ui.label(timed_message.message.as_str());
+                        false
+                    } else {
+                        true
+                    }
                 } else {
-                    self.tab_state.timed_message = None;
+                    false
+                };
+
+                if reset_message {
+                    *self.tab_state.timed_message.write() = None;
                 }
             }
         });
@@ -681,7 +692,7 @@ impl WowsToolkitApp {
                         self.update_window_open = true;
                         self.latest_release = Some(latest_release);
                     } else {
-                        self.tab_state.timed_message = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
+                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
                     }
                 }
             }

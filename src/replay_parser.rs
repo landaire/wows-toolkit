@@ -5,7 +5,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-use crate::{icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
+use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
@@ -293,6 +293,7 @@ impl ToolkitTabViewer<'_> {
 
                                     let url = build_ship_config_url(entity, &metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
 
                                     ui.close_menu();
                                 }
@@ -302,6 +303,7 @@ impl ToolkitTabViewer<'_> {
 
                                     let url = build_short_ship_config_url(entity, &metadata_provider);
                                     ui.output_mut(|output| output.copied_text = url);
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
 
                                     ui.close_menu();
                                 }
@@ -388,6 +390,7 @@ impl ToolkitTabViewer<'_> {
 
                     if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                         ui.output_mut(|output| output.copied_text = text);
+                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
                     }
                     ui.end_row();
                 }

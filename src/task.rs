@@ -105,6 +105,21 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
 }
 
+impl std::fmt::Debug for BackgroundTaskCompletion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DataLoaded { new_dir, wows_data, replays } => f
+                .debug_struct("DataLoaded")
+                .field("new_dir", new_dir)
+                .field("wows_data", &"<...>")
+                .field("replays", &"<...>")
+                .finish(),
+            Self::ReplayLoaded { replay } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
+            Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
+        }
+    }
+}
+
 fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
 
@@ -260,6 +275,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         break;
     }
 
+    debug!("Loading GameParams");
+
     // Try loading GameParams.data
     let metadata_provider = load_game_params(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
         if let Some(catalog) = found_catalog {
@@ -269,6 +286,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         Arc::new(metadata_provider)
     });
 
+    debug!("Loading icons");
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
 
     let data = WorldOfWarshipsData {
@@ -281,6 +299,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         replays_dir: replays_dir.clone(),
     };
 
+    debug!("Loading replays");
     let replays = replay_filepaths(&replays_dir).map(|replays| {
         let iter = replays.into_iter().filter_map(|path| {
             // Filter out any replays that don't parse correctly
@@ -296,6 +315,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
         HashMap::from_iter(iter)
     });
+
+    debug!("Sending background task completion");
 
     Ok(BackgroundTaskCompletion::DataLoaded {
         new_dir: wows_directory,
