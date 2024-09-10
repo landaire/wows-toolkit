@@ -14,7 +14,7 @@ use std::{
 
 use egui::{
     mutex::{Mutex, RwLock},
-    OpenUrl, Ui, WidgetText,
+    Color32, OpenUrl, Ui, WidgetText,
 };
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
@@ -86,19 +86,35 @@ impl ToolkitTabViewer<'_> {
                     ui.horizontal(|ui| {
                         StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(50.0)).horizontal(|mut strip| {
                             strip.cell(|ui| {
-                                ui.add_sized(
+                                let show_text_error = {
+                                    let path = Path::new(&self.tab_state.settings.wows_dir);
+                                    !(path.exists() && path.join("bin").exists())
+                                };
+
+                                let response = ui.add_sized(
                                     ui.available_size(),
                                     egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
                                         .interactive(self.tab_state.can_change_wows_dir)
-                                        .hint_text("World of Warships Directory"),
+                                        .hint_text("World of Warships Directory")
+                                        .text_color_opt(show_text_error.then(|| Color32::RED)),
                                 );
+
+                                // If someone pastes a path in, let's do some basic validation to see if this
+                                // can be a WoWs path. If so, reload game data.
+                                if response.changed() {
+                                    let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
+                                    if path.exists() && path.join("bin").exists() {
+                                        self.tab_state.prevent_changing_wows_dir();
+                                        crate::update_background_task!(self.tab_state.background_task, Some(self.tab_state.load_game_data(path)));
+                                    }
+                                }
                             });
                             strip.cell(|ui| {
                                 if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Open...")).clicked() {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
                                         self.tab_state.prevent_changing_wows_dir();
-                                        self.tab_state.load_game_data(folder);
+                                        crate::update_background_task!(self.tab_state.background_task, Some(self.tab_state.load_game_data(folder)));
                                     }
                                 }
                             });
