@@ -321,13 +321,23 @@ impl TabState {
                         if let Some(wows_data) = self.world_of_warships_data.as_ref() {
                             let wows_data = wows_data.read();
 
-                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
-                                let replay_file: ReplayFile = ReplayFile::from_file(&new_file).unwrap();
-                                let replay = Replay::new(replay_file, game_metadata.clone());
-                                let replay = Arc::new(RwLock::new(replay));
+                            // Sometimes we parse the replay too early. Let's try to parse it a couple times
 
-                                if let Some(replay_files) = &mut self.replay_files {
-                                    replay_files.insert(new_file.clone(), replay);
+                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
+                                for _ in 0..3 {
+                                    if let Some(replay_file) = ReplayFile::from_file(&new_file).ok() {
+                                        let replay = Replay::new(replay_file, game_metadata.clone());
+                                        let replay = Arc::new(RwLock::new(replay));
+
+                                        if let Some(replay_files) = &mut self.replay_files {
+                                            replay_files.insert(new_file.clone(), replay);
+                                        }
+
+                                        break;
+                                    } else {
+                                        // oops our framerate
+                                        std::thread::sleep(Duration::from_secs(1));
+                                    }
                                 }
                             }
                         }
@@ -376,7 +386,10 @@ impl TabState {
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file() && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) && path.file_name().unwrap() != "temp.wowsreplay" {
+                                if path.is_file()
+                                    && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                    && path.file_name().expect("path has no filename") != "temp.wowsreplay"
+                                {
                                     tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
                                     // Send this path to the thread watching for replays in background
                                     let _ = background_tx.send(path);
