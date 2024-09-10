@@ -9,7 +9,7 @@ use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato
 use egui::{
     mutex::{Mutex, RwLock},
     text::LayoutJob,
-    Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, TextFormat, Vec2,
+    Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2,
 };
 use egui_extras::{Column, TableBuilder};
 
@@ -37,7 +37,7 @@ use crate::{
     util::{self, build_ship_config_url, build_short_ship_config_url, build_wows_numbers_url, player_color_for_team_relation, separate_number},
 };
 
-const CHAT_VIEW_WIDTH: f32 = 200.0;
+const CHAT_VIEW_WIDTH: f32 = 500.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
@@ -333,68 +333,63 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
-        egui::Grid::new("filtered_files_grid")
-            .max_col_width(CHAT_VIEW_WIDTH)
-            .num_columns(1)
-            .striped(true)
-            .show(ui, |ui| {
-                for message in battle_report.game_chat() {
-                    let GameMessage {
-                        sender_relation,
-                        sender_name,
-                        channel,
-                        message,
-                    } = message;
+        for message in battle_report.game_chat() {
+            let GameMessage {
+                sender_relation,
+                sender_name,
+                channel,
+                message,
+            } = message;
 
-                    let text = format!("{sender_name} ({channel:?}): {message}");
+            let text = format!("{sender_name} ({channel:?}): {message}");
 
-                    let is_dark_mode = ui.visuals().dark_mode;
-                    let name_color = player_color_for_team_relation(*sender_relation, is_dark_mode);
+            let is_dark_mode = ui.visuals().dark_mode;
+            let name_color = player_color_for_team_relation(*sender_relation, is_dark_mode);
 
-                    let mut job = LayoutJob::default();
-                    job.append(
-                        &format!("{sender_name}:\n"),
-                        0.0,
-                        TextFormat {
-                            color: name_color,
-                            ..Default::default()
-                        },
-                    );
+            let mut job = LayoutJob::default();
+            job.append(
+                &format!("{sender_name}:\n"),
+                0.0,
+                TextFormat {
+                    color: name_color,
+                    ..Default::default()
+                },
+            );
 
-                    let text_color = match channel {
-                        ChatChannel::Division => Color32::GOLD,
-                        ChatChannel::Global => {
-                            if is_dark_mode {
-                                Color32::WHITE
-                            } else {
-                                Color32::BLACK
-                            }
-                        }
-                        ChatChannel::Team => {
-                            if is_dark_mode {
-                                Color32::LIGHT_GREEN
-                            } else {
-                                Color32::DARK_GREEN
-                            }
-                        }
-                    };
-
-                    job.append(
-                        message,
-                        0.0,
-                        TextFormat {
-                            color: text_color,
-                            ..Default::default()
-                        },
-                    );
-
-                    if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
-                        ui.output_mut(|output| output.copied_text = text);
-                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
+            let text_color = match channel {
+                ChatChannel::Division => Color32::GOLD,
+                ChatChannel::Global => {
+                    if is_dark_mode {
+                        Color32::WHITE
+                    } else {
+                        Color32::BLACK
                     }
-                    ui.end_row();
                 }
-            });
+                ChatChannel::Team => {
+                    if is_dark_mode {
+                        Color32::LIGHT_GREEN
+                    } else {
+                        Color32::DARK_GREEN
+                    }
+                }
+            };
+
+            job.append(
+                message,
+                0.0,
+                TextFormat {
+                    color: text_color,
+                    ..Default::default()
+                },
+            );
+
+            if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
+                ui.output_mut(|output| output.copied_text = text);
+                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
+            }
+            ui.add(Separator::default());
+            ui.end_row();
+        }
     }
 
     fn build_replay_view(&self, replay_file: &Replay, ui: &mut egui::Ui) {
@@ -465,11 +460,14 @@ impl ToolkitTabViewer<'_> {
             });
 
             if self.tab_state.settings.replay_settings.show_game_chat {
-                egui::SidePanel::left("replay_view_chat").default_width(CHAT_VIEW_WIDTH).show_inside(ui, |ui| {
-                    egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
-                        self.build_replay_chat(report, ui);
+                egui::SidePanel::left("replay_view_chat")
+                    .default_width(CHAT_VIEW_WIDTH)
+                    .max_width(CHAT_VIEW_WIDTH)
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
+                            self.build_replay_chat(report, ui);
+                        });
                     });
-                });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
