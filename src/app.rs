@@ -725,31 +725,34 @@ impl eframe::App for WowsToolkitApp {
                 let url = latest_release.html_url.clone();
                 let mut notes = latest_release.body.clone();
                 let tag = latest_release.tag_name.clone();
-                egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
-                    ui.vertical(|ui| {
-                        ui.label(format!("Version {} of WoWs Toolkit is available", tag));
-                        if let Some(notes) = notes.as_mut() {
-                            ui.text_edit_multiline(notes);
-                        }
-                        ui.horizontal(|ui| {
-                            #[cfg(target_os = "windows")]
-                            {
-                                let asset = latest_release
-                                    .assets
-                                    .iter()
-                                    .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
-                                if let Some(asset) = asset {
+                let asset = latest_release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+                // Only show the update window if we have a valid artifact to download
+                if let Some(asset) = asset {
+                    egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(format!("Version {} of WoWs Toolkit is available", tag));
+                            if let Some(notes) = notes.as_mut() {
+                                ui.text_edit_multiline(notes);
+                            }
+                            ui.horizontal(|ui| {
+                                #[cfg(target_os = "windows")]
+                                {
                                     if ui.button("Install Update").clicked() {
                                         self.tab_state.background_task = Some(crate::task::start_download_update_task(&self.runtime, asset));
                                     }
                                 }
-                            }
-                            if ui.button("View Release").clicked() {
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                            }
+                                if ui.button("View Release").clicked() {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
+                            });
                         });
                     });
-                });
+                } else {
+                    self.update_window_open = false;
+                }
             }
         }
 
