@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.18] - 2024-09-10
+## [0.1.18] - 2024-09-14
 
 ### 🚀 Features
 
@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 - *(replays)* Fix bug where app would crash if it was focused at the end of a match
 - *(settings)* Setting WoWs directory didn't work so well
+- *(replays)* Chat is visually more appealing, easier to read (fixes #3)
+- *(app)* Only show update window if there's a build to download
 
 ## [0.1.17] - 2024-09-05
 
