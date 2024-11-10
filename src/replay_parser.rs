@@ -38,6 +38,7 @@ use crate::{
 };
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
+const DAMAGE_INDEX: usize = 412;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
@@ -262,7 +263,6 @@ impl ToolkitTabViewer<'_> {
 
                         // Actual damage
                         ui.col(|ui| {
-                            const DAMAGE_INDEX: usize = 412;
                             if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
                                 ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
                             } else {
@@ -453,6 +453,7 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_view(&self, replay_file: &Replay, ui: &mut egui::Ui) {
         if let Some(report) = replay_file.battle_report.as_ref() {
+            
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
@@ -461,6 +462,57 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
+                if report.battle_results().is_some() {
+                    let mut team_damage= 0;
+                    let mut red_team_damage = 0;
+                    for vehicle in report.player_entities() {
+                        if let Some(player) = vehicle.player() {
+                            if let Some(player_damage) = vehicle.results_info().expect("no player info").as_array().and_then(|values| values[DAMAGE_INDEX].as_i64()) {
+                                if player.team_id() > 0 {
+                                    red_team_damage += player_damage;
+                                } else {
+                                    team_damage += player_damage;
+                                }
+                            }
+                        }
+                    }
+
+                    let mut job = LayoutJob::default();
+                    job.append(
+                        "Damage Dealt: ",
+                        0.0,
+                        Default::default(),
+                    );
+                    job.append(
+                        &separate_number(team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                        0.0,
+                        TextFormat {
+                            color: Color32::LIGHT_GREEN,
+                            ..Default::default()
+                        },
+                    );
+                    job.append(
+                        " : ",
+                        0.0,
+                        Default::default(),
+                    );
+                    job.append(
+                        &separate_number(red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                        0.0,
+                        TextFormat {
+                            color: Color32::LIGHT_RED,
+                            ..Default::default()
+                        },
+                    );
+
+                    job.append(
+                        &format!(" ({})", separate_number(team_damage + red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))),
+                        0.0,
+                        Default::default(),
+                    );
+
+                    ui.label(job);
+                }
                 ui.menu_button("Export Chat", |ui| {
                     if ui.small_button(format!("{} Save To File", icons::FLOPPY_DISK)).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
