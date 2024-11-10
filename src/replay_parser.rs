@@ -471,6 +471,23 @@ impl ToolkitTabViewer<'_> {
 
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
+                let results_button = egui::Button::new("Results JSON");
+                if ui.add_enabled(report.battle_results().is_some(), results_button).clicked() {
+                    if let Some(results_json) = report.battle_results() {
+                        let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
+                        let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");
+                        let viewer = plaintext_viewer::PlaintextFileViewer {
+                            title: Arc::new("results.json".to_owned()),
+                            file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                ext: ".json".to_owned(),
+                                contents: pretty_meta,
+                            })),
+                            open: Arc::new(AtomicBool::new(true)),
+                        };
+
+                        self.tab_state.file_viewer.lock().push(viewer);
+                    }
+                }
             });
 
             if self.tab_state.settings.replay_settings.show_game_chat {
