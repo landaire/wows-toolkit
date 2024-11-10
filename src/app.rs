@@ -36,6 +36,7 @@ use wowsunpack::data::idx::FileNode;
 use crate::{
     error::ToolkitError,
     file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+    game_params::game_params_bin_path,
     icons,
     plaintext_viewer::PlaintextFileViewer,
     replay_parser::{Replay, SharedReplayParserTabState},
@@ -193,6 +194,8 @@ pub struct Settings {
     pub has_default_value_fix_015: bool,
     #[serde(default = "default_sent_replays")]
     pub sent_replays: Arc<std::sync::Mutex<HashSet<String>>>,
+    #[serde(default = "default_bool::<false>")]
+    pub has_019_game_params_update: bool,
 }
 
 impl Default for Settings {
@@ -207,6 +210,7 @@ impl Default for Settings {
             send_replay_data: true,
             has_default_value_fix_015: true,
             sent_replays: Default::default(),
+            has_019_game_params_update: false,
         }
     }
 }
@@ -391,7 +395,7 @@ impl TabState {
             let (background_tx, background_rx) = mpsc::channel();
 
             if let Some(wows_data) = self.world_of_warships_data.clone() {
-                self.should_send_replays.store(true, Ordering::SeqCst);
+                self.should_send_replays.store(self.settings.send_replay_data, Ordering::SeqCst);
                 task::start_background_parsing_thread(background_rx, Arc::clone(&self.settings.sent_replays), wows_data, self.should_send_replays.clone());
             }
 
@@ -530,6 +534,13 @@ impl WowsToolkitApp {
                 saved_state.tab_state.settings.check_for_updates = true;
                 saved_state.tab_state.settings.send_replay_data = true;
                 saved_state.tab_state.settings.has_default_value_fix_015 = true;
+            }
+
+            if !saved_state.tab_state.settings.has_019_game_params_update {
+                saved_state.tab_state.settings.has_019_game_params_update = true;
+
+                // Remove the old game params
+                let _ = std::fs::remove_file(game_params_bin_path());
             }
 
             saved_state

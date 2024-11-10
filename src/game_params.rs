@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Arc, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Instant,
+};
 
 use itertools::Itertools;
 
@@ -19,6 +23,15 @@ struct CachedGameParams {
     app_version: String,
     game_version: usize,
     params: Vec<Param>,
+}
+
+pub fn game_params_bin_path() -> PathBuf {
+    let old_cache_path = Path::new("game_params.bin");
+    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        storage_dir.join(old_cache_path)
+    } else {
+        old_cache_path.to_path_buf()
+    }
 }
 
 pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
