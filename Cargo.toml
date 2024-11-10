@@ -1,6 +1,6 @@
 [package]
 name = "wows_toolkit"
-version = "0.1.18"
+version = "0.1.19"
 authors = ["landaire"]
 edition = "2021"
 rust-version = "1.72"
@@ -17,9 +17,9 @@ eframe = { version = "0.27.0", default-features = false, features = [
 tracing = "0.1"
 
 # You only need serde if you want app persistence:
-wows_replays = { version = "0.1", features = ["arc"] }
+wows_replays = { version = "0.1.2", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.3", default-features = false, features = [
+wowsunpack = { version = "0.4", default-features = false, features = [
     "arc",
     "cbor",
     "json",
