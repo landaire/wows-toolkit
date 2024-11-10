@@ -136,6 +136,7 @@ impl ToolkitTabViewer<'_> {
             })
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
@@ -159,6 +160,11 @@ impl ToolkitTabViewer<'_> {
                         );
                     });
                 }
+                header.col(|ui| {
+                    ui.strong("Actual Damage").on_hover_text(
+                        "Actual damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+                    );
+                });
                 header.col(|ui| {
                     ui.strong("Time Lived");
                 });
@@ -241,6 +247,14 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(separate_number(entity.damage(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
                             });
                         }
+                        ui.col(|ui| {
+                            const DAMAGE_INDEX: usize = 412;
+                            if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
+                                ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                            } else {
+                                ui.label("-");
+                            }
+                        });
 
                         ui.col(|ui| {
                             if let Some(death_info) = entity.death_info() {
