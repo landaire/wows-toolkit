@@ -129,12 +129,14 @@ impl ToolkitTabViewer<'_> {
             .column(Column::initial(100.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_observed_damage {
-                    table.column(Column::initial(100.0).clip(true))
+                    table.column(Column::initial(110.0).clip(true))
                 } else {
                     table
                 }
             })
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(110.0).clip(true))
+            .column(Column::initial(110.0).clip(true))
+            .column(Column::initial(110.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
@@ -155,14 +157,24 @@ impl ToolkitTabViewer<'_> {
                 });
                 if self.tab_state.settings.replay_settings.show_observed_damage {
                     header.col(|ui| {
-                        ui.strong("Observed Damage").on_hover_text(
+                        ui.strong(format!("Observed Damage {}", icons::INFO)).on_hover_text(
                             "Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.",
                         );
                     });
                 }
                 header.col(|ui| {
-                    ui.strong("Actual Damage").on_hover_text(
+                    ui.strong(format!("Actual Damage {}", icons::INFO)).on_hover_text(
                         "Actual damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+                    );
+                });
+                header.col(|ui| {
+                    ui.strong(format!("Spotting Damage {}", icons::INFO)).on_hover_text(
+                        "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+                    );
+                });
+                header.col(|ui| {
+                    ui.strong(format!("Potential Damage {}", icons::INFO)).on_hover_text(
+                        "Potential damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
                     );
                 });
                 header.col(|ui| {
@@ -247,10 +259,43 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(separate_number(entity.damage(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
                             });
                         }
+
+                        // Actual damage
                         ui.col(|ui| {
                             const DAMAGE_INDEX: usize = 412;
                             if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
                                 ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                            } else {
+                                ui.label("-");
+                            }
+                        });
+                        // Spotting damage
+                        ui.col(|ui| {
+                            const DAMAGE_INDEX: usize = 398;
+                            if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
+                                ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                            } else {
+                                ui.label("-");
+                            }
+                        });
+                        // Potential damage
+                        ui.col(|ui| {
+                            const ARTILLERY_POTENTIAL_DAMAGE: usize = 402;
+                            const _TORPEDO_POTENTIAL_DAMAGE: usize = 403; // may not be accurate?
+                            const _AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
+                            const PLANE_POTENTIAL_DAMAGE: usize = 405; // also may not be accurate?
+
+                            if let Some(damage_numbers) = entity.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=PLANE_POTENTIAL_DAMAGE])) {
+                                println!("{:#?}", damage_numbers);
+                                let total_pot = damage_numbers.iter().map(|num| num.as_f64()).fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
+                                let hover_string = format!("Artillery: {}\nTorpedo: {}\nAirstrike: {}\nPlanes: {}",
+                                    separate_number(damage_numbers[0].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                                    separate_number(damage_numbers[1].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                                    separate_number(damage_numbers[2].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                                    separate_number(damage_numbers[3].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
+                                );
+                                
+                                ui.label(separate_number(total_pot, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))).on_hover_text(hover_string);
                             } else {
                                 ui.label("-");
                             }
@@ -471,8 +516,8 @@ impl ToolkitTabViewer<'_> {
 
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
-                let results_button = egui::Button::new("Results JSON");
-                if ui.add_enabled(report.battle_results().is_some(), results_button).clicked() {
+                let results_button = egui::Button::new("Results Raw JSON");
+                if ui.add_enabled(report.battle_results().is_some(), results_button).on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.").clicked() {
                     if let Some(results_json) = report.battle_results() {
                         let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
                         let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");
@@ -546,7 +591,7 @@ impl ToolkitTabViewer<'_> {
                             [vehicle_name.as_str(), map_name.as_str(), scenario.as_str(), mode.as_str(), time].iter().join(" - ")
                         };
 
-                        let label = ui.add(Label::new(label.as_str()).sense(Sense::click())).on_hover_text(label.as_str());
+                        let label = ui.add(Label::new(label.as_str()).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
                         label.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
