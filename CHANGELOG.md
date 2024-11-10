@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.19] - 2024-11-10
+
+### 🚀 Features
+
+- Show actual damage numbers
+- Add button for showing raw battle results
+
+### ⚙️ Miscellaneous Tasks
+
+- Add upgrade path for re-generating game params in v0.1.19
+- Bump version to v0.1.19
+
 ## [0.1.18] - 2024-09-14
 
 ### 🚀 Features
