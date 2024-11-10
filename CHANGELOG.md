@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Show actual damage numbers
 - Add button for showing raw battle results
+- Add potential and spotting damage + fixed some labels
 
 ### ⚙️ Miscellaneous Tasks
 
