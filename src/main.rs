@@ -32,8 +32,8 @@ fn main() -> eframe::Result<()> {
     };
 
     let file_appender = tracing_appender::rolling::Builder::new()
-        .rotation(Rotation::DAILY)
-        .max_log_files(2)
+        .rotation(Rotation::HOURLY)
+        .max_log_files(1)
         .filename_prefix("wows_toolkit.log")
         .build(".")
         .expect("failed to build file appender");
