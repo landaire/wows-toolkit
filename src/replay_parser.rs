@@ -292,17 +292,15 @@ impl ToolkitTabViewer<'_> {
                         ui.col(|ui| {
                             const ARTILLERY_POTENTIAL_DAMAGE: usize = 402;
                             const _TORPEDO_POTENTIAL_DAMAGE: usize = 403; // may not be accurate?
-                            const _AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
-                            const PLANE_POTENTIAL_DAMAGE: usize = 405; // also may not be accurate?
+                            const AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
 
-                            if let Some(damage_numbers) = entity.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=PLANE_POTENTIAL_DAMAGE])) {
+                            if let Some(damage_numbers) = entity.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=AIRSTRIKE_POTENTIAL_DAMAGE])) {
                                 println!("{:#?}", damage_numbers);
                                 let total_pot = damage_numbers.iter().map(|num| num.as_f64()).fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
-                                let hover_string = format!("Artillery: {}\nTorpedo: {}\nAirstrike: {}\nPlanes: {}",
+                                let hover_string = format!("Artillery: {}\nTorpedo: {}\nPlanes: {}",
                                     separate_number(damage_numbers[0].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
                                     separate_number(damage_numbers[1].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
                                     separate_number(damage_numbers[2].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                                    separate_number(damage_numbers[3].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
                                 );
                                 
                                 ui.label(separate_number(total_pot, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))).on_hover_text(hover_string);
