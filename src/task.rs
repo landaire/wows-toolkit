@@ -304,11 +304,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         let iter = replays.into_iter().filter_map(|path| {
             // Filter out any replays that don't parse correctly
             let replay_file = ReplayFile::from_file(&path).ok()?;
-            let replay = Arc::new(RwLock::new(Replay {
-                replay_file,
-                resource_loader: metadata_provider.clone().unwrap(),
-                battle_report: None,
-            }));
+            let replay = Arc::new(RwLock::new(Replay::new(replay_file, metadata_provider.clone().unwrap())));
 
             Some((path, replay))
         });
@@ -398,7 +394,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
                 }
                 let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
                 if let Some(metadata_provider) = metadata_provider {
-                    let replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
+                    let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             // Send the replay builds to the remote server

@@ -1,15 +1,10 @@
 use std::{
-    borrow::Cow,
-    io::{BufWriter, Write},
-    path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    borrow::Cow, collections::HashMap, io::{BufWriter, Write}, path::PathBuf, sync::{atomic::AtomicBool, Arc}
 };
 
 use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
 use egui::{
-    mutex::{Mutex},
-    text::LayoutJob,
-    Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2,
+    mutex::Mutex, text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2
 };
 use egui_extras::{Column, TableBuilder};
 
@@ -49,6 +44,10 @@ pub struct Replay {
     pub resource_loader: Arc<GameMetadataProvider>,
 
     pub battle_report: Option<BattleReport>,
+
+    pub divisions: HashMap<u32, char>,
+
+    pub remaining_div_identifiers: String,
 }
 
 fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
@@ -65,6 +64,8 @@ impl Replay {
             replay_file,
             resource_loader,
             battle_report: None,
+            divisions: HashMap::new(),
+            remaining_div_identifiers: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect(),
         }
     }
     pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
@@ -82,15 +83,29 @@ impl Replay {
         let mut controller = BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
         let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
 
-        match p.parse_packets_mut(packet_data, &mut controller) {
+        let report = match p.parse_packets_mut(packet_data, &mut controller) {
             Ok(()) => {
                 controller.finish();
-                Ok(controller.build_report())
+                controller.build_report()
             }
             Err(e) => {
                 debug!("{:?}", e);
                 controller.finish();
-                Ok(controller.build_report())
+                controller.build_report()
+            }
+        };
+
+        Ok(report)
+    }
+    pub fn assign_divs(&mut self) {
+        if let Some(report) = self.battle_report.as_ref() {
+            for vehicle in report.player_entities() {
+                if let Some(player) = vehicle.player() {
+                    let div = player.division_id();
+                    if div > 0 {
+                        self.divisions.entry(div).or_insert_with(|| self.remaining_div_identifiers.pop().unwrap_or('?'));
+                    }
+                }
             }
         }
     }
@@ -115,7 +130,7 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
     }
 
-    fn build_replay_player_list(&self, report: &BattleReport, ui: &mut egui::Ui) {
+    fn build_replay_player_list(&self, replay_file: &Replay, report: &BattleReport, ui: &mut egui::Ui) {
         let table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -210,11 +225,17 @@ impl ToolkitTabViewer<'_> {
                                 })
                                 .unwrap_or_else(|| "unk".to_string());
                             if let Some(icon) = self.ship_class_icon_from_species(ship.species().expect("ship has no species")) {
-                                let color = match player.relation() {
+                                let mut color = match player.relation() {
                                     0 => Color32::GOLD,
                                     1 => Color32::LIGHT_GREEN,
                                     _ => Color32::LIGHT_RED,
                                 };
+
+                                if let Some(self_player) = sorted_players[0].player() {
+                                    if player.team_id() == self_player.team_id() {
+                                        color = Color32::GOLD;
+                                    }
+                                }
 
                                 let image = Image::new(ImageSource::Bytes {
                                     uri: icon.path.clone().into(),
@@ -236,6 +257,9 @@ impl ToolkitTabViewer<'_> {
                             } else {
                                 player_color_for_team_relation(player.relation(), is_dark_mode)
                             };
+                            if let Some(div) = replay_file.divisions.get(&player.division_id()).cloned() {
+                                ui.label(format!("({})", div));
+                            }
                             ui.label(RichText::new(player_name_with_clan(player)).color(name_color));
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
@@ -627,7 +651,7 @@ impl ToolkitTabViewer<'_> {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal().id_source("replay_player_list_scroll_area").show(ui, |ui| {
-                    self.build_replay_player_list(report, ui);
+                    self.build_replay_player_list(replay_file, report, ui);
                 });
             });
         }

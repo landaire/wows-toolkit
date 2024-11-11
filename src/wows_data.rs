@@ -93,7 +93,11 @@ impl WorldOfWarshipsData {
                 //         .send()
                 //         .expect("failed to POST build data");
                 // }
-                replay.write().battle_report = Some(report);
+                {
+                    let mut replay_guard = replay.write();
+                    replay_guard.battle_report = Some(report);
+                    replay_guard.assign_divs();
+                }
                 BackgroundTaskCompletion::ReplayLoaded { replay }
             });
 
