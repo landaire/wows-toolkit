@@ -394,6 +394,25 @@ impl ToolkitTabViewer<'_> {
 
                                     ui.close_menu();
                                 }
+
+                                ui.separator();
+
+                                if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
+                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("metadata.json".to_owned()),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty_meta,
+                                        })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+
+                                    self.tab_state.file_viewer.lock().push(viewer);
+
+                                    ui.close_menu();
+                                }
+
                             });
                         });
                     });
