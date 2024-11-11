@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.20] - 2024-11-11
+
+### 🚀 Features
+
+- *(replays)* Add total damage dealt in a match between the teams
+- *(replays)* Selected replay will be highlighted in sidebar
+- *(replays)* Add indicator for if a player disconnected from match
+- *(replays)* Add action button to see raw player metadata
+
+### 🐛 Bug Fixes
+
+- Log file rotates hourly to reduce total log file size
+- *(replays)* Airstrike and plane potential damage are the same
+
+### ⚙️ Miscellaneous Tasks
+
+- Update replay screenshot
+- Use better screenshot
+- Add github discord workflow
+- Bump version to v0.1.20
+
 ## [0.1.19] - 2024-11-10
 
 ### 🚀 Features
