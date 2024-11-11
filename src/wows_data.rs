@@ -4,8 +4,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 
-use egui::mutex::RwLock;
-
+use parking_lot::RwLock;
 use wows_replays::ReplayFile;
 use wowsunpack::{
     data::{idx::FileNode, pkg::PkgFileLoader},

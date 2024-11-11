@@ -12,11 +12,11 @@ use std::{
     time::Duration,
 };
 
-use egui::mutex::RwLock;
 use gettext::Catalog;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
+use parking_lot::RwLock;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};

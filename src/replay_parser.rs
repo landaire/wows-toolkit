@@ -7,12 +7,13 @@ use std::{
 
 use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
 use egui::{
-    mutex::{Mutex, RwLock},
+    mutex::{Mutex},
     text::LayoutJob,
     Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2,
 };
 use egui_extras::{Column, TableBuilder};
 
+use parking_lot::RwLock;
 use tap::Pipe;
 use tracing::debug;
 
@@ -643,7 +644,14 @@ impl ToolkitTabViewer<'_> {
                             [vehicle_name.as_str(), map_name.as_str(), scenario.as_str(), mode.as_str(), time].iter().join(" - ")
                         };
 
-                        let label = ui.add(Label::new(label.as_str()).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
+                        let mut label_text = egui::RichText::new(label.as_str());
+                        if let Some(current_replay) = self.tab_state.current_replay.as_ref() {
+                            if Arc::ptr_eq(current_replay, &replay) {
+                                label_text = label_text.background_color(Color32::DARK_GRAY).color(Color32::WHITE);
+                            }
+                        }
+
+                        let label = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
                         label.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());

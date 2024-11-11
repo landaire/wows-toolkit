@@ -12,10 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{
-    mutex::{Mutex, RwLock},
-    Color32, OpenUrl, Ui, WidgetText,
-};
+use egui::{mutex::Mutex, Color32, OpenUrl, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
@@ -25,6 +22,7 @@ use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use octocrab::models::repos::Release;
+use parking_lot::RwLock;
 use tracing::{debug, trace};
 
 use serde::{Deserialize, Serialize};

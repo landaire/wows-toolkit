@@ -6246,6 +6246,7 @@ dependencies = [
  "language-tags",
  "notify",
  "octocrab",
+ "parking_lot",
  "pickled",
  "reqwest",
  "rfd",
