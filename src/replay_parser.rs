@@ -240,6 +240,15 @@ impl ToolkitTabViewer<'_> {
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
+                            let disconnect_hover_text = if player.did_disconnect() {
+                                Some("Player disconnected from the match")
+                            } else {
+                                None
+                            };
+
+                            if let Some(disconnect_text) = disconnect_hover_text {
+                                ui.label(icons::PLUGS).on_hover_text(disconnect_text);
+                            }
                         });
 
                         if self.tab_state.settings.replay_settings.show_entity_id {
