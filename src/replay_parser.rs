@@ -36,6 +36,7 @@ use crate::{
 };
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
+const XP_INDEX: usize = 389;
 const DAMAGE_INDEX: usize = 412;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
@@ -138,6 +139,7 @@ impl ToolkitTabViewer<'_> {
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto().clip(true))
+            .column(Column::initial(55.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     table.column(Column::initial(100.0).clip(true))
@@ -165,6 +167,9 @@ impl ToolkitTabViewer<'_> {
             .header(20.0, |mut header| {
                 header.col(|ui| {
                     ui.strong("Player Name");
+                });
+                header.col(|ui| {
+                    ui.strong("Base XP");
                 });
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     header.col(|ui| {
@@ -276,7 +281,13 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(icons::PLUGS).on_hover_text(disconnect_text);
                             }
                         });
-
+                        ui.col(|ui| {
+                            if let Some(base_xmp) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[XP_INDEX].as_number().and_then(|number| number.as_i64()))) {
+                                ui.label(separate_number(base_xmp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                            } else {
+                                ui.label("-");
+                            }
+                        });
                         if self.tab_state.settings.replay_settings.show_entity_id {
                             ui.col(|ui| {
                                 ui.label(format!("{}", entity.id()));
