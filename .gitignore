@@ -1,5 +1,5 @@
-/target
-/dist
-/.cargo/config.toml
+target/
+dist/
+.cargo/config.toml
 wows_toolkit.log.*
 
