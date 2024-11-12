@@ -8,6 +8,11 @@ This is a toolkit for interacting with World of Warships files
 
 ![WoWs Toolkit Unpacker Tab With Filtering](assets/wows_toolkit_unpacker_filtering.png)
 
+## Pre-Built Application Binaries
+
+Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases/latest Download the `
+wows-toolkit_v(VERSION)_x86_64-pc-windows-gnu.zip` file, extract the application somewhere, and you're good to go! For all other platforms you will have to compile yourself.
+
 ## Usage
 
 1. Run the application
@@ -17,15 +22,20 @@ This is a toolkit for interacting with World of Warships files
 
 The application will automatically check for updates on startup and, if available, will present update details in-app.
 
-## Pre-built Binaries
+This is not considered a World of Warships mod and does not modify your World of Warships install at all. It passively reads game files required for parsing replays, and parses replay files directly.
 
-Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases. For all other platforms you will have to compile yourself.
+## Features
 
-## Building Locally
+- Can read replay files and display statistics such as damage dealt, time lived, spotting damage, and potential damage.
+- Can view player builds by clicking the "Actions" button on a player row and choosing to open the build in your web browser.
+- Can browse and extract packed game files.
+- Automatically sends **builds** (not raw replays) to shipbuilds.com for build statistic gathering from **Randoms** and **Ranked** games. Training rooms are not sent. Sending replay data can be disabled in the application settings tab.
 
-Make sure you are using the latest version of stable rust by running `rustup update`.
+## For Developers
 
-`cargo run --release`
+If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
+
+To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release` from the source code directory.
 
 On Linux you need to first run:
 
