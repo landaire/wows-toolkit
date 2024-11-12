@@ -446,7 +446,7 @@ fn send_replay_data(path: &Path, wows_data: &WorldOfWarshipsData, client: &reqwe
 
 pub fn start_background_parsing_thread(
     rx: mpsc::Receiver<PathBuf>,
-    sent_replays: Arc<Mutex<HashSet<String>>>,
+    sent_replays: Arc<RwLock<HashSet<String>>>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     should_send_replays: Arc<AtomicBool>,
 ) {
@@ -459,7 +459,7 @@ pub fn start_background_parsing_thread(
             debug!("Attempting to prune old replay paths from settings");
 
             // Prune files that no longer exist to prevent the settings from growing too large
-            let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
+            let mut sent_replays = sent_replays.write();
             let mut to_remove = Vec::new();
             for file_path in &*sent_replays {
                 if !Path::new(file_path).exists() {
@@ -480,8 +480,6 @@ pub fn start_background_parsing_thread(
             // Try to see if we have any historical replays we can send
             match std::fs::read_dir(&wows_data.replays_dir) {
                 Ok(read_dir) => {
-                    let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
-
                     for file in read_dir {
                         if let Ok(file) = file {
                             let path = file.path();
@@ -491,10 +489,11 @@ pub fn start_background_parsing_thread(
                             }
 
                             let path_str = path.to_string_lossy();
+                            let sent_replay = { sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
 
-                            if !sent_replays.contains(path_str.as_ref()) || cfg!(feature = "shipbuilds_debugging") {
+                            if !sent_replay {
                                 if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
-                                    sent_replays.insert(path_str.into_owned());
+                                    sent_replays.write().insert(path_str.into_owned());
                                 }
                             }
                         }
@@ -513,13 +512,13 @@ pub fn start_background_parsing_thread(
             }
 
             let path_str = path.to_string_lossy();
-            let mut sent_replays = sent_replays.lock().expect("failed to lock sent_replays");
+            let sent_replay = { sent_replays.read().contains(path_str.as_ref()) };
 
-            if !sent_replays.contains(path_str.as_ref()) {
+            if !sent_replay {
                 debug!("Attempting to send replay at {}", path_str);
                 let wows_data = wows_data.read();
                 if let Ok(_) = send_replay_data(&path, &*wows_data, &client) {
-                    sent_replays.insert(path_str.into_owned());
+                    sent_replays.write().insert(path_str.into_owned());
                 }
             } else {
                 debug!("Not sending replay as it's already been sent");

@@ -23,39 +23,39 @@ impl<'writer> FormatFields<'writer> for NewType {
 fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
-    use tracing::level_filters::LevelFilter;
-    use tracing_appender::rolling::Rotation;
-    use tracing_subscriber::{
-        fmt::{self, time::LocalTime},
-        layer::SubscriberExt,
-        Layer,
-    };
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_appender::rolling::Rotation;
+    // use tracing_subscriber::{
+    //     fmt::{self, time::LocalTime},
+    //     layer::SubscriberExt,
+    //     Layer,
+    // };
 
-    let file_appender = tracing_appender::rolling::Builder::new()
-        .rotation(Rotation::HOURLY)
-        .max_log_files(1)
-        .filename_prefix("wows_toolkit.log")
-        .build(".")
-        .expect("failed to build file appender");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let subscriber = tracing_subscriber::registry()
-        .with(
-            fmt::Layer::new()
-                .pretty()
-                // .with_writer(std::io::stdout)
-                // .with_timer(LocalTime::rfc_3339())
-                .fmt_fields(NewType(Pretty::default()))
-                .with_ansi(true)
-                .with_filter(LevelFilter::DEBUG),
-        )
-        .with(
-            fmt::Layer::new()
-                .with_writer(non_blocking)
-                .with_timer(LocalTime::rfc_3339())
-                .with_ansi(false)
-                .with_filter(LevelFilter::DEBUG),
-        );
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    // let file_appender = tracing_appender::rolling::Builder::new()
+    //     .rotation(Rotation::HOURLY)
+    //     .max_log_files(1)
+    //     .filename_prefix("wows_toolkit.log")
+    //     .build(".")
+    //     .expect("failed to build file appender");
+    // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // let subscriber = tracing_subscriber::registry()
+    //     .with(
+    //         fmt::Layer::new()
+    //             .pretty()
+    //             // .with_writer(std::io::stdout)
+    //             // .with_timer(LocalTime::rfc_3339())
+    //             .fmt_fields(NewType(Pretty::default()))
+    //             .with_ansi(true)
+    //             .with_filter(LevelFilter::DEBUG),
+    //     )
+    //     .with(
+    //         fmt::Layer::new()
+    //             .with_writer(non_blocking)
+    //             .with_timer(LocalTime::rfc_3339())
+    //             .with_ansi(false)
+    //             .with_filter(LevelFilter::DEBUG),
+    //     );
+    // tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let icon_data: &[u8] = &include_bytes!("../assets/wows_toolkit.png")[..];
 

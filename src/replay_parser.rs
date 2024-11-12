@@ -1,11 +1,13 @@
 use std::{
-    borrow::Cow, collections::HashMap, io::{BufWriter, Write}, path::PathBuf, sync::{atomic::AtomicBool, Arc}
+    borrow::Cow,
+    collections::HashMap,
+    io::{BufWriter, Write},
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
-use egui::{
-    mutex::Mutex, text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2
-};
+use egui::{mutex::Mutex, text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder};
 
 use parking_lot::RwLock;
@@ -504,7 +506,6 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_view(&self, replay_file: &Replay, ui: &mut egui::Ui) {
         if let Some(report) = replay_file.battle_report.as_ref() {
-            
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
@@ -514,11 +515,16 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
                 if report.battle_results().is_some() {
-                    let mut team_damage= 0;
+                    let mut team_damage = 0;
                     let mut red_team_damage = 0;
                     for vehicle in report.player_entities() {
                         if let Some(player) = vehicle.player() {
-                            if let Some(player_damage) = vehicle.results_info().expect("no player info").as_array().and_then(|values| values[DAMAGE_INDEX].as_i64()) {
+                            if let Some(player_damage) = vehicle
+                                .results_info()
+                                .expect("no player info")
+                                .as_array()
+                                .and_then(|values| values[DAMAGE_INDEX].as_i64())
+                            {
                                 if player.team_id() > 0 {
                                     red_team_damage += player_damage;
                                 } else {
@@ -529,11 +535,7 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     let mut job = LayoutJob::default();
-                    job.append(
-                        "Damage Dealt: ",
-                        0.0,
-                        Default::default(),
-                    );
+                    job.append("Damage Dealt: ", 0.0, Default::default());
                     job.append(
                         &separate_number(team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
                         0.0,
@@ -542,11 +544,7 @@ impl ToolkitTabViewer<'_> {
                             ..Default::default()
                         },
                     );
-                    job.append(
-                        " : ",
-                        0.0,
-                        Default::default(),
-                    );
+                    job.append(" : ", 0.0, Default::default());
                     job.append(
                         &separate_number(red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
                         0.0,
@@ -557,7 +555,10 @@ impl ToolkitTabViewer<'_> {
                     );
 
                     job.append(
-                        &format!(" ({})", separate_number(team_damage + red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))),
+                        &format!(
+                            " ({})",
+                            separate_number(team_damage + red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))
+                        ),
                         0.0,
                         Default::default(),
                     );
@@ -620,7 +621,11 @@ impl ToolkitTabViewer<'_> {
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
                 let results_button = egui::Button::new("Results Raw JSON");
-                if ui.add_enabled(report.battle_results().is_some(), results_button).on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.").clicked() {
+                if ui
+                    .add_enabled(report.battle_results().is_some(), results_button)
+                    .on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.")
+                    .clicked()
+                {
                     if let Some(results_json) = report.battle_results() {
                         let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
                         let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");

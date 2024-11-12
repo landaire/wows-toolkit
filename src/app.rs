@@ -171,7 +171,7 @@ pub const fn default_bool<const V: bool>() -> bool {
     V
 }
 
-pub fn default_sent_replays() -> Arc<std::sync::Mutex<HashSet<String>>> {
+pub fn default_sent_replays() -> Arc<RwLock<HashSet<String>>> {
     Default::default()
 }
 
@@ -191,7 +191,7 @@ pub struct Settings {
     #[serde(default = "default_bool::<false>")]
     pub has_default_value_fix_015: bool,
     #[serde(default = "default_sent_replays")]
-    pub sent_replays: Arc<std::sync::Mutex<HashSet<String>>>,
+    pub sent_replays: Arc<RwLock<HashSet<String>>>,
     #[serde(default = "default_bool::<false>")]
     pub has_019_game_params_update: bool,
 }
@@ -437,7 +437,6 @@ impl TabState {
                 Err(e) => debug!("watch error: {:?}", e),
             })
             .expect("failed to create fs watcher for replays dir");
-
             self.file_watcher = Some(watcher);
             self.file_receiver = Some(rx);
             self.file_watcher.as_mut().unwrap()
