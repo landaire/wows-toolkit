@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.21] - 2024-11-12
+
+### 🚀 Features
+
+- *(replays)* Show which division a player was in (div letters probably don't match in-game)
+- Default wows dir was previously broken, now should work
+
+### 🐛 Bug Fixes
+
+- Resolved application hang when first using the application
+
 ## [0.1.20] - 2024-11-11
 
 ### 🚀 Features
