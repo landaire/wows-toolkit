@@ -558,6 +558,7 @@ impl WowsToolkitApp {
         let default_wows_path = Path::new(default_wows_dir);
         if default_wows_path.exists() {
             this.tab_state.settings.wows_dir = default_wows_dir.to_string();
+            this.tab_state.background_task = Some(this.tab_state.load_game_data(default_wows_path.to_path_buf()));
         }
 
         this
