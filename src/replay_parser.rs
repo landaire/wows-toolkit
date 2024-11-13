@@ -771,6 +771,7 @@ impl ToolkitTabViewer<'_> {
                             update_background_task!(self.tab_state.background_task, wows_data.read().parse_live_replay());
                         }
                     }
+                    ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
                 }
             });
 

@@ -42,6 +42,16 @@ use crate::{
     wows_data::WorldOfWarshipsData,
 };
 
+#[macro_export]
+macro_rules! update_background_task {
+    ($saved_task:expr, $background_task:expr) => {
+        let task = $background_task;
+        if task.is_some() {
+            $saved_task = task;
+        }
+    };
+}
+
 #[derive(Clone)]
 pub enum Tab {
     Unpacker,
@@ -301,6 +311,9 @@ pub struct TabState {
 
     #[serde(skip)]
     pub should_send_replays: Arc<AtomicBool>,
+
+    #[serde(default = "default_bool::<false>")]
+    pub auto_load_latest_replay: bool,
 }
 
 impl Default for TabState {
@@ -326,6 +339,7 @@ impl Default for TabState {
             used_filter: None,
             filtered_file_list: None,
             should_send_replays: Arc::new(AtomicBool::new(false)),
+            auto_load_latest_replay: false,
         }
     }
 }
@@ -348,7 +362,13 @@ impl TabState {
                                         let replay = Arc::new(RwLock::new(replay));
 
                                         if let Some(replay_files) = &mut self.replay_files {
-                                            replay_files.insert(new_file.clone(), replay);
+                                            replay_files.insert(new_file.clone(), Arc::clone(&replay));
+                                        }
+
+                                        if self.auto_load_latest_replay {
+                                            if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                                                update_background_task!(self.background_task, wows_data.read().load_replay(replay));
+                                            }
                                         }
 
                                         break;
@@ -867,14 +887,4 @@ fn build_error_window(ui: &mut egui::Ui, error: &dyn Error) {
         ui.label(format!("{} An error occurred:", icons::WARNING));
         ui.label(error.to_string());
     });
-}
-
-#[macro_export]
-macro_rules! update_background_task {
-    ($saved_task:expr, $background_task:expr) => {
-        let task = $background_task;
-        if task.is_some() {
-            $saved_task = task;
-        }
-    };
 }
