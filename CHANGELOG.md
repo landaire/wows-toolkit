@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.22] - 2024-11-13
+
+### 🚀 Features
+
+- *(replays)* Add base xp
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fixed total damage numbers reflecting incorrect teams
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog
+
 ## [0.1.21] - 2024-11-12
 
 ### 🚀 Features
