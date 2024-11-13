@@ -134,6 +134,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_player_list(&self, replay_file: &Replay, report: &BattleReport, ui: &mut egui::Ui) {
+        let is_dark_mode = ui.visuals().dark_mode;
         let table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -219,6 +220,7 @@ impl ToolkitTabViewer<'_> {
                 });
                 for entity in &sorted_players {
                     let player = entity.player().unwrap();
+                    let player_color = player_color_for_team_relation(player.relation(), is_dark_mode);
                     let ship = player.vehicle();
 
                     body.row(30.0, |mut ui| {
@@ -258,11 +260,10 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(species);
                             }
 
-                            let is_dark_mode = ui.visuals().dark_mode;
                             let name_color = if player.is_abuser() {
                                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
                             } else {
-                                player_color_for_team_relation(player.relation(), is_dark_mode)
+                                player_color
                             };
                             if let Some(div) = replay_file.divisions.get(&player.division_id()).cloned() {
                                 ui.label(format!("({})", div));
@@ -283,7 +284,8 @@ impl ToolkitTabViewer<'_> {
                         });
                         ui.col(|ui| {
                             if let Some(base_xmp) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[XP_INDEX].as_number().and_then(|number| number.as_i64()))) {
-                                ui.label(separate_number(base_xmp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                                let label_text =  separate_number(base_xmp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
+                                ui.label(RichText::new(label_text).color(player_color));
                             } else {
                                 ui.label("-");
                             }
@@ -311,7 +313,8 @@ impl ToolkitTabViewer<'_> {
                         // Actual damage
                         ui.col(|ui| {
                             if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
-                                ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
+                                let label_text = separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
+                                ui.label(RichText::new(label_text).color(player_color));
                             } else {
                                 ui.label("-");
                             }
@@ -771,6 +774,7 @@ impl ToolkitTabViewer<'_> {
                             update_background_task!(self.tab_state.background_task, wows_data.read().parse_live_replay());
                         }
                     }
+
                     ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
                 }
             });
