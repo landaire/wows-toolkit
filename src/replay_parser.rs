@@ -536,7 +536,7 @@ impl ToolkitTabViewer<'_> {
                                 .as_array()
                                 .and_then(|values| values[DAMAGE_INDEX].as_i64())
                             {
-                                if player.team_id() > 0 {
+                                if player.relation() > 1 {
                                     red_team_damage += player_damage;
                                 } else {
                                     team_damage += player_damage;
