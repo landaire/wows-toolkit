@@ -92,6 +92,8 @@ pub struct TrackedPlayer {
     clan: String,
     timestamps: BTreeSet<chrono::DateTime<Local>>,
     arena_ids: BTreeSet<i64>,
+    #[serde(default)]
+    notes: String,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -256,6 +258,7 @@ impl ToolkitTabViewer<'_> {
                 .column(Column::initial(115.0).clip(true))
                 .column(Column::initial(90.0).clip(true))
                 .column(Column::initial(130.0).clip(true))
+                .column(Column::initial(200.0).clip(true))
                 .column(Column::remainder())
                 .min_scrolled_height(0.0);
 
@@ -330,6 +333,9 @@ impl ToolkitTabViewer<'_> {
                     header.col(|ui| {
                         ui.strong("Aliases");
                     });
+                    header.col(|ui| {
+                        ui.strong("Notes");
+                    });
                 })
                 .body(|mut body| {
                     let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
@@ -345,9 +351,9 @@ impl ToolkitTabViewer<'_> {
                         tracked_players_by_ts.iter().map(|(_ts, ids)| ids).flatten().cloned().collect()
                     };
 
-                    let tracked_players = &player_tracker_settings.tracked_players;
+                    let tracked_players = &mut player_tracker_settings.tracked_players;
                     let players = tracked_players
-                        .iter()
+                        .iter_mut()
                         .filter(|(id, player)| {
                             if !player_tracker_settings.player_filter.is_empty() {
                                 player_range.contains(id)
@@ -463,6 +469,9 @@ impl ToolkitTabViewer<'_> {
                             });
                             row.col(|ui| {
                                 ui.label(player.names.iter().join(", "));
+                            });
+                            row.col(|ui| {
+                                ui.text_edit_singleline(&mut player.notes);
                             });
                         });
                     }
