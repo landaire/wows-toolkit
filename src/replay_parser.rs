@@ -141,7 +141,7 @@ impl ToolkitTabViewer<'_> {
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto().clip(true))
             .column(Column::initial(55.0).clip(true))
-            .column(Column::initial(55.0).clip(true))
+            .column(Column::initial(65.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     table.column(Column::initial(100.0).clip(true))
@@ -152,15 +152,16 @@ impl ToolkitTabViewer<'_> {
             .column(Column::initial(100.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_observed_damage {
-                    table.column(Column::initial(110.0).clip(true))
+                    table.column(Column::initial(115.0).clip(true))
                 } else {
                     table
                 }
             })
             .column(Column::initial(110.0).clip(true))
-            .column(Column::initial(110.0).clip(true))
-            .column(Column::initial(110.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(115.0).clip(true))
+            .column(Column::initial(115.0).clip(true))
+            // Time lived
+            .column(Column::initial(90.0).clip(true))
             .column(Column::initial(100.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
