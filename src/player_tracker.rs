@@ -25,6 +25,11 @@ pub struct PlayerTracker {
 
 impl PlayerTracker {
     pub fn update_from_replay(&mut self, replay: &Replay) {
+        if !matches!(replay.replay_file.meta.gameType.as_str(), "RandomBattle" | "RankedBattle") {
+            // Only update from randoms / ranked
+            return;
+        }
+
         if let Some(report) = replay.battle_report.as_ref() {
             let tracked_players = &mut self.tracked_players;
             let tracked_players_by_ts = &mut self.tracked_players_by_time;
