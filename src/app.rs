@@ -319,7 +319,7 @@ pub struct TabState {
     #[serde(skip)]
     pub should_send_replays: Arc<AtomicBool>,
 
-    #[serde(default = "default_bool::<false>")]
+    #[serde(default = "default_bool::<true>")]
     pub auto_load_latest_replay: bool,
 }
 
@@ -346,7 +346,7 @@ impl Default for TabState {
             used_filter: None,
             filtered_file_list: None,
             should_send_replays: Arc::new(AtomicBool::new(false)),
-            auto_load_latest_replay: false,
+            auto_load_latest_replay: true,
         }
     }
 }
