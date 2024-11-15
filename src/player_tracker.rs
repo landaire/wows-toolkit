@@ -439,10 +439,10 @@ impl ToolkitTabViewer<'_> {
                             };
 
                             let encounters_color = match times_encountered_in_range {
+                                0..=1 => None,
                                 2..=3 => Some(Color32::YELLOW),
                                 4..=5 => Some(Color32::ORANGE),
-                                6..=8 => Some(Color32::LIGHT_RED),
-                                _ => None,
+                                _ => Some(Color32::LIGHT_RED),
                             };
 
                             row.col(|ui| {
