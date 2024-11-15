@@ -550,6 +550,7 @@ impl WowsToolkitApp {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
         cc.egui_ctx.set_fonts(fonts);
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.

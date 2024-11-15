@@ -88,14 +88,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,
-        Box::new(|cc| {
-            let style = Style {
-                visuals: Visuals::dark(),
-                ..Style::default()
-            };
-            cc.egui_ctx.set_style(style);
-            Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))
-        }),
+        Box::new(|cc| Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))),
     )
 }
 
