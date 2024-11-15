@@ -83,7 +83,11 @@ fn main() -> eframe::Result<()> {
         }
     }
 
-    eframe::run_native(wows_toolkit::APP_NAME, native_options, Box::new(|cc| Box::new(wows_toolkit::WowsToolkitApp::new(cc))))
+    eframe::run_native(
+        wows_toolkit::APP_NAME,
+        native_options,
+        Box::new(|cc| Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))),
+    )
 }
 
 // When compiling to web using trunk:

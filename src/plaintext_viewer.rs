@@ -29,8 +29,9 @@ impl PlaintextFileViewer {
                 egui::CentralPanel::default().show(ctx, |ui| match &mut *file_info {
                     FileType::PlainTextFile { ext, contents } => {
                         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
-                            let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx());
-                            let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), &theme, string, &ext[1..]);
+                            let style = ui.style().as_ref();
+                            let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), style);
+                            let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), style, &theme, string, &ext[1..]);
                             layout_job.wrap.max_width = wrap_width;
                             ui.fonts(|f| f.layout_job(layout_job))
                         };
