@@ -565,13 +565,13 @@ pub fn start_populating_player_inspector(
                                 player_tracker.write().update_from_replay(&replay);
                             }
                             Err(e) => {
-                                error!("error attempting to parse replay for replay inspector: {:?}", e);
+                                println!("error attempting to parse replay for replay inspector: {:?}", e);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    error!("error attempting to open replay for replay inspector: {:?}", e);
+                    println!("error attempting to open replay for replay inspector: {:?}", e);
                 }
             }
         }

@@ -33,8 +33,14 @@ impl PlayerTracker {
             let timestamp = Local.from_local_datetime(&timestamp).single().expect("failed to convert to local time");
 
             for player in report.players() {
-                // Ignore ourselves
-                if player.relation() == 0 {
+                // Grab the metadata player
+                if let Some(metadata_player) = replay.replay_file.meta.vehicles.iter().find(|metadata_player| metadata_player.name == player.name()) {
+                    // Ignore ourselves
+                    if metadata_player.relation == 0 {
+                        continue;
+                    }
+                } else {
+                    // couldn't find this player? weird
                     continue;
                 }
 
@@ -52,19 +58,24 @@ impl PlayerTracker {
                 }
 
                 if update_metadata || tracked_player.timestamps.is_empty() {
-                    // If we need to update the name, let's add the name to the alias list
-                    if update_metadata {
+                    if update_metadata
+                        && !tracked_player.names.contains(&tracked_player.last_name)
+                        && tracked_player.last_name != player.name()
+                        && !tracked_player.last_name.is_empty()
+                    {
+                        // If we need to update the name, let's add the name to the alias list
                         tracked_player.names.insert(tracked_player.last_name.clone());
                     }
 
                     tracked_player.last_name = player.name().to_string();
 
-                    tracked_player.clan_id = player.clan_id();
                     tracked_player.clan = player.clan().to_string();
-                    tracked_player.timestamps.insert(timestamp);
-                    tracked_player.arena_ids.insert(report.arena_id());
-                    tracked_player.db_id = player.db_id();
                 }
+
+                tracked_player.db_id = player.db_id();
+                tracked_player.clan_id = player.clan_id();
+                tracked_player.timestamps.insert(timestamp);
+                tracked_player.arena_ids.insert(report.arena_id());
 
                 tracked_players_by_ts.entry(timestamp.clone()).or_default().push(player.db_id());
             }
@@ -119,6 +130,7 @@ enum SortedBy {
     Clan(SortOrder),
     LastEncountered(SortOrder),
     TimesEncountered(SortOrder),
+    TimesEncounteredInTimeRange(SortOrder),
 }
 
 impl SortedBy {
@@ -128,6 +140,7 @@ impl SortedBy {
             SortedBy::Clan(_) => "Clan",
             SortedBy::LastEncountered(_) => "Last Encountered",
             SortedBy::TimesEncountered(_) => "Times Encountered",
+            SortedBy::TimesEncounteredInTimeRange(_) => "Times Encountered in Time Range",
         }
     }
 
@@ -151,7 +164,11 @@ impl SortedBy {
 
     fn order(&self) -> SortOrder {
         match self {
-            SortedBy::Name(sort_order) | SortedBy::Clan(sort_order) | SortedBy::LastEncountered(sort_order) | SortedBy::TimesEncountered(sort_order) => *sort_order,
+            SortedBy::Name(sort_order)
+            | SortedBy::Clan(sort_order)
+            | SortedBy::LastEncountered(sort_order)
+            | SortedBy::TimesEncountered(sort_order)
+            | SortedBy::TimesEncounteredInTimeRange(sort_order) => *sort_order,
         }
     }
 }
@@ -236,6 +253,7 @@ impl ToolkitTabViewer<'_> {
                 .column(Column::initial(60.0).clip(true))
                 .column(Column::initial(115.0).clip(true))
                 .column(Column::initial(65.0).clip(true))
+                .column(Column::initial(115.0).clip(true))
                 .column(Column::initial(90.0).clip(true))
                 .column(Column::initial(130.0).clip(true))
                 .column(Column::remainder())
@@ -272,7 +290,7 @@ impl ToolkitTabViewer<'_> {
                         ui.strong("WG ID");
                     });
                     header.col(|ui| {
-                        let raw_text = "Encounters";
+                        let raw_text = "Total Encounters";
                         let text = if let SortedBy::TimesEncountered(sort_order) = sorted_by {
                             format!("{} {}", raw_text, sort_order.icon())
                         } else {
@@ -281,6 +299,20 @@ impl ToolkitTabViewer<'_> {
 
                         if ui.strong(text).clicked() {
                             player_tracker_settings.sort_order.transition_to(SortedBy::TimesEncountered(SortOrder::Asc));
+                        }
+                    });
+                    header.col(|ui| {
+                        let raw_text = "Encounters in Time Range";
+                        let text = if let SortedBy::TimesEncounteredInTimeRange(sort_order) = sorted_by {
+                            format!("{} {}", raw_text, sort_order.icon())
+                        } else {
+                            raw_text.to_string()
+                        };
+
+                        if ui.strong(text).clicked() {
+                            player_tracker_settings
+                                .sort_order
+                                .transition_to(SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc));
                         }
                     });
                     header.col(|ui| {
@@ -358,6 +390,16 @@ impl ToolkitTabViewer<'_> {
                                 }
                             }
                             SortedBy::TimesEncountered(sort_order) => {
+                                let playera_count = playera.timestamps.len();
+                                let playerb_count = playerb.timestamps.len();
+
+                                if sort_order == SortOrder::Asc {
+                                    playera_count.cmp(&playerb_count)
+                                } else {
+                                    playerb_count.cmp(&playera_count)
+                                }
+                            }
+                            SortedBy::TimesEncounteredInTimeRange(sort_order) => {
                                 let (playera_count, playerb_count) = if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
                                     let playera_count = playera.timestamps.iter().filter(|ts| **ts > filter_range).count();
                                     let playerb_count = playerb.timestamps.iter().filter(|ts| **ts > filter_range).count();
@@ -381,7 +423,13 @@ impl ToolkitTabViewer<'_> {
                     for (player_id, player) in players {
                         body.row(30.0, |mut row| {
                             let times_encountered = player.arena_ids.len();
-                            let encounters_color = match times_encountered {
+                            let times_encountered_in_range = if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
+                                player.timestamps.iter().filter(|ts| **ts > filter_range).count()
+                            } else {
+                                times_encountered
+                            };
+
+                            let encounters_color = match times_encountered_in_range {
                                 2..=3 => Some(Color32::YELLOW),
                                 4..=5 => Some(Color32::ORANGE),
                                 6..=8 => Some(Color32::LIGHT_RED),
@@ -401,7 +449,12 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(player_id.to_string());
                             });
                             row.col(|ui| {
-                                let text = RichText::new(player.arena_ids.len().to_string());
+                                let text = RichText::new(times_encountered.to_string());
+                                let text = if let Some(color) = encounters_color { text.color(color) } else { text };
+                                ui.label(text);
+                            });
+                            row.col(|ui| {
+                                let text = RichText::new(times_encountered_in_range.to_string());
                                 let text = if let Some(color) = encounters_color { text.color(color) } else { text };
                                 ui.label(text);
                             });
