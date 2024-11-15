@@ -141,6 +141,7 @@ impl ToolkitTabViewer<'_> {
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto().clip(true))
             .column(Column::initial(55.0).clip(true))
+            .column(Column::initial(55.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     table.column(Column::initial(100.0).clip(true))
@@ -171,6 +172,9 @@ impl ToolkitTabViewer<'_> {
                 });
                 header.col(|ui| {
                     ui.strong("Base XP");
+                });
+                header.col(|ui| {
+                    ui.strong("Raw XP");
                 });
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     header.col(|ui| {
@@ -290,6 +294,15 @@ impl ToolkitTabViewer<'_> {
                                 ui.label("-");
                             }
                         });
+                        ui.col(|ui| {
+                            if let Some(raw_xp) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[XP_INDEX - 1].as_number().and_then(|number| number.as_i64()))) {
+                                let raw_xp =  separate_number(raw_xp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
+                                ui.label(raw_xp);
+                            } else {
+                                ui.label("-");
+                            }
+                        });
+
                         if self.tab_state.settings.replay_settings.show_entity_id {
                             ui.col(|ui| {
                                 ui.label(format!("{}", entity.id()));
@@ -464,13 +477,28 @@ impl ToolkitTabViewer<'_> {
                 sender_relation,
                 sender_name,
                 channel,
-                message,
+                 message,
             } = message;
 
-            let text = format!("{sender_name} ({channel:?}): {message}");
+            let translated_text = if sender_relation.is_none() {
+                self.metadata_provider().and_then(|provider| {
+                    let name = provider.localized_name_from_id(message);
+
+                    name
+                })
+            } else {
+                None
+            };
+
+            let text = format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message));
+
 
             let is_dark_mode = ui.visuals().dark_mode;
-            let name_color = player_color_for_team_relation(*sender_relation, is_dark_mode);
+            let name_color = if let Some(relation) = sender_relation {
+                player_color_for_team_relation(*relation, is_dark_mode)
+            } else {
+                Color32::GRAY
+            };
 
             let mut job = LayoutJob::default();
             job.append(
@@ -501,7 +529,7 @@ impl ToolkitTabViewer<'_> {
             };
 
             job.append(
-                message,
+                translated_text.as_ref().unwrap_or(message),
                 0.0,
                 TextFormat {
                     color: text_color,
