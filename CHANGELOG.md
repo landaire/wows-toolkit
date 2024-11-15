@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.24] - 2024-11-15
+
+### 🚀 Features
+
+- *(player_tracker)* Add editable player notes
+
+### 🐛 Bug Fixes
+
+- *(player_tracker)* Fix bug with sorting encounters in time range
+- *(player_tracker)* Colors stopped for high numbers
+- Dark mode did not work for system-wide light mode users
+
+### Player_tracker
+
+- Change default sort to be times encountered within the tim range
+
 ## [0.1.23] - 2024-11-15
 
 ### 🚀 Features
