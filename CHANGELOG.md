@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.23] - 2024-11-15
+
+### 🚀 Features
+
+- *(replays)* Add checkbox to auto-load most recent replay
+- *(replays)* Colorize base XP and damage
+- Add new player tracker tab
+- *(replays)* Add hover text to break down damage by damage type
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fix operation replays failing to load
+
+### ⚙️ Miscellaneous Tasks
+
+- Update gui
+
+### Replays
+
+- Adjust some table column sizes
+- Enable auto loading of latest replay by default
+
 ## [0.1.22] - 2024-11-13
 
 ### 🚀 Features
