@@ -180,7 +180,7 @@ impl SortedBy {
 
 impl Default for SortedBy {
     fn default() -> Self {
-        SortedBy::TimesEncountered(SortOrder::Desc)
+        SortedBy::TimesEncounteredInTimeRange(SortOrder::Desc)
     }
 }
 
