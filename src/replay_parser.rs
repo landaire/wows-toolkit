@@ -174,7 +174,7 @@ impl ToolkitTabViewer<'_> {
                     ui.strong("Base XP");
                 });
                 header.col(|ui| {
-                    ui.strong("Raw XP");
+                    ui.strong(format!("Raw XP {}", icons::INFO)).on_hover_text("Raw XP before win modifiers are applied.");
                 });
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     header.col(|ui| {
