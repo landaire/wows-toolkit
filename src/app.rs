@@ -37,6 +37,7 @@ use crate::{
     game_params::game_params_bin_path,
     icons,
     plaintext_viewer::PlaintextFileViewer,
+    player_tracker::PlayerTracker,
     replay_parser::{Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     wows_data::WorldOfWarshipsData,
@@ -57,6 +58,7 @@ pub enum Tab {
     Unpacker,
     ReplayParser,
     Settings,
+    PlayerTracker,
 }
 
 impl Tab {
@@ -65,6 +67,7 @@ impl Tab {
             Tab::Unpacker => format!("{} Resource Unpacker", icons::ARCHIVE),
             Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
             Tab::ReplayParser => format!("{} Replay Inspector", icons::MAGNIFYING_GLASS),
+            Tab::PlayerTracker => format!("{} Player Tracker", icons::DETECTIVE),
         }
     }
 }
@@ -156,6 +159,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Unpacker => self.build_unpacker_tab(ui),
             Tab::Settings => self.build_settings_tab(ui),
             Tab::ReplayParser => self.build_replay_parser_tab(ui),
+            Tab::PlayerTracker => self.build_player_tracker_tab(ui),
         }
     }
 }
@@ -204,6 +208,8 @@ pub struct Settings {
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     #[serde(default = "default_bool::<false>")]
     pub has_019_game_params_update: bool,
+    #[serde(default)]
+    pub player_tracker: Arc<RwLock<PlayerTracker>>,
 }
 
 impl Default for Settings {
@@ -219,6 +225,7 @@ impl Default for Settings {
             has_default_value_fix_015: true,
             sent_replays: Default::default(),
             has_019_game_params_update: false,
+            player_tracker: Default::default(),
         }
     }
 }
@@ -414,7 +421,13 @@ impl TabState {
 
             if let Some(wows_data) = self.world_of_warships_data.clone() {
                 self.should_send_replays.store(self.settings.send_replay_data, Ordering::SeqCst);
-                task::start_background_parsing_thread(background_rx, Arc::clone(&self.settings.sent_replays), wows_data, self.should_send_replays.clone());
+                task::start_background_parsing_thread(
+                    background_rx,
+                    Arc::clone(&self.settings.sent_replays),
+                    wows_data,
+                    self.should_send_replays.clone(),
+                    Arc::clone(&self.settings.player_tracker),
+                );
             }
 
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
@@ -518,7 +531,7 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::Unpacker, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
             runtime: Runtime::new().expect("failed to create tokio runtime"),
@@ -603,6 +616,9 @@ impl WowsToolkitApp {
                         } => {
                             // do nothing
                         }
+                        BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
+                            // do nothing
+                        }
                     }
 
                     match result {
@@ -625,6 +641,9 @@ impl WowsToolkitApp {
                                 {
                                     self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                 }
+                                {
+                                    self.tab_state.settings.player_tracker.write().update_from_replay(&*replay.read());
+                                }
                                 self.tab_state.current_replay = Some(replay);
                                 *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)))
                             }
@@ -642,6 +661,9 @@ impl WowsToolkitApp {
                                     .expect("failed to execute updated process");
 
                                 std::process::exit(0);
+                            }
+                            BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
+                                // do nothing
                             }
                         },
                         Err(ToolkitError::BackgroundTaskCompleted) => {

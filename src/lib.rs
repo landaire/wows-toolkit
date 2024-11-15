@@ -6,6 +6,7 @@ mod error;
 mod file_unpacker;
 mod game_params;
 mod plaintext_viewer;
+mod player_tracker;
 mod replay_parser;
 mod task;
 mod util;
