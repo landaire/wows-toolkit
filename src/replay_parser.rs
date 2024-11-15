@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
-use egui::{mutex::Mutex, text::LayoutJob, Color32, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
+use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder};
 
 use parking_lot::RwLock;
@@ -38,6 +38,17 @@ use crate::{
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 const XP_INDEX: usize = 389;
 const DAMAGE_INDEX: usize = 412;
+
+const DAMAGE_AP: usize = 147;
+const DAMAGE_SAP: usize = 148;
+const DAMAGE_HE: usize = 149;
+const DAMAGE_SAP_SECONDARIES: usize = 151;
+const DAMAGE_HE_SECONDARIES: usize = 152;
+const DAMAGE_NORMAL_TORPS: usize = 153;
+const DAMAGE_DEEP_WATER_TORPS: usize = 154;
+const DAMAGE_FIRE: usize = 166;
+const DAMAGE_FLOODS: usize = 167;
+
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
@@ -326,10 +337,45 @@ impl ToolkitTabViewer<'_> {
 
                         // Actual damage
                         ui.col(|ui| {
-                            if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
-                                let label_text = separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
-                                ui.label(RichText::new(label_text).color(player_color));
+                            let got_valid_damages = if let Some(info_array) = entity.results_info().and_then(|info| info.as_array()) {
+
+                                if let Some(damage_number) =  info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()) {
+                                    // Grab other damage numbers
+                                    let damage_stats = [
+                                        (DAMAGE_AP, "AP"),
+                                        (DAMAGE_SAP, "SAP"),
+                                        (DAMAGE_HE, "HE"),
+                                        (DAMAGE_HE_SECONDARIES, "HE Sec"),
+                                        (DAMAGE_SAP_SECONDARIES, "SAP Sec"),
+                                        (DAMAGE_NORMAL_TORPS, "Torps"),
+                                        (DAMAGE_DEEP_WATER_TORPS, "Deep Water Torps"),
+                                        (DAMAGE_FIRE, "Fire"),
+                                        (DAMAGE_FLOODS, "Flood")
+                                    ];
+
+                                    let breakdowns: Vec<String> = damage_stats.iter().filter_map(|(idx, description)| {
+                                        info_array[*idx].as_number().and_then(|number| number.as_i64()).map(|num| {
+                                            let num =  separate_number(num, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
+                                            format!("{:<16}: {}", description, num)
+                                        })
+                                    }).collect();
+
+                                    let label_text = separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
+                                    let label_text = RichText::new(label_text).color(player_color);
+                                    // if let Some(damage_breakdowns) = breakdowns {
+                                        ui.label(label_text).on_hover_text(RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0)));
+
+                                    // } else {
+                                    //     ui.label(label_text);
+                                    // }
+                                    true
+                                } else {
+                                    false
+                                }
                             } else {
+                                false
+                            };
+                            if !got_valid_damages {
                                 ui.label("-");
                             }
                         });
@@ -349,7 +395,6 @@ impl ToolkitTabViewer<'_> {
                             const AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
 
                             if let Some(damage_numbers) = entity.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=AIRSTRIKE_POTENTIAL_DAMAGE])) {
-                                println!("{:#?}", damage_numbers);
                                 let total_pot = damage_numbers.iter().map(|num| num.as_f64()).fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
                                 let hover_string = format!("Artillery: {}\nTorpedo: {}\nPlanes: {}",
                                     separate_number(damage_numbers[0].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
