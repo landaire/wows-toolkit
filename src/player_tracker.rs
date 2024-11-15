@@ -158,6 +158,9 @@ impl SortedBy {
             (SortedBy::TimesEncountered(sort_order), SortedBy::TimesEncountered(_)) => {
                 sort_order.toggle();
             }
+            (SortedBy::TimesEncounteredInTimeRange(sort_order), SortedBy::TimesEncounteredInTimeRange(_)) => {
+                sort_order.toggle();
+            }
             (old, new) => {
                 *old = new;
             }
