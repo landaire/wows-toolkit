@@ -829,8 +829,6 @@ impl eframe::App for WowsToolkitApp {
                 if ui.button(format!("{} Create Issue", icons::BUG)).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
                 }
-
-                egui::widgets::global_dark_light_mode_buttons(ui);
             });
         });
 

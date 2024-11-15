@@ -23,6 +23,8 @@ impl<'writer> FormatFields<'writer> for NewType {
 fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
+    use egui::{Style, Visuals};
+
     // use tracing::level_filters::LevelFilter;
     // use tracing_appender::rolling::Rotation;
     // use tracing_subscriber::{
@@ -86,7 +88,14 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,
-        Box::new(|cc| Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))),
+        Box::new(|cc| {
+            let style = Style {
+                visuals: Visuals::dark(),
+                ..Style::default()
+            };
+            cc.egui_ctx.set_style(style);
+            Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))
+        }),
     )
 }
 
