@@ -3,10 +3,11 @@ use std::{
     collections::HashMap,
     io::{BufWriter, Write},
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc}, time::Duration,
 };
 
-use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
+use crate::{app::TimedMessage, icons, twitch, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
+use chrono::{Local, NaiveDateTime, TimeZone};
 use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder};
 
@@ -14,6 +15,7 @@ use parking_lot::RwLock;
 use tap::Pipe;
 use tracing::debug;
 
+use tracing_subscriber::fmt::time;
 use wows_replays::{
     analyzer::{
         battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
@@ -145,6 +147,10 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_player_list(&self, replay_file: &Replay, report: &BattleReport, ui: &mut egui::Ui) {
+        let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
+        let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
+        let twitch_state = self.tab_state.twitch_state.read();
+
         let is_dark_mode = ui.visuals().dark_mode;
         let table = TableBuilder::new(ui)
             .striped(true)
@@ -288,6 +294,18 @@ impl ToolkitTabViewer<'_> {
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
+
+                            let match_timestamp= chrono::offset::Local::now() - Duration::from_secs(60 * 3);
+                            if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
+                                let hover_text = timestamps.iter().map(|(name, timestamps)| {
+                                    format!("Possible stream name: {}\nSeen: {} minutes after match start", name, timestamps.iter().map(|ts| {
+                                        let delta = ts.signed_duration_since(match_timestamp);
+                                        delta.num_minutes()
+                                    }).join(", "))
+                                }).join("\n\n");
+                                ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
+                            }
+
                             let disconnect_hover_text = if player.did_disconnect() {
                                 Some("Player disconnected from the match")
                             } else {

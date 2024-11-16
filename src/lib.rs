@@ -9,6 +9,7 @@ mod plaintext_viewer;
 mod player_tracker;
 mod replay_parser;
 mod task;
+mod twitch;
 mod util;
 mod wows_data;
 pub use app::WowsToolkitApp;

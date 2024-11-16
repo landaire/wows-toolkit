@@ -45,13 +45,21 @@ data-encoding = "2.5.0"
 image = { version = "0.24", features = ["jpeg", "png"] }
 octocrab = "0.34"
 semver = "1.0"
-tokio = { version = "1.35", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "macros"] }
 zip = "0.6"
-reqwest = { version = "0.11", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 egui-phosphor = "0.7"
 chrono = "0.4"
 serde_cbor = "0.11"
 parking_lot = { version = "0.12.3", features = ["serde"] }
+twitch_api = { version = "0.7.0-rc.8", features = [
+    "helix",
+    "client",
+    "reqwest",
+] }
+clipboard = "0.5.0"
+anyhow = "1.0.93"
+levenshtein = "1.0.5"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

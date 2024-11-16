@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use clipboard::{ClipboardContext, ClipboardProvider};
 use egui::{mutex::Mutex, Color32, OpenUrl, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
@@ -40,6 +41,7 @@ use crate::{
     player_tracker::PlayerTracker,
     replay_parser::{Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
+    twitch::{Token, TwitchState},
     wows_data::WorldOfWarshipsData,
 };
 
@@ -139,7 +141,39 @@ impl ToolkitTabViewer<'_> {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Show Game Chat");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Show Observed Damage Column");
-            })
+            });
+            ui.label("Twitch Settings");
+            ui.group(|ui| {
+                if ui
+                    .button(format!("{} Get Login Token", icons::BROWSER))
+                    .on_hover_text(
+                        "We use Chatterino's login page as it provides a token with the \
+                        necessary permissions (basically a moderator token with chat permissions), \
+                        and it removes the need for the WoWs Toolkit developer to host their own login page website which would have the same result.",
+                    )
+                    .clicked()
+                {
+                    ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
+                }
+
+                let text = if self.tab_state.twitch_state.read().token_is_valid() {
+                    format!("{} Paste Token (Current Token is Valid {})", icons::CLIPBOARD_TEXT, icons::CHECK_CIRCLE)
+                } else {
+                    format!("{} Paste Token (No Current Token / Invalid Token {})", icons::CLIPBOARD_TEXT, icons::X_CIRCLE)
+                };
+                if ui.button(text).clicked() {
+                    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                    if let Ok(contents) = ctx.get_contents() {
+                        let token: Result<Token, _> = contents.parse();
+                        if let Ok(token) = token {
+                            if let Some(tx) = self.tab_state.twitch_token_sender.as_ref() {
+                                self.tab_state.settings.twitch_token = Some(token.clone());
+                                let _ = tx.blocking_send(token);
+                            }
+                        }
+                    }
+                }
+            });
         });
     }
 }
@@ -210,6 +244,8 @@ pub struct Settings {
     pub has_019_game_params_update: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
+    #[serde(default)]
+    pub twitch_token: Option<Token>,
 }
 
 impl Default for Settings {
@@ -226,6 +262,7 @@ impl Default for Settings {
             sent_replays: Default::default(),
             has_019_game_params_update: false,
             player_tracker: Default::default(),
+            twitch_token: Default::default(),
         }
     }
 }
@@ -321,6 +358,12 @@ pub struct TabState {
 
     #[serde(default = "default_bool::<true>")]
     pub auto_load_latest_replay: bool,
+
+    #[serde(skip)]
+    pub twitch_token_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::Token>>,
+
+    #[serde(skip)]
+    pub twitch_state: Arc<RwLock<TwitchState>>,
 }
 
 impl Default for TabState {
@@ -347,6 +390,8 @@ impl Default for TabState {
             filtered_file_list: None,
             should_send_replays: Arc::new(AtomicBool::new(false)),
             auto_load_latest_replay: true,
+            twitch_token_sender: Default::default(),
+            twitch_state: Default::default(),
         }
     }
 }
@@ -515,12 +560,12 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     error_to_show: Option<Box<dyn Error>>,
 
-    tab_state: TabState,
+    pub(crate) tab_state: TabState,
     #[serde(skip)]
     dock_state: DockState<Tab>,
 
     #[serde(skip)]
-    runtime: Runtime,
+    pub(crate) runtime: Runtime,
 }
 
 impl Default for WowsToolkitApp {
@@ -554,7 +599,7 @@ impl WowsToolkitApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
+        let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 saved_state.tab_state.background_task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
@@ -579,22 +624,28 @@ impl WowsToolkitApp {
                 .should_send_replays
                 .store(saved_state.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
-            return saved_state;
-        }
+            saved_state
+        } else {
+            let mut this: Self = Default::default();
+            // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
+            this.tab_state.settings.locale = Some("en".to_string());
+            this.tab_state.should_send_replays.store(this.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
-        let mut this: Self = Default::default();
-        // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
-        this.tab_state.settings.locale = Some("en".to_string());
-        this.tab_state.should_send_replays.store(this.tab_state.settings.send_replay_data, Ordering::Relaxed);
+            let default_wows_dir = "C:\\Games\\World_of_Warships";
+            let default_wows_path = Path::new(default_wows_dir);
+            if default_wows_path.exists() {
+                this.tab_state.settings.wows_dir = default_wows_dir.to_string();
+                this.tab_state.background_task = Some(this.tab_state.load_game_data(default_wows_path.to_path_buf()));
+            }
 
-        let default_wows_dir = "C:\\Games\\World_of_Warships";
-        let default_wows_path = Path::new(default_wows_dir);
-        if default_wows_path.exists() {
-            this.tab_state.settings.wows_dir = default_wows_dir.to_string();
-            this.tab_state.background_task = Some(this.tab_state.load_game_data(default_wows_path.to_path_buf()));
-        }
+            this
+        };
 
-        this
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        state.tab_state.twitch_token_sender = Some(tx);
+        task::begin_startup_tasks(&state, rx);
+
+        state
     }
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {

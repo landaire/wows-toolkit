@@ -4,13 +4,11 @@ use std::{
 };
 
 use crate::{icons, task};
-use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
 use egui::{Color32, RichText};
 use egui_extras::{Column, TableBuilder};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use wows_replays::ReplayFile;
 
 use crate::{app::ToolkitTabViewer, replay_parser::Replay};
 

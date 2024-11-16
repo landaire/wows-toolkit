@@ -20,6 +20,10 @@ use parking_lot::RwLock;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};
+use twitch_api::{
+    twitch_oauth2::{AccessToken, UserToken},
+    HelixClient,
+};
 use wows_replays::ReplayFile;
 use wowsunpack::{
     data::{
@@ -37,7 +41,9 @@ use crate::{
     game_params::load_game_params,
     player_tracker::{self, PlayerTracker},
     replay_parser::Replay,
+    twitch::{self, Token, TwitchState},
     wows_data::{self, ShipIcon, WorldOfWarshipsData},
+    WowsToolkitApp,
 };
 
 pub struct DownloadProgress {
@@ -375,7 +381,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
     runtime.spawn(async move {
         let result = download_update(progress_tx, url).await.map(|path| BackgroundTaskCompletion::UpdateDownloaded(path));
 
-        tx.send(result);
+        let _ = tx.send(result);
     });
 
     BackgroundTask {
@@ -385,6 +391,77 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
             last_progress: None,
         },
     }
+}
+
+async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) {
+    let client = twitch_state.read().client().clone();
+    match UserToken::from_token(&client, AccessToken::from(token.oauth_token())).await {
+        Ok(token) => {
+            let mut state = twitch_state.write();
+            state.token = Some(token);
+            state.token_is_valid = true;
+        }
+        Err(_e) => {
+            let mut state = twitch_state.write();
+            state.token_is_valid = false;
+        }
+    }
+}
+
+pub fn start_twitch_task(runtime: &Runtime, twitch_state: Arc<RwLock<TwitchState>>, token: Option<Token>, mut token_rx: tokio::sync::mpsc::Receiver<Token>) {
+    runtime.spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60 * 2));
+
+        // Set the initial twitch token
+        if let Some(token) = token {
+            update_twitch_token(&twitch_state, &token).await;
+        }
+
+        loop {
+            let token_receive = token_rx.recv();
+
+            tokio::select! {
+                // Every 2 minutes we attempt to get the participants list
+                _ = interval.tick() => {
+                    let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
+                    if let Some(token) = token {
+                        if let Ok(chatters) = twitch::fetch_chatters(client, token).await {
+                            let now = chrono::offset::Local::now();
+                            let mut state = twitch_state.write();
+                            for chatter in chatters {
+                                state.participants.entry(chatter).or_default().insert(now);
+                            }
+                        }
+                    }
+                }
+
+                token = token_receive => {
+                    if let Some(token) = token {
+                        update_twitch_token(&twitch_state, &token).await;
+
+                        let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
+                        if let Some(token) = token {
+                            if let Ok(chatters) = twitch::fetch_chatters(client, token).await {
+                                let now = chrono::offset::Local::now();
+                                let mut state = twitch_state.write();
+                                for chatter in chatters {
+                                    state.participants.entry(chatter).or_default().insert(now);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Do a period cleanup of old viewers
+            let mut state = twitch_state.write();
+            let now = chrono::offset::Local::now();
+            for (_, timestamps) in &mut state.participants {
+                // Retain only timestamps within the last 30 minutes
+                timestamps.retain(|ts| *ts > (now - Duration::from_secs(60 * 30)));
+            }
+        }
+    });
 }
 
 fn parse_replay_data_in_background(
@@ -583,4 +660,13 @@ pub fn start_populating_player_inspector(
         receiver: rx,
         kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays,
     }
+}
+
+pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<Token>) {
+    start_twitch_task(
+        &toolkit.runtime,
+        Arc::clone(&toolkit.tab_state.twitch_state),
+        toolkit.tab_state.settings.twitch_token.clone(),
+        token_rx,
+    );
 }
