@@ -105,6 +105,8 @@ pub struct TrackedPlayer {
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 enum TimePeriod {
+    LastHour,
+    LastSixHours,
     LastDay,
     LastWeek,
     LastMonth,
@@ -194,6 +196,8 @@ impl Default for SortedBy {
 impl TimePeriod {
     fn description(&self) -> &'static str {
         match self {
+            TimePeriod::LastHour => "Past Hour",
+            TimePeriod::LastSixHours => "Past 6 Hour",
             TimePeriod::LastDay => "Past 24 Hours",
             TimePeriod::LastWeek => "Past Week",
             TimePeriod::LastMonth => "Past Month",
@@ -203,6 +207,8 @@ impl TimePeriod {
 
     fn to_date(&self) -> Option<DateTime<Local>> {
         match self {
+            TimePeriod::LastHour => Some(Local::now() - Duration::hours(1)),
+            TimePeriod::LastSixHours => Some(Local::now() - Duration::hours(6)),
             TimePeriod::LastDay => Some(Local::now() - Duration::hours(24)),
             TimePeriod::LastWeek => Some(Local::now() - Duration::days(7)),
             TimePeriod::LastMonth => Some(Local::now() - Duration::weeks(4)),
