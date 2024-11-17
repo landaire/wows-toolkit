@@ -754,14 +754,14 @@ impl ToolkitTabViewer<'_> {
                     .default_width(CHAT_VIEW_WIDTH)
                     .max_width(CHAT_VIEW_WIDTH)
                     .show_inside(ui, |ui| {
-                        egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
+                        egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
                             self.build_replay_chat(report, ui);
                         });
                     });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::ScrollArea::horizontal().id_source("replay_player_list_scroll_area").show(ui, |ui| {
+                egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
                     self.build_replay_player_list(replay_file, report, ui);
                 });
             });

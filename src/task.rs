@@ -41,7 +41,7 @@ use crate::{
     game_params::load_game_params,
     player_tracker::{self, PlayerTracker},
     replay_parser::Replay,
-    twitch::{self, Token, TwitchState},
+    twitch::{self, Token, TwitchState, TwitchUpdate},
     wows_data::{self, ShipIcon, WorldOfWarshipsData},
     WowsToolkitApp,
 };
@@ -399,22 +399,37 @@ async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) 
         Ok(token) => {
             let mut state = twitch_state.write();
             state.token = Some(token);
-            state.token_is_valid = true;
         }
-        Err(_e) => {
-            let mut state = twitch_state.write();
-            state.token_is_valid = false;
-        }
+        Err(_e) => {}
     }
 }
 
-pub fn start_twitch_task(runtime: &Runtime, twitch_state: Arc<RwLock<TwitchState>>, token: Option<Token>, mut token_rx: tokio::sync::mpsc::Receiver<Token>) {
+pub fn start_twitch_task(
+    runtime: &Runtime,
+    twitch_state: Arc<RwLock<TwitchState>>,
+    mut monitored_channel: String,
+    token: Option<Token>,
+    mut token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>,
+) {
     runtime.spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60 * 2));
 
         // Set the initial twitch token
         if let Some(token) = token {
             update_twitch_token(&twitch_state, &token).await;
+        }
+
+        let (client, token) = {
+            let state = twitch_state.read();
+            (state.client().clone(), state.token.clone())
+        };
+        let mut monitored_user_id = token.as_ref().map(|token| token.user_id.clone());
+        if !monitored_channel.is_empty() {
+            if let Some(token) = token {
+                if let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await {
+                    monitored_user_id = Some(user.id)
+                }
+            }
         }
 
         loop {
@@ -425,29 +440,58 @@ pub fn start_twitch_task(runtime: &Runtime, twitch_state: Arc<RwLock<TwitchState
                 _ = interval.tick() => {
                     let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
                     if let Some(token) = token {
-                        if let Ok(chatters) = twitch::fetch_chatters(client, &token.user_id, &token).await {
-                            let now = chrono::offset::Local::now();
-                            let mut state = twitch_state.write();
-                            for chatter in chatters {
-                                state.participants.entry(chatter).or_default().insert(now);
-                            }
-                        }
-                    }
-                }
-
-                token = token_receive => {
-                    if let Some(token) = token {
-                        update_twitch_token(&twitch_state, &token).await;
-
-                        let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
-                        if let Some(token) = token {
-                            if let Ok(chatters) = twitch::fetch_chatters(client, &token.user_id, &token).await {
+                        if let Some(monitored_user) = &monitored_user_id {
+                            if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, &token).await {
                                 let now = chrono::offset::Local::now();
                                 let mut state = twitch_state.write();
                                 for chatter in chatters {
                                     state.participants.entry(chatter).or_default().insert(now);
                                 }
                             }
+                        }
+                    }
+                }
+
+                update = token_receive => {
+                    if let Some(update) = update {
+                        match update {
+                            TwitchUpdate::Token(token) => {
+                                let had_previous_token = { twitch_state.read().token_is_valid() };
+                                update_twitch_token(&twitch_state, &token).await;
+
+                                let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
+                                if let Some(token) = &token {
+                                    if let Some(monitored_user) = &monitored_user_id {
+                                        if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, token).await {
+                                            let now = chrono::offset::Local::now();
+                                            let mut state = twitch_state.write();
+                                            for chatter in chatters {
+                                                state.participants.entry(chatter).or_default().insert(now);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if !had_previous_token {
+                                    // If we didn't have a previous token, but we did have a username to watch, update the username
+                                    monitored_user_id = token.as_ref().map(|token| token.user_id.clone());
+                                    if !monitored_channel.is_empty() {
+                                        if let Some(token) = token {
+                                            if let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await {
+                                                monitored_user_id = Some(user.id)
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            TwitchUpdate::User(user_name) => {
+                                let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
+                                if let Some(token) = token {
+                                    if let Ok(Some(user)) = client.get_user_from_login(&user_name, &token).await {
+                                        monitored_user_id = Some(user.id);
+                                    }
+                                }
+                            },
                         }
                     }
                 }
@@ -662,10 +706,11 @@ pub fn start_populating_player_inspector(
     }
 }
 
-pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<Token>) {
+pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
     start_twitch_task(
         &toolkit.runtime,
         Arc::clone(&toolkit.tab_state.twitch_state),
+        toolkit.tab_state.settings.twitch_monitored_channel.clone(),
         toolkit.tab_state.settings.twitch_token.clone(),
         token_rx,
     );

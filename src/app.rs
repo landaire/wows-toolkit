@@ -166,11 +166,18 @@ impl ToolkitTabViewer<'_> {
                     if let Ok(contents) = ctx.get_contents() {
                         let token: Result<Token, _> = contents.parse();
                         if let Ok(token) = token {
-                            if let Some(tx) = self.tab_state.twitch_token_sender.as_ref() {
+                            if let Some(tx) = self.tab_state.twitch_update_sender.as_ref() {
                                 self.tab_state.settings.twitch_token = Some(token.clone());
-                                let _ = tx.blocking_send(token);
+                                let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
                             }
                         }
+                    }
+                }
+                ui.label("Monitored Channel (Default to Self)");
+                let response = ui.text_edit_singleline(&mut self.tab_state.settings.twitch_monitored_channel);
+                if response.lost_focus() {
+                    if let Some(tx) = self.tab_state.twitch_update_sender.as_ref() {
+                        let _ = tx.blocking_send(crate::twitch::TwitchUpdate::User(self.tab_state.settings.twitch_monitored_channel.clone()));
                     }
                 }
             });
@@ -247,7 +254,7 @@ pub struct Settings {
     #[serde(default)]
     pub twitch_token: Option<Token>,
     #[serde(default)]
-    pub watched_channels: String,
+    pub twitch_monitored_channel: String,
 }
 
 impl Default for Settings {
@@ -265,7 +272,7 @@ impl Default for Settings {
             has_019_game_params_update: false,
             player_tracker: Default::default(),
             twitch_token: Default::default(),
-            watched_channels: Default::default(),
+            twitch_monitored_channel: Default::default(),
         }
     }
 }
@@ -364,7 +371,7 @@ pub struct TabState {
     pub auto_load_latest_replay: bool,
 
     #[serde(skip)]
-    pub twitch_token_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::Token>>,
+    pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
 
     #[serde(skip)]
     pub twitch_state: Arc<RwLock<TwitchState>>,
@@ -394,7 +401,7 @@ impl Default for TabState {
             filtered_file_list: None,
             should_send_replays: Arc::new(AtomicBool::new(false)),
             auto_load_latest_replay: true,
-            twitch_token_sender: Default::default(),
+            twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
         }
     }
@@ -664,7 +671,7 @@ impl WowsToolkitApp {
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
-        state.tab_state.twitch_token_sender = Some(tx);
+        state.tab_state.twitch_update_sender = Some(tx);
         task::begin_startup_tasks(&state, rx);
 
         state

@@ -15,7 +15,7 @@ use twitch_api::{
         self,
         chat::{get_chatters, Chatter},
     },
-    twitch_oauth2::{AccessToken, UserToken},
+    twitch_oauth2::{AccessToken, TwitchToken, UserToken},
     types::{UserId, UserIdRef},
     HelixClient,
 };
@@ -92,6 +92,12 @@ impl FromStr for Token {
     }
 }
 
+#[derive(Debug)]
+pub enum TwitchUpdate {
+    Token(Token),
+    User(String),
+}
+
 type ParticipantList = HashMap<String, BTreeSet<DateTime<Local>>>;
 
 #[derive(Default)]
@@ -100,13 +106,16 @@ pub struct TwitchState {
     pub token: Option<UserToken>,
     pub participants: ParticipantList,
     last_participants_update: Option<Instant>,
-    pub token_is_valid: bool,
     pub watched_channel: String,
 }
 
 impl TwitchState {
     pub fn token_is_valid(&self) -> bool {
-        self.token_is_valid
+        if let Some(token) = self.token.as_ref() {
+            token.expires_in().as_secs() > 0
+        } else {
+            false
+        }
     }
 
     pub fn client(&self) -> &HelixClient<'static, reqwest::Client> {
@@ -141,7 +150,7 @@ impl TwitchState {
     }
 }
 
-pub async fn fetch_chatters(client: HelixClient<'static, reqwest::Client>, user_id: &UserId, token: &UserToken) -> anyhow::Result<Vec<String>> {
+pub async fn fetch_chatters(client: &HelixClient<'static, reqwest::Client>, user_id: &UserId, token: &UserToken) -> anyhow::Result<Vec<String>> {
     let request = get_chatters::GetChattersRequest::new(user_id, &token.user_id);
     let response: Vec<helix::chat::Chatter> = client.req_get(request, token).await?.data;
     Ok(response.iter().map(|chatter| chatter.user_login.to_string()).collect())
