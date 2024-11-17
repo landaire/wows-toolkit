@@ -425,7 +425,7 @@ pub fn start_twitch_task(runtime: &Runtime, twitch_state: Arc<RwLock<TwitchState
                 _ = interval.tick() => {
                     let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
                     if let Some(token) = token {
-                        if let Ok(chatters) = twitch::fetch_chatters(client, token).await {
+                        if let Ok(chatters) = twitch::fetch_chatters(client, &token.user_id, &token).await {
                             let now = chrono::offset::Local::now();
                             let mut state = twitch_state.write();
                             for chatter in chatters {
@@ -441,7 +441,7 @@ pub fn start_twitch_task(runtime: &Runtime, twitch_state: Arc<RwLock<TwitchState
 
                         let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
                         if let Some(token) = token {
-                            if let Ok(chatters) = twitch::fetch_chatters(client, token).await {
+                            if let Ok(chatters) = twitch::fetch_chatters(client, &token.user_id, &token).await {
                                 let now = chrono::offset::Local::now();
                                 let mut state = twitch_state.write();
                                 for chatter in chatters {

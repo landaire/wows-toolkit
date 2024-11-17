@@ -246,6 +246,8 @@ pub struct Settings {
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
     pub twitch_token: Option<Token>,
+    #[serde(default)]
+    pub watched_channels: String,
 }
 
 impl Default for Settings {
@@ -263,6 +265,7 @@ impl Default for Settings {
             has_019_game_params_update: false,
             player_tracker: Default::default(),
             twitch_token: Default::default(),
+            watched_channels: Default::default(),
         }
     }
 }
@@ -277,6 +280,7 @@ pub enum NotifyFileEvent {
     Added(PathBuf),
     Removed(PathBuf),
     PreferencesChanged,
+    TempArenaInfoCreated(PathBuf),
 }
 
 pub struct TimedMessage {
@@ -441,6 +445,18 @@ impl TabState {
                         // debug!("Preferences file changed -- reloading game data");
                         // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                     }
+                    NotifyFileEvent::TempArenaInfoCreated(path) => {
+                        // Parse the metadata
+                        let meta_data = std::fs::read(path);
+
+                        if meta_data.is_err() {
+                            return;
+                        }
+
+                        if let Ok(replay_file) = ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0)) {
+                            self.settings.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+                        }
+                    }
                 }
             }
         }
@@ -482,13 +498,19 @@ impl TabState {
                     match event.kind {
                         EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
                             for path in event.paths {
-                                if path.is_file()
-                                    && path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                    && path.file_name().expect("path has no filename") != "temp.wowsreplay"
-                                {
-                                    tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
-                                    // Send this path to the thread watching for replays in background
-                                    let _ = background_tx.send(path);
+                                if path.is_file() {
+                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                        && path.file_name().expect("path has no filename") != "temp.wowsreplay"
+                                    {
+                                        tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
+                                        // Send this path to the thread watching for replays in background
+                                        let _ = background_tx.send(path);
+                                    } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
+                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
+                                            .expect("failed to send file creation event");
+                                        // Send this path to the thread watching for replays in background
+                                        let _ = background_tx.send(path);
+                                    }
                                 }
                             }
                         }

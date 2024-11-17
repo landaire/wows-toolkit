@@ -101,6 +101,7 @@ pub struct TwitchState {
     pub participants: ParticipantList,
     last_participants_update: Option<Instant>,
     pub token_is_valid: bool,
+    pub watched_channel: String,
 }
 
 impl TwitchState {
@@ -140,8 +141,8 @@ impl TwitchState {
     }
 }
 
-pub async fn fetch_chatters(client: HelixClient<'static, reqwest::Client>, token: UserToken) -> anyhow::Result<Vec<String>> {
-    let request = get_chatters::GetChattersRequest::new(&token.user_id, &token.user_id);
-    let response: Vec<helix::chat::Chatter> = client.req_get(request, &token).await?.data;
+pub async fn fetch_chatters(client: HelixClient<'static, reqwest::Client>, user_id: &UserId, token: &UserToken) -> anyhow::Result<Vec<String>> {
+    let request = get_chatters::GetChattersRequest::new(user_id, &token.user_id);
+    let response: Vec<helix::chat::Chatter> = client.req_get(request, token).await?.data;
     Ok(response.iter().map(|chatter| chatter.user_login.to_string()).collect())
 }
