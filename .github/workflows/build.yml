@@ -28,7 +28,7 @@ jobs:
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md"
           ARCHIVE_TYPES: ${{ matrix.archive }}
-          TOOLCHAIN_VERSION: stable
+          TOOLCHAIN_VERSION: 1.82.0
   release_without_not_required:
     name: release ${{ matrix.target }}
     runs-on: ubuntu-latest
