@@ -630,11 +630,8 @@ impl WowsToolkitApp {
         // Note that you must enable the `persistence` feature for this to work.
         let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-            if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                saved_state.tab_state.background_task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
-            }
-
             saved_state.tab_state.settings.locale = Some("en".to_string());
+
             if saved_state.tab_state.settings.has_default_value_fix_015 {
                 saved_state.tab_state.settings.check_for_updates = true;
                 saved_state.tab_state.settings.send_replay_data = true;
@@ -652,6 +649,10 @@ impl WowsToolkitApp {
                 .tab_state
                 .should_send_replays
                 .store(saved_state.tab_state.settings.send_replay_data, Ordering::Relaxed);
+
+            if !saved_state.tab_state.settings.wows_dir.is_empty() {
+                saved_state.tab_state.background_task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
+            }
 
             saved_state
         } else {
