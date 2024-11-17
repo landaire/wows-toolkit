@@ -28,7 +28,7 @@ jobs:
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md"
           ARCHIVE_TYPES: ${{ matrix.archive }}
-          INPUT_TOOLCHAIN_VERSION: 1.82.0
+          TOOLCHAIN_VERSION: 1.82.0
   release_without_not_required:
     name: release ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -43,6 +43,6 @@ jobs:
         with:
           RUSTTARGET: ${{ matrix.target }}
           UPLOAD_MODE: none
-          INPUT_TOOLCHAIN_VERSION: 1.82.0
+          TOOLCHAIN_VERSION: 1.82.0
       - name: Checkout output
         run: ls -laR
