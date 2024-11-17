@@ -3,7 +3,7 @@ name = "wows_toolkit"
 version = "0.1.25"
 authors = ["landaire"]
 edition = "2021"
-rust-version = "1.72"
+rust-version = "1.82"
 
 
 [dependencies]
