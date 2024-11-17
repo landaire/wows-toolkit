@@ -23,7 +23,6 @@ use wowsunpack::{
 use crate::{
     app::ToolkitTabViewer,
     plaintext_viewer::{self, FileType},
-    wows_data,
 };
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 

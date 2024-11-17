@@ -23,8 +23,6 @@ impl<'writer> FormatFields<'writer> for NewType {
 fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
-    use egui::{Style, Visuals};
-
     // use tracing::level_filters::LevelFilter;
     // use tracing_appender::rolling::Rotation;
     // use tracing_subscriber::{

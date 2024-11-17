@@ -1,22 +1,16 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap},
     fmt::Debug,
     str::FromStr,
-    sync::{atomic::AtomicBool, Arc},
     time::Instant,
 };
 
-use anyhow::anyhow;
-use chrono::{DateTime, Duration, Local};
-use parking_lot::RwLock;
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use twitch_api::{
-    helix::{
-        self,
-        chat::{get_chatters, Chatter},
-    },
-    twitch_oauth2::{AccessToken, TwitchToken, UserToken},
-    types::{UserId, UserIdRef},
+    helix::{self, chat::get_chatters},
+    twitch_oauth2::{TwitchToken, UserToken},
+    types::UserId,
     HelixClient,
 };
 

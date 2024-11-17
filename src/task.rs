@@ -6,7 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
-        Arc, Mutex,
+        Arc,
     },
     thread,
     time::Duration,
@@ -20,18 +20,14 @@ use parking_lot::RwLock;
 use reqwest::Url;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};
-use twitch_api::{
-    twitch_oauth2::{AccessToken, UserToken},
-    HelixClient,
-};
+use twitch_api::twitch_oauth2::{AccessToken, UserToken};
 use wows_replays::ReplayFile;
 use wowsunpack::{
     data::{
         idx::{self, FileNode},
         pkg::PkgFileLoader,
-        Version,
     },
-    game_params::{provider::GameMetadataProvider, types::Species},
+    game_params::types::Species,
 };
 use zip::ZipArchive;
 
@@ -39,10 +35,10 @@ use crate::{
     build_tracker,
     error::ToolkitError,
     game_params::load_game_params,
-    player_tracker::{self, PlayerTracker},
+    player_tracker::PlayerTracker,
     replay_parser::Replay,
     twitch::{self, Token, TwitchState, TwitchUpdate},
-    wows_data::{self, ShipIcon, WorldOfWarshipsData},
+    wows_data::{ShipIcon, WorldOfWarshipsData},
     WowsToolkitApp,
 };
 
@@ -407,7 +403,7 @@ async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) 
 pub fn start_twitch_task(
     runtime: &Runtime,
     twitch_state: Arc<RwLock<TwitchState>>,
-    mut monitored_channel: String,
+    monitored_channel: String,
     token: Option<Token>,
     mut token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>,
 ) {

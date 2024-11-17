@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{icons, task, twitch};
+use crate::{icons, task};
 use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
 use egui::{Color32, RichText};
 use egui_extras::{Column, TableBuilder};

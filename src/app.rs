@@ -803,8 +803,6 @@ impl WowsToolkitApp {
         });
     }
 
-    fn check_for_battle_results_update(&mut self) {}
-
     fn check_for_updates(&mut self) {
         let result = self
             .runtime

@@ -3,10 +3,11 @@ use std::{
     collections::HashMap,
     io::{BufWriter, Write},
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc}, time::Duration,
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
-use crate::{app::TimedMessage, icons, twitch, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
+use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
 use chrono::{Local, NaiveDateTime, TimeZone};
 use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder};
@@ -15,7 +16,6 @@ use parking_lot::RwLock;
 use tap::Pipe;
 use tracing::debug;
 
-use tracing_subscriber::fmt::time;
 use wows_replays::{
     analyzer::{
         battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
@@ -50,7 +50,6 @@ const DAMAGE_NORMAL_TORPS: usize = 153;
 const DAMAGE_DEEP_WATER_TORPS: usize = 154;
 const DAMAGE_FIRE: usize = 166;
 const DAMAGE_FLOODS: usize = 167;
-
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
@@ -541,7 +540,7 @@ impl ToolkitTabViewer<'_> {
                 sender_relation,
                 sender_name,
                 channel,
-                 message,
+                message,
             } = message;
 
             let translated_text = if sender_relation.is_none() {
@@ -555,7 +554,6 @@ impl ToolkitTabViewer<'_> {
             };
 
             let text = format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message));
-
 
             let is_dark_mode = ui.visuals().dark_mode;
             let name_color = if let Some(relation) = sender_relation {
