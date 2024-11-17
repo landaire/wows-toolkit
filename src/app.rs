@@ -806,29 +806,18 @@ impl WowsToolkitApp {
     fn check_for_battle_results_update(&mut self) {}
 
     fn check_for_updates(&mut self) {
-        let result = self.runtime.block_on(async {
-            octocrab::instance()
-                .repos("landaire", "wows-toolkit")
-                .releases()
-                .list()
-                // Optional Parameters
-                .per_page(1)
-                // Send the request
-                .send()
-                .await
-        });
+        let result = self
+            .runtime
+            .block_on(async { octocrab::instance().repos("landaire", "wows-toolkit").releases().get_latest().await });
 
-        if let Ok(result) = result {
-            if !result.items.is_empty() {
-                let latest_release = result.items[0].clone();
-                if let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..]) {
-                    let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-                    if app_version < version {
-                        self.update_window_open = true;
-                        self.latest_release = Some(latest_release);
-                    } else {
-                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
-                    }
+        if let Ok(latest_release) = result {
+            if let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..]) {
+                let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+                if app_version < version {
+                    self.update_window_open = true;
+                    self.latest_release = Some(latest_release);
+                } else {
+                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
                 }
             }
         }
