@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.25] - 2024-11-17
+
+### 🚀 Features
+
+- *(player_tracker)* Only consider ranked / random battles
+- Add twitch integration to detect stream snipers
+- *(player_tracker)* Ignore players in division
+- *(player_tracker)* Add more time ranges for time filter
+- *(player_tracker)* Add players from current match with stream sniper detection
+- *(settings)* Allow customizing which twitch channel to watch for player tracker
+
+### 🐛 Bug Fixes
+
+- Bug with loading game data when no locale is set
+
 ## [0.1.24] - 2024-11-15
 
 ### 🚀 Features
