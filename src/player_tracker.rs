@@ -35,16 +35,20 @@ impl PlayerTracker {
             let timestamp = NaiveDateTime::parse_from_str(&replay.replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
             let timestamp = Local.from_local_datetime(&timestamp).single().expect("failed to convert to local time");
 
+            let self_player = report.players().iter().find(|player| {
+                if let Some(meta_player) = replay.replay_file.meta.vehicles.iter().find(|metadata_player| metadata_player.name == player.name()) {
+                    meta_player.relation == 0
+                } else {
+                    false
+                }
+            });
+
             for player in report.players() {
-                // Grab the metadata player
-                if let Some(metadata_player) = replay.replay_file.meta.vehicles.iter().find(|metadata_player| metadata_player.name == player.name()) {
-                    // Ignore ourselves
-                    if metadata_player.relation == 0 {
+                if let Some(self_player) = self_player {
+                    // Ignore ourselves and people in our division
+                    if Arc::ptr_eq(self_player, player) || (self_player.division_id() > 0 && player.division_id() == self_player.division_id()) {
                         continue;
                     }
-                } else {
-                    // couldn't find this player? weird
-                    continue;
                 }
 
                 let tracked_player = tracked_players.entry(player.db_id()).or_default();
