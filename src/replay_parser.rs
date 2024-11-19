@@ -294,7 +294,6 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
 
-                            let match_timestamp= chrono::offset::Local::now() - Duration::from_secs(60 * 3);
                             if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
                                 let hover_text = timestamps.iter().map(|(name, timestamps)| {
                                     format!("Possible stream name: {}\nSeen: {} minutes after match start", name, timestamps.iter().map(|ts| {
