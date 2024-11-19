@@ -65,11 +65,14 @@ pub struct Replay {
     pub remaining_div_identifiers: String,
 }
 
-fn player_name_with_clan(player: &Player) -> Cow<'_, str> {
+fn clan_color_for_player(player: &Player) -> Option<Color32> {
     if player.clan().is_empty() {
-        Cow::Borrowed(player.name())
+        None
     } else {
-        Cow::Owned(format!("[{}] {}", player.clan(), player.name()))
+
+        let clan_color = player.raw_props_with_name().get("clanColor").expect("no clan color?");
+        let clan_color = clan_color.as_i64().expect("clan color is not an i64");
+        Some(Color32::from_rgb(((clan_color & 0xFF0000) >> 16) as u8, ((clan_color & 0xFF00)  >> 8) as u8, (clan_color & 0xFF) as u8))
     }
 }
 
@@ -241,7 +244,13 @@ impl ToolkitTabViewer<'_> {
                 });
                 for entity in &sorted_players {
                     let player = entity.player().unwrap();
-                    let player_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+                    let mut player_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+
+                    if let Some(self_player) = sorted_players[0].player() {
+                        if self_player.division_id() > 0 && player.division_id() == self_player.division_id() {
+                            player_color = Color32::GOLD;
+                        }
+                    }
                     let ship = player.vehicle();
 
                     body.row(30.0, |mut ui| {
@@ -289,7 +298,10 @@ impl ToolkitTabViewer<'_> {
                             if let Some(div) = replay_file.divisions.get(&player.division_id()).cloned() {
                                 ui.label(format!("({})", div));
                             }
-                            ui.label(RichText::new(player_name_with_clan(player)).color(name_color));
+                            if !player.clan().is_empty() {
+                                ui.label(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()));
+                            }
+                            ui.label(RichText::new(player.name()).color(name_color));
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
@@ -612,7 +624,10 @@ impl ToolkitTabViewer<'_> {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
             ui.horizontal(|ui| {
-                ui.label(player_name_with_clan(self_player));
+                if !self_player.clan().is_empty() {
+                    ui.label(format!("[{}]", self_player.clan()));
+                }
+                ui.label(self_player.name());
                 ui.label(report.game_type());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
