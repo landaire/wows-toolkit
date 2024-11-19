@@ -4,7 +4,7 @@ use wowsunpack::error::ErrorKind;
 
 #[derive(Error, Debug)]
 pub enum ToolkitError {
-    #[error("Invalid World of Warships directory {0:?} specified")]
+    #[error("Invalid World of Warships directory {0} specified. Specify the correct directory in the Settings tab.")]
     InvalidWowsDirectory(PathBuf),
 
     #[error("Invalid GameParams.data")]

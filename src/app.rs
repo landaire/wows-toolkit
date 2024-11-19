@@ -261,15 +261,15 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             current_replay_path: Default::default(),
-            wows_dir: Default::default(),
+            wows_dir: "C:\\Games\\World_of_Warships".to_string(),
             replays_dir: Default::default(),
-            locale: Default::default(),
+            locale: Some("en".to_string()),
             replay_settings: Default::default(),
             check_for_updates: true,
             send_replay_data: true,
             has_default_value_fix_015: true,
             sent_replays: Default::default(),
-            has_019_game_params_update: false,
+            has_019_game_params_update: true,
             player_tracker: Default::default(),
             twitch_token: Default::default(),
             twitch_monitored_channel: Default::default(),
@@ -630,9 +630,8 @@ impl WowsToolkitApp {
         // Note that you must enable the `persistence` feature for this to work.
         let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-            saved_state.tab_state.settings.locale = Some("en".to_string());
 
-            if saved_state.tab_state.settings.has_default_value_fix_015 {
+            if !saved_state.tab_state.settings.has_default_value_fix_015 {
                 saved_state.tab_state.settings.check_for_updates = true;
                 saved_state.tab_state.settings.send_replay_data = true;
                 saved_state.tab_state.settings.has_default_value_fix_015 = true;
@@ -651,7 +650,8 @@ impl WowsToolkitApp {
                 .store(saved_state.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                saved_state.tab_state.background_task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
+                let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
+                update_background_task!(saved_state.tab_state.background_task, task);
             }
 
             saved_state
