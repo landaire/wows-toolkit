@@ -39,25 +39,6 @@ pub struct WorldOfWarshipsData {
 }
 
 impl WorldOfWarshipsData {
-    pub fn parse_live_replay(&self) -> Option<BackgroundTask> {
-        let replays_dir = &self.replays_dir;
-        let meta = replays_dir.join("tempArenaInfo.json");
-        let replay = replays_dir.join("temp.wowsreplay");
-
-        let meta_data = std::fs::read(meta);
-        let replay_data = std::fs::read(replay);
-
-        if meta_data.is_err() || replay_data.is_err() {
-            return None;
-        }
-
-        let replay_file: ReplayFile = ReplayFile::from_decrypted_parts(meta_data.unwrap(), replay_data.unwrap()).unwrap();
-        let game_metadata = self.game_metadata.clone()?;
-        let replay = Replay::new(replay_file, game_metadata);
-
-        self.load_replay(Arc::new(RwLock::new(replay)))
-    }
-
     pub fn parse_replay<P: AsRef<Path>>(&self, replay_path: P) -> Option<BackgroundTask> {
         let path = replay_path.as_ref();
 
