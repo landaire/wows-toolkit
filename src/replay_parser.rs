@@ -858,8 +858,6 @@ impl ToolkitTabViewer<'_> {
             ui.horizontal(|ui| {
                 if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked() {
                     if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
-                        //println!("{:#?}", ReplayFile::from_file(&file));
-
                         self.tab_state.settings.current_replay_path = file;
 
                         if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
@@ -873,12 +871,6 @@ impl ToolkitTabViewer<'_> {
 
                 // Only show the live game button if the replays dir exists
                 if let Some(_replays_dir) = self.replays_dir() {
-                    if ui.button(format!("{} Load Live Game", icons::DETECTIVE)).clicked() {
-                        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                            update_background_task!(self.tab_state.background_task, wows_data.read().parse_live_replay());
-                        }
-                    }
-
                     ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
                 }
             });
