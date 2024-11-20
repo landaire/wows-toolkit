@@ -14,6 +14,7 @@ use std::{
 
 use clipboard::{ClipboardContext, ClipboardProvider};
 use egui::{mutex::Mutex, Color32, OpenUrl, Ui, WidgetText};
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
@@ -375,6 +376,9 @@ pub struct TabState {
 
     #[serde(skip)]
     pub twitch_state: Arc<RwLock<TwitchState>>,
+
+    #[serde(skip)]
+    pub markdown_cache: CommonMarkCache,
 }
 
 impl Default for TabState {
@@ -403,6 +407,7 @@ impl Default for TabState {
             auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
+            markdown_cache: Default::default(),
         }
     }
 }
@@ -857,7 +862,7 @@ impl eframe::App for WowsToolkitApp {
                         ui.vertical(|ui| {
                             ui.label(format!("Version {} of WoWs Toolkit is available", tag));
                             if let Some(notes) = notes.as_mut() {
-                                ui.text_edit_multiline(notes);
+                                CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
                             }
                             ui.horizontal(|ui| {
                                 #[cfg(target_os = "windows")]
