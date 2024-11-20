@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.26] - 2024-11-20
+
+### 🚀 Features
+
+- Expose clan color and make your own div gold
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fix stream sniper detection in replay parser
+- Default settings were not properly applied
+
+### Internal
+
+- Use release tagged as latest for updates
+
 ## [0.1.25] - 2024-11-17
 
 ### 🚀 Features
