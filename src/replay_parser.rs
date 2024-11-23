@@ -1,10 +1,8 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     io::{BufWriter, Write},
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
-    time::Duration,
 };
 
 use crate::{
