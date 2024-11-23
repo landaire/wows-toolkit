@@ -6,6 +6,7 @@ use std::{
 };
 
 use chrono::{DateTime, Local};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use twitch_api::{
     helix::{self, chat::get_chatters},
@@ -118,8 +119,20 @@ impl TwitchState {
 
     pub fn player_is_potential_stream_sniper(&self, name: &str, match_timestamp: DateTime<Local>) -> Option<HashMap<String, Vec<DateTime<Local>>>> {
         let mut results = HashMap::new();
+        let name_chunks = name
+            .chars()
+            .collect::<Vec<char>>()
+            .chunks(5)
+            .map(|c| c.iter().collect::<String>())
+            .collect::<Vec<String>>();
+
         for (viewer_name, viewer_timestamps) in &self.participants {
-            if levenshtein::levenshtein(&viewer_name, name) < 5 {
+            if (name.len() > 5 && levenshtein::levenshtein(&viewer_name, name) <= 3)
+                || name_chunks
+                    .iter()
+                    .position(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
+                    .is_some()
+            {
                 let timestamps: Vec<_> = viewer_timestamps
                     .iter()
                     .cloned()
