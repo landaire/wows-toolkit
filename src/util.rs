@@ -17,23 +17,11 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     }
 }
 
-pub fn player_color_for_team_relation(relation: u32, is_dark_mode: bool) -> Color32 {
+pub fn player_color_for_team_relation(relation: u32) -> Color32 {
     match relation {
         0 => Color32::WHITE,
-        1 => {
-            if is_dark_mode {
-                Color32::LIGHT_GREEN
-            } else {
-                Color32::DARK_GREEN
-            }
-        }
-        _ => {
-            if is_dark_mode {
-                Color32::LIGHT_RED
-            } else {
-                Color32::DARK_RED
-            }
-        }
+        1 => Color32::LIGHT_GREEN,
+        _ => Color32::LIGHT_RED,
     }
 }
 

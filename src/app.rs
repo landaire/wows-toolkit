@@ -43,7 +43,7 @@ use crate::{
     replay_parser::{Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
-    wows_data::WorldOfWarshipsData,
+    wows_data::{load_replay, WorldOfWarshipsData},
 };
 
 #[macro_export]
@@ -435,7 +435,7 @@ impl TabState {
 
                                         if self.auto_load_latest_replay {
                                             if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                                                update_background_task!(self.background_task, wows_data.read().load_replay(replay));
+                                                update_background_task!(self.background_task, load_replay(Arc::clone(wows_data), replay));
                                             }
                                         }
 

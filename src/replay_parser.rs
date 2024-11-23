@@ -7,10 +7,15 @@ use std::{
     time::Duration,
 };
 
-use crate::{app::TimedMessage, icons, update_background_task, util::build_tomato_gg_url, wows_data::ShipIcon};
-use chrono::{Local, NaiveDateTime, TimeZone};
+use crate::{
+    app::TimedMessage,
+    icons, update_background_task,
+    util::build_tomato_gg_url,
+    wows_data::{load_replay, parse_replay, ShipIcon, WorldOfWarshipsData},
+};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, TableBuilder, TableRow};
 
 use parking_lot::RwLock;
 use tap::Pipe;
@@ -18,7 +23,7 @@ use tracing::debug;
 
 use wows_replays::{
     analyzer::{
-        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player},
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity},
         AnalyzerMut,
     },
     ReplayFile,
@@ -53,26 +58,357 @@ const DAMAGE_FLOODS: usize = 167;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
+fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
+    wows_data.ship_icons.get(&species).cloned()
+}
+
+struct SkillInfo {
+    skill_points: usize,
+    num_skills: usize,
+    highest_tier: usize,
+    num_tier_1_skills: usize,
+    hover_text: Option<&'static str>,
+    label_text: RichText,
+}
+
+struct Damage {
+    ap: Option<u64>,
+    sap: Option<u64>,
+    he: Option<u64>,
+    he_secondaries: Option<u64>,
+    sap_secondaries: Option<u64>,
+    torps: Option<u64>,
+    deep_water_torps: Option<u64>,
+    fire: Option<u64>,
+    flooding: Option<u64>,
+}
+
+struct PotentialDamage {
+    artillery: u64,
+    torpedoes: u64,
+    planes: u64,
+}
+
+pub struct VehicleReport {
+    vehicle: Arc<VehicleEntity>,
+    color: Color32,
+    name_text: RichText,
+    clan_text: Option<RichText>,
+    ship_species_text: String,
+    icon: Option<Arc<ShipIcon>>,
+    division_label: Option<String>,
+    base_xp: Option<i64>,
+    base_xp_text: Option<RichText>,
+    raw_xp: Option<i64>,
+    raw_xp_text: Option<String>,
+    observed_damage: u64,
+    observed_damage_text: String,
+    actual_damage: Option<u64>,
+    actual_damage_report: Option<Damage>,
+    actual_damage_text: Option<RichText>,
+    /// RichText to support monospace font
+    actual_damage_hover_text: Option<RichText>,
+    ship_name: String,
+    spotting_damage: Option<u64>,
+    spotting_damage_text: Option<String>,
+    potential_damage: Option<u64>,
+    potential_damage_text: Option<String>,
+    potential_damage_hover_text: Option<String>,
+    potential_damage_report: Option<PotentialDamage>,
+    time_lived_text: Option<String>,
+    skill_info: SkillInfo,
+}
+
+pub struct UiReport {
+    match_timestamp: DateTime<Local>,
+    self_player: Option<Arc<VehicleEntity>>,
+    vehicle_reports: Vec<VehicleReport>,
+}
+
+impl UiReport {
+    fn new(replay_file: &ReplayFile, report: &BattleReport, wows_data: &WorldOfWarshipsData, metadata_provider: &GameMetadataProvider) -> Self {
+        let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
+        let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
+
+        let mut sorted_players = report.player_entities().to_vec();
+        sorted_players.sort_unstable_by_key(|item| {
+            let player = item.player().unwrap();
+            (player.relation(), player.vehicle().species(), player.entity_id())
+        });
+
+        let mut divisions: HashMap<u32, char> = Default::default();
+        let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
+
+        let self_player = sorted_players
+            .iter()
+            .find(|vehicle| vehicle.player().map(|player| player.relation() == 0).unwrap_or(false))
+            .cloned();
+        let locale = "en-US";
+
+        let player_reports = sorted_players.iter().filter_map(|vehicle| {
+            let player = vehicle.player()?;
+            let mut player_color = player_color_for_team_relation(player.relation());
+
+            if let Some(self_player) = self_player.as_ref().and_then(|vehicle| vehicle.player().cloned()) {
+                if self_player.db_id() != player.db_id() && self_player.division_id() > 0 && player.division_id() == self_player.division_id() {
+                    player_color = Color32::GOLD;
+                }
+            }
+
+            let vehicle_param = player.vehicle();
+
+            let ship_species_text: String = vehicle_param
+                .species()
+                .and_then(|species| {
+                    let species: &'static str = species.into();
+                    let id = format!("IDS_{}", species.to_uppercase());
+                    metadata_provider.localized_name_from_id(&id)
+                })
+                .unwrap_or_else(|| "unk".to_string());
+
+            let icon = ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), wows_data);
+
+            let name_color = if player.is_abuser() {
+                Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
+            } else {
+                player_color
+            };
+
+            // Assign division
+            let div = player.division_id();
+            let division_char = if div > 0 {
+                Some(divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')).clone())
+            } else {
+                None
+            };
+
+            let div_text = if let Some(div) = division_char { Some(format!("({})", div)) } else { None };
+
+            let clan_text = if !player.clan().is_empty() {
+                Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()))
+            } else {
+                None
+            };
+            let name_text = RichText::new(player.name()).color(name_color);
+
+            let (base_xp, base_xp_text) = if let Some(base_xp) = vehicle.results_info().and_then(|info| {
+                info.as_array()
+                    .and_then(|info_array| info_array[XP_INDEX].as_number().and_then(|number| number.as_i64()))
+            }) {
+                let label_text = separate_number(base_xp, Some(locale));
+                (Some(base_xp), Some(RichText::new(label_text).color(player_color)))
+            } else {
+                (None, None)
+            };
+
+            let (raw_xp, raw_xp_text) = if let Some(raw_xp) = vehicle.results_info().and_then(|info| {
+                info.as_array()
+                    .and_then(|info_array| info_array[XP_INDEX - 1].as_number().and_then(|number| number.as_i64()))
+            }) {
+                let label_text = separate_number(raw_xp, Some(locale));
+                (Some(raw_xp), Some(label_text))
+            } else {
+                (None, None)
+            };
+
+            let ship_name = metadata_provider
+                .localized_name_from_param(vehicle_param)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("{}", vehicle_param.id()));
+
+            let observed_damage = vehicle.damage().ceil() as u64;
+            let observed_damage_text = separate_number(observed_damage, Some(locale));
+
+            // Actual damage
+            let (damage, damage_text, damage_hover_text, damage_report) = vehicle
+                .results_info()
+                .and_then(|info| info.as_array())
+                .and_then(|info_array| {
+                    info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
+                        // Grab other damage numbers
+                        let damage_stats = [
+                            (DAMAGE_AP, "AP"),
+                            (DAMAGE_SAP, "SAP"),
+                            (DAMAGE_HE, "HE"),
+                            (DAMAGE_HE_SECONDARIES, "HE Sec"),
+                            (DAMAGE_SAP_SECONDARIES, "SAP Sec"),
+                            (DAMAGE_NORMAL_TORPS, "Torps"),
+                            (DAMAGE_DEEP_WATER_TORPS, "Deep Water Torps"),
+                            (DAMAGE_FIRE, "Fire"),
+                            (DAMAGE_FLOODS, "Flood"),
+                        ];
+
+                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                        let breakdowns: Vec<String> = damage_stats
+                            .iter()
+                            .filter_map(|(idx, description)| {
+                                info_array[*idx].as_number().and_then(|number| number.as_u64()).map(|num| {
+                                    let num = separate_number(num, Some(locale));
+                                    format!("{:<16}: {}", description, num)
+                                })
+                            })
+                            .collect();
+
+                        let damage_report_text = separate_number(damage_number, Some(locale));
+                        let damage_report_text = RichText::new(damage_report_text).color(player_color);
+                        let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+
+                        (
+                            Some(damage_number),
+                            Some(damage_report_text),
+                            Some(damage_report_hover_text),
+                            Some(Damage {
+                                ap: info_array[DAMAGE_AP].as_number().and_then(|number| number.as_u64()),
+                                sap: info_array[DAMAGE_SAP].as_number().and_then(|number| number.as_u64()),
+                                he: info_array[DAMAGE_HE].as_number().and_then(|number| number.as_u64()),
+                                he_secondaries: info_array[DAMAGE_HE_SECONDARIES].as_number().and_then(|number| number.as_u64()),
+                                sap_secondaries: info_array[DAMAGE_SAP_SECONDARIES].as_number().and_then(|number| number.as_u64()),
+                                torps: info_array[DAMAGE_NORMAL_TORPS].as_number().and_then(|number| number.as_u64()),
+                                deep_water_torps: info_array[DAMAGE_DEEP_WATER_TORPS].as_number().and_then(|number| number.as_u64()),
+                                fire: info_array[DAMAGE_FIRE].as_number().and_then(|number| number.as_u64()),
+                                flooding: info_array[DAMAGE_FLOODS].as_number().and_then(|number| number.as_u64()),
+                            }),
+                        )
+                    })
+                })
+                .unwrap_or_default();
+
+            // Spotting damage
+            const SPOTTING_DAMAGE_INDEX: usize = 398;
+            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) = vehicle.results_info().and_then(|info| {
+                info.as_array()
+                    .and_then(|info_array| info_array[SPOTTING_DAMAGE_INDEX].as_number().and_then(|number| number.as_u64()))
+            }) {
+                (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
+            } else {
+                (None, None)
+            };
+
+            // Potential damage
+            const ARTILLERY_POTENTIAL_DAMAGE: usize = 402;
+            const _TORPEDO_POTENTIAL_DAMAGE: usize = 403; // may not be accurate?
+            const AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
+
+            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) = if let Some(damage_numbers) = vehicle
+                .results_info()
+                .and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=AIRSTRIKE_POTENTIAL_DAMAGE]))
+            {
+                let total_pot = damage_numbers
+                    .iter()
+                    .map(|num| num.as_f64())
+                    .fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
+
+                let potential_damage_text = separate_number(total_pot, Some(locale));
+
+                let potential_damage_report = PotentialDamage {
+                    artillery: damage_numbers[0].as_f64().unwrap_or_default() as u64,
+                    torpedoes: damage_numbers[0].as_f64().unwrap_or_default() as u64,
+                    planes: damage_numbers[0].as_f64().unwrap_or_default() as u64,
+                };
+
+                let hover_string = format!(
+                    "Artillery: {}\nTorpedo: {}\nPlanes: {}",
+                    separate_number(potential_damage_report.artillery, Some(locale)),
+                    separate_number(potential_damage_report.torpedoes, Some(locale)),
+                    separate_number(potential_damage_report.planes, Some(locale)),
+                );
+
+                (Some(total_pot), Some(potential_damage_text), Some(hover_string), Some(potential_damage_report))
+            } else {
+                (None, None, None, None)
+            };
+
+            let time_lived_text = vehicle.death_info().map(|death_info| {
+                let secs = death_info.time_lived().as_secs();
+                format!("{}:{:02}", secs / 60, secs % 60)
+            });
+
+            let species = vehicle_param.species().expect("ship has no species?");
+            let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
+                .commander_skills()
+                .map(|skills| {
+                    let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
+                    let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
+                    let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
+                        if skill.tier().get_for_species(species.clone()) == 1 {
+                            accum += 1;
+                        }
+                        accum
+                    });
+
+                    (points, skills.len(), highest_tier.unwrap_or(0), num_tier_1_skills)
+                })
+                .unwrap_or((0, 0, 0, 0));
+
+            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills);
+
+            let skill_info = SkillInfo {
+                skill_points,
+                num_skills,
+                highest_tier,
+                num_tier_1_skills,
+                hover_text: hover_text,
+                label_text: label,
+            };
+
+            Some(VehicleReport {
+                vehicle: Arc::clone(&vehicle),
+                color: player_color,
+                name_text,
+                clan_text,
+                icon,
+                division_label: div_text,
+                base_xp,
+                base_xp_text,
+                raw_xp,
+                raw_xp_text,
+                observed_damage,
+                observed_damage_text,
+                actual_damage: damage,
+                actual_damage_report: damage_report,
+                actual_damage_text: damage_text,
+                actual_damage_hover_text: damage_hover_text,
+                ship_name,
+                spotting_damage,
+                spotting_damage_text,
+                potential_damage,
+                potential_damage_hover_text,
+                potential_damage_report,
+                time_lived_text,
+                skill_info,
+                potential_damage_text,
+                ship_species_text,
+            })
+        });
+
+        Self {
+            match_timestamp,
+            vehicle_reports: player_reports.collect(),
+            self_player,
+        }
+    }
+}
+
 pub struct Replay {
     pub replay_file: ReplayFile,
 
     pub resource_loader: Arc<GameMetadataProvider>,
 
     pub battle_report: Option<BattleReport>,
-
-    pub divisions: HashMap<u32, char>,
-
-    pub remaining_div_identifiers: String,
+    pub ui_report: Option<UiReport>,
 }
 
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
     if player.clan().is_empty() {
         None
     } else {
-
         let clan_color = player.raw_props_with_name().get("clanColor").expect("no clan color?");
         let clan_color = clan_color.as_i64().expect("clan color is not an i64");
-        Some(Color32::from_rgb(((clan_color & 0xFF0000) >> 16) as u8, ((clan_color & 0xFF00)  >> 8) as u8, (clan_color & 0xFF) as u8))
+        Some(Color32::from_rgb(
+            ((clan_color & 0xFF0000) >> 16) as u8,
+            ((clan_color & 0xFF00) >> 8) as u8,
+            (clan_color & 0xFF) as u8,
+        ))
     }
 }
 
@@ -82,8 +418,7 @@ impl Replay {
             replay_file,
             resource_loader,
             battle_report: None,
-            divisions: HashMap::new(),
-            remaining_div_identifiers: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect(),
+            ui_report: None,
         }
     }
     pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
@@ -115,28 +450,14 @@ impl Replay {
 
         Ok(report)
     }
-    pub fn assign_divs(&mut self) {
-        if let Some(report) = self.battle_report.as_ref() {
-            for vehicle in report.player_entities() {
-                if let Some(player) = vehicle.player() {
-                    let div = player.division_id();
-                    if div > 0 {
-                        self.divisions.entry(div).or_insert_with(|| self.remaining_div_identifiers.pop().unwrap_or('?'));
-                    }
-                }
-            }
+    pub fn build_ui_report(&mut self, wows_data: &WorldOfWarshipsData, metadata_provider: &GameMetadataProvider) {
+        if let Some(battle_report) = &self.battle_report {
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, wows_data, metadata_provider))
         }
     }
 }
 
 impl ToolkitTabViewer<'_> {
-    fn ship_class_icon_from_species(&self, species: Species) -> Option<Arc<ShipIcon>> {
-        self.tab_state
-            .world_of_warships_data
-            .as_ref()
-            .and_then(|wows_data| wows_data.read().ship_icons.get(&species).cloned())
-    }
-
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
         self.tab_state
             .world_of_warships_data
@@ -149,11 +470,6 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_player_list(&self, replay_file: &Replay, report: &BattleReport, ui: &mut egui::Ui) {
-        let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
-        let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
-        let twitch_state = self.tab_state.twitch_state.read();
-
-        let is_dark_mode = ui.visuals().dark_mode;
         let table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -237,312 +553,244 @@ impl ToolkitTabViewer<'_> {
                 });
             })
             .body(|mut body| {
-                let mut sorted_players = report.player_entities().to_vec();
-                sorted_players.sort_unstable_by_key(|item| {
-                    let player = item.player().unwrap();
-                    (player.relation(), player.vehicle().species(), player.entity_id())
-                });
-                for entity in &sorted_players {
-                    let player = entity.player().unwrap();
-                    let mut player_color = player_color_for_team_relation(player.relation(), is_dark_mode);
+                let ui_report = replay_file.ui_report.as_ref().expect("no ui report was generated");
+                for player_report in &ui_report.vehicle_reports {
 
-                    if let Some(self_player) = sorted_players[0].player() {
-                        if self_player.division_id() > 0 && player.division_id() == self_player.division_id() {
-                            player_color = Color32::GOLD;
-                        }
-                    }
-                    let ship = player.vehicle();
-
-                    body.row(30.0, |mut ui| {
-                        ui.col(|ui| {
-                            let species: String = ship
-                                .species()
-                                .and_then(|species| {
-                                    let species: &'static str = species.into();
-                                    let id = format!("IDS_{}", species.to_uppercase());
-                                    self.metadata_provider().and_then(|metadata| metadata.localized_name_from_id(&id))
-                                })
-                                .unwrap_or_else(|| "unk".to_string());
-                            if let Some(icon) = self.ship_class_icon_from_species(ship.species().expect("ship has no species")) {
-                                let mut color = match player.relation() {
-                                    0 => Color32::GOLD,
-                                    1 => Color32::LIGHT_GREEN,
-                                    _ => Color32::LIGHT_RED,
-                                };
-
-                                if let Some(self_player) = sorted_players[0].player() {
-                                    if player.team_id() == self_player.team_id() {
-                                        color = Color32::GOLD;
-                                    }
-                                }
-
-                                let image = Image::new(ImageSource::Bytes {
-                                    uri: icon.path.clone().into(),
-                                    // the icon size is <1k, this clone is fairly cheap
-                                    bytes: icon.data.clone().into(),
-                                })
-                                .tint(color)
-                                .fit_to_exact_size((20.0, 20.0).into())
-                                .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
-
-                                ui.add(image).on_hover_text(species);
-                            } else {
-                                ui.label(species);
-                            }
-
-                            let name_color = if player.is_abuser() {
-                                Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
-                            } else {
-                                player_color
-                            };
-                            if let Some(div) = replay_file.divisions.get(&player.division_id()).cloned() {
-                                ui.label(format!("({})", div));
-                            }
-                            if !player.clan().is_empty() {
-                                ui.label(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()));
-                            }
-                            ui.label(RichText::new(player.name()).color(name_color));
-                            if player.is_hidden() {
-                                ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
-                            }
-
-                            if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
-                                let hover_text = timestamps.iter().map(|(name, timestamps)| {
-                                    format!("Possible stream name: {}\nSeen: {} minutes after match start", name, timestamps.iter().map(|ts| {
-                                        let delta = ts.signed_duration_since(match_timestamp);
-                                        delta.num_minutes()
-                                    }).join(", "))
-                                }).join("\n\n");
-                                ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
-                            }
-
-                            let disconnect_hover_text = if player.did_disconnect() {
-                                Some("Player disconnected from the match")
-                            } else {
-                                None
-                            };
-
-                            if let Some(disconnect_text) = disconnect_hover_text {
-                                ui.label(icons::PLUGS).on_hover_text(disconnect_text);
-                            }
-                        });
-                        ui.col(|ui| {
-                            if let Some(base_xmp) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[XP_INDEX].as_number().and_then(|number| number.as_i64()))) {
-                                let label_text =  separate_number(base_xmp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
-                                ui.label(RichText::new(label_text).color(player_color));
-                            } else {
-                                ui.label("-");
-                            }
-                        });
-                        ui.col(|ui| {
-                            if let Some(raw_xp) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[XP_INDEX - 1].as_number().and_then(|number| number.as_i64()))) {
-                                let raw_xp =  separate_number(raw_xp, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
-                                ui.label(raw_xp);
-                            } else {
-                                ui.label("-");
-                            }
-                        });
-
-                        if self.tab_state.settings.replay_settings.show_entity_id {
-                            ui.col(|ui| {
-                                ui.label(format!("{}", entity.id()));
-                            });
-                        }
-
-                        ui.col(|ui| {
-                            let ship_name = self
-                                .metadata_provider()
-                                .and_then(|metadata| metadata.localized_name_from_param(ship).map(ToString::to_string))
-                                .unwrap_or_else(|| format!("{}", ship.id()));
-                            ui.label(ship_name);
-                        });
-
-                        if self.tab_state.settings.replay_settings.show_observed_damage {
-                            ui.col(|ui| {
-                                ui.label(separate_number(entity.damage(), self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
-                            });
-                        }
-
-                        // Actual damage
-                        ui.col(|ui| {
-                            let got_valid_damages = if let Some(info_array) = entity.results_info().and_then(|info| info.as_array()) {
-
-                                if let Some(damage_number) =  info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()) {
-                                    // Grab other damage numbers
-                                    let damage_stats = [
-                                        (DAMAGE_AP, "AP"),
-                                        (DAMAGE_SAP, "SAP"),
-                                        (DAMAGE_HE, "HE"),
-                                        (DAMAGE_HE_SECONDARIES, "HE Sec"),
-                                        (DAMAGE_SAP_SECONDARIES, "SAP Sec"),
-                                        (DAMAGE_NORMAL_TORPS, "Torps"),
-                                        (DAMAGE_DEEP_WATER_TORPS, "Deep Water Torps"),
-                                        (DAMAGE_FIRE, "Fire"),
-                                        (DAMAGE_FLOODS, "Flood")
-                                    ];
-
-                                    let breakdowns: Vec<String> = damage_stats.iter().filter_map(|(idx, description)| {
-                                        info_array[*idx].as_number().and_then(|number| number.as_i64()).map(|num| {
-                                            let num =  separate_number(num, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
-                                            format!("{:<16}: {}", description, num)
-                                        })
-                                    }).collect();
-
-                                    let label_text = separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()));
-                                    let label_text = RichText::new(label_text).color(player_color);
-                                    // if let Some(damage_breakdowns) = breakdowns {
-                                        ui.label(label_text).on_hover_text(RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0)));
-
-                                    // } else {
-                                    //     ui.label(label_text);
-                                    // }
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            };
-                            if !got_valid_damages {
-                                ui.label("-");
-                            }
-                        });
-                        // Spotting damage
-                        ui.col(|ui| {
-                            const DAMAGE_INDEX: usize = 398;
-                            if let Some(damage_number) = entity.results_info().and_then(|info| info.as_array().and_then(|info_array| info_array[DAMAGE_INDEX].as_number().and_then(|number| number.as_i64()))) {
-                                ui.label(separate_number(damage_number, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())));
-                            } else {
-                                ui.label("-");
-                            }
-                        });
-                        // Potential damage
-                        ui.col(|ui| {
-                            const ARTILLERY_POTENTIAL_DAMAGE: usize = 402;
-                            const _TORPEDO_POTENTIAL_DAMAGE: usize = 403; // may not be accurate?
-                            const AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
-
-                            if let Some(damage_numbers) = entity.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=AIRSTRIKE_POTENTIAL_DAMAGE])) {
-                                let total_pot = damage_numbers.iter().map(|num| num.as_f64()).fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
-                                let hover_string = format!("Artillery: {}\nTorpedo: {}\nPlanes: {}",
-                                    separate_number(damage_numbers[0].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                                    separate_number(damage_numbers[1].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                                    separate_number(damage_numbers[2].as_f64().unwrap_or_default() as u64, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                                );
-                                
-                                ui.label(separate_number(total_pot, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))).on_hover_text(hover_string);
-                            } else {
-                                ui.label("-");
-                            }
-                        });
-
-                        ui.col(|ui| {
-                            if let Some(death_info) = entity.death_info() {
-                                let secs = death_info.time_lived().as_secs();
-                                ui.label(format!("{}:{:02}", secs / 60, secs % 60));
-                            } else {
-                                ui.label("-");
-                            }
-                        });
-
-                        let species = ship.species().expect("ship has no species?");
-                        let (skill_points, num_skills, highest_tier, num_tier_1_skills) = entity
-                            .commander_skills()
-                            .map(|skills| {
-                                let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
-                                let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
-                                let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
-                                    if skill.tier().get_for_species(species.clone()) == 1 {
-                                        accum += 1;
-                                    }
-                                    accum
-                                });
-
-                                (points, skills.len(), highest_tier.unwrap_or(0), num_tier_1_skills)
-                            })
-                            .unwrap_or((0, 0, 0, 0));
-                        ui.col(|ui| {
-                            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills);
-                            ui.label(label).pipe(|label| {
-                                if let Some(hover_text) = hover_text {
-                                    label.on_hover_text(hover_text)
-                                } else {
-                                    label
-                                }
-                            });
-                        });
-                        ui.col(|ui| {
-                            ui.menu_button(icons::DOTS_THREE, |ui| {
-                                if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
-                                    let metadata_provider = self.metadata_provider().unwrap();
-
-                                    let url = build_ship_config_url(entity, &metadata_provider);
-
-                                    ui.ctx().open_url(OpenUrl::new_tab(url));
-                                    ui.close_menu();
-                                }
-
-                                if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
-                                    let metadata_provider = self.metadata_provider().unwrap();
-
-                                    let url = build_ship_config_url(entity, &metadata_provider);
-                                    ui.output_mut(|output| output.copied_text = url);
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
-
-                                    ui.close_menu();
-                                }
-
-                                if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
-                                    let metadata_provider = self.metadata_provider().unwrap();
-
-                                    let url = build_short_ship_config_url(entity, &metadata_provider);
-                                    ui.output_mut(|output| output.copied_text = url);
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
-
-                                    ui.close_menu();
-                                }
-
-                                ui.separator();
-
-                                if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
-                                    if let Some(url) = build_tomato_gg_url(entity) {
-                                        ui.ctx().open_url(OpenUrl::new_tab(url));
-                                    }
-
-                                    ui.close_menu();
-                                }
-
-                                if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
-                                    if let Some(url) = build_wows_numbers_url(entity) {
-                                        ui.ctx().open_url(OpenUrl::new_tab(url));
-                                    }
-
-                                    ui.close_menu();
-                                }
-
-                                ui.separator();
-
-                                if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
-                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
-                                    let viewer = plaintext_viewer::PlaintextFileViewer {
-                                        title: Arc::new("metadata.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
-                                            ext: ".json".to_owned(),
-                                            contents: pretty_meta,
-                                        })),
-                                        open: Arc::new(AtomicBool::new(true)),
-                                    };
-
-                                    self.tab_state.file_viewer.lock().push(viewer);
-
-                                    ui.close_menu();
-                                }
-
-                            });
-                        });
+                    body.row(30.0, |ui| {
+                        self.build_player_row(ui_report, player_report, ui);
                     });
                 }
             });
+    }
+
+    fn build_player_row(&self, ui_report: &UiReport, player_report: &VehicleReport, mut ui: TableRow<'_, '_>) {
+        let twitch_state = self.tab_state.twitch_state.read();
+        let match_timestamp = ui_report.match_timestamp;
+
+        ui.col(|ui| {
+            // Add ship icon
+            if let Some(icon) = player_report.icon.as_ref() {
+                let image = Image::new(ImageSource::Bytes {
+                    uri: icon.path.clone().into(),
+                    // the icon size is <1k, this clone is fairly cheap
+                    bytes: icon.data.clone().into(),
+                })
+                .tint(player_report.color)
+                .fit_to_exact_size((20.0, 20.0).into())
+                .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
+
+                ui.add(image).on_hover_text(&player_report.ship_species_text);
+            } else {
+                ui.label(&player_report.ship_species_text);
+            }
+
+            // Add division ID
+            if let Some(div) = player_report.division_label.as_ref() {
+                ui.label(div);
+            }
+
+            // Add player clan
+            if let Some(clan_text) = player_report.clan_text.clone() {
+                ui.label(clan_text);
+            }
+
+            // Add player name
+            ui.label(player_report.name_text.clone());
+
+            // Add icons for player properties
+            if let Some(player) = player_report.vehicle.player() {
+                // Hidden profile icon
+                if player.is_hidden() {
+                    ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
+                }
+
+                // Stream sniper icon
+                if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
+                    let hover_text = timestamps
+                        .iter()
+                        .map(|(name, timestamps)| {
+                            format!(
+                                "Possible stream name: {}\nSeen: {} minutes after match start",
+                                name,
+                                timestamps
+                                    .iter()
+                                    .map(|ts| {
+                                        let delta = ts.signed_duration_since(match_timestamp);
+                                        delta.num_minutes()
+                                    })
+                                    .join(", ")
+                            )
+                        })
+                        .join("\n\n");
+                    ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
+                }
+
+                let disconnect_hover_text = if player.did_disconnect() {
+                    Some("Player disconnected from the match")
+                } else {
+                    None
+                };
+                if let Some(disconnect_text) = disconnect_hover_text {
+                    ui.label(icons::PLUGS).on_hover_text(disconnect_text);
+                }
+            }
+        });
+
+        // Base XP
+        ui.col(|ui| {
+            if let Some(base_xp_text) = player_report.base_xp_text.clone() {
+                ui.label(base_xp_text);
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Raw XP
+        ui.col(|ui| {
+            if let Some(raw_xp_text) = player_report.raw_xp_text.clone() {
+                ui.label(raw_xp_text);
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Entity ID (debugging)
+        if self.tab_state.settings.replay_settings.show_entity_id {
+            ui.col(|ui| {
+                ui.label(format!("{}", player_report.vehicle.id()));
+            });
+        }
+
+        // Ship name
+        ui.col(|ui| {
+            ui.label(&player_report.ship_name);
+        });
+
+        // Observed damage
+        if self.tab_state.settings.replay_settings.show_observed_damage {
+            ui.col(|ui| {
+                ui.label(&player_report.observed_damage_text);
+            });
+        }
+
+        // Actual damage
+        ui.col(|ui| {
+            if let Some(damage_text) = player_report.actual_damage_text.clone() {
+                let response = ui.label(damage_text);
+                if let Some(hover_text) = player_report.actual_damage_hover_text.clone() {
+                    response.on_hover_text(hover_text);
+                }
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Spotting damage
+        ui.col(|ui| {
+            if let Some(spotting_damage) = player_report.spotting_damage_text.as_ref() {
+                ui.label(spotting_damage);
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Potential damage
+        ui.col(|ui| {
+            if let Some(damage_text) = player_report.potential_damage_text.clone() {
+                let response = ui.label(damage_text);
+                if let Some(hover_text) = player_report.potential_damage_hover_text.as_ref() {
+                    response.on_hover_text(hover_text);
+                }
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Time lived
+        ui.col(|ui| {
+            if let Some(time_lived) = player_report.time_lived_text.as_ref() {
+                ui.label(time_lived);
+            } else {
+                ui.label("-");
+            }
+        });
+
+        ui.col(|ui| {
+            let response = ui.label(player_report.skill_info.label_text.clone());
+            if let Some(hover_text) = player_report.skill_info.hover_text {
+                response.on_hover_text(hover_text);
+            }
+        });
+        ui.col(|ui| {
+            ui.menu_button(icons::DOTS_THREE, |ui| {
+                if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
+                    let metadata_provider = self.metadata_provider().unwrap();
+
+                    let url = build_ship_config_url(&player_report.vehicle, &metadata_provider);
+
+                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                    ui.close_menu();
+                }
+
+                if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
+                    let metadata_provider = self.metadata_provider().unwrap();
+
+                    let url = build_ship_config_url(&player_report.vehicle, &metadata_provider);
+                    ui.output_mut(|output| output.copied_text = url);
+                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
+
+                    ui.close_menu();
+                }
+
+                if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
+                    let metadata_provider = self.metadata_provider().unwrap();
+
+                    let url = build_short_ship_config_url(&player_report.vehicle, &metadata_provider);
+                    ui.output_mut(|output| output.copied_text = url);
+                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
+
+                    ui.close_menu();
+                }
+
+                ui.separator();
+
+                if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
+                    if let Some(url) = build_tomato_gg_url(&player_report.vehicle) {
+                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                    }
+
+                    ui.close_menu();
+                }
+
+                if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
+                    if let Some(url) = build_wows_numbers_url(&player_report.vehicle) {
+                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                    }
+
+                    ui.close_menu();
+                }
+
+                ui.separator();
+
+                if let Some(player) = player_report.vehicle.player() {
+                    if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
+                        let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                        let viewer = plaintext_viewer::PlaintextFileViewer {
+                            title: Arc::new("metadata.json".to_owned()),
+                            file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                ext: ".json".to_owned(),
+                                contents: pretty_meta,
+                            })),
+                            open: Arc::new(AtomicBool::new(true)),
+                        };
+
+                        self.tab_state.file_viewer.lock().push(viewer);
+
+                        ui.close_menu();
+                    }
+                }
+            });
+        });
     }
 
     fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
@@ -568,7 +816,7 @@ impl ToolkitTabViewer<'_> {
 
             let is_dark_mode = ui.visuals().dark_mode;
             let name_color = if let Some(relation) = sender_relation {
-                player_color_for_team_relation(*relation, is_dark_mode)
+                player_color_for_team_relation(*relation)
             } else {
                 Color32::GRAY
             };
@@ -838,7 +1086,7 @@ impl ToolkitTabViewer<'_> {
 
                         if label.double_clicked() {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                update_background_task!(self.tab_state.background_task, wows_data.read().load_replay(replay.clone()));
+                                update_background_task!(self.tab_state.background_task, load_replay(Arc::clone(wows_data), replay.clone()));
                             }
                         }
                         ui.end_row();
@@ -863,7 +1111,7 @@ impl ToolkitTabViewer<'_> {
                         if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                             update_background_task!(
                                 self.tab_state.background_task,
-                                wows_data.read().parse_replay(self.tab_state.settings.current_replay_path.clone())
+                                parse_replay(Arc::clone(wows_data), self.tab_state.settings.current_replay_path.clone())
                             );
                         }
                     }
