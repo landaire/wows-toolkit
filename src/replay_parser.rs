@@ -1,4 +1,5 @@
 use std::{
+    borrow::{Borrow, Cow},
     collections::HashMap,
     io::{BufWriter, Write},
     path::PathBuf,
@@ -16,6 +17,7 @@ use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, L
 use egui_extras::{Column, TableBuilder, TableRow};
 
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use tap::Pipe;
 use tracing::debug;
 
@@ -113,6 +115,7 @@ pub struct VehicleReport {
     potential_damage_text: Option<String>,
     potential_damage_hover_text: Option<String>,
     potential_damage_report: Option<PotentialDamage>,
+    time_lived_secs: Option<u64>,
     time_lived_text: Option<String>,
     skill_info: SkillInfo,
 }
@@ -121,6 +124,7 @@ pub struct UiReport {
     match_timestamp: DateTime<Local>,
     self_player: Option<Arc<VehicleEntity>>,
     vehicle_reports: Vec<VehicleReport>,
+    sorted: bool,
 }
 
 impl UiReport {
@@ -128,22 +132,18 @@ impl UiReport {
         let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
         let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
 
-        let mut sorted_players = report.player_entities().to_vec();
-        sorted_players.sort_unstable_by_key(|item| {
-            let player = item.player().unwrap();
-            (player.relation(), player.vehicle().species(), player.entity_id())
-        });
+        let players = report.player_entities().to_vec();
 
         let mut divisions: HashMap<u32, char> = Default::default();
         let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
 
-        let self_player = sorted_players
+        let self_player = players
             .iter()
             .find(|vehicle| vehicle.player().map(|player| player.relation() == 0).unwrap_or(false))
             .cloned();
         let locale = "en-US";
 
-        let player_reports = sorted_players.iter().filter_map(|vehicle| {
+        let player_reports = players.iter().filter_map(|vehicle| {
             let player = vehicle.player()?;
             let mut player_color = player_color_for_team_relation(player.relation());
 
@@ -316,10 +316,13 @@ impl UiReport {
                 (None, None, None, None)
             };
 
-            let time_lived_text = vehicle.death_info().map(|death_info| {
-                let secs = death_info.time_lived().as_secs();
-                format!("{}:{:02}", secs / 60, secs % 60)
-            });
+            let (time_lived, time_lived_text) = vehicle
+                .death_info()
+                .map(|death_info| {
+                    let secs = death_info.time_lived().as_secs();
+                    (Some(secs), Some(format!("{}:{:02}", secs / 60, secs % 60)))
+                })
+                .unwrap_or_default();
 
             let species = vehicle_param.species().expect("ship has no species?");
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
@@ -372,6 +375,7 @@ impl UiReport {
                 potential_damage,
                 potential_damage_hover_text,
                 potential_damage_report,
+                time_lived_secs: time_lived,
                 time_lived_text,
                 skill_info,
                 potential_damage_text,
@@ -383,8 +387,191 @@ impl UiReport {
             match_timestamp,
             vehicle_reports: player_reports.collect(),
             self_player,
+            sorted: false,
         }
     }
+
+    fn sort_players(&mut self, sort_order: SortOrder) {
+        use std::cmp::Reverse;
+
+        let self_player_team_id = self
+            .self_player
+            .as_ref()
+            .expect("no self player?")
+            .player()
+            .as_ref()
+            .expect("no self player player")
+            .team_id();
+
+        match sort_order {
+            SortOrder::Desc(column) => match column {
+                SortColumn::Name => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+
+                    (player.team_id() != self_player_team_id, Reverse(player.name().to_string()), player.db_id())
+                }),
+                SortColumn::BaseXp => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (
+                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
+                        Reverse(report.base_xp.unwrap_or_default()),
+                        player.db_id(),
+                    )
+                }),
+                SortColumn::RawXp => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.raw_xp.unwrap_or_default()), player.db_id())
+                }),
+                SortColumn::ShipName => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (
+                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
+                        Reverse(report.ship_name.clone()),
+                        player.db_id(),
+                    )
+                }),
+                SortColumn::ShipClass => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(player.vehicle().species()), player.db_id())
+                }),
+                SortColumn::ObservedDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.observed_damage), player.db_id())
+                }),
+                SortColumn::ActualDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.actual_damage), player.db_id())
+                }),
+                SortColumn::SpottingDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.spotting_damage), player.db_id())
+                }),
+                SortColumn::PotentialDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.potential_damage), player.db_id())
+                }),
+                SortColumn::TimeLived => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, Reverse(report.time_lived_secs), player.db_id())
+                }),
+            },
+            SortOrder::Asc(column) => match column {
+                SortColumn::Name => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+
+                    (player.team_id() != self_player_team_id, player.name().to_string(), player.db_id())
+                }),
+                SortColumn::BaseXp => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (
+                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
+                        report.base_xp.unwrap_or_default(),
+                        player.db_id(),
+                    )
+                }),
+                SortColumn::RawXp => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (
+                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
+                        report.raw_xp.unwrap_or_default(),
+                        player.db_id(),
+                    )
+                }),
+                SortColumn::ShipName => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (
+                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
+                        report.ship_name.clone(),
+                        player.db_id(),
+                    )
+                }),
+                SortColumn::ShipClass => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, player.vehicle().species(), player.db_id())
+                }),
+                SortColumn::ObservedDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, report.observed_damage, player.db_id())
+                }),
+                SortColumn::ActualDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, report.actual_damage, player.db_id())
+                }),
+                SortColumn::SpottingDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, report.spotting_damage, player.db_id())
+                }),
+                SortColumn::PotentialDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, report.potential_damage, player.db_id())
+                }),
+                SortColumn::TimeLived => self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let player = report.vehicle.player().expect("no player?");
+                    (player.team_id() != self_player_team_id, report.time_lived_secs, player.db_id())
+                }),
+            },
+        }
+
+        self.sorted = true;
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SortOrder {
+    Asc(SortColumn),
+    Desc(SortColumn),
+}
+
+impl Default for SortOrder {
+    fn default() -> Self {
+        SortOrder::Asc(SortColumn::ShipClass)
+    }
+}
+
+impl SortOrder {
+    fn icon(&self) -> &'static str {
+        match self {
+            SortOrder::Asc(_) => icons::SORT_ASCENDING,
+            SortOrder::Desc(_) => icons::SORT_DESCENDING,
+        }
+    }
+
+    fn toggle(&mut self) {
+        match self {
+            // By default everything should be Descending. Descending transitions to ascending. Ascending transitions back to default state.
+            SortOrder::Asc(_) => *self = Default::default(),
+            SortOrder::Desc(column) => *self = SortOrder::Asc(*column),
+        }
+    }
+
+    fn update_column(&mut self, new_column: SortColumn) {
+        match self {
+            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) if *sort_column == new_column => {
+                self.toggle();
+            }
+            _ => *self = SortOrder::Desc(new_column),
+        }
+    }
+
+    fn column(&self) -> SortColumn {
+        match self {
+            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) => *sort_column,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SortColumn {
+    Name,
+    BaseXp,
+    RawXp,
+    ShipName,
+    ShipClass,
+    ObservedDamage,
+    ActualDamage,
+    SpottingDamage,
+    PotentialDamage,
+    TimeLived,
 }
 
 pub struct Replay {
@@ -455,6 +642,23 @@ impl Replay {
     }
 }
 
+fn column_name_with_sort_order(text: &'static str, has_info: bool, sort_order: SortOrder, column: SortColumn) -> Cow<'static, str> {
+    if sort_order.column() == column {
+        let text_with_icon = if has_info {
+            format!("{} {} {}", text, icons::INFO, sort_order.icon())
+        } else {
+            format!("{} {}", text, sort_order.icon())
+        };
+        Cow::Owned(text_with_icon)
+    } else {
+        if has_info {
+            Cow::Owned(format!("{} {}", text, icons::INFO))
+        } else {
+            Cow::Borrowed(text)
+        }
+    }
+}
+
 impl ToolkitTabViewer<'_> {
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
         self.tab_state
@@ -467,48 +671,61 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
     }
 
-    fn build_replay_player_list(&self, replay_file: &Replay, report: &BattleReport, ui: &mut egui::Ui) {
+    fn build_replay_player_list(&self, ui_report: &mut UiReport, report: &BattleReport, ui: &mut egui::Ui) {
         let table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto().clip(true))
-            .column(Column::initial(55.0).clip(true))
-            .column(Column::initial(65.0).clip(true))
+            .column(Column::initial(75.0).clip(true))
+            .column(Column::initial(85.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_entity_id {
-                    table.column(Column::initial(100.0).clip(true))
+                    table.column(Column::initial(120.0).clip(true))
                 } else {
                     table
                 }
             })
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(120.0).clip(true))
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_observed_damage {
-                    table.column(Column::initial(115.0).clip(true))
+                    table.column(Column::initial(135.0).clip(true))
                 } else {
                     table
                 }
             })
-            .column(Column::initial(110.0).clip(true))
-            .column(Column::initial(115.0).clip(true))
-            .column(Column::initial(115.0).clip(true))
+            .column(Column::initial(130.0).clip(true))
+            .column(Column::initial(135.0).clip(true))
+            .column(Column::initial(135.0).clip(true))
             // Time lived
-            .column(Column::initial(90.0).clip(true))
-            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(110.0).clip(true))
+            .column(Column::initial(120.0).clip(true))
             .column(Column::remainder())
             .min_scrolled_height(0.0);
 
+        let mut replay_sort = self.tab_state.replay_sort.lock().expect("could not lock replay sort");
+        if !ui_report.sorted {
+            ui_report.sort_players(*replay_sort);
+        }
         table
             .header(20.0, |mut header| {
                 header.col(|ui| {
-                    ui.strong("Player Name");
+                    if ui.strong(column_name_with_sort_order("Player Name", false, *replay_sort, SortColumn::Name)).clicked() {
+                        replay_sort.update_column(SortColumn::Name);
+                        ui_report.sort_players(*replay_sort);
+                    };
                 });
                 header.col(|ui| {
-                    ui.strong("Base XP");
+                    if ui.strong(column_name_with_sort_order("Base XP", false, *replay_sort, SortColumn::BaseXp)).clicked() {
+                        replay_sort.update_column(SortColumn::BaseXp);
+                        ui_report.sort_players(*replay_sort);
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(format!("Raw XP {}", icons::INFO)).on_hover_text("Raw XP before win modifiers are applied.");
+                    if ui.strong(column_name_with_sort_order("Raw XP",true, *replay_sort, SortColumn::RawXp)).on_hover_text("Raw XP before win modifiers are applied.").clicked() {
+                        replay_sort.update_column(SortColumn::RawXp);
+                        ui_report.sort_players(*replay_sort);
+                    }
                 });
                 if self.tab_state.settings.replay_settings.show_entity_id {
                     header.col(|ui| {
@@ -516,32 +733,50 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
                 header.col(|ui| {
-                    ui.strong("Ship Name");
+                    if ui.strong(column_name_with_sort_order("Ship Name", false, *replay_sort, SortColumn::ShipName)).clicked() {
+                        replay_sort.update_column(SortColumn::ShipName);
+                        ui_report.sort_players(*replay_sort);
+                    }
                 });
                 if self.tab_state.settings.replay_settings.show_observed_damage {
                     header.col(|ui| {
-                        ui.strong(format!("Observed Damage {}", icons::INFO)).on_hover_text(
+                        if ui.strong(column_name_with_sort_order("Observed Damage", true, *replay_sort, SortColumn::ObservedDamage)).on_hover_text(
                             "Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.",
-                        );
+                        ).clicked() {
+                            replay_sort.update_column(SortColumn::ObservedDamage);
+                            ui_report.sort_players(*replay_sort);
+                        }
                     });
                 }
                 header.col(|ui| {
-                    ui.strong(format!("Actual Damage {}", icons::INFO)).on_hover_text(
+                    if ui.strong(column_name_with_sort_order("Actual Damage", true, *replay_sort, SortColumn::ActualDamage)).on_hover_text(
                         "Actual damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    );
+                    ).clicked() {
+                            replay_sort.update_column(SortColumn::ActualDamage);
+                            ui_report.sort_players(*replay_sort);
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(format!("Spotting Damage {}", icons::INFO)).on_hover_text(
+                    if ui.strong(column_name_with_sort_order("Spotting Damage", true, *replay_sort, SortColumn::SpottingDamage)).on_hover_text(
                         "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    );
+                    ).clicked() {
+                            replay_sort.update_column(SortColumn::SpottingDamage);
+                            ui_report.sort_players(*replay_sort);
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(format!("Potential Damage {}", icons::INFO)).on_hover_text(
+                    if ui.strong(column_name_with_sort_order("Potential Damage", true, *replay_sort, SortColumn::PotentialDamage)).on_hover_text(
                         "Potential damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    );
+                    ).clicked() {
+                        replay_sort.update_column(SortColumn::PotentialDamage);
+                        ui_report.sort_players(*replay_sort);
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong("Time Lived");
+                    if ui.strong(column_name_with_sort_order("Time Lived", false, *replay_sort, SortColumn::TimeLived)).clicked() {
+                        replay_sort.update_column(SortColumn::TimeLived);
+                        ui_report.sort_players(*replay_sort);
+                    }
                 });
                 header.col(|ui| {
                     ui.strong("Allocated Skills");
@@ -551,7 +786,6 @@ impl ToolkitTabViewer<'_> {
                 });
             })
             .body(|mut body| {
-                let ui_report = replay_file.ui_report.as_ref().expect("no ui report was generated");
                 for player_report in &ui_report.vehicle_reports {
 
                     body.row(30.0, |ui| {
@@ -812,7 +1046,6 @@ impl ToolkitTabViewer<'_> {
 
             let text = format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message));
 
-            let is_dark_mode = ui.visuals().dark_mode;
             let name_color = if let Some(relation) = sender_relation {
                 player_color_for_team_relation(*relation)
             } else {
@@ -831,20 +1064,8 @@ impl ToolkitTabViewer<'_> {
 
             let text_color = match channel {
                 ChatChannel::Division => Color32::GOLD,
-                ChatChannel::Global => {
-                    if is_dark_mode {
-                        Color32::WHITE
-                    } else {
-                        Color32::BLACK
-                    }
-                }
-                ChatChannel::Team => {
-                    if is_dark_mode {
-                        Color32::LIGHT_GREEN
-                    } else {
-                        Color32::DARK_GREEN
-                    }
-                }
+                ChatChannel::Global => Color32::WHITE,
+                ChatChannel::Team => Color32::LIGHT_GREEN,
             };
 
             job.append(
@@ -865,7 +1086,7 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    fn build_replay_view(&self, replay_file: &Replay, ui: &mut egui::Ui) {
+    fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui) {
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
@@ -1020,7 +1241,9 @@ impl ToolkitTabViewer<'_> {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
-                    self.build_replay_player_list(replay_file, report, ui);
+                    if let Some(ui_report) = replay_file.ui_report.as_mut() {
+                        self.build_replay_player_list(ui_report, report, ui);
+                    }
                 });
             });
         }
@@ -1129,8 +1352,8 @@ impl ToolkitTabViewer<'_> {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
-                    let replay_file = replay_file.read();
-                    self.build_replay_view(&replay_file, ui);
+                    let mut replay_file = replay_file.write();
+                    self.build_replay_view(&mut replay_file, ui);
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                         ui.heading("Double click or load a replay to view data");

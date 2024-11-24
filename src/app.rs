@@ -40,7 +40,7 @@ use crate::{
     icons,
     plaintext_viewer::PlaintextFileViewer,
     player_tracker::PlayerTracker,
-    replay_parser::{Replay, SharedReplayParserTabState},
+    replay_parser::{self, Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
     wows_data::{load_replay, WorldOfWarshipsData},
@@ -379,6 +379,9 @@ pub struct TabState {
 
     #[serde(skip)]
     pub markdown_cache: CommonMarkCache,
+
+    #[serde(default)]
+    pub replay_sort: std::sync::Mutex<replay_parser::SortOrder>,
 }
 
 impl Default for TabState {
@@ -408,6 +411,7 @@ impl Default for TabState {
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
+            replay_sort: Default::default(),
         }
     }
 }
