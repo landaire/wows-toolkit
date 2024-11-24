@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.27] - 2024-11-24
+
+### 🚀 Features
+
+- Update prompt window renders markdown
+- *(replays)* Implement sortable columns in replay viewer
+- Expose player on GameMessage
+- *(replays)* Player clan is now shown with chat message
+
+### 🐛 Bug Fixes
+
+- Map.bin was being written to disk by the replay parser lib by accident
+- Adjustments to stream sniper detection
+
+### 🚜 Refactor
+
+- *(replays)* Large refactoring of the replay viewer to clean up code + make future features easier to implement
+
 ## [0.1.26] - 2024-11-20
 
 ### 🚀 Features
