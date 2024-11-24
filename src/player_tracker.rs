@@ -454,7 +454,7 @@ impl ToolkitTabViewer<'_> {
                                     if !player_tracker_settings.player_filter.is_empty() {
                                         player_range.contains(id)
                                             && (player.clan.to_ascii_lowercase().contains(&filter_lower)
-                                                || player.last_name.contains(&filter_lower)
+                                                || player.last_name.to_ascii_lowercase().contains(&filter_lower)
                                                 || player.names.iter().position(|name| name.to_ascii_lowercase().contains(&filter_lower)).is_some())
                                     } else {
                                         player_range.contains(id)
