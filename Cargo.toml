@@ -89,7 +89,7 @@ debug = true
 
 [patch.crates-io]
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
-# wows_replays = { path = "../wows-replays/parser" }
+wows_replays = { path = "../wows-replays/parser" }
 # wowsunpack = { path = "../wowsunpack" }
 
 # If you want to use the bleeding edge version of egui and eframe:

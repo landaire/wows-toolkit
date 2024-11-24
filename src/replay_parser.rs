@@ -1032,6 +1032,8 @@ impl ToolkitTabViewer<'_> {
                 sender_name,
                 channel,
                 message,
+                entity_id,
+                player,
             } = message;
 
             let translated_text = if sender_relation.is_none() {
@@ -1044,7 +1046,14 @@ impl ToolkitTabViewer<'_> {
                 None
             };
 
-            let text = format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message));
+            let text = match player {
+                Some(player) if !player.clan().is_empty() => {
+                    format!("[{}] {sender_name} ({channel:?}): {}", player.clan(), translated_text.as_ref().unwrap_or(message))
+                }
+                _ => {
+                    format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message))
+                }
+            };
 
             let name_color = if let Some(relation) = sender_relation {
                 player_color_for_team_relation(*relation)
@@ -1053,6 +1062,18 @@ impl ToolkitTabViewer<'_> {
             };
 
             let mut job = LayoutJob::default();
+            if let Some(player) = player {
+                if !player.clan().is_empty() {
+                    job.append(
+                        &format!("[{}] ", player.clan()),
+                        0.0,
+                        TextFormat {
+                            color: clan_color_for_player(&*player).unwrap(),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
             job.append(
                 &format!("{sender_name}:\n"),
                 0.0,
@@ -1163,8 +1184,18 @@ impl ToolkitTabViewer<'_> {
                                         sender_name,
                                         channel,
                                         message,
+                                        entity_id,
+                                        player,
                                     } = message;
-                                    let _ = writeln!(file, "{} ({:?}): {}", sender_name, channel, message);
+
+                                    match player {
+                                        Some(player) if !player.clan().is_empty() => {
+                                            let _ = writeln!(file, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
+                                        }
+                                        _ => {
+                                            let _ = writeln!(file, "{} ({:?}): {}", sender_name, channel, message);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1180,8 +1211,17 @@ impl ToolkitTabViewer<'_> {
                                 sender_name,
                                 channel,
                                 message,
+                                entity_id,
+                                player,
                             } = message;
-                            let _ = writeln!(&mut buf, "{} ({:?}): {}", sender_name, channel, message);
+                            match player {
+                                Some(player) if !player.clan().is_empty() => {
+                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
+                                }
+                                _ => {
+                                    let _ = writeln!(buf, "{} ({:?}): {}", sender_name, channel, message);
+                                }
+                            }
                         }
 
                         let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
