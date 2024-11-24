@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Map.bin was being written to disk by the replay parser lib by accident
 - Adjustments to stream sniper detection
+- *(player_tracker)* Fix filtering by player name
 
 ### 🚜 Refactor
 
