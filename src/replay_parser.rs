@@ -342,8 +342,8 @@ impl UiReport {
 
                 let potential_damage_report = PotentialDamage {
                     artillery: damage_numbers[0].as_f64().unwrap_or_default() as u64,
-                    torpedoes: damage_numbers[0].as_f64().unwrap_or_default() as u64,
-                    planes: damage_numbers[0].as_f64().unwrap_or_default() as u64,
+                    torpedoes: damage_numbers[1].as_f64().unwrap_or_default() as u64,
+                    planes: damage_numbers[2].as_f64().unwrap_or_default() as u64,
                 };
 
                 let hover_string = format!(
