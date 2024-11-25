@@ -120,6 +120,47 @@ pub struct VehicleReport {
     skill_info: SkillInfo,
 }
 
+use std::cmp::Reverse;
+
+enum SortKey {
+    String(String),
+    i64(Option<i64>),
+    u64(Option<u64>),
+    Species(Species),
+}
+
+impl PartialEq for SortKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SortKey::String(a), SortKey::String(b)) => a == b,
+            (SortKey::i64(a), SortKey::i64(b)) => a == b,
+            (SortKey::u64(a), SortKey::u64(b)) => a == b,
+            (SortKey::Species(a), SortKey::Species(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for SortKey {}
+
+impl PartialOrd for SortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SortKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (SortKey::String(a), SortKey::String(b)) => a.cmp(b),
+            (SortKey::i64(a), SortKey::i64(b)) => a.cmp(b),
+            (SortKey::u64(a), SortKey::u64(b)) => a.cmp(b),
+            (SortKey::Species(a), SortKey::Species(b)) => a.cmp(b),
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
 pub struct UiReport {
     match_timestamp: DateTime<Local>,
     self_player: Option<Arc<VehicleEntity>>,
@@ -392,8 +433,6 @@ impl UiReport {
     }
 
     fn sort_players(&mut self, sort_order: SortOrder) {
-        use std::cmp::Reverse;
-
         let self_player_team_id = self
             .self_player
             .as_ref()
@@ -403,113 +442,37 @@ impl UiReport {
             .expect("no self player player")
             .team_id();
 
+        let sort_key = |report: &VehicleReport, column: &SortColumn| {
+            let player = report.vehicle.player().expect("no player?");
+            let team_id = player.team_id() != self_player_team_id;
+            let db_id = player.db_id();
+
+            let key = match column {
+                SortColumn::Name => SortKey::String(player.name().to_string()),
+                SortColumn::BaseXp => SortKey::i64(report.base_xp),
+                SortColumn::RawXp => SortKey::i64(report.raw_xp),
+                SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
+                SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
+                SortColumn::ObservedDamage => SortKey::u64(Some(report.observed_damage)),
+                SortColumn::ActualDamage => SortKey::u64(report.actual_damage),
+                SortColumn::SpottingDamage => SortKey::u64(report.spotting_damage),
+                SortColumn::PotentialDamage => SortKey::u64(report.potential_damage),
+                SortColumn::TimeLived => SortKey::u64(report.time_lived_secs),
+            };
+
+            (team_id, key, db_id)
+        };
+
         match sort_order {
-            SortOrder::Desc(column) => match column {
-                SortColumn::Name => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-
-                    (player.team_id() != self_player_team_id, Reverse(player.name().to_string()), player.db_id())
-                }),
-                SortColumn::BaseXp => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (
-                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
-                        Reverse(report.base_xp.unwrap_or_default()),
-                        player.db_id(),
-                    )
-                }),
-                SortColumn::RawXp => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.raw_xp.unwrap_or_default()), player.db_id())
-                }),
-                SortColumn::ShipName => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (
-                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
-                        Reverse(report.ship_name.clone()),
-                        player.db_id(),
-                    )
-                }),
-                SortColumn::ShipClass => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(player.vehicle().species()), player.db_id())
-                }),
-                SortColumn::ObservedDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.observed_damage), player.db_id())
-                }),
-                SortColumn::ActualDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.actual_damage), player.db_id())
-                }),
-                SortColumn::SpottingDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.spotting_damage), player.db_id())
-                }),
-                SortColumn::PotentialDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.potential_damage), player.db_id())
-                }),
-                SortColumn::TimeLived => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, Reverse(report.time_lived_secs), player.db_id())
-                }),
-            },
-            SortOrder::Asc(column) => match column {
-                SortColumn::Name => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-
-                    (player.team_id() != self_player_team_id, player.name().to_string(), player.db_id())
-                }),
-                SortColumn::BaseXp => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (
-                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
-                        report.base_xp.unwrap_or_default(),
-                        player.db_id(),
-                    )
-                }),
-                SortColumn::RawXp => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (
-                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
-                        report.raw_xp.unwrap_or_default(),
-                        player.db_id(),
-                    )
-                }),
-                SortColumn::ShipName => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (
-                        report.vehicle.player().expect("no player?").team_id() != self_player_team_id,
-                        report.ship_name.clone(),
-                        player.db_id(),
-                    )
-                }),
-                SortColumn::ShipClass => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, player.vehicle().species(), player.db_id())
-                }),
-                SortColumn::ObservedDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, report.observed_damage, player.db_id())
-                }),
-                SortColumn::ActualDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, report.actual_damage, player.db_id())
-                }),
-                SortColumn::SpottingDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, report.spotting_damage, player.db_id())
-                }),
-                SortColumn::PotentialDamage => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, report.potential_damage, player.db_id())
-                }),
-                SortColumn::TimeLived => self.vehicle_reports.sort_unstable_by_key(|report| {
-                    let player = report.vehicle.player().expect("no player?");
-                    (player.team_id() != self_player_team_id, report.time_lived_secs, player.db_id())
-                }),
-            },
+            SortOrder::Desc(column) => {
+                self.vehicle_reports.sort_unstable_by_key(|report| {
+                    let key = sort_key(report, &column);
+                    (key.0, Reverse(key.1), key.2)
+                });
+            }
+            SortOrder::Asc(column) => {
+                self.vehicle_reports.sort_unstable_by_key(|report| sort_key(report, &column));
+            }
         }
 
         self.sorted = true;
