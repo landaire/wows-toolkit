@@ -1,5 +1,5 @@
 use std::{
-    borrow::{Borrow, Cow},
+    borrow::Cow,
     collections::HashMap,
     io::{BufWriter, Write},
     path::PathBuf,
@@ -613,12 +613,10 @@ fn column_name_with_sort_order(text: &'static str, has_info: bool, sort_order: S
             format!("{} {}", text, sort_order.icon())
         };
         Cow::Owned(text_with_icon)
+    } else if has_info {
+        Cow::Owned(format!("{} {}", text, icons::INFO))
     } else {
-        if has_info {
-            Cow::Owned(format!("{} {}", text, icons::INFO))
-        } else {
-            Cow::Borrowed(text)
-        }
+        Cow::Borrowed(text)
     }
 }
 
