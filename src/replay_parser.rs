@@ -16,6 +16,7 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
 use egui_extras::{Column, TableBuilder, TableRow};
 
+use escaper::decode_html;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tap::Pipe;
@@ -999,7 +1000,7 @@ impl ToolkitTabViewer<'_> {
 
             let translated_text = if sender_relation.is_none() {
                 self.metadata_provider().and_then(|provider| {
-                    let name = provider.localized_name_from_id(message);
+                    let name = provider.localized_name_from_id(message).map(|name| Cow::Owned(name));
 
                     name
                 })
@@ -1007,12 +1008,18 @@ impl ToolkitTabViewer<'_> {
                 None
             };
 
+            let message = if let Ok(decoded) = decode_html(message.as_str()) {
+                Cow::Owned(decoded)
+            } else {
+                Cow::Borrowed(message)
+            };
+
             let text = match player {
                 Some(player) if !player.clan().is_empty() => {
-                    format!("[{}] {sender_name} ({channel:?}): {}", player.clan(), translated_text.as_ref().unwrap_or(message))
+                    format!("[{}] {sender_name} ({channel:?}): {}", player.clan(), translated_text.as_ref().unwrap_or(&message))
                 }
                 _ => {
-                    format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(message))
+                    format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(&message))
                 }
             };
 
@@ -1051,7 +1058,7 @@ impl ToolkitTabViewer<'_> {
             };
 
             job.append(
-                translated_text.as_ref().unwrap_or(message),
+                translated_text.as_ref().unwrap_or(&message),
                 0.0,
                 TextFormat {
                     color: text_color,

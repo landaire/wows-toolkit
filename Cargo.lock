@@ -1598,6 +1598,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3d8a32ae18130a3c84dd492d4215c3d913c3b07c6b63c2eb3eb7ff1101ab7bf"
 
 [[package]]
+name = "entities"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
+
+[[package]]
 name = "enum-map"
 version = "2.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1695,6 +1701,15 @@ name = "error-code"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5d9305ccc6942a704f4335694ecd3de2ea531b114ac2d51f5f843750787a92f"
+
+[[package]]
+name = "escaper"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53eb97b7349ba1bdb31839eceafe9aaae8f1d8d944dc589b67fb0b26e1c1666"
+dependencies = [
+ "entities",
+]
 
 [[package]]
 name = "event-listener"
@@ -6106,6 +6121,7 @@ dependencies = [
  "egui_commonmark",
  "egui_dock",
  "egui_extras",
+ "escaper",
  "flate2",
  "gettext",
  "glob",
