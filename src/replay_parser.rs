@@ -119,6 +119,7 @@ pub struct VehicleReport {
     time_lived_secs: Option<u64>,
     time_lived_text: Option<String>,
     skill_info: SkillInfo,
+    received_damage: Option<u64>,
 }
 
 use std::cmp::Reverse;
@@ -358,6 +359,13 @@ impl UiReport {
                 (None, None, None, None)
             };
 
+            let received_damage = None;
+            // const DAMAGE_RECEIVED_START_INDEX: usize = 101;
+            // const DAMAGE_RECEIVED_END_INDEX: usize = DAMAGE_RECEIVED_START_INDEX + 56;
+            // let (received_damage, received_damage_text) = if let Some(damage_numbers) = vehicle.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[DAMAGE_RECEIVED_START_INDEX..=DAMAGE_RECEIVED_END_INDEX])) {
+            //     let total_damage = damage_numbers.iter
+            // }
+
             let (time_lived, time_lived_text) = vehicle
                 .death_info()
                 .map(|death_info| {
@@ -422,6 +430,7 @@ impl UiReport {
                 skill_info,
                 potential_damage_text,
                 ship_species_text,
+                received_damage,
             })
         });
 

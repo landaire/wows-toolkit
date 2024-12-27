@@ -6125,6 +6125,8 @@ dependencies = [
  "flate2",
  "gettext",
  "glob",
+ "http-body",
+ "http-body-util",
  "humansize",
  "image 0.24.9",
  "itertools 0.12.1",

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet},
     env,
     error::Error,
@@ -19,11 +20,12 @@ use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
 use gettext::Catalog;
 
+use http_body_util::BodyExt;
 use notify::{
     event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
-use octocrab::models::repos::Release;
+use octocrab::{models::repos::Release, params::repos::Reference};
 use parking_lot::RwLock;
 use tracing::{debug, trace};
 
@@ -813,11 +815,38 @@ impl WowsToolkitApp {
     }
 
     fn check_for_updates(&mut self) {
-        let result = self
-            .runtime
-            .block_on(async { octocrab::instance().repos("landaire", "wows-toolkit").releases().get_latest().await });
+        use http_body::Body;
 
-        if let Ok(latest_release) = result {
+        let (app_updates, constants_updates) = self.runtime.block_on(async {
+            let octocrab = octocrab::instance();
+            let app_updates = octocrab.repos("landaire", "wows-toolkit").releases().get_latest().await;
+            if let Ok(constants_updates) = octocrab
+                .repos("padtrack", "wows-constants")
+                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
+                .await
+            {
+                let mut body = constants_updates.into_body();
+                let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
+
+                // Iterate through all data chunks in the body
+                while let Some(frame) = body.frame().await {
+                    match frame {
+                        Ok(frame) => {
+                            if let Some(data) = frame.data_ref() {
+                                result.extend_from_slice(&data);
+                            }
+                        }
+                        Err(_) => return (app_updates, None),
+                    }
+                }
+
+                (app_updates, Some(result))
+            } else {
+                (app_updates, None)
+            }
+        });
+
+        if let Ok(latest_release) = app_updates {
             if let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..]) {
                 let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
                 if app_version < version {
@@ -827,6 +856,15 @@ impl WowsToolkitApp {
                     *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
                 }
             }
+        }
+
+        if let Some(constants_updates) = constants_updates {
+            let mut constants_path = PathBuf::from("constants.json");
+            if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+                constants_path = storage_dir.join(constants_path)
+            }
+
+            std::fs::write(constants_path, constants_updates.as_slice());
         }
         self.checked_for_updates = true;
     }

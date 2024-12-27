@@ -12,6 +12,7 @@ use wowsunpack::{
 };
 
 use crate::{
+    build_tracker,
     replay_parser::Replay,
     task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
 };
@@ -56,25 +57,33 @@ pub fn load_replay(wows_data: Arc<RwLock<WorldOfWarshipsData>>, replay: Arc<RwLo
     let _join_handle = std::thread::spawn(move || {
         let res = { replay.read().parse(game_version.to_string().as_str()) };
         let res = res.map(move |report| {
-            // // Send the replay builds to the remote server
-            // for player in report.player_entities() {
-            //     let client = reqwest::blocking::Client::new();
-            //     client
-            //         .post("http://192.168.1.215:5150/api/ship_builds")
-            //         .json(&build_tracker::BuildTrackerPayload::build_from(
-            //             player,
-            //             player.player().unwrap().realm().to_owned(),
-            //             report.version(),
-            //             &metadata_provider,
-            //         ))
-            //         .send()
-            //         .expect("failed to POST build data");
-            // }
             {
-                let mut replay_guard = replay.write();
-                replay_guard.battle_report = Some(report);
                 let wows_data = wows_data.read();
                 let metadata_provider = wows_data.game_metadata.as_ref().unwrap();
+
+                #[cfg(feature = "shipbuilds_debugging")]
+                {
+                    let metadata_provider = wows_data.game_metadata.as_ref().unwrap();
+                    // Send the replay builds to the remote server
+                    for player in report.player_entities() {
+                        let client = reqwest::blocking::Client::new();
+                        client
+                            .post("http://shipbuilds.com/api/ship_builds")
+                            .json(&build_tracker::BuildTrackerPayload::build_from(
+                                player,
+                                player.player().unwrap().realm().to_owned(),
+                                report.version(),
+                                report.game_type().to_owned(),
+                                &metadata_provider,
+                            ))
+                            .send()
+                            .expect("failed to POST build data");
+                    }
+                }
+
+                let mut replay_guard = replay.write();
+                replay_guard.battle_report = Some(report);
+
                 replay_guard.build_ui_report(&*wows_data, &metadata_provider);
             }
             BackgroundTaskCompletion::ReplayLoaded { replay }
