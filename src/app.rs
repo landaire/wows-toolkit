@@ -27,6 +27,7 @@ use notify::{
 };
 use octocrab::{models::repos::Release, params::repos::Reference};
 use parking_lot::RwLock;
+use serde_json::json;
 use tracing::{debug, trace};
 
 use serde::{Deserialize, Serialize};
@@ -50,10 +51,10 @@ use crate::{
 
 #[macro_export]
 macro_rules! update_background_task {
-    ($saved_task:expr, $background_task:expr) => {
+    ($saved_tasks:expr, $background_task:expr) => {
         let task = $background_task;
-        if task.is_some() {
-            $saved_task = task;
+        if let Some(task) = task {
+            $saved_tasks.push(task);
         }
     };
 }
@@ -122,7 +123,7 @@ impl ToolkitTabViewer<'_> {
                                     let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
                                     if path.exists() && path.join("bin").exists() {
                                         self.tab_state.prevent_changing_wows_dir();
-                                        crate::update_background_task!(self.tab_state.background_task, Some(self.tab_state.load_game_data(path)));
+                                        crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
                                     }
                                 }
                             });
@@ -131,7 +132,7 @@ impl ToolkitTabViewer<'_> {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
                                         self.tab_state.prevent_changing_wows_dir();
-                                        crate::update_background_task!(self.tab_state.background_task, Some(self.tab_state.load_game_data(folder)));
+                                        crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(folder)));
                                     }
                                 }
                             });
@@ -142,8 +143,13 @@ impl ToolkitTabViewer<'_> {
             ui.label("Replay Settings");
             ui.group(|ui| {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Show Game Chat");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Show Raw XP Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Show Observed Damage Column");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Show Fires Column");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Show Floods Column");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Show Citadels Column");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Show Critical Module Hits Column");
             });
             ui.label("Twitch Settings");
             ui.group(|ui| {
@@ -213,6 +219,16 @@ pub struct ReplaySettings {
     pub show_game_chat: bool,
     pub show_entity_id: bool,
     pub show_observed_damage: bool,
+    #[serde(default)]
+    pub show_raw_xp: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_fires: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_floods: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_citadels: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_crits: bool,
 }
 
 impl Default for ReplaySettings {
@@ -220,7 +236,12 @@ impl Default for ReplaySettings {
         Self {
             show_game_chat: true,
             show_entity_id: false,
-            show_observed_damage: true,
+            show_observed_damage: false,
+            show_raw_xp: false,
+            show_fires: true,
+            show_floods: true,
+            show_citadels: true,
+            show_crits: true,
         }
     }
 }
@@ -258,6 +279,8 @@ pub struct Settings {
     pub twitch_token: Option<Token>,
     #[serde(default)]
     pub twitch_monitored_channel: String,
+    #[serde(default)]
+    pub constants_file_commit: Option<String>,
 }
 
 impl Default for Settings {
@@ -276,6 +299,7 @@ impl Default for Settings {
             player_tracker: Default::default(),
             twitch_token: Default::default(),
             twitch_monitored_channel: Default::default(),
+            constants_file_commit: None,
         }
     }
 }
@@ -356,7 +380,7 @@ pub struct TabState {
     pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
 
     #[serde(skip)]
-    pub background_task: Option<BackgroundTask>,
+    pub background_tasks: Vec<BackgroundTask>,
 
     #[serde(skip)]
     pub timed_message: RwLock<Option<TimedMessage>>,
@@ -384,10 +408,14 @@ pub struct TabState {
 
     #[serde(default)]
     pub replay_sort: std::sync::Mutex<replay_parser::SortOrder>,
+
+    #[serde(skip)]
+    pub game_constants: Arc<RwLock<serde_json::Value>>,
 }
 
 impl Default for TabState {
     fn default() -> Self {
+        let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json")).expect("failed to parse constants JSON");
         Self {
             world_of_warships_data: None,
             filter: Default::default(),
@@ -402,7 +430,7 @@ impl Default for TabState {
             file_watcher: None,
             replay_files: None,
             file_receiver: None,
-            background_task: None,
+            background_tasks: Vec::new(),
             can_change_wows_dir: true,
             timed_message: RwLock::new(None),
             current_replay: None,
@@ -414,6 +442,7 @@ impl Default for TabState {
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
             replay_sort: Default::default(),
+            game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
         }
     }
 }
@@ -441,7 +470,10 @@ impl TabState {
 
                                         if self.auto_load_latest_replay {
                                             if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                                                update_background_task!(self.background_task, load_replay(Arc::clone(wows_data), replay));
+                                                update_background_task!(
+                                                    self.background_tasks,
+                                                    load_replay(Arc::clone(&self.game_constants), Arc::clone(wows_data), replay)
+                                                );
                                             }
                                         }
 
@@ -662,7 +694,7 @@ impl WowsToolkitApp {
 
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
-                update_background_task!(saved_state.tab_state.background_task, task);
+                update_background_task!(saved_state.tab_state.background_tasks, task);
             }
 
             saved_state
@@ -676,7 +708,9 @@ impl WowsToolkitApp {
             let default_wows_path = Path::new(default_wows_dir);
             if default_wows_path.exists() {
                 this.tab_state.settings.wows_dir = default_wows_dir.to_string();
-                this.tab_state.background_task = Some(this.tab_state.load_game_data(default_wows_path.to_path_buf()));
+
+                let task = this.tab_state.load_game_data(default_wows_path.to_path_buf());
+                update_background_task!(this.tab_state.background_tasks, Some(task));
             }
 
             this
@@ -692,7 +726,9 @@ impl WowsToolkitApp {
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // TODO: Merge these channels
-            if let Some(task) = &mut self.tab_state.background_task {
+            let mut remove_tasks = Vec::new();
+            for i in 0..self.tab_state.background_tasks.len() {
+                let task = &mut self.tab_state.background_tasks[i];
                 let desc = task.build_description(ui);
                 trace!("Task description: {:?}", desc);
                 if let Some(result) = desc {
@@ -710,6 +746,9 @@ impl WowsToolkitApp {
                             // do nothing
                         }
                         BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
+                            // do nothing
+                        }
+                        BackgroundTaskKind::LoadingConstants => {
                             // do nothing
                         }
                     }
@@ -758,9 +797,12 @@ impl WowsToolkitApp {
                             BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
                                 // do nothing
                             }
+                            BackgroundTaskCompletion::ConstantsLoaded(constants) => {
+                                *self.tab_state.game_constants.write() = constants;
+                            }
                         },
                         Err(ToolkitError::BackgroundTaskCompleted) => {
-                            self.tab_state.background_task = None;
+                            remove_tasks.push(i);
                         }
                         Err(e) => {
                             self.show_error_window = true;
@@ -768,7 +810,18 @@ impl WowsToolkitApp {
                         }
                     }
                 }
-            } else if let Some(rx) = &self.tab_state.unpacker_progress {
+            }
+
+            // Remove whatever background tasks have yielded a result
+            self.tab_state.background_tasks = self
+                .tab_state
+                .background_tasks
+                .drain(..)
+                .enumerate()
+                .filter_map(|(i, task)| if remove_tasks.contains(&i) { None } else { Some(task) })
+                .collect();
+
+            if let Some(rx) = &self.tab_state.unpacker_progress {
                 if ui.button("Stop").clicked() {
                     UNPACKER_STOP.store(true, Ordering::Relaxed);
                 }
@@ -817,9 +870,26 @@ impl WowsToolkitApp {
     fn check_for_updates(&mut self) {
         use http_body::Body;
 
+        let current_constants_commit = &self.tab_state.settings.constants_file_commit;
+
         let (app_updates, constants_updates) = self.runtime.block_on(async {
             let octocrab = octocrab::instance();
             let app_updates = octocrab.repos("landaire", "wows-toolkit").releases().get_latest().await;
+
+            let latest_commit = octocrab
+                .repos("padtrack", "wows-constants")
+                .list_commits()
+                .per_page(1)
+                .send()
+                .await
+                .ok()
+                .and_then(|mut list| list.take_items().pop())
+                .map(|commit| commit.sha);
+
+            if current_constants_commit == &latest_commit || latest_commit.is_none() {
+                return (app_updates, None);
+            }
+
             if let Ok(constants_updates) = octocrab
                 .repos("padtrack", "wows-constants")
                 .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
@@ -840,7 +910,7 @@ impl WowsToolkitApp {
                     }
                 }
 
-                (app_updates, Some(result))
+                (app_updates, Some((result, latest_commit)))
             } else {
                 (app_updates, None)
             }
@@ -858,13 +928,17 @@ impl WowsToolkitApp {
             }
         }
 
-        if let Some(constants_updates) = constants_updates {
+        if let Some((constants_updates, latest_commit)) = constants_updates {
             let mut constants_path = PathBuf::from("constants.json");
             if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
                 constants_path = storage_dir.join(constants_path)
             }
 
-            std::fs::write(constants_path, constants_updates.as_slice());
+            if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
+                self.tab_state.settings.constants_file_commit = latest_commit;
+
+                update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_updates)));
+            }
         }
         self.checked_for_updates = true;
     }
@@ -910,7 +984,8 @@ impl eframe::App for WowsToolkitApp {
                                 #[cfg(target_os = "windows")]
                                 {
                                     if ui.button("Install Update").clicked() {
-                                        self.tab_state.background_task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                        let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                        update_background_task!(self.tab_state.background_tasks, task);
                                     }
                                 }
                                 if ui.button("View Release").clicked() {

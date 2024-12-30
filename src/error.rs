@@ -33,4 +33,7 @@ pub enum ToolkitError {
 
     #[error("Could not not read update ZipArchive")]
     ZipReadError(#[from] zip::result::ZipError),
+
+    #[error("An error occurred")]
+    UndefinedError(#[from] anyhow::Error),
 }

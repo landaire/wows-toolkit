@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::Context;
 use gettext::Catalog;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
@@ -60,9 +61,11 @@ pub enum BackgroundTaskKind {
         last_progress: Option<DownloadProgress>,
     },
     PopulatePlayerInspectorFromReplays,
+    LoadingConstants,
 }
 
 impl BackgroundTask {
+    /// TODO: has a bug currently where if multiple tasks are running at the same time, the message looks a bit wonky
     pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
@@ -93,6 +96,10 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label("Populating player inspector from historical replays...");
                     }
+                    BackgroundTaskKind::LoadingConstants => {
+                        ui.spinner();
+                        ui.label("Loading data constants...");
+                    }
                 }
                 None
             }
@@ -112,6 +119,7 @@ pub enum BackgroundTaskCompletion {
     },
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
+    ConstantsLoaded(serde_json::Value),
 }
 
 impl std::fmt::Debug for BackgroundTaskCompletion {
@@ -126,6 +134,7 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::ReplayLoaded { replay } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
+            Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
         }
     }
 }
@@ -710,4 +719,20 @@ pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc
         toolkit.tab_state.settings.twitch_token.clone(),
         token_rx,
     );
+}
+
+pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = serde_json::from_slice(&constants)
+            .context("failed to deserialize constants file")
+            .map(|constants| BackgroundTaskCompletion::ConstantsLoaded(constants))
+            .map_err(|err| err.into());
+
+        tx.send(result);
+    });
+    BackgroundTask {
+        receiver: rx,
+        kind: BackgroundTaskKind::LoadingConstants,
+    }
 }

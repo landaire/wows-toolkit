@@ -267,7 +267,7 @@ impl ToolkitTabViewer<'_> {
                     if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                         if ui.button("Populate Data From Replays").clicked() {
                             crate::update_background_task!(
-                                self.tab_state.background_task,
+                                self.tab_state.background_tasks,
                                 Some(task::start_populating_player_inspector(
                                     replay_files.keys().cloned().collect(),
                                     Arc::clone(wows_data),

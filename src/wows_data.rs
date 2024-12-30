@@ -39,17 +39,21 @@ pub struct WorldOfWarshipsData {
     pub replays_dir: PathBuf,
 }
 
-pub fn parse_replay<P: AsRef<Path>>(wows_data: Arc<RwLock<WorldOfWarshipsData>>, replay_path: P) -> Option<BackgroundTask> {
+pub fn parse_replay<P: AsRef<Path>>(
+    game_constants: Arc<RwLock<serde_json::Value>>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    replay_path: P,
+) -> Option<BackgroundTask> {
     let path = replay_path.as_ref();
 
     let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
     let game_metadata = { wows_data.read().game_metadata.clone()? };
     let replay = Replay::new(replay_file, game_metadata);
 
-    load_replay(wows_data, Arc::new(RwLock::new(replay)))
+    load_replay(game_constants, wows_data, Arc::new(RwLock::new(replay)))
 }
 
-pub fn load_replay(wows_data: Arc<RwLock<WorldOfWarshipsData>>, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
+pub fn load_replay(game_constants: Arc<RwLock<serde_json::Value>>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, replay: Arc<RwLock<Replay>>) -> Option<BackgroundTask> {
     let game_version = { wows_data.read().game_version };
 
     let (tx, rx) = mpsc::channel();
@@ -84,7 +88,9 @@ pub fn load_replay(wows_data: Arc<RwLock<WorldOfWarshipsData>>, replay: Arc<RwLo
                 let mut replay_guard = replay.write();
                 replay_guard.battle_report = Some(report);
 
-                replay_guard.build_ui_report(&*wows_data, &metadata_provider);
+                let constants = game_constants.read();
+
+                replay_guard.build_ui_report(&*constants, &*wows_data, &metadata_provider);
             }
             BackgroundTaskCompletion::ReplayLoaded { replay }
         });
