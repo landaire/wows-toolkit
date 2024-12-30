@@ -2,6 +2,7 @@
 #![allow(clippy::blocks_in_if_conditions)]
 mod app;
 mod build_tracker;
+mod consts;
 mod error;
 mod file_unpacker;
 mod game_params;

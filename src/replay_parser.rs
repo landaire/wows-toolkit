@@ -68,7 +68,7 @@ struct SkillInfo {
     num_skills: usize,
     highest_tier: usize,
     num_tier_1_skills: usize,
-    hover_text: Option<&'static str>,
+    hover_text: Option<String>,
     label_text: RichText,
 }
 
@@ -461,7 +461,7 @@ impl UiReport {
                 })
                 .unwrap_or((0, 0, 0, 0));
 
-            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills);
+            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills, vehicle.commander_skills());
 
             let skill_info = SkillInfo {
                 skill_points,
@@ -1185,7 +1185,7 @@ impl ToolkitTabViewer<'_> {
 
         ui.col(|ui| {
             let response = ui.label(player_report.skill_info.label_text.clone());
-            if let Some(hover_text) = player_report.skill_info.hover_text {
+            if let Some(hover_text) = &player_report.skill_info.hover_text {
                 response.on_hover_text(hover_text);
             }
         });
