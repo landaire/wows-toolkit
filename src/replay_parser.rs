@@ -59,6 +59,45 @@ const DAMAGE_FLOODS: usize = 167;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
+static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
+    ("damage_main_ap", "AP"),
+    ("damage_main_cs", "SAP"),
+    ("damage_main_he", "HE"),
+    ("damage_atba_ap", "AP Sec"),
+    ("damage_atba_cs", "SAP Sec"),
+    ("damage_atba_he", "HE Sec"),
+    ("damage_tpd_normal", "Torps"),
+    ("damage_tpd_deep", "Deep Water Torps"),
+    ("damage_tpd_alter", "Alt Torps"),
+    ("damage_tpd_photon", "Photon Torps"),
+    ("damage_bomb", "HE Bomb"),
+    ("damage_bomb_avia", "Bomb"),
+    ("damage_bomb_alt", "Alt Bomb"),
+    ("damage_bomb_airsupport", "Air Support Bomb"),
+    ("damage_dbomb_airsupport", "Air Support Depth Charge"),
+    ("damage_tbomb", "Torpedo Bomber"),
+    ("damage_tbomb_alt", "Torpedo Bomber (Alt)"),
+    ("damage_tbomb_airsupport", "Torpedo Bomber Air Support"),
+    ("damage_fire", "Fire"),
+    ("damage_ram", "Ram"),
+    ("damage_flood", "Flood"),
+    ("damage_dbomb_direct", "Depth Charge (Direct)"),
+    ("damage_dbomb_splash", "Depth Charge (Splash)"),
+    ("damage_sea_mine", "Sea Mine"),
+    ("damage_rocket", "Rocket"),
+    ("damage_rocket_avia", "Avia Rocket"),
+    ("damage_rocket_airsupport", "Air Supp Rocket"),
+    ("damage_skip", "Skip Bomb"),
+    ("damage_skip_avia", "Avia Skip Bomb"),
+    ("damage_skip_alt", "Alt Skip Bomb"),
+    ("damage_skip_airsupport", "Air Supp Skip Bomb"),
+    ("damage_wave", "Wave"),
+    ("damage_charge_laser", "Charge Laser"),
+    ("damage_pulse_laser", "Pulse Laser"),
+    ("damage_axis_laser", "Axis Laser"),
+    ("damage_phaser_laser", "Phaser Laser"),
+];
+
 fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
     wows_data.ship_icons.get(&species).cloned()
 }
@@ -120,10 +159,13 @@ pub struct VehicleReport {
     time_lived_text: Option<String>,
     skill_info: SkillInfo,
     received_damage: Option<u64>,
+    received_damage_text: Option<RichText>,
+    received_damage_hover_text: Option<RichText>,
     fires: Option<u64>,
     floods: Option<u64>,
     citadels: Option<u64>,
     crits: Option<u64>,
+    distance_traveled: Option<f64>,
 }
 
 use std::cmp::Reverse;
@@ -132,6 +174,7 @@ enum SortKey {
     String(String),
     i64(Option<i64>),
     u64(Option<u64>),
+    f64(Option<f64>),
     Species(Species),
 }
 
@@ -141,6 +184,7 @@ impl PartialEq for SortKey {
             (SortKey::String(a), SortKey::String(b)) => a == b,
             (SortKey::i64(a), SortKey::i64(b)) => a == b,
             (SortKey::u64(a), SortKey::u64(b)) => a == b,
+            (SortKey::f64(a), SortKey::f64(b)) => a == b,
             (SortKey::Species(a), SortKey::Species(b)) => a == b,
             _ => false,
         }
@@ -161,6 +205,7 @@ impl Ord for SortKey {
             (SortKey::String(a), SortKey::String(b)) => a.cmp(b),
             (SortKey::i64(a), SortKey::i64(b)) => a.cmp(b),
             (SortKey::u64(a), SortKey::u64(b)) => a.cmp(b),
+            (SortKey::f64(a), SortKey::f64(b)) => a.partial_cmp(b).expect("could not compare f64  keys?"),
             (SortKey::Species(a), SortKey::Species(b)) => a.cmp(b),
             _ => std::cmp::Ordering::Equal,
         }
@@ -278,62 +323,11 @@ impl UiReport {
                     let total_damage_index = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
 
                     info_array[total_damage_index].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
-                        // Grab other damage numbers
-                        let damage_stats = [
-                            (DAMAGE_AP, "AP"),
-                            (DAMAGE_SAP, "SAP"),
-                            (DAMAGE_HE, "HE"),
-                            (DAMAGE_HE_SECONDARIES, "HE Sec"),
-                            (DAMAGE_SAP_SECONDARIES, "SAP Sec"),
-                            (DAMAGE_NORMAL_TORPS, "Torps"),
-                            (DAMAGE_DEEP_WATER_TORPS, "Deep Water Torps"),
-                            (DAMAGE_FIRE, "Fire"),
-                            (DAMAGE_FLOODS, "Flood"),
-                        ];
-
-                        let damage_stats = [
-                            ("damage_main_ap", "AP"),
-                            ("damage_main_cs", "SAP"),
-                            ("damage_main_he", "HE"),
-                            ("damage_atba_ap", "AP Sec"),
-                            ("damage_atba_cs", "SAP Sec"),
-                            ("damage_atba_he", "HE Sec"),
-                            ("damage_tpd_normal", "Torps"),
-                            ("damage_tpd_deep", "Deep Water Torps"),
-                            ("damage_tpd_alter", "Alt Torps"),
-                            ("damage_tpd_photon", "Photon Torps"),
-                            ("damage_bomb", "HE Bomb"),
-                            ("damage_bomb_avia", "Bomb"),
-                            ("damage_bomb_alt", "Alt Bomb"),
-                            ("damage_bomb_airsupport", "Air Support Bomb"),
-                            ("damage_dbomb_airsupport", "Air Support Depth Charge"),
-                            ("damage_tbomb", "Torpedo Bomber"),
-                            ("damage_tbomb_alt", "Torpedo Bomber (Alt)"),
-                            ("damage_tbomb_airsupport", "Torpedo Bomber Air Support"),
-                            ("damage_fire", "Fire"),
-                            ("damage_ram", "Ram"),
-                            ("damage_flood", "Flood"),
-                            ("damage_dbomb_direct", "Depth Charge (Direct)"),
-                            ("damage_dbomb_splash", "Depth Charge (Splash)"),
-                            ("damage_sea_mine", "Sea Mine"),
-                            ("damage_rocket", "Rocket"),
-                            ("damage_rocket_avia", "Avia Rocket"),
-                            ("damage_rocket_airsupport", "Air Supp Rocket"),
-                            ("damage_skip", "Skip Bomb"),
-                            ("damage_skip_avia", "Avia Skip Bomb"),
-                            ("damage_skip_alt", "Alt Skip Bomb"),
-                            ("damage_skip_airsupport", "Air Supp Skip Bomb"),
-                            ("damage_wave", "Wave"),
-                            ("damage_charge_laser", "Charge Laser"),
-                            ("damage_pulse_laser", "Pulse Laser"),
-                            ("damage_axis_laser", "Axis Laser"),
-                            ("damage_phaser_laser", "Phaser Laser"),
-                        ];
-
+                        // Grab the damage breakdown
                         println!("getting damage stats");
 
                         // First pass over damage numbers: grab the longest description so that we can later format it
-                        let longest_width = damage_stats
+                        let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
                                 let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
@@ -347,7 +341,7 @@ impl UiReport {
                             + 1;
 
                         // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                        let breakdowns: Vec<String> = damage_stats
+                        let breakdowns: Vec<String> = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
                                 let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
@@ -383,6 +377,53 @@ impl UiReport {
                             }),
                         )
                     })
+                })
+                .unwrap_or_default();
+
+            // Received damage
+            let (received_damage, received_damage_text, received_damage_hover_text) = results_info
+                .map(|info_array| {
+                    // Grab the damage breakdown
+
+                    println!("getting damage stats");
+
+                    // First pass over damage numbers: grab the longest description so that we can later format it
+                    let longest_width = DAMAGE_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx]
+                                .as_number()
+                                .and_then(|number| number.as_u64())
+                                .and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                        })
+                        .max()
+                        .unwrap_or_default()
+                        + 1;
+
+                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                    let breakdowns: Vec<(u64, String)> = DAMAGE_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
+                                if num > 0 {
+                                    let num_str = separate_number(num, Some(locale));
+                                    Some((num, format!("{:<longest_width$}: {}", description, num_str)))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+
+                    let total_received = breakdowns.iter().fold(0, |total, (dmg, _)| total + *dmg);
+
+                    let received_damage_report_text = separate_number(total_received, Some(locale));
+                    let received_damage_report_text = RichText::new(received_damage_report_text).color(player_color);
+                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().map(|(_num, desc)| desc).join("\n")).font(FontId::monospace(12.0));
+
+                    (Some(total_received), Some(received_damage_report_text), Some(received_damage_report_hover_text))
                 })
                 .unwrap_or_default();
 
@@ -428,13 +469,6 @@ impl UiReport {
                 } else {
                     (None, None, None, None)
                 };
-
-            let received_damage = None;
-            // const DAMAGE_RECEIVED_START_INDEX: usize = 101;
-            // const DAMAGE_RECEIVED_END_INDEX: usize = DAMAGE_RECEIVED_START_INDEX + 56;
-            // let (received_damage, received_damage_text) = if let Some(damage_numbers) = vehicle.results_info().and_then(|info| info.as_array().map(|info_array| &info_array[DAMAGE_RECEIVED_START_INDEX..=DAMAGE_RECEIVED_END_INDEX])) {
-            //     let total_damage = damage_numbers.iter
-            // }
 
             let (time_lived, time_lived_text) = vehicle
                 .death_info()
@@ -523,6 +557,11 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
+            let distance_traveled = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
+                let distance_idx = distance_idx.as_u64()? as usize;
+                results_info?[distance_idx].as_f64()
+            });
+
             Some(VehicleReport {
                 vehicle: Arc::clone(&vehicle),
                 color: player_color,
@@ -552,10 +591,13 @@ impl UiReport {
                 potential_damage_text,
                 ship_species_text,
                 received_damage,
+                received_damage_text,
+                received_damage_hover_text,
                 fires,
                 floods,
                 citadels: cits,
                 crits,
+                distance_traveled,
             })
         });
 
@@ -597,6 +639,8 @@ impl UiReport {
                 SortColumn::Floods => SortKey::u64(report.floods),
                 SortColumn::Citadels => SortKey::u64(report.citadels),
                 SortColumn::Crits => SortKey::u64(report.crits),
+                SortColumn::ReceivedDamage => SortKey::u64(report.received_damage),
+                SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
             };
 
             (team_id, key, db_id)
@@ -678,6 +722,8 @@ pub enum SortColumn {
     Floods,
     Citadels,
     Crits,
+    ReceivedDamage,
+    DistanceTraveled,
 }
 
 pub struct Replay {
@@ -806,10 +852,26 @@ impl ToolkitTabViewer<'_> {
             })
             // Actual damage
             .column(Column::initial(130.0).clip(true))
-            // Spotting damage
-            .column(Column::initial(135.0).clip(true))
+            // Received damage
+            .pipe(|table| {
+                if self.tab_state.settings.replay_settings.show_received_damage {
+                    table.column(Column::initial(130.0).clip(true))
+                } else {
+                    table
+                }
+            })
             // Potential damage
             .column(Column::initial(135.0).clip(true))
+            // Spotting damage
+            .column(Column::initial(135.0).clip(true))
+            .pipe(|table| {
+                if self.tab_state.settings.replay_settings.show_distance_traveled {
+                    // Distance Traveled
+                    table.column(Column::initial(80.0).clip(true))
+                } else {
+                    table
+                }
+            })
             .pipe(|table| {
                 if self.tab_state.settings.replay_settings.show_fires {
                     // Fires
@@ -905,14 +967,16 @@ impl ToolkitTabViewer<'_> {
                             ui_report.sort_players(*replay_sort);
                     }
                 });
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Spotting Damage", true, *replay_sort, SortColumn::SpottingDamage)).on_hover_text(
-                        "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    ).clicked() {
-                            replay_sort.update_column(SortColumn::SpottingDamage);
+                if self.tab_state.settings.replay_settings.show_received_damage{
+                    header.col(|ui| {
+                        if ui.strong(column_name_with_sort_order("Recv Damage", true, *replay_sort, SortColumn::ReceivedDamage)).on_hover_text(
+                            "Total damage received. This column may break between patches because the data format is absolute junk and undocumented.",
+                        ).clicked() {
+                            replay_sort.update_column(SortColumn::ReceivedDamage);
                             ui_report.sort_players(*replay_sort);
-                    }
-                });
+                        }
+                    });
+                }
                 header.col(|ui| {
                     if ui.strong(column_name_with_sort_order("Potential Damage", true, *replay_sort, SortColumn::PotentialDamage)).on_hover_text(
                         "Potential damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
@@ -921,6 +985,24 @@ impl ToolkitTabViewer<'_> {
                         ui_report.sort_players(*replay_sort);
                     }
                 });
+                header.col(|ui| {
+                    if ui.strong(column_name_with_sort_order("Spotting Damage", true, *replay_sort, SortColumn::SpottingDamage)).on_hover_text(
+                        "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+                    ).clicked() {
+                            replay_sort.update_column(SortColumn::SpottingDamage);
+                            ui_report.sort_players(*replay_sort);
+                    }
+                });
+                if self.tab_state.settings.replay_settings.show_distance_traveled {
+                    header.col(|ui| {
+                        if ui.strong(column_name_with_sort_order("Dist. Traveled", true, *replay_sort, SortColumn::DistanceTraveled)).on_hover_text(
+                            "This column may break between patches because the data format is absolute junk and undocumented.",
+                        ).clicked() {
+                            replay_sort.update_column(SortColumn::DistanceTraveled);
+                            ui_report.sort_players(*replay_sort);
+                        }
+                    });
+                }
                 if self.tab_state.settings.replay_settings.show_fires {
                     header.col(|ui| {
                         if ui.strong(column_name_with_sort_order("Fires", true, *replay_sort, SortColumn::Fires)).on_hover_text(
@@ -1109,14 +1191,19 @@ impl ToolkitTabViewer<'_> {
             }
         });
 
-        // Spotting damage
-        ui.col(|ui| {
-            if let Some(spotting_damage) = player_report.spotting_damage_text.as_ref() {
-                ui.label(spotting_damage);
-            } else {
-                ui.label("-");
-            }
-        });
+        // Total Damage Received
+        if self.tab_state.settings.replay_settings.show_received_damage {
+            ui.col(|ui| {
+                if let Some(received_damage_text) = player_report.received_damage_text.clone() {
+                    let response = ui.label(received_damage_text);
+                    if let Some(hover_text) = player_report.received_damage_hover_text.clone() {
+                        response.on_hover_text(hover_text);
+                    }
+                } else {
+                    ui.label("-");
+                }
+            });
+        }
 
         // Potential damage
         ui.col(|ui| {
@@ -1129,6 +1216,26 @@ impl ToolkitTabViewer<'_> {
                 ui.label("-");
             }
         });
+
+        // Spotting damage
+        ui.col(|ui| {
+            if let Some(spotting_damage) = player_report.spotting_damage_text.as_ref() {
+                ui.label(spotting_damage);
+            } else {
+                ui.label("-");
+            }
+        });
+
+        // Fires
+        if self.tab_state.settings.replay_settings.show_distance_traveled {
+            ui.col(|ui| {
+                if let Some(distance) = player_report.distance_traveled {
+                    ui.label(format!("{:.2}km", distance));
+                } else {
+                    ui.label("-");
+                }
+            });
+        }
 
         // Fires
         if self.tab_state.settings.replay_settings.show_fires {

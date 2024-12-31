@@ -196,7 +196,7 @@ pub fn colorize_captain_points(
             if extra_hover_text.is_empty() {
                 Some(default_text.to_string())
             } else {
-                Some(format!("{} and has", extra_hover_text.join(", ")))
+                Some(format!("{} and has {}", default_text, extra_hover_text.join(", ")))
             },
         );
     } else if highest_skill_tier <= 2 && points >= 6 {
@@ -207,7 +207,7 @@ pub fn colorize_captain_points(
             if extra_hover_text.is_empty() {
                 Some(default_text.to_string())
             } else {
-                Some(format!("{} and has ", extra_hover_text.join(", ")))
+                Some(format!("{} and has {}", default_text, extra_hover_text.join(", ")))
             },
         );
     }
