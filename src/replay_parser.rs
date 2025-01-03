@@ -391,7 +391,7 @@ impl UiReport {
                     let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
                             info_array[idx]
                                 .as_number()
                                 .and_then(|number| number.as_u64())
