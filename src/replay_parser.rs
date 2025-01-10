@@ -13,7 +13,9 @@ use crate::{
     wows_data::{load_replay, parse_replay, ShipIcon, WorldOfWarshipsData},
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
-use egui::{mutex::Mutex, text::LayoutJob, Color32, FontId, Image, ImageSource, Label, OpenUrl, RichText, Sense, Separator, TextFormat, Vec2};
+use egui::{
+    mutex::Mutex, text::LayoutJob, Color32, ComboBox, FontId, Image, ImageSource, Label, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator, TextFormat, Vec2,
+};
 use egui_extras::{Column, TableBuilder, TableRow};
 
 use escaper::decode_html;
@@ -391,7 +393,7 @@ impl UiReport {
                     let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
                             info_array[idx]
                                 .as_number()
                                 .and_then(|number| number.as_u64())
@@ -1734,10 +1736,20 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                // Only show the live game button if the replays dir exists
-                if let Some(_replays_dir) = self.replays_dir() {
-                    ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
-                }
+                ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
+                ComboBox::from_id_salt("column_filters")
+                    .selected_text("Column Filters")
+                    .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+                    .show_ui(ui, |ui| {
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
+                    });
             });
 
             egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {

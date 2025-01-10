@@ -1060,6 +1060,8 @@ impl eframe::App for WowsToolkitApp {
             DockArea::new(&mut self.dock_state)
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
+                .show_leaf_collapse_buttons(false)
+                .show_leaf_close_all_buttons(false)
                 .show_close_buttons(false)
                 .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
