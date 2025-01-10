@@ -11,7 +11,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use wows_replays::ReplayMeta;
 
-use crate::{app::ToolkitTabViewer, replay_parser::Replay};
+use crate::{app::ToolkitTabViewer, ui::replay_parser::Replay};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {

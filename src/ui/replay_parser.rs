@@ -319,15 +319,12 @@ impl UiReport {
 
             let results_info = vehicle.results_info().and_then(|info| info.as_array());
 
-            // Actual damage
+            // Actual damage done to other players
             let (damage, damage_text, damage_hover_text, damage_report) = results_info
                 .and_then(|info_array| {
                     let total_damage_index = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
 
                     info_array[total_damage_index].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
-                        // Grab the damage breakdown
-                        println!("getting damage stats");
-
                         // First pass over damage numbers: grab the longest description so that we can later format it
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
@@ -385,10 +382,6 @@ impl UiReport {
             // Received damage
             let (received_damage, received_damage_text, received_damage_hover_text) = results_info
                 .map(|info_array| {
-                    // Grab the damage breakdown
-
-                    println!("getting damage stats");
-
                     // First pass over damage numbers: grab the longest description so that we can later format it
                     let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
@@ -515,19 +508,63 @@ impl UiReport {
                     let mut floods = 0;
                     let mut cits = 0;
                     let mut crits = 0;
-                    println!("got interactions!");
 
                     let interactions_idx = interactions_idx.as_u64()? as usize;
                     let dict = results_info?[interactions_idx].as_object()?;
-                    for (_victim, victim_interactions) in dict {
+                    for (victim, victim_interactions) in dict {
+                        let victim_id: i64 = victim.parse().expect("failed to convert victim ID to name");
+                        let victim_vehicle = players
+                            .iter()
+                            .find(|vehicle| if let Some(player) = vehicle.player() { player.db_id() == victim_id } else { false });
+
                         let victim_interactions = victim_interactions.as_array()?;
+
+                        // if let Some(victim_vehicle) = victim_vehicle {
+                        //     if vehicle.player().unwrap().name() != "Paulo_Rogerio1" {
+                        //         continue;
+                        //     }
+                        //     println!(
+                        //         "Damage done from {} to {}:",
+                        //         vehicle.player().expect("no player").name(),
+                        //         victim_vehicle.player().unwrap().name(),
+                        //     );
+
+                        //     DAMAGE_DESCRIPTIONS.iter().for_each(|(key, description)| {
+                        //         if let Some(idx) = constants
+                        //             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")
+                        //             .and_then(|arr| arr.as_array())
+                        //             .and_then(|arr| arr.iter().position(|name| name.as_str().map(|name| name == *key).unwrap_or_default()))
+                        //         {
+                        //             if let Some(num) = victim_interactions[idx as usize].as_number().and_then(|number| number.as_u64()) {
+                        //                 if num > 0 {
+                        //                     let num_str = separate_number(num, Some(locale));
+                        //                     println!("{}: {}", description, num_str)
+                        //                 }
+                        //             }
+                        //         }
+
+                        //         let hits_key = key.replace("damage", "hits");
+                        //         if let Some(idx) = constants
+                        //             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")
+                        //             .and_then(|arr| arr.as_array())
+                        //             .and_then(|arr| arr.iter().position(|name| name.as_str().map(|name| name == &hits_key).unwrap_or_default()))
+                        //         {
+                        //             if let Some(num) = victim_interactions[idx as usize].as_number().and_then(|number| number.as_u64()) {
+                        //                 if num > 0 {
+                        //                     let num_str = separate_number(num, Some(locale));
+                        //                     println!("Hits {}: {}", description, num_str)
+                        //                 }
+                        //             }
+                        //         }
+                        //     });
+                        // }
+
                         fires += constants
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
-                        println!("got fires!");
 
                         floods += constants
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
@@ -535,7 +572,6 @@ impl UiReport {
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
-                        println!("got floods!");
 
                         cits += constants
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
@@ -544,15 +580,12 @@ impl UiReport {
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        println!("got cits!");
-
                         crits += constants
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
-                        println!("got crits!");
                     }
 
                     Some((Some(fires), Some(floods), Some(cits), Some(crits)))

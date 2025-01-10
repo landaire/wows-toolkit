@@ -36,9 +36,9 @@ use crate::{
     build_tracker,
     error::ToolkitError,
     game_params::load_game_params,
-    player_tracker::PlayerTracker,
-    replay_parser::Replay,
     twitch::{self, Token, TwitchState, TwitchUpdate},
+    ui::player_tracker::PlayerTracker,
+    ui::replay_parser::Replay,
     wows_data::{ShipIcon, WorldOfWarshipsData},
     WowsToolkitApp,
 };

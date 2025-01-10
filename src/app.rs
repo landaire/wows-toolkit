@@ -38,14 +38,14 @@ use wowsunpack::data::idx::FileNode;
 
 use crate::{
     error::ToolkitError,
-    file_unpacker::{UnpackerProgress, UNPACKER_STOP},
     game_params::game_params_bin_path,
     icons,
     plaintext_viewer::PlaintextFileViewer,
-    player_tracker::PlayerTracker,
-    replay_parser::{self, Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
+    ui::file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+    ui::player_tracker::PlayerTracker,
+    ui::replay_parser::{self, Replay, SharedReplayParserTabState},
     wows_data::{load_replay, parse_replay, WorldOfWarshipsData},
 };
 

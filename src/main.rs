@@ -38,15 +38,15 @@ fn main() -> eframe::Result<()> {
     //     .build(".")
     //     .expect("failed to build file appender");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let subscriber = tracing_subscriber::registry().with(
-        fmt::Layer::new()
-            .pretty()
-            // .with_writer(std::io::stdout)
-            // .with_timer(LocalTime::rfc_3339())
-            .fmt_fields(NewType(Pretty::default()))
-            .with_ansi(true)
-            .with_filter(LevelFilter::DEBUG),
-    );
+    // let subscriber = tracing_subscriber::registry().with(
+    //     fmt::Layer::new()
+    //         .pretty()
+    //         // .with_writer(std::io::stdout)
+    //         // .with_timer(LocalTime::rfc_3339())
+    //         .fmt_fields(NewType(Pretty::default()))
+    //         .with_ansi(true)
+    //         .with_filter(LevelFilter::DEBUG),
+    // );
     // .with(
     //     fmt::Layer::new()
     //         .with_writer(non_blocking)
@@ -54,8 +54,8 @@ fn main() -> eframe::Result<()> {
     //         .with_ansi(false)
     //         .with_filter(LevelFilter::DEBUG),
     // );
-    #[cfg(debug_assertions)]
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    // #[cfg(debug_assertions)]
+    // tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let icon_data: &[u8] = &include_bytes!("../assets/wows_toolkit.png")[..];
 

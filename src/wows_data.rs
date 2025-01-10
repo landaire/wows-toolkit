@@ -13,8 +13,8 @@ use wowsunpack::{
 
 use crate::{
     build_tracker,
-    replay_parser::Replay,
     task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
+    ui::replay_parser::Replay,
 };
 
 pub struct ShipIcon {
