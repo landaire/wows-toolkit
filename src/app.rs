@@ -14,7 +14,7 @@ use std::{
 };
 
 use clipboard::{ClipboardContext, ClipboardProvider};
-use egui::{mutex::Mutex, Color32, OpenUrl, Ui, WidgetText};
+use egui::{mutex::Mutex, Color32, Context, OpenUrl, Ui, WidgetText};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
@@ -46,7 +46,7 @@ use crate::{
     replay_parser::{self, Replay, SharedReplayParserTabState},
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
-    wows_data::{load_replay, WorldOfWarshipsData},
+    wows_data::{load_replay, parse_replay, WorldOfWarshipsData},
 };
 
 #[macro_export]
@@ -948,6 +948,70 @@ impl WowsToolkitApp {
         }
         self.checked_for_updates = true;
     }
+
+    fn ui_file_drag_and_drop(&mut self, ctx: &Context) {
+        use egui::{Align2, Color32, Id, LayerId, Order, TextStyle};
+
+        // Preview hovering files:
+        if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
+            let text = ctx.input(|i| {
+                if i.raw.hovered_files.len() > 1 {
+                    return Some("Only one file at a time, please.".to_owned());
+                }
+
+                if let Some(file) = i.raw.hovered_files.first() {
+                    if let Some(path) = &file.path {
+                        if path.is_file() {
+                            return Some(format!("Drop to load\n{}", path.file_name()?.to_str()?));
+                        }
+                    }
+                }
+
+                None
+            });
+
+            if let Some(text) = text {
+                let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("file_drop_target")));
+
+                let screen_rect = ctx.screen_rect();
+                painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
+                painter.text(
+                    screen_rect.center(),
+                    Align2::CENTER_CENTER,
+                    text,
+                    TextStyle::Heading.resolve(&ctx.style()),
+                    Color32::WHITE,
+                );
+            }
+        }
+
+        let mut dropped_files = Vec::new();
+
+        // Collect dropped files:
+        ctx.input(|i| {
+            if !i.raw.dropped_files.is_empty() {
+                dropped_files.clone_from(&i.raw.dropped_files);
+            }
+        });
+
+        // Only perform operations if we have one file
+        if dropped_files.len() == 1 {
+            if let Some(path) = &dropped_files[0].path {
+                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                    self.tab_state.settings.current_replay_path = path.clone();
+                    println!("Updating background task");
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        parse_replay(
+                            Arc::clone(&self.tab_state.game_constants),
+                            Arc::clone(wows_data),
+                            self.tab_state.settings.current_replay_path.clone()
+                        )
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for WowsToolkitApp {
@@ -1081,6 +1145,10 @@ impl eframe::App for WowsToolkitApp {
             .enumerate()
             .filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None })
             .collect();
+        drop(file_viewer);
+
+        // Handle replay drag and drop events
+        self.ui_file_drag_and_drop(ctx);
     }
 }
 

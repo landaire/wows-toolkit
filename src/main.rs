@@ -64,7 +64,8 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([600.0, 400.0])
             .with_min_inner_size([400.0, 300.0])
             .with_icon(eframe::icon_data::from_png_bytes(icon_data).expect("failed to load application icon"))
-            .with_title(format!("{} v{}", wows_toolkit::APP_NAME, env!("CARGO_PKG_VERSION"))),
+            .with_title(format!("{} v{}", wows_toolkit::APP_NAME, env!("CARGO_PKG_VERSION")))
+            .with_drag_and_drop(true),
         ..Default::default()
     };
 
