@@ -7,7 +7,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, TryRecvError},
+        mpsc::{self, Receiver, Sender, TryRecvError},
         Arc,
     },
     time::{Duration, Instant},
@@ -43,9 +43,12 @@ use crate::{
     plaintext_viewer::PlaintextFileViewer,
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
-    ui::file_unpacker::{UnpackerProgress, UNPACKER_STOP},
-    ui::player_tracker::PlayerTracker,
-    ui::replay_parser::{self, Replay, SharedReplayParserTabState},
+    ui::{
+        file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+        mod_manager::{ModInfo, ModManagerInfo},
+        player_tracker::PlayerTracker,
+        replay_parser::{self, Replay, SharedReplayParserTabState},
+    },
     wows_data::{load_replay, parse_replay, WorldOfWarshipsData},
 };
 
@@ -65,6 +68,7 @@ pub enum Tab {
     ReplayParser,
     Settings,
     PlayerTracker,
+    ModManager,
 }
 
 impl Tab {
@@ -74,6 +78,7 @@ impl Tab {
             Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
             Tab::ReplayParser => format!("{} Replay Inspector", icons::MAGNIFYING_GLASS),
             Tab::PlayerTracker => format!("{} Player Tracker", icons::DETECTIVE),
+            Tab::ModManager => format!("{} Mod Manager", icons::WRENCH),
         }
     }
 }
@@ -210,6 +215,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Settings => self.build_settings_tab(ui),
             Tab::ReplayParser => self.build_replay_parser_tab(ui),
             Tab::PlayerTracker => self.build_player_tracker_tab(ui),
+            Tab::ModManager => self.build_mod_manager_tab(ui),
         }
     }
 }
@@ -417,11 +423,25 @@ pub struct TabState {
 
     #[serde(skip)]
     pub game_constants: Arc<RwLock<serde_json::Value>>,
+
+    #[serde(default)]
+    pub mod_manager_info: ModManagerInfo,
+
+    #[serde(skip)]
+    pub mod_action_sender: Sender<ModInfo>,
+
+    #[serde(skip)]
+    /// Used temporarily to store the mod action receiver until the mod manager thread is started
+    pub mod_action_receiver: Option<Receiver<ModInfo>>,
+
+    #[serde(skip)]
+    pub mod_update_receiver: Option<Receiver<BackgroundTask>>,
 }
 
 impl Default for TabState {
     fn default() -> Self {
         let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json")).expect("failed to parse constants JSON");
+        let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         Self {
             world_of_warships_data: None,
             filter: Default::default(),
@@ -449,6 +469,10 @@ impl Default for TabState {
             markdown_cache: Default::default(),
             replay_sort: Default::default(),
             game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
+            mod_manager_info: Default::default(),
+            mod_action_sender,
+            mod_action_receiver: Some(mod_action_receiver),
+            mod_update_receiver: None,
         }
     }
 }
@@ -643,7 +667,7 @@ pub struct WowsToolkitApp {
     dock_state: DockState<Tab>,
 
     #[serde(skip)]
-    pub(crate) runtime: Runtime,
+    pub(crate) runtime: Arc<Runtime>,
 }
 
 impl Default for WowsToolkitApp {
@@ -654,10 +678,10 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::ModManager, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
-            runtime: Runtime::new().expect("failed to create tokio runtime"),
+            runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
         }
     }
 }
@@ -724,97 +748,157 @@ impl WowsToolkitApp {
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
-        task::begin_startup_tasks(&state, rx);
+        task::begin_startup_tasks(&mut state, rx);
 
         state
     }
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
+        // Try to update mod update tasks
+        if let Some(new_task) = self.tab_state.mod_update_receiver.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.tab_state.background_tasks.push(new_task);
+        }
+
         ui.horizontal(|ui| {
             // TODO: Merge these channels
             let mut remove_tasks = Vec::new();
+
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
-                let desc = task.build_description(ui);
-                trace!("Task description: {:?}", desc);
-                if let Some(result) = desc {
-                    match &task.kind {
-                        BackgroundTaskKind::LoadingData => {
-                            self.tab_state.allow_changing_wows_dir();
-                        }
-                        BackgroundTaskKind::LoadingReplay => {
-                            // nothing to do
-                        }
-                        BackgroundTaskKind::Updating {
-                            rx: _rx,
-                            last_progress: _last_progress,
-                        } => {
-                            // do nothing
-                        }
-                        BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
-                            // do nothing
-                        }
-                        BackgroundTaskKind::LoadingConstants => {
-                            // do nothing
-                        }
-                    }
 
-                    match result {
-                        Ok(data) => match data {
-                            BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
-                                let replays_dir = wows_data.replays_dir.clone();
-                                if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
-                                    *old_wows_data.write() = wows_data;
-                                } else {
-                                    self.tab_state.world_of_warships_data = Some(Arc::new(RwLock::new(wows_data)));
-                                }
-                                self.tab_state.update_wows_dir(&new_dir, &replays_dir);
-                                self.tab_state.replay_files = replays;
-                                self.tab_state.filtered_file_list = None;
-                                self.tab_state.used_filter = None;
-
-                                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)))
+                let remove_task = {
+                    let desc = task.build_description(ui);
+                    trace!("Task description: {:?}", desc);
+                    if let Some(result) = desc {
+                        match &task.kind {
+                            BackgroundTaskKind::LoadingData => {
+                                self.tab_state.allow_changing_wows_dir();
                             }
-                            BackgroundTaskCompletion::ReplayLoaded { replay } => {
-                                {
-                                    self.tab_state.replay_parser_tab.lock().game_chat.clear();
-                                }
-                                {
-                                    self.tab_state.settings.player_tracker.write().update_from_replay(&*replay.read());
-                                }
-                                self.tab_state.current_replay = Some(replay);
-                                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)))
+                            BackgroundTaskKind::LoadingReplay => {
+                                // nothing to do
                             }
-                            BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
-                                let current_process = env::args().next().expect("current process has no path?");
-                                let current_process_new_path = format!("{}.old", current_process);
-                                // Rename this process
-                                std::fs::rename(current_process.clone(), &current_process_new_path).expect("failed to rename current process");
-                                // Rename the new exe
-                                std::fs::rename(new_exe, &current_process).expect("failed to rename new process");
-
-                                Command::new(current_process)
-                                    .arg(current_process_new_path)
-                                    .spawn()
-                                    .expect("failed to execute updated process");
-
-                                std::process::exit(0);
-                            }
-                            BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
+                            BackgroundTaskKind::Updating {
+                                rx: _rx,
+                                last_progress: _last_progress,
+                            } => {
                                 // do nothing
                             }
-                            BackgroundTaskCompletion::ConstantsLoaded(constants) => {
-                                *self.tab_state.game_constants.write() = constants;
+                            BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
+                                // do nothing
                             }
-                        },
-                        Err(ToolkitError::BackgroundTaskCompleted) => {
-                            remove_tasks.push(i);
+                            BackgroundTaskKind::LoadingConstants => {
+                                // do nothing
+                            }
+                            BackgroundTaskKind::LoadingModDatabase => {}
+                            BackgroundTaskKind::InstallingMod {
+                                mod_info: _,
+                                rx: _,
+                                last_progress: _,
+                            } => {
+                                // do nothing
+                            }
+                            BackgroundTaskKind::UninstallingMod {
+                                mod_info: _,
+                                rx: _,
+                                last_progress: _,
+                            } => {
+                                // do nothing
+                            }
+                            BackgroundTaskKind::DownloadingMod { mod_info, rx, last_progress } => {
+                                // do nothing
+                            }
                         }
-                        Err(e) => {
-                            self.show_error_window = true;
-                            self.error_to_show = Some(Box::new(e));
+
+                        match result {
+                            Ok(data) => match data {
+                                BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
+                                    let replays_dir = wows_data.replays_dir.clone();
+                                    if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
+                                        *old_wows_data.write() = wows_data;
+                                    } else {
+                                        let wows_data = Arc::new(RwLock::new(wows_data));
+                                        self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
+
+                                        self.tab_state.mod_update_receiver = Some(task::start_mod_manager_thread(
+                                            Arc::clone(&self.runtime),
+                                            wows_data,
+                                            self.tab_state.mod_action_receiver.take().unwrap(),
+                                        ));
+                                    }
+                                    self.tab_state.update_wows_dir(&new_dir, &replays_dir);
+                                    self.tab_state.replay_files = replays;
+                                    self.tab_state.filtered_file_list = None;
+                                    self.tab_state.used_filter = None;
+
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)));
+                                }
+                                BackgroundTaskCompletion::ReplayLoaded { replay } => {
+                                    {
+                                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                                    }
+                                    {
+                                        self.tab_state.settings.player_tracker.write().update_from_replay(&*replay.read());
+                                    }
+                                    self.tab_state.current_replay = Some(replay);
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)));
+                                }
+                                BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
+                                    let current_process = env::args().next().expect("current process has no path?");
+                                    let current_process_new_path = format!("{}.old", current_process);
+                                    // Rename this process
+                                    std::fs::rename(current_process.clone(), &current_process_new_path).expect("failed to rename current process");
+                                    // Rename the new exe
+                                    std::fs::rename(new_exe, &current_process).expect("failed to rename new process");
+
+                                    Command::new(current_process)
+                                        .arg(current_process_new_path)
+                                        .spawn()
+                                        .expect("failed to execute updated process");
+
+                                    std::process::exit(0);
+                                }
+                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
+                                    // do nothing
+                                }
+                                BackgroundTaskCompletion::ConstantsLoaded(constants) => {
+                                    *self.tab_state.game_constants.write() = constants;
+                                }
+                                BackgroundTaskCompletion::ModDatabaseLoaded(index) => {
+                                    self.tab_state.mod_manager_info.update_index("test".to_string(), index);
+                                }
+                                BackgroundTaskCompletion::ModInstalled(mod_info) => {
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                        "{} Successfully installed mod: {}",
+                                        icons::CHECK_CIRCLE,
+                                        mod_info.meta.name()
+                                    )));
+                                }
+                                BackgroundTaskCompletion::ModUninstalled(mod_info) => {
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                        "{} Successfully uninstalled mod: {}",
+                                        icons::CHECK_CIRCLE,
+                                        mod_info.meta.name()
+                                    )));
+                                }
+                                BackgroundTaskCompletion::ModDownloaded(_) => {
+                                    // Do nothing when the mod is downloaded.
+                                }
+                            },
+                            Err(ToolkitError::BackgroundTaskCompleted) => {}
+                            Err(e) => {
+                                eprintln!("Background task error: {:?}", e);
+                                self.show_error_window = true;
+                                self.error_to_show = Some(Box::new(e));
+                            }
                         }
+                        true
+                    } else {
+                        false
                     }
+                };
+
+                if remove_task {
+                    remove_tasks.push(i);
                 }
             }
 
@@ -1149,6 +1233,9 @@ impl eframe::App for WowsToolkitApp {
 
         // Handle replay drag and drop events
         self.ui_file_drag_and_drop(ctx);
+
+        // Ensure we update at least every second
+        ctx.request_repaint_after_secs(1.0);
     }
 }
 

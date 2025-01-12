@@ -37,6 +37,8 @@ pub struct WorldOfWarshipsData {
     pub game_version: usize,
 
     pub replays_dir: PathBuf,
+
+    pub build_dir: PathBuf,
 }
 
 pub fn parse_replay<P: AsRef<Path>>(

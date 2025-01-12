@@ -5,20 +5,25 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, TryRecvError},
+        mpsc::{self, Receiver, Sender, TryRecvError},
         Arc,
     },
     thread,
     time::Duration,
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
+use flate2::read::GzDecoder;
 use gettext::Catalog;
+use glob::glob;
+use http_body_util::BodyExt;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use reqwest::Url;
+use scopeguard::defer;
+use tar::Archive;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};
 use twitch_api::twitch_oauth2::{AccessToken, UserToken};
@@ -37,8 +42,12 @@ use crate::{
     error::ToolkitError,
     game_params::load_game_params,
     twitch::{self, Token, TwitchState, TwitchUpdate},
-    ui::player_tracker::PlayerTracker,
-    ui::replay_parser::Replay,
+    ui::{
+        mod_manager::{ModInfo, ModManagerIndex},
+        player_tracker::PlayerTracker,
+        replay_parser::Replay,
+    },
+    update_background_task,
     wows_data::{ShipIcon, WorldOfWarshipsData},
     WowsToolkitApp,
 };
@@ -62,6 +71,22 @@ pub enum BackgroundTaskKind {
     },
     PopulatePlayerInspectorFromReplays,
     LoadingConstants,
+    LoadingModDatabase,
+    DownloadingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    InstallingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    UninstallingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
 }
 
 impl BackgroundTask {
@@ -100,6 +125,47 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label("Loading data constants...");
                     }
+                    BackgroundTaskKind::LoadingModDatabase => {
+                        ui.spinner();
+                        ui.label("Loading mod database...");
+                    }
+                    BackgroundTaskKind::DownloadingMod { mod_info, rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => {
+                                *last_progress = Some(progress);
+                            }
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+
+                        if let Some(progress) = last_progress {
+                            ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Downloading {}", mod_info.meta.name())));
+                        }
+                    }
+                    BackgroundTaskKind::InstallingMod { mod_info, rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => {
+                                *last_progress = Some(progress);
+                            }
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+
+                        if let Some(progress) = last_progress {
+                            ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Installing {}", mod_info.meta.name())));
+                        }
+                    }
+                    BackgroundTaskKind::UninstallingMod { mod_info, rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => *last_progress = Some(progress),
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+
+                        if let Some(progress) = last_progress {
+                            ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Uninstalling {}", mod_info.meta.name())));
+                        }
+                    }
                 }
                 None
             }
@@ -120,6 +186,10 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     ConstantsLoaded(serde_json::Value),
+    ModDatabaseLoaded(ModManagerIndex),
+    ModDownloaded(ModInfo),
+    ModInstalled(ModInfo),
+    ModUninstalled(ModInfo),
 }
 
 impl std::fmt::Debug for BackgroundTaskCompletion {
@@ -135,6 +205,10 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
+            Self::ModDatabaseLoaded(_) => f.write_str("ModDatabaseLoaded(_)"),
+            Self::ModDownloaded(modi) => f.debug_struct("ModDownloaded").field("0", modi).finish(),
+            Self::ModInstalled(modi) => f.debug_struct("ModInstalled").field("0", modi).finish(),
+            Self::ModUninstalled(modi) => f.debug_struct("ModUninstalled").field("0", modi).finish(),
         }
     }
 }
@@ -261,7 +335,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     let number = latest_build.unwrap();
-    for file in read_dir(wows_directory.join("bin").join(format!("{}", number)).join("idx"))? {
+    let build_dir = wows_directory.join("bin").join(format!("{}", number));
+    for file in read_dir(&build_dir.join("idx"))? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
             let file_data = std::fs::read(file.path()).unwrap();
@@ -316,6 +391,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         game_version: number,
         ship_icons: icons,
         replays_dir: replays_dir.clone(),
+        build_dir,
     };
 
     debug!("Loading replays");
@@ -712,7 +788,7 @@ pub fn start_populating_player_inspector(
     }
 }
 
-pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
+pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
     start_twitch_task(
         &toolkit.runtime,
         Arc::clone(&toolkit.tab_state.twitch_state),
@@ -720,6 +796,8 @@ pub fn begin_startup_tasks(toolkit: &WowsToolkitApp, token_rx: tokio::sync::mpsc
         toolkit.tab_state.settings.twitch_token.clone(),
         token_rx,
     );
+
+    update_background_task!(toolkit.tab_state.background_tasks, Some(load_mods_db()));
 }
 
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
@@ -736,4 +814,266 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
         receiver: rx,
         kind: BackgroundTaskKind::LoadingConstants,
     }
+}
+
+pub fn load_mods_db() -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mods_db = std::fs::read_to_string("..\\mods.toml").unwrap();
+        let result = toml::from_str::<ModManagerIndex>(&mods_db)
+            .context("failed to deserialize mods db")
+            .map(|constants| BackgroundTaskCompletion::ModDatabaseLoaded(constants))
+            .map_err(|err| err.into());
+
+        tx.send(result);
+    });
+    BackgroundTask {
+        receiver: rx,
+        kind: BackgroundTaskKind::LoadingModDatabase,
+    }
+}
+
+async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> anyhow::Result<Vec<u8>> {
+    use http_body::Body;
+
+    let Ok(url_parse) = Url::parse(mod_info.meta.repo_url()) else {
+        eprintln!("failed to parse repo URL: {}", mod_info.meta.repo_url());
+        return Err(anyhow!("Failed to download mod tarball"));
+    };
+
+    let mut repo_parts = url_parse.path().split('/').filter(|s| !s.is_empty());
+    let Some(owner) = repo_parts.next() else {
+        eprintln!("failed to get owner from repo URL: {}", mod_info.meta.repo_url());
+        return Err(anyhow!("Failed to download mod tarball"));
+    };
+    let Some(repo) = repo_parts.next() else {
+        eprintln!("failed to get repo from repo URL: {}", mod_info.meta.repo_url());
+        return Err(anyhow!("Failed to download mod tarball"));
+    };
+    let octocrab = octocrab::instance();
+    eprintln!("downloading tarball from {}/{}", owner, repo);
+    eprintln!("commit: {}", mod_info.meta.commit());
+    let repo = octocrab.repos(owner, repo);
+    let mut response = repo.download_tarball(mod_info.meta.commit().to_string()).await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to download mod tarball - server error"));
+    }
+
+    let body = response.body_mut();
+    let total = body.size_hint().exact().unwrap_or_default() as usize;
+    let mut result = Vec::with_capacity(total);
+
+    // Iterate through all data chunks in the body
+    while let Some(frame) = body.frame().await {
+        match frame {
+            Ok(frame) => {
+                if let Some(data) = frame.data_ref() {
+                    result.extend_from_slice(&data);
+                    tx.send(DownloadProgress {
+                        downloaded: result.len() as u64,
+                        total: total as u64,
+                    });
+                }
+            }
+            Err(_) => Err(anyhow!("Error while downloading mod tarball"))?,
+        }
+    }
+
+    Ok(result)
+}
+
+fn unpack_mod(tarball: &[u8], wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> anyhow::Result<()> {
+    let tar = GzDecoder::new(tarball);
+    let mut archive = Archive::new(tar);
+
+    let wows_dir = { wows_data.read().build_dir.join("res_mods") };
+
+    let mut globs: Vec<_> = mod_info
+        .meta
+        .paths()
+        .iter()
+        .filter_map(|pat| match glob::Pattern::new(pat) {
+            Ok(pat) => Some(pat),
+            Err(e) => {
+                eprintln!("failed to parse glob: {}", e);
+                None
+            }
+        })
+        .collect();
+    if globs.is_empty() {
+        eprintln!("using default glob");
+        globs.push(glob::Pattern::new("*").unwrap());
+    }
+
+    let mut entries_count = 100;
+    let mut paths = Vec::new();
+    for (processed_files, entry) in archive.entries()?.enumerate() {
+        defer! {
+            let _ = tx.send(DownloadProgress {
+                downloaded: processed_files as u64,
+                total:  entries_count as u64,
+            });
+        };
+
+        let mut entry = entry.context("entry")?;
+        let mod_file_path = entry.path().context("path")?;
+
+        // Tarballs are structured as:
+        // <REPO_OWNER>-<REPO_NAME>-<REFERENCE>
+        // <REPO_OWNER>-<REPO_NAME>-<REFERENCE>/<MOD_DATA>
+        // pax_global_header
+
+        // We want to strip out the first directory in the chain
+        let mod_file_path = mod_file_path.components().skip(1).collect::<PathBuf>();
+        if mod_file_path.components().count() == 0 {
+            eprintln!("skipping repo metadata file");
+            continue;
+        }
+
+        println!("processing {}", mod_file_path.display());
+
+        // Ensure that this is a file we should be extracting
+        if !globs.iter().any(|pat| pat.matches_path(&mod_file_path) || mod_file_path.starts_with(pat.as_str())) {
+            eprintln!("Path did not match any glob: {}", mod_file_path.display());
+            continue;
+        }
+
+        let target_path = wows_dir.join(mod_file_path);
+
+        // Ensure that a mod didn't try to write to elsewhere on the filesystem
+        if !std::path::absolute(&target_path).context("absolute path")?.starts_with(&wows_dir) {
+            return Err(anyhow!("Mod tried to write to an invalid path: {}", target_path.display()));
+        }
+
+        println!("unpacking to {}", target_path.display());
+
+        paths.push(target_path.clone());
+        if entry.header().entry_type().is_dir() {
+            std::fs::create_dir_all(&target_path).context(target_path.display().to_string())?;
+            continue;
+        }
+
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).context(parent.display().to_string())?;
+        }
+
+        println!("writing file {}", target_path.display());
+
+        entry.unpack(target_path)?;
+    }
+
+    let _ = std::fs::File::create(wows_dir.join("PnFModsLoader.py"));
+
+    *mod_info.mod_paths.lock() = paths;
+
+    Ok(())
+}
+
+fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
+    eprintln!("downloading mod");
+    let (download_task_tx, download_task_rx) = mpsc::channel();
+    let (download_progress_tx, download_progress_rx) = mpsc::channel();
+    let _ = tx.send(BackgroundTask {
+        receiver: download_task_rx,
+        kind: BackgroundTaskKind::DownloadingMod {
+            mod_info: mod_info.clone(),
+            rx: download_progress_rx,
+            last_progress: None,
+        },
+    });
+
+    // TODO: Download pending mods in parallel?
+    let tar_file = runtime.block_on(async { download_mod_tarball(&mod_info, download_progress_tx).await });
+    eprintln!("downloaded");
+    match tar_file {
+        Ok(tar_file) => {
+            download_task_tx.send(Ok(BackgroundTaskCompletion::ModDownloaded(mod_info.clone()))).unwrap();
+
+            let (install_task_tx, install_task_rx) = mpsc::channel();
+            let (install_progress_tx, install_progress_rx) = mpsc::channel();
+            let _ = tx.send(BackgroundTask {
+                receiver: install_task_rx,
+                kind: if mod_info.enabled {
+                    BackgroundTaskKind::InstallingMod {
+                        mod_info: mod_info.clone(),
+                        rx: install_progress_rx,
+                        last_progress: None,
+                    }
+                } else {
+                    BackgroundTaskKind::UninstallingMod {
+                        mod_info: mod_info.clone(),
+                        rx: install_progress_rx,
+                        last_progress: None,
+                    }
+                },
+            });
+
+            let unpack_result = unpack_mod(&tar_file, wows_data.clone(), &mod_info, install_progress_tx);
+            eprintln!("unpack res: {:?}", unpack_result);
+
+            install_task_tx.send(Ok(BackgroundTaskCompletion::ModInstalled(mod_info))).unwrap();
+        }
+        Err(e) => {
+            eprintln!("{:?}", e);
+        }
+    }
+}
+
+fn uninstall_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) -> anyhow::Result<()> {
+    eprintln!("downloading mod");
+    let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
+    let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
+    let _ = tx.send(BackgroundTask {
+        receiver: uninstall_task_rx,
+        kind: BackgroundTaskKind::UninstallingMod {
+            mod_info: mod_info.clone(),
+            rx: uninstall_progress_rx,
+            last_progress: None,
+        },
+    });
+
+    let wows_dir = { wows_data.read().build_dir.join("res_mods") };
+    let paths = { mod_info.mod_paths.lock().clone() };
+    for (i, file) in paths.iter().enumerate() {
+        if !file.starts_with(&wows_dir) {
+            continue;
+        }
+
+        eprintln!("deleting {}", file.display());
+        if file.is_dir() {
+            std::fs::remove_dir_all(file);
+        } else {
+            std::fs::remove_file(file);
+        }
+
+        let _ = uninstall_progress_tx.send(DownloadProgress {
+            downloaded: i as u64,
+            total: paths.len() as u64,
+        });
+    }
+
+    uninstall_task_tx.send(Ok(BackgroundTaskCompletion::ModUninstalled(mod_info))).unwrap();
+
+    Ok(())
+}
+
+pub fn start_mod_manager_thread(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, receiver: mpsc::Receiver<ModInfo>) -> mpsc::Receiver<BackgroundTask> {
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        while let Some(mod_info) = receiver.recv().ok() {
+            eprintln!("mod was changed: {:?}", mod_info.meta.name());
+
+            if mod_info.enabled {
+                eprintln!("installing mod: {:?}", mod_info.meta.name());
+                install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), tx.clone());
+            } else {
+                eprintln!("uninstalling mod: {:?}", mod_info.meta.name());
+                uninstall_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), tx.clone());
+            }
+        }
+    });
+
+    rx
 }
