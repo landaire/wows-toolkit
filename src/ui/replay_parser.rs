@@ -1,25 +1,31 @@
+use core::cell::RefCell;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     io::{BufWriter, Write},
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    rc::Rc,
+    sync::{atomic::AtomicBool, mpsc::Sender, Arc},
 };
 
 use crate::{
-    app::TimedMessage,
-    icons, update_background_task,
+    app::{ReplaySettings, Settings, TimedMessage},
+    icons,
+    task::{BackgroundTask, BackgroundTaskKind},
+    update_background_task,
     util::build_tomato_gg_url,
     wows_data::{load_replay, parse_replay, ShipIcon, WorldOfWarshipsData},
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{
-    mutex::Mutex, text::LayoutJob, Color32, ComboBox, FontId, Image, ImageSource, Label, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator, TextFormat, Vec2,
+    text::LayoutJob, Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator,
+    TextFormat, Vec2,
 };
-use egui_extras::{Column, TableBuilder, TableRow};
 
+use egui_extras::{Column, TableBuilder, TableRow};
+use egui_table::Table;
 use escaper::decode_html;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use tap::Pipe;
 use tracing::debug;
@@ -219,16 +225,28 @@ pub struct UiReport {
     self_player: Option<Arc<VehicleEntity>>,
     vehicle_reports: Vec<VehicleReport>,
     sorted: bool,
+    is_row_expanded: BTreeMap<u64, bool>,
+    constants: Arc<RwLock<serde_json::Value>>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    replay_sort: Arc<Mutex<SortOrder>>,
+    columns: Vec<ReplayColumn>,
+    row_heights: BTreeMap<u64, f32>,
+    background_task_sender: Sender<BackgroundTask>,
 }
 
 impl UiReport {
     fn new(
         replay_file: &ReplayFile,
         report: &BattleReport,
-        constants: &serde_json::Value,
-        wows_data: &WorldOfWarshipsData,
-        metadata_provider: &GameMetadataProvider,
+        constants: Arc<RwLock<serde_json::Value>>,
+        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+        replay_sort: Arc<Mutex<SortOrder>>,
+        background_task_sender: Sender<BackgroundTask>,
     ) -> Self {
+        let wows_data_inner = wows_data.read();
+        let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
+        let constants_inner = constants.read();
+
         let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
         let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
 
@@ -264,7 +282,7 @@ impl UiReport {
                 })
                 .unwrap_or_else(|| "unk".to_string());
 
-            let icon = ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), wows_data);
+            let icon = ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), &wows_data_inner);
 
             let name_color = if player.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
@@ -322,14 +340,14 @@ impl UiReport {
             // Actual damage done to other players
             let (damage, damage_text, damage_hover_text, damage_report) = results_info
                 .and_then(|info_array| {
-                    let total_damage_index = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
+                    let total_damage_index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
 
                     info_array[total_damage_index].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
                         // First pass over damage numbers: grab the longest description so that we can later format it
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
                                 info_array[idx]
                                     .as_number()
                                     .and_then(|number| number.as_u64())
@@ -343,7 +361,7 @@ impl UiReport {
                         let breakdowns: Vec<String> = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
                                 info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                     if num > 0 {
                                         let num = separate_number(num, Some(locale));
@@ -386,7 +404,7 @@ impl UiReport {
                     let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
                             info_array[idx]
                                 .as_number()
                                 .and_then(|number| number.as_u64())
@@ -400,7 +418,9 @@ impl UiReport {
                     let breakdowns: Vec<(u64, String)> = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner
+                                .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?
+                                .as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
@@ -497,11 +517,11 @@ impl UiReport {
                 num_skills,
                 highest_tier,
                 num_tier_1_skills,
-                hover_text: hover_text,
+                hover_text,
                 label_text: label,
             };
 
-            let (fires, floods, cits, crits) = constants
+            let (fires, floods, cits, crits) = constants_inner
                 .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/interactions")
                 .and_then(|interactions_idx| {
                     let mut fires = 0;
@@ -559,28 +579,28 @@ impl UiReport {
                         //     });
                         // }
 
-                        fires += constants
+                        fires += constants_inner
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        floods += constants
+                        floods += constants_inner
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        cits += constants
+                        cits += constants_inner
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "citadels").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        crits += constants
+                        crits += constants_inner
                             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
                             .as_array()
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default()))
@@ -592,7 +612,7 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let distance_traveled = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
+            let distance_traveled = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
                 let distance_idx = distance_idx.as_u64()? as usize;
                 results_info?[distance_idx].as_f64()
             });
@@ -636,11 +656,41 @@ impl UiReport {
             })
         });
 
+        let vehicle_reports = player_reports.collect();
+
+        drop(constants_inner);
+        drop(wows_data_inner);
+
         Self {
             match_timestamp,
-            vehicle_reports: player_reports.collect(),
+            vehicle_reports,
             self_player,
+            replay_sort,
+            wows_data,
+            constants,
+            is_row_expanded: Default::default(),
             sorted: false,
+            columns: vec![
+                ReplayColumn::Actions,
+                ReplayColumn::Name,
+                ReplayColumn::ShipName,
+                ReplayColumn::BaseXp,
+                ReplayColumn::RawXp,
+                ReplayColumn::ObservedDamage,
+                ReplayColumn::ActualDamage,
+                ReplayColumn::ReceivedDamage,
+                ReplayColumn::PotentialDamage,
+                ReplayColumn::SpottingDamage,
+                ReplayColumn::TimeLived,
+                ReplayColumn::Fires,
+                ReplayColumn::Floods,
+                ReplayColumn::Citadels,
+                ReplayColumn::Crits,
+                ReplayColumn::DistanceTraveled,
+                ReplayColumn::Skills,
+            ],
+            row_heights: Default::default(),
+            background_task_sender,
         }
     }
 
@@ -695,7 +745,612 @@ impl UiReport {
 
         self.sorted = true;
     }
+
+    fn update_visible_columns(&mut self, settings: &ReplaySettings) {
+        let optional_columns = [
+            (ReplayColumn::RawXp, settings.show_raw_xp),
+            (ReplayColumn::ObservedDamage, settings.show_observed_damage),
+            (ReplayColumn::Fires, settings.show_fires),
+            (ReplayColumn::Floods, settings.show_floods),
+            (ReplayColumn::Citadels, settings.show_citadels),
+            (ReplayColumn::Crits, settings.show_crits),
+            (ReplayColumn::ReceivedDamage, settings.show_received_damage),
+            (ReplayColumn::DistanceTraveled, settings.show_distance_traveled),
+        ];
+
+        let mut optional_columns: HashMap<ReplayColumn, bool> = optional_columns.iter().copied().collect();
+
+        let mut remove_columns = Vec::with_capacity(optional_columns.len());
+        // For each column in our existing set, check to see if it's been disabled.
+        // If so,
+        for (i, column) in self.columns.iter().enumerate() {
+            if optional_columns.contains_key(column) {
+                if let Some(false) = optional_columns.remove(column) {
+                    remove_columns.push(i);
+                }
+            }
+        }
+
+        // Remove columns in reverse order so that we don't invalidate indices
+        for i in remove_columns.into_iter().rev() {
+            self.columns.remove(i);
+        }
+
+        // The optional_columns set above is the remaining columns which are enabled,
+        // but not in the existing set, or disabled and not in the existing set. Add the former.
+        for (column, enabled) in optional_columns {
+            if enabled {
+                self.columns.push(column);
+            }
+        }
+
+        // Finally, sort the remaining columns by their order in the enum.
+        self.columns.sort_unstable_by_key(|column| *column as u8);
+    }
+
+    fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
+        let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
+        let expandedness = ui.ctx().animate_bool(Id::new(row_nr), is_expanded);
+
+        let Some(report) = self.vehicle_reports.get(row_nr as usize) else {
+            return;
+        };
+
+        let column = *self.columns.get(col_nr).expect("somehow ended up with zero columns?");
+        let mut change_expand = false;
+
+        let response = ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                // The first column always has the expand/collapse button
+                if col_nr == 1 {
+                    let (_, response) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::click());
+                    egui::collapsing_header::paint_default_icon(ui, expandedness, &response);
+                    if response.clicked() {
+                        change_expand = true;
+                    }
+                }
+
+                match column {
+                    ReplayColumn::Name => {
+                        // Add ship icon
+                        if let Some(icon) = report.icon.as_ref() {
+                            let image = Image::new(ImageSource::Bytes {
+                                uri: icon.path.clone().into(),
+                                // the icon size is <1k, this clone is fairly cheap
+                                bytes: icon.data.clone().into(),
+                            })
+                            .tint(report.color)
+                            .fit_to_exact_size((20.0, 20.0).into())
+                            .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
+
+                            ui.add(image).on_hover_text(&report.ship_species_text);
+                        } else {
+                            ui.label(&report.ship_species_text);
+                        }
+
+                        // Add division ID
+                        if let Some(div) = report.division_label.as_ref() {
+                            ui.label(div);
+                        }
+
+                        // Add player clan
+                        if let Some(clan_text) = report.clan_text.clone() {
+                            ui.label(clan_text);
+                        }
+
+                        // Add player name
+                        ui.label(report.name_text.clone());
+
+                        // Add icons for player properties
+                        if let Some(player) = report.vehicle.player() {
+                            // Hidden profile icon
+                            if player.is_hidden() {
+                                ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
+                            }
+
+                            // // Stream sniper icon
+                            // if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
+                            //     let hover_text = timestamps
+                            //         .iter()
+                            //         .map(|(name, timestamps)| {
+                            //             format!(
+                            //                 "Possible stream name: {}\nSeen: {} minutes after match start",
+                            //                 name,
+                            //                 timestamps
+                            //                     .iter()
+                            //                     .map(|ts| {
+                            //                         let delta = ts.signed_duration_since(match_timestamp);
+                            //                         delta.num_minutes()
+                            //                     })
+                            //                     .join(", ")
+                            //             )
+                            //         })
+                            //         .join("\n\n");
+                            //     ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
+                            // }
+
+                            let disconnect_hover_text = if player.did_disconnect() {
+                                Some("Player disconnected from the match")
+                            } else {
+                                None
+                            };
+                            if let Some(disconnect_text) = disconnect_hover_text {
+                                ui.label(icons::PLUGS).on_hover_text(disconnect_text);
+                            }
+                        }
+                    }
+                    ReplayColumn::BaseXp => {
+                        if let Some(base_xp_text) = report.base_xp_text.clone() {
+                            ui.label(base_xp_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::RawXp => {
+                        if let Some(raw_xp_text) = report.raw_xp_text.clone() {
+                            ui.label(raw_xp_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::ShipName => {
+                        ui.label(&report.ship_name);
+                    }
+                    ReplayColumn::ObservedDamage => {
+                        ui.label(&report.observed_damage_text);
+                    }
+                    ReplayColumn::ActualDamage => {
+                        if let Some(damage_text) = report.actual_damage_text.clone() {
+                            let response = ui.label(damage_text);
+                            if let Some(hover_text) = report.actual_damage_hover_text.clone() {
+                                response.on_hover_text(hover_text);
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::ReceivedDamage => {
+                        if let Some(received_damage_text) = report.received_damage_text.clone() {
+                            let response = ui.label(received_damage_text);
+                            if let Some(hover_text) = report.received_damage_hover_text.clone() {
+                                response.on_hover_text(hover_text);
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::PotentialDamage => {
+                        if let Some(damage_text) = report.potential_damage_text.clone() {
+                            let response = ui.label(damage_text);
+                            if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
+                                response.on_hover_text(hover_text);
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::SpottingDamage => {
+                        if let Some(spotting_damage_text) = report.spotting_damage_text.clone() {
+                            ui.label(spotting_damage_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::TimeLived => {
+                        if let Some(time_lived_text) = report.time_lived_text.clone() {
+                            ui.label(time_lived_text);
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Fires => {
+                        if let Some(fires) = report.fires {
+                            ui.label(fires.to_string());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Floods => {
+                        if let Some(floods) = report.floods {
+                            ui.label(floods.to_string());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Citadels => {
+                        if let Some(citadels) = report.citadels {
+                            ui.label(citadels.to_string());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Crits => {
+                        if let Some(crits) = report.crits {
+                            ui.label(crits.to_string());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::DistanceTraveled => {
+                        if let Some(distance) = report.distance_traveled {
+                            ui.label(format!("{:.2}km", distance));
+                        } else {
+                            ui.label("-");
+                        }
+                    }
+                    ReplayColumn::Skills => {
+                        let response = ui.label(report.skill_info.label_text.clone());
+                        if let Some(hover_text) = &report.skill_info.hover_text {
+                            response.on_hover_text(hover_text);
+                        }
+                    }
+                    ReplayColumn::Actions => {
+                        ui.menu_button(icons::DOTS_THREE, |ui| {
+                            if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
+                                let metadata_provider = self.metadata_provider();
+
+                                let url = build_ship_config_url(&report.vehicle, &metadata_provider);
+
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                                ui.close_menu();
+                            }
+
+                            if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
+                                let metadata_provider = self.metadata_provider();
+
+                                let url = build_ship_config_url(&report.vehicle, &metadata_provider);
+                                ui.output_mut(|output| output.copied_text = url);
+
+                                self.background_task_sender.send(BackgroundTask {
+                                    receiver: None,
+                                    kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                });
+
+                                ui.close_menu();
+                            }
+
+                            if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
+                                let metadata_provider = self.metadata_provider();
+
+                                let url = build_short_ship_config_url(&report.vehicle, &metadata_provider);
+                                ui.output_mut(|output| output.copied_text = url);
+                                self.background_task_sender.send(BackgroundTask {
+                                    receiver: None,
+                                    kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                });
+
+                                ui.close_menu();
+                            }
+
+                            ui.separator();
+
+                            if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
+                                if let Some(url) = build_tomato_gg_url(&report.vehicle) {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
+
+                                ui.close_menu();
+                            }
+
+                            if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
+                                if let Some(url) = build_wows_numbers_url(&report.vehicle) {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
+
+                                ui.close_menu();
+                            }
+
+                            ui.separator();
+
+                            if let Some(player) = report.vehicle.player() {
+                                if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
+                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("metadata.json".to_owned()),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty_meta,
+                                        })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+
+                                    self.background_task_sender
+                                        .send(BackgroundTask {
+                                            receiver: None,
+                                            kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                        })
+                                        .unwrap();
+
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+
+            // // Entity ID (debugging)
+            // if self.tab_state.settings.replay_settings.show_entity_id {
+            //     ui.col(|ui| {
+            //         ui.label(format!("{}", player_report.vehicle.id()));
+            //     });
+            // }
+
+            // Expanded content goes here
+            if 0.0 < expandedness {
+                match column {
+                    ReplayColumn::ActualDamage => {
+                        if let Some(damage_extended_info) = report.actual_damage_hover_text.clone() {
+                            ui.label(damage_extended_info);
+                        }
+                    }
+                    ReplayColumn::PotentialDamage => {
+                        if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
+                            ui.label(damage_extended_info);
+                        }
+                    }
+                    ReplayColumn::ReceivedDamage => {
+                        if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
+                            ui.label(damage_extended_info);
+                        }
+                    }
+                    _ => {
+                        // Do nothing
+                    }
+                }
+            }
+        });
+
+        if change_expand {
+            // Toggle.
+            // Note: we use a map instead of a set so that we can animate opening and closing of each column.
+            self.is_row_expanded.insert(row_nr, !is_expanded);
+            self.row_heights.remove(&row_nr);
+        }
+
+        let cell_height = response.response.rect.height();
+        let previous_height = self.row_heights.entry(row_nr).or_insert(cell_height);
+
+        if *previous_height < cell_height {
+            *previous_height = cell_height;
+        }
+    }
+
+    fn metadata_provider(&self) -> Arc<GameMetadataProvider> {
+        self.wows_data.read().game_metadata.as_ref().expect("no metadata provider?").clone()
+    }
 }
+
+impl egui_table::TableDelegate for UiReport {
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell_inf: &egui_table::HeaderCellInfo) {
+        let egui_table::HeaderCellInfo {
+            group_index, col_range, row_nr, ..
+        } = cell_inf;
+
+        let margin = 4.0;
+
+        egui::Frame::none().inner_margin(Margin::symmetric(margin, 0.0)).show(ui, |ui| {
+            if *row_nr != 0 {
+                return;
+            }
+
+            let column = *self.columns.get(*group_index).expect("somehow ended up with zero columns?");
+            match column {
+                ReplayColumn::Actions => {
+                    ui.label("Actions");
+                }
+                ReplayColumn::Name => {
+                    if ui
+                        .strong(column_name_with_sort_order("Player Name", false, *self.replay_sort.lock(), SortColumn::Name))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Name);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::BaseXp => {
+                    if ui
+                        .strong(column_name_with_sort_order("Base XP", false, *self.replay_sort.lock(), SortColumn::BaseXp))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::BaseXp);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::RawXp => {
+                    if ui
+                        .strong(column_name_with_sort_order("Raw XP", false, *self.replay_sort.lock(), SortColumn::RawXp))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::RawXp);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ShipName => {
+                    if ui
+                        .strong(column_name_with_sort_order("Ship Name", false, *self.replay_sort.lock(), SortColumn::ShipName))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ShipName);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ObservedDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Observed Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ObservedDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ObservedDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ActualDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Actual Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ActualDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ActualDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::SpottingDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Spotting Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::SpottingDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::SpottingDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::PotentialDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Potential Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::PotentialDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::PotentialDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::TimeLived => {
+                    ui.strong("Time Lived");
+                }
+                ReplayColumn::Fires => {
+                    if ui
+                        .strong(column_name_with_sort_order("Fires", false, *self.replay_sort.lock(), SortColumn::Fires))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Fires);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Floods => {
+                    if ui
+                        .strong(column_name_with_sort_order("Floods", false, *self.replay_sort.lock(), SortColumn::Floods))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Floods);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Citadels => {
+                    if ui
+                        .strong(column_name_with_sort_order("Citadels", false, *self.replay_sort.lock(), SortColumn::Citadels))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Citadels);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Crits => {
+                    if ui
+                        .strong(column_name_with_sort_order("Crits", false, *self.replay_sort.lock(), SortColumn::Crits))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Crits);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::ReceivedDamage => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Received Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ReceivedDamage,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::ReceivedDamage);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::DistanceTraveled => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Distance Traveled",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::DistanceTraveled,
+                        ))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::DistanceTraveled);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Skills => {
+                    ui.strong("Skills");
+                }
+            }
+        });
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell_info: &egui_table::CellInfo) {
+        let egui_table::CellInfo { row_nr, col_nr, .. } = *cell_info;
+
+        if row_nr % 2 == 1 {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
+        }
+
+        egui::Frame::none().inner_margin(Margin::symmetric(4.0, 4.0)).show(ui, |ui| {
+            self.cell_content_ui(row_nr, col_nr, ui);
+        });
+    }
+
+    fn row_top_offset(&self, ctx: &Context, _table_id: Id, row_nr: u64) -> f32 {
+        let fully_expanded_row_height = 100.0;
+
+        let offset = self
+            .is_row_expanded
+            .range(0..row_nr)
+            .map(|(expanded_row_nr, expanded)| {
+                let how_expanded = ctx.animate_bool(Id::new(expanded_row_nr), *expanded);
+                how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
+            })
+            .sum::<f32>()
+            + row_nr as f32 * ROW_HEIGHT;
+
+        // let offset = self.row_heights.range(0..row_nr).map(|(row, height)| *height).sum::<f32>() + row_nr as f32 * ROW_HEIGHT;
+
+        offset
+    }
+}
+
+const ROW_HEIGHT: f32 = 28.0;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SortOrder {
@@ -725,13 +1380,15 @@ impl SortOrder {
         }
     }
 
-    fn update_column(&mut self, new_column: SortColumn) {
+    fn update_column(&mut self, new_column: SortColumn) -> SortOrder {
         match self {
             SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) if *sort_column == new_column => {
                 self.toggle();
             }
             _ => *self = SortOrder::Desc(new_column),
         }
+
+        self.clone()
     }
 
     fn column(&self) -> SortColumn {
@@ -741,7 +1398,30 @@ impl SortOrder {
     }
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// All columns
+pub enum ReplayColumn {
+    Actions,
+    Name,
+    ShipName,
+    BaseXp,
+    RawXp,
+    ObservedDamage,
+    ActualDamage,
+    ReceivedDamage,
+    SpottingDamage,
+    PotentialDamage,
+    TimeLived,
+    Fires,
+    Floods,
+    Citadels,
+    Crits,
+    DistanceTraveled,
+    Skills,
+}
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+/// Columns which are sortable
 pub enum SortColumn {
     Name,
     BaseXp,
@@ -822,9 +1502,22 @@ impl Replay {
 
         Ok(report)
     }
-    pub fn build_ui_report(&mut self, game_constants: &serde_json::Value, wows_data: &WorldOfWarshipsData, metadata_provider: &GameMetadataProvider) {
+    pub fn build_ui_report(
+        &mut self,
+        game_constants: Arc<RwLock<serde_json::Value>>,
+        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+        replay_sort: Arc<Mutex<SortOrder>>,
+        background_task_sender: Sender<BackgroundTask>,
+    ) {
         if let Some(battle_report) = &self.battle_report {
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, game_constants, wows_data, metadata_provider))
+            self.ui_report = Some(UiReport::new(
+                &self.replay_file,
+                battle_report,
+                game_constants,
+                wows_data,
+                replay_sort,
+                background_task_sender,
+            ))
         }
     }
 }
@@ -857,249 +1550,269 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_player_list(&self, ui_report: &mut UiReport, report: &BattleReport, ui: &mut egui::Ui) {
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto().clip(true))
-            .column(Column::initial(75.0).clip(true))
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_raw_xp {
-                    table.column(Column::initial(85.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_entity_id {
-                    table.column(Column::initial(120.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .column(Column::initial(120.0).clip(true))
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_observed_damage {
-                    table.column(Column::initial(135.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            // Actual damage
-            .column(Column::initial(130.0).clip(true))
-            // Received damage
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_received_damage {
-                    table.column(Column::initial(130.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            // Potential damage
-            .column(Column::initial(135.0).clip(true))
-            // Spotting damage
-            .column(Column::initial(135.0).clip(true))
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_distance_traveled {
-                    // Distance Traveled
-                    table.column(Column::initial(80.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_fires {
-                    // Fires
-                    table.column(Column::initial(80.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_floods {
-                    // Floods
-                    table.column(Column::initial(80.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_citadels {
-                    // Citadels
-                    table.column(Column::initial(80.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            .pipe(|table| {
-                if self.tab_state.settings.replay_settings.show_crits {
-                    // Crits
-                    table.column(Column::initial(80.0).clip(true))
-                } else {
-                    table
-                }
-            })
-            // Time lived
-            .column(Column::initial(110.0).clip(true))
-            // Allocated skills
-            .column(Column::initial(120.0).clip(true))
-            // Actions
-            .column(Column::remainder())
-            .min_scrolled_height(0.0);
-
-        let mut replay_sort = self.tab_state.replay_sort.lock().expect("could not lock replay sort");
         if !ui_report.sorted {
+            let replay_sort = self.tab_state.replay_sort.lock();
             ui_report.sort_players(*replay_sort);
         }
-        table
-            .header(20.0, |mut header| {
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Player Name", false, *replay_sort, SortColumn::Name)).clicked() {
-                        replay_sort.update_column(SortColumn::Name);
-                        ui_report.sort_players(*replay_sort);
-                    };
-                });
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Base XP", false, *replay_sort, SortColumn::BaseXp)).clicked() {
-                        replay_sort.update_column(SortColumn::BaseXp);
-                        ui_report.sort_players(*replay_sort);
-                    }
-                });
-                if self.tab_state.settings.replay_settings.show_raw_xp {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Raw XP",true, *replay_sort, SortColumn::RawXp)).on_hover_text("Raw XP before win modifiers are applied.").clicked() {
-                            replay_sort.update_column(SortColumn::RawXp);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                if self.tab_state.settings.replay_settings.show_entity_id {
-                    header.col(|ui| {
-                        ui.strong("ID");
-                    });
-                }
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Ship Name", false, *replay_sort, SortColumn::ShipName)).clicked() {
-                        replay_sort.update_column(SortColumn::ShipName);
-                        ui_report.sort_players(*replay_sort);
-                    }
-                });
-                if self.tab_state.settings.replay_settings.show_observed_damage {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Observed Damage", true, *replay_sort, SortColumn::ObservedDamage)).on_hover_text(
-                            "Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::ObservedDamage);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Actual Damage", true, *replay_sort, SortColumn::ActualDamage)).on_hover_text(
-                        "Actual damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    ).clicked() {
-                            replay_sort.update_column(SortColumn::ActualDamage);
-                            ui_report.sort_players(*replay_sort);
-                    }
-                });
-                if self.tab_state.settings.replay_settings.show_received_damage{
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Recv Damage", true, *replay_sort, SortColumn::ReceivedDamage)).on_hover_text(
-                            "Total damage received. This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::ReceivedDamage);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Potential Damage", true, *replay_sort, SortColumn::PotentialDamage)).on_hover_text(
-                        "Potential damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    ).clicked() {
-                        replay_sort.update_column(SortColumn::PotentialDamage);
-                        ui_report.sort_players(*replay_sort);
-                    }
-                });
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Spotting Damage", true, *replay_sort, SortColumn::SpottingDamage)).on_hover_text(
-                        "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
-                    ).clicked() {
-                            replay_sort.update_column(SortColumn::SpottingDamage);
-                            ui_report.sort_players(*replay_sort);
-                    }
-                });
-                if self.tab_state.settings.replay_settings.show_distance_traveled {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Dist. Traveled", true, *replay_sort, SortColumn::DistanceTraveled)).on_hover_text(
-                            "This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::DistanceTraveled);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                if self.tab_state.settings.replay_settings.show_fires {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Fires", true, *replay_sort, SortColumn::Fires)).on_hover_text(
-                            "This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::Fires);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                if self.tab_state.settings.replay_settings.show_floods {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Floods", true, *replay_sort, SortColumn::Floods)).on_hover_text(
-                            "This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::Floods);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
 
-                }
-                if self.tab_state.settings.replay_settings.show_citadels{
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Cits", true, *replay_sort, SortColumn::Citadels)).on_hover_text(
-                            "This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::Citadels);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                if self.tab_state.settings.replay_settings.show_crits {
-                    header.col(|ui| {
-                        if ui.strong(column_name_with_sort_order("Crits", true, *replay_sort, SortColumn::Crits )).on_hover_text(
-                            "Critical Module Hits. This column may break between patches because the data format is absolute junk and undocumented.",
-                        ).clicked() {
-                            replay_sort.update_column(SortColumn::Crits);
-                            ui_report.sort_players(*replay_sort);
-                        }
-                    });
-                }
-                header.col(|ui| {
-                    if ui.strong(column_name_with_sort_order("Time Lived", false, *replay_sort, SortColumn::TimeLived)).clicked() {
-                        replay_sort.update_column(SortColumn::TimeLived);
-                        ui_report.sort_players(*replay_sort);
-                    }
-                });
-                header.col(|ui| {
-                    ui.strong("Allocated Skills");
-                });
-                header.col(|ui| {
-                    ui.strong("Actions");
-                });
-            })
-            .body(|mut body| {
-                for player_report in &ui_report.vehicle_reports {
+        ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
 
-                    body.row(30.0, |ui| {
-                        self.build_player_row(ui_report, player_report, ui);
-                    });
-                }
-            });
+        let mut columns = vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
+        columns[ReplayColumn::Actions as usize] = egui_table::Column::new(35.0).resizable(false);
+
+        let table = egui_table::Table::new()
+            .id_salt("replay_player_list")
+            .num_rows(ui_report.vehicle_reports.len() as u64)
+            .columns(columns)
+            .num_sticky_cols(2)
+            .headers([
+                egui_table::HeaderRow {
+                    height: 14.0f32,
+                    groups: Default::default(),
+                },
+                egui_table::HeaderRow::new(14.0f32),
+            ])
+            .auto_size_mode(egui_table::AutoSizeMode::default());
+        table.show(ui, ui_report);
+        // let table = TableBuilder::new(ui)
+        //     .striped(true)
+        //     .resizable(true)
+        //     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        //     .column(Column::auto().clip(true))
+        //     .column(Column::initial(75.0).clip(true))
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_raw_xp {
+        //             table.column(Column::initial(85.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_entity_id {
+        //             table.column(Column::initial(120.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .column(Column::initial(120.0).clip(true))
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_observed_damage {
+        //             table.column(Column::initial(135.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     // Actual damage
+        //     .column(Column::initial(130.0).clip(true))
+        //     // Received damage
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_received_damage {
+        //             table.column(Column::initial(130.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     // Potential damage
+        //     .column(Column::initial(135.0).clip(true))
+        //     // Spotting damage
+        //     .column(Column::initial(135.0).clip(true))
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_distance_traveled {
+        //             // Distance Traveled
+        //             table.column(Column::initial(80.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_fires {
+        //             // Fires
+        //             table.column(Column::initial(80.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_floods {
+        //             // Floods
+        //             table.column(Column::initial(80.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_citadels {
+        //             // Citadels
+        //             table.column(Column::initial(80.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     .pipe(|table| {
+        //         if self.tab_state.settings.replay_settings.show_crits {
+        //             // Crits
+        //             table.column(Column::initial(80.0).clip(true))
+        //         } else {
+        //             table
+        //         }
+        //     })
+        //     // Time lived
+        //     .column(Column::initial(110.0).clip(true))
+        //     // Allocated skills
+        //     .column(Column::initial(120.0).clip(true))
+        //     // Actions
+        //     .column(Column::remainder())
+        //     .min_scrolled_height(0.0);
+
+        // table
+        //     .header(20.0, |mut header| {
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Player Name", false, *replay_sort, SortColumn::Name)).clicked() {
+        //                 replay_sort.update_column(SortColumn::Name);
+        //                 ui_report.sort_players(*replay_sort);
+        //             };
+        //         });
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Base XP", false, *replay_sort, SortColumn::BaseXp)).clicked() {
+        //                 replay_sort.update_column(SortColumn::BaseXp);
+        //                 ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         if self.tab_state.settings.replay_settings.show_raw_xp {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Raw XP",true, *replay_sort, SortColumn::RawXp)).on_hover_text("Raw XP before win modifiers are applied.").clicked() {
+        //                     replay_sort.update_column(SortColumn::RawXp);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         if self.tab_state.settings.replay_settings.show_entity_id {
+        //             header.col(|ui| {
+        //                 ui.strong("ID");
+        //             });
+        //         }
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Ship Name", false, *replay_sort, SortColumn::ShipName)).clicked() {
+        //                 replay_sort.update_column(SortColumn::ShipName);
+        //                 ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         if self.tab_state.settings.replay_settings.show_observed_damage {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Observed Damage", true, *replay_sort, SortColumn::ObservedDamage)).on_hover_text(
+        //                     "Observed damage reflects only damage you witnessed (i.e. victim was visible on your screen). This value may be lower than actual damage.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::ObservedDamage);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Actual Damage", true, *replay_sort, SortColumn::ActualDamage)).on_hover_text(
+        //                 "Actual damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+        //             ).clicked() {
+        //                     replay_sort.update_column(SortColumn::ActualDamage);
+        //                     ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         if self.tab_state.settings.replay_settings.show_received_damage{
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Recv Damage", true, *replay_sort, SortColumn::ReceivedDamage)).on_hover_text(
+        //                     "Total damage received. This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::ReceivedDamage);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Potential Damage", true, *replay_sort, SortColumn::PotentialDamage)).on_hover_text(
+        //                 "Potential damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+        //             ).clicked() {
+        //                 replay_sort.update_column(SortColumn::PotentialDamage);
+        //                 ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Spotting Damage", true, *replay_sort, SortColumn::SpottingDamage)).on_hover_text(
+        //                 "Spotting damage seen from battle results. May not be present in the replay file if you left the game before it ended. This column may break between patches because the data format is absolute junk and undocumented.",
+        //             ).clicked() {
+        //                     replay_sort.update_column(SortColumn::SpottingDamage);
+        //                     ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         if self.tab_state.settings.replay_settings.show_distance_traveled {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Dist. Traveled", true, *replay_sort, SortColumn::DistanceTraveled)).on_hover_text(
+        //                     "This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::DistanceTraveled);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         if self.tab_state.settings.replay_settings.show_fires {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Fires", true, *replay_sort, SortColumn::Fires)).on_hover_text(
+        //                     "This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::Fires);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         if self.tab_state.settings.replay_settings.show_floods {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Floods", true, *replay_sort, SortColumn::Floods)).on_hover_text(
+        //                     "This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::Floods);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+
+        //         }
+        //         if self.tab_state.settings.replay_settings.show_citadels{
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Cits", true, *replay_sort, SortColumn::Citadels)).on_hover_text(
+        //                     "This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::Citadels);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         if self.tab_state.settings.replay_settings.show_crits {
+        //             header.col(|ui| {
+        //                 if ui.strong(column_name_with_sort_order("Crits", true, *replay_sort, SortColumn::Crits )).on_hover_text(
+        //                     "Critical Module Hits. This column may break between patches because the data format is absolute junk and undocumented.",
+        //                 ).clicked() {
+        //                     replay_sort.update_column(SortColumn::Crits);
+        //                     ui_report.sort_players(*replay_sort);
+        //                 }
+        //             });
+        //         }
+        //         header.col(|ui| {
+        //             if ui.strong(column_name_with_sort_order("Time Lived", false, *replay_sort, SortColumn::TimeLived)).clicked() {
+        //                 replay_sort.update_column(SortColumn::TimeLived);
+        //                 ui_report.sort_players(*replay_sort);
+        //             }
+        //         });
+        //         header.col(|ui| {
+        //             ui.strong("Allocated Skills");
+        //         });
+        //         header.col(|ui| {
+        //             ui.strong("Actions");
+        //         });
+        //     })
+        //     .body(|mut body| {
+        //         for player_report in &ui_report.vehicle_reports {
+
+        //             body.row(30.0, |ui| {
+        //                 self.build_player_row(ui_report, player_report, ui);
+        //             });
+        //         }
+        //     });
     }
 
     fn build_player_row(&self, ui_report: &UiReport, player_report: &VehicleReport, mut ui: TableRow<'_, '_>) {
@@ -1733,7 +2446,13 @@ impl ToolkitTabViewer<'_> {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                                 update_background_task!(
                                     self.tab_state.background_tasks,
-                                    load_replay(Arc::clone(&self.tab_state.game_constants), Arc::clone(wows_data), replay.clone())
+                                    load_replay(
+                                        Arc::clone(&self.tab_state.game_constants),
+                                        Arc::clone(wows_data),
+                                        replay.clone(),
+                                        Arc::clone(&self.tab_state.replay_sort),
+                                        self.tab_state.background_task_sender.clone(),
+                                    )
                                 );
                             }
                         }
@@ -1762,7 +2481,9 @@ impl ToolkitTabViewer<'_> {
                                 parse_replay(
                                     Arc::clone(&self.tab_state.game_constants),
                                     Arc::clone(wows_data),
-                                    self.tab_state.settings.current_replay_path.clone()
+                                    self.tab_state.settings.current_replay_path.clone(),
+                                    Arc::clone(&self.tab_state.replay_sort),
+                                    self.tab_state.background_task_sender.clone(),
                                 )
                             );
                         }

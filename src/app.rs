@@ -1,3 +1,4 @@
+use core::cell::RefCell;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
@@ -5,6 +6,7 @@ use std::{
     error::Error,
     path::{Path, PathBuf},
     process::Command,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender, TryRecvError},
@@ -329,6 +331,7 @@ pub enum NotifyFileEvent {
     TempArenaInfoCreated(PathBuf),
 }
 
+#[derive(Clone)]
 pub struct TimedMessage {
     pub message: String,
     pub expiration: Instant,
@@ -419,7 +422,7 @@ pub struct TabState {
     pub markdown_cache: CommonMarkCache,
 
     #[serde(default)]
-    pub replay_sort: std::sync::Mutex<replay_parser::SortOrder>,
+    pub replay_sort: Arc<parking_lot::Mutex<replay_parser::SortOrder>>,
 
     #[serde(skip)]
     pub game_constants: Arc<RwLock<serde_json::Value>>,
@@ -435,13 +438,16 @@ pub struct TabState {
     pub mod_action_receiver: Option<Receiver<ModInfo>>,
 
     #[serde(skip)]
-    pub mod_update_receiver: Option<Receiver<BackgroundTask>>,
+    pub background_task_receiver: Receiver<BackgroundTask>,
+    #[serde(skip)]
+    pub background_task_sender: Sender<BackgroundTask>,
 }
 
 impl Default for TabState {
     fn default() -> Self {
         let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json")).expect("failed to parse constants JSON");
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
+        let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
             world_of_warships_data: None,
             filter: Default::default(),
@@ -472,7 +478,8 @@ impl Default for TabState {
             mod_manager_info: Default::default(),
             mod_action_sender,
             mod_action_receiver: Some(mod_action_receiver),
-            mod_update_receiver: None,
+            background_task_receiver,
+            background_task_sender,
         }
     }
 }
@@ -502,7 +509,13 @@ impl TabState {
                                             if let Some(wows_data) = self.world_of_warships_data.as_ref() {
                                                 update_background_task!(
                                                     self.background_tasks,
-                                                    load_replay(Arc::clone(&self.game_constants), Arc::clone(wows_data), replay)
+                                                    load_replay(
+                                                        Arc::clone(&self.game_constants),
+                                                        Arc::clone(wows_data),
+                                                        replay,
+                                                        Arc::clone(&self.replay_sort),
+                                                        self.background_task_sender.clone()
+                                                    )
                                                 );
                                             }
                                         }
@@ -639,7 +652,7 @@ impl TabState {
         });
 
         BackgroundTask {
-            receiver: rx,
+            receiver: rx.into(),
             kind: BackgroundTaskKind::LoadingData,
         }
     }
@@ -755,7 +768,7 @@ impl WowsToolkitApp {
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         // Try to update mod update tasks
-        if let Some(new_task) = self.tab_state.mod_update_receiver.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        if let Some(new_task) = self.tab_state.background_task_receiver.try_recv().ok() {
             self.tab_state.background_tasks.push(new_task);
         }
 
@@ -807,10 +820,19 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::DownloadingMod { mod_info, rx, last_progress } => {
                                 // do nothing
                             }
+                            BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
+                                self.tab_state.timed_message.write().replace(timed_message.clone());
+                            }
+                            BackgroundTaskKind::OpenFileViewer(plaintext_file_viewer) => {
+                                self.tab_state.file_viewer.lock().push(plaintext_file_viewer.clone());
+                            }
                         }
 
                         match result {
                             Ok(data) => match data {
+                                BackgroundTaskCompletion::NoReceiver => {
+                                    // do nothing
+                                }
                                 BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
                                     let replays_dir = wows_data.replays_dir.clone();
                                     if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
@@ -819,11 +841,12 @@ impl WowsToolkitApp {
                                         let wows_data = Arc::new(RwLock::new(wows_data));
                                         self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
 
-                                        self.tab_state.mod_update_receiver = Some(task::start_mod_manager_thread(
+                                        task::start_mod_manager_thread(
                                             Arc::clone(&self.runtime),
                                             wows_data,
                                             self.tab_state.mod_action_receiver.take().unwrap(),
-                                        ));
+                                            self.tab_state.background_task_sender.clone(),
+                                        );
                                     }
                                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                                     self.tab_state.replay_files = replays;
@@ -1089,7 +1112,9 @@ impl WowsToolkitApp {
                         parse_replay(
                             Arc::clone(&self.tab_state.game_constants),
                             Arc::clone(wows_data),
-                            self.tab_state.settings.current_replay_path.clone()
+                            self.tab_state.settings.current_replay_path.clone(),
+                            Arc::clone(&self.tab_state.replay_sort),
+                            self.tab_state.background_task_sender.clone(),
                         )
                     );
                 }

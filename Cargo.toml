@@ -67,6 +67,7 @@ http-body-util = "0.1.2"
 toml = "0.8.19"
 tar = "0.4.43"
 scopeguard = "1.2.0"
+egui_table = "0.2.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -95,7 +96,7 @@ debug = true
 
 [patch.crates-io]
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
-wows_replays = { path = "../wows-replays/parser" }
+# wows_replays = { path = "../wows-replays/parser" }
 # wowsunpack = { path = "../wowsunpack" }
 
 # If you want to use the bleeding edge version of egui and eframe:

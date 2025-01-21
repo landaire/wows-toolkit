@@ -10,6 +10,7 @@ pub enum FileType {
     Image { ext: String, contents: Vec<u8> },
 }
 
+#[derive(Clone)]
 pub struct PlaintextFileViewer {
     pub title: Arc<String>,
     pub file_info: Arc<Mutex<FileType>>,

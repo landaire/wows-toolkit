@@ -38,9 +38,11 @@ use wowsunpack::{
 use zip::ZipArchive;
 
 use crate::{
+    app::TimedMessage,
     build_tracker,
     error::ToolkitError,
     game_params::load_game_params,
+    plaintext_viewer::PlaintextFileViewer,
     twitch::{self, Token, TwitchState, TwitchUpdate},
     ui::{
         mod_manager::{ModInfo, ModManagerIndex},
@@ -58,7 +60,7 @@ pub struct DownloadProgress {
 }
 
 pub struct BackgroundTask {
-    pub receiver: mpsc::Receiver<Result<BackgroundTaskCompletion, ToolkitError>>,
+    pub receiver: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, ToolkitError>>>,
     pub kind: BackgroundTaskKind,
 }
 
@@ -87,12 +89,18 @@ pub enum BackgroundTaskKind {
         rx: mpsc::Receiver<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
     },
+    UpdateTimedMessage(TimedMessage),
+    OpenFileViewer(PlaintextFileViewer),
 }
 
 impl BackgroundTask {
     /// TODO: has a bug currently where if multiple tasks are running at the same time, the message looks a bit wonky
     pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
-        match self.receiver.try_recv() {
+        if self.receiver.is_none() {
+            return Some(Ok(BackgroundTaskCompletion::NoReceiver));
+        }
+
+        match self.receiver.as_ref().unwrap().try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => {
                 match &mut self.kind {
@@ -166,6 +174,9 @@ impl BackgroundTask {
                             ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Uninstalling {}", mod_info.meta.name())));
                         }
                     }
+                    BackgroundTaskKind::UpdateTimedMessage(_) | BackgroundTaskKind::OpenFileViewer(_) => {
+                        // do nothing
+                    }
                 }
                 None
             }
@@ -190,6 +201,7 @@ pub enum BackgroundTaskCompletion {
     ModDownloaded(ModInfo),
     ModInstalled(ModInfo),
     ModUninstalled(ModInfo),
+    NoReceiver,
 }
 
 impl std::fmt::Debug for BackgroundTaskCompletion {
@@ -209,6 +221,7 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::ModDownloaded(modi) => f.debug_struct("ModDownloaded").field("0", modi).finish(),
             Self::ModInstalled(modi) => f.debug_struct("ModInstalled").field("0", modi).finish(),
             Self::ModUninstalled(modi) => f.debug_struct("ModUninstalled").field("0", modi).finish(),
+            Self::NoReceiver => f.debug_struct("NoReceiver").finish(),
         }
     }
 }
@@ -466,7 +479,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
     });
 
     BackgroundTask {
-        receiver: rx,
+        receiver: rx.into(),
         kind: BackgroundTaskKind::Updating {
             rx: progress_rx,
             last_progress: None,
@@ -783,7 +796,7 @@ pub fn start_populating_player_inspector(
     });
 
     BackgroundTask {
-        receiver: rx,
+        receiver: rx.into(),
         kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays,
     }
 }
@@ -805,13 +818,13 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     std::thread::spawn(move || {
         let result = serde_json::from_slice(&constants)
             .context("failed to deserialize constants file")
-            .map(|constants| BackgroundTaskCompletion::ConstantsLoaded(constants))
+            .map(BackgroundTaskCompletion::ConstantsLoaded)
             .map_err(|err| err.into());
 
         tx.send(result);
     });
     BackgroundTask {
-        receiver: rx,
+        receiver: rx.into(),
         kind: BackgroundTaskKind::LoadingConstants,
     }
 }
@@ -819,16 +832,16 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
 pub fn load_mods_db() -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mods_db = std::fs::read_to_string("..\\mods.toml").unwrap();
+        let mods_db = std::fs::read_to_string("../mods.toml").unwrap();
         let result = toml::from_str::<ModManagerIndex>(&mods_db)
             .context("failed to deserialize mods db")
-            .map(|constants| BackgroundTaskCompletion::ModDatabaseLoaded(constants))
+            .map(BackgroundTaskCompletion::ModDatabaseLoaded)
             .map_err(|err| err.into());
 
         tx.send(result);
     });
     BackgroundTask {
-        receiver: rx,
+        receiver: rx.into(),
         kind: BackgroundTaskKind::LoadingModDatabase,
     }
 }
@@ -975,7 +988,7 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
     let (download_task_tx, download_task_rx) = mpsc::channel();
     let (download_progress_tx, download_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
-        receiver: download_task_rx,
+        receiver: download_task_rx.into(),
         kind: BackgroundTaskKind::DownloadingMod {
             mod_info: mod_info.clone(),
             rx: download_progress_rx,
@@ -993,7 +1006,7 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
             let (install_task_tx, install_task_rx) = mpsc::channel();
             let (install_progress_tx, install_progress_rx) = mpsc::channel();
             let _ = tx.send(BackgroundTask {
-                receiver: install_task_rx,
+                receiver: install_task_rx.into(),
                 kind: if mod_info.enabled {
                     BackgroundTaskKind::InstallingMod {
                         mod_info: mod_info.clone(),
@@ -1025,7 +1038,7 @@ fn uninstall_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsDat
     let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
     let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
-        receiver: uninstall_task_rx,
+        receiver: uninstall_task_rx.into(),
         kind: BackgroundTaskKind::UninstallingMod {
             mod_info: mod_info.clone(),
             rx: uninstall_progress_rx,
@@ -1058,22 +1071,23 @@ fn uninstall_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsDat
     Ok(())
 }
 
-pub fn start_mod_manager_thread(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, receiver: mpsc::Receiver<ModInfo>) -> mpsc::Receiver<BackgroundTask> {
-    let (tx, rx) = mpsc::channel();
-
+pub fn start_mod_manager_thread(
+    runtime: Arc<Runtime>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    receiver: mpsc::Receiver<ModInfo>,
+    background_task_sender: mpsc::Sender<BackgroundTask>,
+) {
     std::thread::spawn(move || {
-        while let Some(mod_info) = receiver.recv().ok() {
+        while let Ok(mod_info) = receiver.recv() {
             eprintln!("mod was changed: {:?}", mod_info.meta.name());
 
             if mod_info.enabled {
                 eprintln!("installing mod: {:?}", mod_info.meta.name());
-                install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), tx.clone());
+                install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
             } else {
                 eprintln!("uninstalling mod: {:?}", mod_info.meta.name());
-                uninstall_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), tx.clone());
+                uninstall_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
             }
         }
     });
-
-    rx
 }

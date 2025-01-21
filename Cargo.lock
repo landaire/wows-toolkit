@@ -1493,6 +1493,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_table"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc957dce337da3794d73f0c20a998e205850ed8a0fa1410432bddf31133667f8"
+dependencies = [
+ "egui",
+ "serde",
+ "vec1",
+]
+
+[[package]]
 name = "ehttp"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5490,6 +5501,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
+name = "vec1"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab68b56840f69efb0fefbe3ab6661499217ffdc58e2eef7c3f6f69835386322"
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6123,6 +6140,8 @@ dependencies = [
 [[package]]
 name = "wows_replays"
 version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde514201e6eff667550defdea15b9d049942e936c5840cbfec750a60b52b802"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -6160,6 +6179,7 @@ dependencies = [
  "egui_commonmark",
  "egui_dock",
  "egui_extras",
+ "egui_table",
  "escaper",
  "flate2",
  "gettext",
