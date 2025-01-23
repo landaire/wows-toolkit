@@ -801,7 +801,7 @@ impl UiReport {
         let column = *self.columns.get(col_nr).expect("somehow ended up with zero columns?");
         let mut change_expand = false;
 
-        let response = ui.vertical(|ui| {
+        let mut inner_response = ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 // The first column always has the expand/collapse button
                 if col_nr == 1 {
@@ -1103,6 +1103,16 @@ impl UiReport {
             }
         });
 
+        if ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary) && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default())) {
+            change_expand = true;
+        }
+        // if input.pointer.any_click() && response.rect.contains(input.pointer.interact_pos().unwrap_or_default()) {
+        //     change_expand = true;
+        // }
+        // if ui.interact(inner_response.response.rect, inner_response.response.id, Sense::click()).double_clicked() {
+        //     change_expand = true;
+        // }
+
         if change_expand {
             // Toggle.
             // Note: we use a map instead of a set so that we can animate opening and closing of each column.
@@ -1110,7 +1120,7 @@ impl UiReport {
             self.row_heights.remove(&row_nr);
         }
 
-        let cell_height = response.response.rect.height();
+        let cell_height = inner_response.response.rect.height();
         let previous_height = self.row_heights.entry(row_nr).or_insert(cell_height);
 
         if *previous_height < cell_height {
@@ -1334,8 +1344,6 @@ impl egui_table::TableDelegate for UiReport {
     }
 
     fn row_top_offset(&self, ctx: &Context, _table_id: Id, row_nr: u64) -> f32 {
-        let fully_expanded_row_height = 100.0;
-
         let offset = self
             .is_row_expanded
             .range(0..row_nr)
@@ -1345,8 +1353,6 @@ impl egui_table::TableDelegate for UiReport {
             })
             .sum::<f32>()
             + row_nr as f32 * ROW_HEIGHT;
-
-        // let offset = self.row_heights.range(0..row_nr).map(|(row, height)| *height).sum::<f32>() + row_nr as f32 * ROW_HEIGHT;
 
         offset
     }
