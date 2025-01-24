@@ -18,8 +18,8 @@ use crate::{
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{
-    text::LayoutJob, Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator,
-    TextFormat, Vec2,
+    text::LayoutJob, Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, InnerResponse, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText,
+    Sense, Separator, TextFormat, Vec2,
 };
 
 use egui_extras::{Column, TableBuilder, TableRow};
@@ -232,6 +232,7 @@ pub struct UiReport {
     columns: Vec<ReplayColumn>,
     row_heights: BTreeMap<u64, f32>,
     background_task_sender: Sender<BackgroundTask>,
+    selected_row: Option<(u64, bool)>,
 }
 
 impl UiReport {
@@ -693,6 +694,7 @@ impl UiReport {
             ],
             row_heights: Default::default(),
             background_task_sender,
+            selected_row: None,
         }
     }
 
@@ -801,7 +803,7 @@ impl UiReport {
         let column = *self.columns.get(col_nr).expect("somehow ended up with zero columns?");
         let mut change_expand = false;
 
-        let mut inner_response = ui.vertical(|ui| {
+        let inner_response = ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 // The first column always has the expand/collapse button
                 if col_nr == 1 {
@@ -1103,15 +1105,31 @@ impl UiReport {
             }
         });
 
-        if ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary) && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default())) {
-            change_expand = true;
+        match ui.input(|i| {
+            let double_clicked = i.pointer.button_double_clicked(egui::PointerButton::Primary) && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+            let single_clicked =
+                i.pointer.button_clicked(egui::PointerButton::Primary) && i.modifiers.ctrl && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+
+            (double_clicked, single_clicked)
+        }) {
+            (true, _) => {
+                // A double-click shouldn't enable row selection
+                if let Some((_row, false)) = self.selected_row {
+                    self.selected_row = None;
+                }
+
+                change_expand = true;
+            }
+            (false, true) => {
+                if self.selected_row.take().filter(|prev| prev.0 == row_nr).is_none() {
+                    self.selected_row = Some((row_nr, true));
+                    ui.ctx().request_repaint();
+                }
+            }
+            _ => {
+                // both false
+            }
         }
-        // if input.pointer.any_click() && response.rect.contains(input.pointer.interact_pos().unwrap_or_default()) {
-        //     change_expand = true;
-        // }
-        // if ui.interact(inner_response.response.rect, inner_response.response.id, Sense::click()).double_clicked() {
-        //     change_expand = true;
-        // }
 
         if change_expand {
             // Toggle.
@@ -1334,7 +1352,9 @@ impl egui_table::TableDelegate for UiReport {
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell_info: &egui_table::CellInfo) {
         let egui_table::CellInfo { row_nr, col_nr, .. } = *cell_info;
 
-        if row_nr % 2 == 1 {
+        if self.selected_row.filter(|row| row.0 == row_nr && row.1).is_some() {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().selection.bg_fill);
+        } else if row_nr % 2 == 1 {
             ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
         }
 
