@@ -67,7 +67,7 @@ const DAMAGE_FLOODS: usize = 167;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
-static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
+static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
     ("damage_main_ap", "AP"),
     ("damage_main_cs", "SAP"),
     ("damage_main_he", "HE"),
@@ -93,10 +93,10 @@ static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
     ("damage_dbomb_splash", "Depth Charge (Splash)"),
     ("damage_sea_mine", "Sea Mine"),
     ("damage_rocket", "Rocket"),
-    ("damage_rocket_avia", "Avia Rocket"),
+    // ("damage_rocket_avia", "Avia Rocket"),
     ("damage_rocket_airsupport", "Air Supp Rocket"),
     ("damage_skip", "Skip Bomb"),
-    ("damage_skip_avia", "Avia Skip Bomb"),
+    // ("damage_skip_avia", "Avia Skip Bomb"),
     ("damage_skip_alt", "Alt Skip Bomb"),
     ("damage_skip_airsupport", "Air Supp Skip Bomb"),
     ("damage_wave", "Wave"),
@@ -1096,6 +1096,11 @@ impl UiReport {
                     ReplayColumn::ReceivedDamage => {
                         if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
+                        }
+                    }
+                    ReplayColumn::Skills => {
+                        if let Some(hover_text) = &report.skill_info.hover_text {
+                            ui.label(hover_text);
                         }
                     }
                     _ => {

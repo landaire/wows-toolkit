@@ -267,7 +267,14 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
 
     let icons: HashMap<Species, Arc<ShipIcon>> = HashMap::from_iter(species.iter().map(|species| {
         let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
-        let icon_node = file_tree.find(&path).expect("failed to find file");
+        // let path = format!(
+        //     "gui/battle_hud/markers/minimap/ship/ship_default_svg/{}.svg",
+        //     <&'static str>::from(species).to_ascii_lowercase()
+        // );
+
+        let icon_node = file_tree
+            .find(&path)
+            .expect(format!("failed to find file {}", <&'static str>::from(species)).as_str());
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
