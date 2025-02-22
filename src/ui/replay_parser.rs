@@ -5,7 +5,7 @@ use std::{
     io::{BufWriter, Write},
     path::PathBuf,
     rc::Rc,
-    sync::{atomic::AtomicBool, mpsc::Sender, Arc},
+    sync::{Arc, atomic::AtomicBool, mpsc::Sender},
 };
 
 use crate::{
@@ -14,12 +14,12 @@ use crate::{
     task::{BackgroundTask, BackgroundTaskKind},
     update_background_task,
     util::build_tomato_gg_url,
-    wows_data::{load_replay, parse_replay, ShipIcon, WorldOfWarshipsData},
+    wows_data::{ShipIcon, WorldOfWarshipsData, load_replay, parse_replay},
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{
-    text::LayoutJob, Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, InnerResponse, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText,
-    Sense, Separator, TextFormat, Vec2,
+    Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, InnerResponse, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator,
+    TextFormat, Vec2, text::LayoutJob,
 };
 
 use egui_extras::{Column, TableBuilder, TableRow};
@@ -31,11 +31,11 @@ use tap::Pipe;
 use tracing::debug;
 
 use wows_replays::{
-    analyzer::{
-        battle_controller::{player, BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity},
-        AnalyzerMut,
-    },
     ReplayFile,
+    analyzer::{
+        AnalyzerMut,
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity, player},
+    },
 };
 
 use itertools::Itertools;
@@ -174,10 +174,33 @@ pub struct VehicleReport {
     citadels: Option<u64>,
     crits: Option<u64>,
     distance_traveled: Option<f64>,
+    is_test_ship: bool,
+    is_enemy: bool,
+}
+
+impl VehicleReport {
+    fn remove_nda_info(&mut self) {
+        self.observed_damage = 0;
+        self.observed_damage_text = "NDA".to_string();
+        self.actual_damage = Some(0);
+        self.actual_damage_text = Some("NDA".into());
+        self.actual_damage_hover_text = None;
+        self.potential_damage = Some(0);
+        self.potential_damage_text = Some("NDA".into());
+        self.potential_damage_hover_text = None;
+        self.received_damage = Some(0);
+        self.received_damage_text = Some("NDA".into());
+        self.received_damage_hover_text = None;
+        self.fires = Some(0);
+        self.floods = Some(0);
+        self.citadels = Some(0);
+        self.crits = Some(0);
+    }
 }
 
 use std::cmp::Reverse;
 
+#[allow(non_camel_case_types)]
 enum SortKey {
     String(String),
     i64(Option<i64>),
@@ -233,6 +256,7 @@ pub struct UiReport {
     row_heights: BTreeMap<u64, f32>,
     background_task_sender: Sender<BackgroundTask>,
     selected_row: Option<(u64, bool)>,
+    debug_mode: bool,
 }
 
 impl UiReport {
@@ -243,6 +267,7 @@ impl UiReport {
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
         replay_sort: Arc<Mutex<SortOrder>>,
         background_task_sender: Sender<BackgroundTask>,
+        is_debug_mode: bool,
     ) -> Self {
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
@@ -264,6 +289,7 @@ impl UiReport {
 
         let player_reports = players.iter().filter_map(|vehicle| {
             let player = vehicle.player()?;
+            let is_enemy = player.relation() > 1;
             let mut player_color = player_color_for_team_relation(player.relation());
 
             if let Some(self_player) = self_player.as_ref().and_then(|vehicle| vehicle.player().cloned()) {
@@ -620,7 +646,13 @@ impl UiReport {
                 results_info?[distance_idx].as_f64()
             });
 
-            Some(VehicleReport {
+            let is_test_ship = vehicle_param
+                .data()
+                .vehicle_ref()
+                .map(|vehicle| vehicle.group().starts_with("demo"))
+                .unwrap_or_default();
+
+            let report = VehicleReport {
                 vehicle: Arc::clone(&vehicle),
                 color: player_color,
                 name_text,
@@ -656,7 +688,11 @@ impl UiReport {
                 citadels: cits,
                 crits,
                 distance_traveled,
-            })
+                is_test_ship,
+                is_enemy,
+            };
+
+            Some(report)
         });
 
         let vehicle_reports = player_reports.collect();
@@ -695,6 +731,7 @@ impl UiReport {
             row_heights: Default::default(),
             background_task_sender,
             selected_row: None,
+            debug_mode: is_debug_mode,
         }
     }
 
@@ -719,16 +756,16 @@ impl UiReport {
                 SortColumn::RawXp => SortKey::i64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
                 SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
-                SortColumn::ObservedDamage => SortKey::u64(Some(report.observed_damage)),
-                SortColumn::ActualDamage => SortKey::u64(report.actual_damage),
+                SortColumn::ObservedDamage => SortKey::u64(Some(if report.is_test_ship && !self.debug_mode { 0 } else { report.observed_damage })),
+                SortColumn::ActualDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.actual_damage }),
                 SortColumn::SpottingDamage => SortKey::u64(report.spotting_damage),
-                SortColumn::PotentialDamage => SortKey::u64(report.potential_damage),
+                SortColumn::PotentialDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.potential_damage }),
                 SortColumn::TimeLived => SortKey::u64(report.time_lived_secs),
-                SortColumn::Fires => SortKey::u64(report.fires),
-                SortColumn::Floods => SortKey::u64(report.floods),
-                SortColumn::Citadels => SortKey::u64(report.citadels),
-                SortColumn::Crits => SortKey::u64(report.crits),
-                SortColumn::ReceivedDamage => SortKey::u64(report.received_damage),
+                SortColumn::Fires => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.fires }),
+                SortColumn::Floods => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.floods }),
+                SortColumn::Citadels => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.citadels }),
+                SortColumn::Crits => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.crits }),
+                SortColumn::ReceivedDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.received_damage }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
             };
 
@@ -901,13 +938,21 @@ impl UiReport {
                         ui.label(&report.ship_name);
                     }
                     ReplayColumn::ObservedDamage => {
-                        ui.label(&report.observed_damage_text);
+                        if report.is_test_ship && !self.debug_mode {
+                            ui.label("NDA");
+                        } else {
+                            ui.label(&report.observed_damage_text);
+                        }
                     }
                     ReplayColumn::ActualDamage => {
                         if let Some(damage_text) = report.actual_damage_text.clone() {
-                            let response = ui.label(damage_text);
-                            if let Some(hover_text) = report.actual_damage_hover_text.clone() {
-                                response.on_hover_text(hover_text);
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                let response = ui.label(damage_text);
+                                if let Some(hover_text) = report.actual_damage_hover_text.clone() {
+                                    response.on_hover_text(hover_text);
+                                }
                             }
                         } else {
                             ui.label("-");
@@ -915,9 +960,13 @@ impl UiReport {
                     }
                     ReplayColumn::ReceivedDamage => {
                         if let Some(received_damage_text) = report.received_damage_text.clone() {
-                            let response = ui.label(received_damage_text);
-                            if let Some(hover_text) = report.received_damage_hover_text.clone() {
-                                response.on_hover_text(hover_text);
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                let response = ui.label(received_damage_text);
+                                if let Some(hover_text) = report.received_damage_hover_text.clone() {
+                                    response.on_hover_text(hover_text);
+                                }
                             }
                         } else {
                             ui.label("-");
@@ -925,9 +974,13 @@ impl UiReport {
                     }
                     ReplayColumn::PotentialDamage => {
                         if let Some(damage_text) = report.potential_damage_text.clone() {
-                            let response = ui.label(damage_text);
-                            if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
-                                response.on_hover_text(hover_text);
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                let response = ui.label(damage_text);
+                                if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
+                                    response.on_hover_text(hover_text);
+                                }
                             }
                         } else {
                             ui.label("-");
@@ -949,28 +1002,44 @@ impl UiReport {
                     }
                     ReplayColumn::Fires => {
                         if let Some(fires) = report.fires {
-                            ui.label(fires.to_string());
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                ui.label(fires.to_string());
+                            }
                         } else {
                             ui.label("-");
                         }
                     }
                     ReplayColumn::Floods => {
                         if let Some(floods) = report.floods {
-                            ui.label(floods.to_string());
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                ui.label(floods.to_string());
+                            }
                         } else {
                             ui.label("-");
                         }
                     }
                     ReplayColumn::Citadels => {
                         if let Some(citadels) = report.citadels {
-                            ui.label(citadels.to_string());
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                ui.label(citadels.to_string());
+                            }
                         } else {
                             ui.label("-");
                         }
                     }
                     ReplayColumn::Crits => {
                         if let Some(crits) = report.crits {
-                            ui.label(crits.to_string());
+                            if report.is_test_ship && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                ui.label(crits.to_string());
+                            }
                         } else {
                             ui.label("-");
                         }
@@ -983,50 +1052,56 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::Skills => {
-                        let response = ui.label(report.skill_info.label_text.clone());
-                        if let Some(hover_text) = &report.skill_info.hover_text {
-                            response.on_hover_text(hover_text);
+                        if report.is_enemy && !self.debug_mode {
+                            ui.label("-");
+                        } else {
+                            let response = ui.label(report.skill_info.label_text.clone());
+                            if let Some(hover_text) = &report.skill_info.hover_text {
+                                response.on_hover_text(hover_text);
+                            }
                         }
                     }
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
-                            if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
-                                let metadata_provider = self.metadata_provider();
+                            if !report.is_enemy && !self.debug_mode {
+                                if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
+                                    let metadata_provider = self.metadata_provider();
 
-                                let url = build_ship_config_url(&report.vehicle, &metadata_provider);
+                                    let url = build_ship_config_url(&report.vehicle, &metadata_provider);
 
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                                ui.close_menu();
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    ui.close_menu();
+                                }
+
+                                if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
+                                    let metadata_provider = self.metadata_provider();
+
+                                    let url = build_ship_config_url(&report.vehicle, &metadata_provider);
+                                    ui.ctx().copy_text(url);
+
+                                    let _ = self.background_task_sender.send(BackgroundTask {
+                                        receiver: None,
+                                        kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                    });
+
+                                    ui.close_menu();
+                                }
+
+                                if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
+                                    let metadata_provider = self.metadata_provider();
+
+                                    let url = build_short_ship_config_url(&report.vehicle, &metadata_provider);
+                                    ui.ctx().copy_text(url);
+                                    let _ = self.background_task_sender.send(BackgroundTask {
+                                        receiver: None,
+                                        kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                    });
+
+                                    ui.close_menu();
+                                }
+
+                                ui.separator();
                             }
-
-                            if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
-                                let metadata_provider = self.metadata_provider();
-
-                                let url = build_ship_config_url(&report.vehicle, &metadata_provider);
-                                ui.output_mut(|output| output.copied_text = url);
-
-                                self.background_task_sender.send(BackgroundTask {
-                                    receiver: None,
-                                    kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
-                                });
-
-                                ui.close_menu();
-                            }
-
-                            if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
-                                let metadata_provider = self.metadata_provider();
-
-                                let url = build_short_ship_config_url(&report.vehicle, &metadata_provider);
-                                ui.output_mut(|output| output.copied_text = url);
-                                self.background_task_sender.send(BackgroundTask {
-                                    receiver: None,
-                                    kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
-                                });
-
-                                ui.close_menu();
-                            }
-
-                            ui.separator();
 
                             if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
                                 if let Some(url) = build_tomato_gg_url(&report.vehicle) {
@@ -1044,28 +1119,30 @@ impl UiReport {
                                 ui.close_menu();
                             }
 
-                            ui.separator();
+                            if self.debug_mode {
+                                ui.separator();
 
-                            if let Some(player) = report.vehicle.player() {
-                                if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
-                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
-                                    let viewer = plaintext_viewer::PlaintextFileViewer {
-                                        title: Arc::new("metadata.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
-                                            ext: ".json".to_owned(),
-                                            contents: pretty_meta,
-                                        })),
-                                        open: Arc::new(AtomicBool::new(true)),
-                                    };
+                                if let Some(player) = report.vehicle.player() {
+                                    if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
+                                        let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                        let viewer = plaintext_viewer::PlaintextFileViewer {
+                                            title: Arc::new("metadata.json".to_owned()),
+                                            file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                                ext: ".json".to_owned(),
+                                                contents: pretty_meta,
+                                            })),
+                                            open: Arc::new(AtomicBool::new(true)),
+                                        };
 
-                                    self.background_task_sender
-                                        .send(BackgroundTask {
-                                            receiver: None,
-                                            kind: BackgroundTaskKind::OpenFileViewer(viewer),
-                                        })
-                                        .unwrap();
+                                        self.background_task_sender
+                                            .send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                            })
+                                            .unwrap();
 
-                                    ui.close_menu();
+                                        ui.close_menu();
+                                    }
                                 }
                             }
                         });
@@ -1084,23 +1161,31 @@ impl UiReport {
             if 0.0 < expandedness {
                 match column {
                     ReplayColumn::ActualDamage => {
-                        if let Some(damage_extended_info) = report.actual_damage_hover_text.clone() {
+                        if report.is_test_ship && !self.debug_mode {
+                            ui.label("NDA");
+                        } else if let Some(damage_extended_info) = report.actual_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::PotentialDamage => {
-                        if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
+                        if report.is_test_ship && !self.debug_mode {
+                            ui.label("NDA");
+                        } else if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::ReceivedDamage => {
-                        if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
+                        if report.is_test_ship && !self.debug_mode {
+                            ui.label("NDA");
+                        } else if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::Skills => {
-                        if let Some(hover_text) = &report.skill_info.hover_text {
-                            ui.label(hover_text);
+                        if !report.is_enemy && self.debug_mode {
+                            if let Some(hover_text) = &report.skill_info.hover_text {
+                                ui.label(hover_text);
+                            }
                         }
                     }
                     _ => {
@@ -1162,13 +1247,9 @@ impl egui_table::TableDelegate for UiReport {
             group_index, col_range, row_nr, ..
         } = cell_inf;
 
-        let margin = 4.0;
+        let margin = 4;
 
-        egui::Frame::none().inner_margin(Margin::symmetric(margin, 0.0)).show(ui, |ui| {
-            if *row_nr != 0 {
-                return;
-            }
-
+        egui::Frame::new().inner_margin(Margin::symmetric(margin, 0)).show(ui, |ui| {
             let column = *self.columns.get(*group_index).expect("somehow ended up with zero columns?");
             match column {
                 ReplayColumn::Actions => {
@@ -1363,7 +1444,7 @@ impl egui_table::TableDelegate for UiReport {
             ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
         }
 
-        egui::Frame::none().inner_margin(Margin::symmetric(4.0, 4.0)).show(ui, |ui| {
+        egui::Frame::new().inner_margin(Margin::symmetric(4, 4)).show(ui, |ui| {
             self.cell_content_ui(row_nr, col_nr, ui);
         });
     }
@@ -1437,6 +1518,7 @@ pub enum ReplayColumn {
     Actions,
     Name,
     ShipName,
+    Skills,
     BaseXp,
     RawXp,
     ObservedDamage,
@@ -1444,13 +1526,12 @@ pub enum ReplayColumn {
     ReceivedDamage,
     SpottingDamage,
     PotentialDamage,
-    TimeLived,
     Fires,
     Floods,
     Citadels,
     Crits,
     DistanceTraveled,
-    Skills,
+    TimeLived,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -1541,6 +1622,7 @@ impl Replay {
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
         replay_sort: Arc<Mutex<SortOrder>>,
         background_task_sender: Sender<BackgroundTask>,
+        is_debug_mode: bool,
     ) {
         if let Some(battle_report) = &self.battle_report {
             self.ui_report = Some(UiReport::new(
@@ -1550,6 +1632,7 @@ impl Replay {
                 wows_data,
                 replay_sort,
                 background_task_sender,
+                is_debug_mode,
             ))
         }
     }
@@ -1591,21 +1674,22 @@ impl ToolkitTabViewer<'_> {
         ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
 
         let mut columns = vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
-        columns[ReplayColumn::Actions as usize] = egui_table::Column::new(35.0).resizable(false);
+        let action_label_layout = ui
+            .painter()
+            .layout_no_wrap("Actions".to_string(), egui::FontId::default(), ui.style().visuals.text_color());
+        let action_label_width = action_label_layout.rect.width() + 4.0;
+        columns[ReplayColumn::Actions as usize] = egui_table::Column::new(action_label_width).resizable(false);
 
         let table = egui_table::Table::new()
             .id_salt("replay_player_list")
             .num_rows(ui_report.vehicle_reports.len() as u64)
             .columns(columns)
-            .num_sticky_cols(2)
-            .headers([
-                egui_table::HeaderRow {
-                    height: 14.0f32,
-                    groups: Default::default(),
-                },
-                egui_table::HeaderRow::new(14.0f32),
-            ])
-            .auto_size_mode(egui_table::AutoSizeMode::default());
+            .num_sticky_cols(3)
+            .headers([egui_table::HeaderRow {
+                height: 14.0f32,
+                groups: Default::default(),
+            }])
+            .auto_size_mode(egui_table::AutoSizeMode::Never);
         table.show(ui, ui_report);
         // let table = TableBuilder::new(ui)
         //     .striped(true)
@@ -2092,7 +2176,7 @@ impl ToolkitTabViewer<'_> {
                     let metadata_provider = self.metadata_provider().unwrap();
 
                     let url = build_ship_config_url(&player_report.vehicle, &metadata_provider);
-                    ui.output_mut(|output| output.copied_text = url);
+                    ui.ctx().copy_text(url);
                     *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
 
                     ui.close_menu();
@@ -2102,7 +2186,7 @@ impl ToolkitTabViewer<'_> {
                     let metadata_provider = self.metadata_provider().unwrap();
 
                     let url = build_short_ship_config_url(&player_report.vehicle, &metadata_provider);
-                    ui.output_mut(|output| output.copied_text = url);
+                    ui.ctx().copy_text(url);
                     *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE)));
 
                     ui.close_menu();
@@ -2229,7 +2313,7 @@ impl ToolkitTabViewer<'_> {
             );
 
             if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
-                ui.output_mut(|output| output.copied_text = text);
+                ui.ctx().copy_text(text);
                 *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
             }
             ui.add(Separator::default());
@@ -2356,12 +2440,12 @@ impl ToolkitTabViewer<'_> {
 
                         let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
 
-                        ui.output_mut(|output| output.copied_text = game_chat);
+                        ui.ctx().copy_text(game_chat);
 
                         ui.close_menu();
                     }
                 });
-                if ui.button("Raw Metadata").clicked() {
+                if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
                     let viewer = plaintext_viewer::PlaintextFileViewer {
@@ -2376,10 +2460,11 @@ impl ToolkitTabViewer<'_> {
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
                 let results_button = egui::Button::new("Results Raw JSON");
-                if ui
-                    .add_enabled(report.battle_results().is_some(), results_button)
-                    .on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.")
-                    .clicked()
+                if self.tab_state.settings.debug_mode
+                    && ui
+                        .add_enabled(report.battle_results().is_some(), results_button)
+                        .on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.")
+                        .clicked()
                 {
                     if let Some(results_json) = report.battle_results() {
                         let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
@@ -2412,6 +2497,7 @@ impl ToolkitTabViewer<'_> {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
                     if let Some(ui_report) = replay_file.ui_report.as_mut() {
+                        ui_report.debug_mode = self.tab_state.settings.debug_mode;
                         self.build_replay_player_list(ui_report, report, ui);
                     }
                 });
@@ -2466,7 +2552,7 @@ impl ToolkitTabViewer<'_> {
                         let label = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
                         label.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
-                                ui.output_mut(|output| output.copied_text = path.to_string_lossy().into_owned());
+                                ui.ctx().copy_text(path.to_string_lossy().into_owned());
                                 ui.close_menu();
                             }
                             if ui.button("Show in File Explorer").clicked() {
@@ -2485,6 +2571,7 @@ impl ToolkitTabViewer<'_> {
                                         replay.clone(),
                                         Arc::clone(&self.tab_state.replay_sort),
                                         self.tab_state.background_task_sender.clone(),
+                                        self.tab_state.settings.debug_mode
                                     )
                                 );
                             }
@@ -2517,6 +2604,7 @@ impl ToolkitTabViewer<'_> {
                                     self.tab_state.settings.current_replay_path.clone(),
                                     Arc::clone(&self.tab_state.replay_sort),
                                     self.tab_state.background_task_sender.clone(),
+                                    self.tab_state.settings.debug_mode
                                 )
                             );
                         }

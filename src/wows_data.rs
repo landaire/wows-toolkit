@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
 };
 
 use parking_lot::{Mutex, RwLock};
@@ -47,6 +47,7 @@ pub fn parse_replay<P: AsRef<Path>>(
     replay_path: P,
     replay_sort: Arc<Mutex<SortOrder>>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
+    is_debug_mode: bool,
 ) -> Option<BackgroundTask> {
     let path = replay_path.as_ref();
 
@@ -54,7 +55,14 @@ pub fn parse_replay<P: AsRef<Path>>(
     let game_metadata = { wows_data.read().game_metadata.clone()? };
     let replay = Replay::new(replay_file, game_metadata);
 
-    load_replay(game_constants, wows_data, Arc::new(RwLock::new(replay)), replay_sort, background_task_sender)
+    load_replay(
+        game_constants,
+        wows_data,
+        Arc::new(RwLock::new(replay)),
+        replay_sort,
+        background_task_sender,
+        is_debug_mode,
+    )
 }
 
 pub fn load_replay(
@@ -63,6 +71,7 @@ pub fn load_replay(
     replay: Arc<RwLock<Replay>>,
     replay_sort: Arc<Mutex<SortOrder>>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
+    is_debug_mode: bool,
 ) -> Option<BackgroundTask> {
     let game_version = { wows_data.read().game_version };
 
@@ -99,7 +108,7 @@ pub fn load_replay(
 
                 drop(wows_data_inner);
 
-                replay_guard.build_ui_report(game_constants, wows_data, replay_sort, background_task_sender);
+                replay_guard.build_ui_report(game_constants, wows_data, replay_sort, background_task_sender, is_debug_mode);
             }
             BackgroundTaskCompletion::ReplayLoaded { replay }
         });

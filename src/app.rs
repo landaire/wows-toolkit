@@ -8,15 +8,15 @@ use std::{
     process::Command,
     rc::Rc,
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender, TryRecvError},
-        Arc,
     },
     time::{Duration, Instant},
 };
 
 use clipboard::{ClipboardContext, ClipboardProvider};
-use egui::{mutex::Mutex, Color32, Context, OpenUrl, Ui, WidgetText};
+use egui::{Color32, Context, KeyboardShortcut, Modifiers, OpenUrl, Ui, WidgetText, mutex::Mutex};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
@@ -24,8 +24,8 @@ use gettext::Catalog;
 
 use http_body_util::BodyExt;
 use notify::{
-    event::{ModifyKind, RenameMode},
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::{ModifyKind, RenameMode},
 };
 use octocrab::{models::repos::Release, params::repos::Reference};
 use parking_lot::RwLock;
@@ -35,7 +35,7 @@ use tracing::{debug, trace};
 use serde::{Deserialize, Serialize};
 
 use tokio::runtime::Runtime;
-use wows_replays::{analyzer::battle_controller::GameMessage, ReplayFile};
+use wows_replays::{ReplayFile, analyzer::battle_controller::GameMessage};
 use wowsunpack::data::idx::FileNode;
 
 use crate::{
@@ -46,12 +46,12 @@ use crate::{
     task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     twitch::{Token, TwitchState},
     ui::{
-        file_unpacker::{UnpackerProgress, UNPACKER_STOP},
+        file_unpacker::{UNPACKER_STOP, UnpackerProgress},
         mod_manager::{ModInfo, ModManagerInfo},
         player_tracker::PlayerTracker,
         replay_parser::{self, Replay, SharedReplayParserTabState},
     },
-    wows_data::{load_replay, parse_replay, WorldOfWarshipsData},
+    wows_data::{WorldOfWarshipsData, load_replay, parse_replay},
 };
 
 #[macro_export]
@@ -295,6 +295,8 @@ pub struct Settings {
     pub twitch_monitored_channel: String,
     #[serde(default)]
     pub constants_file_commit: Option<String>,
+    #[serde(default)]
+    pub debug_mode: bool,
 }
 
 impl Default for Settings {
@@ -314,6 +316,7 @@ impl Default for Settings {
             twitch_token: Default::default(),
             twitch_monitored_channel: Default::default(),
             constants_file_commit: None,
+            debug_mode: false,
         }
     }
 }
@@ -514,7 +517,8 @@ impl TabState {
                                                         Arc::clone(wows_data),
                                                         replay,
                                                         Arc::clone(&self.replay_sort),
-                                                        self.background_task_sender.clone()
+                                                        self.background_task_sender.clone(),
+                                                        self.settings.debug_mode,
                                                     )
                                                 );
                                             }
@@ -691,7 +695,7 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::ModManager, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()), //, Tab::ModManager, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
@@ -1115,6 +1119,7 @@ impl WowsToolkitApp {
                             self.tab_state.settings.current_replay_path.clone(),
                             Arc::clone(&self.tab_state.replay_sort),
                             self.tab_state.background_task_sender.clone(),
+                            self.tab_state.settings.debug_mode
                         )
                     );
                 }
@@ -1135,6 +1140,10 @@ impl eframe::App for WowsToolkitApp {
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
         egui_extras::install_image_loaders(ctx);
+
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D))) {
+            self.tab_state.settings.debug_mode = !self.tab_state.settings.debug_mode;
+        }
 
         self.tab_state.try_update_replays();
 
