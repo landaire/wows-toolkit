@@ -52,58 +52,86 @@ use crate::{
 };
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
-const XP_INDEX: usize = 389;
-const DAMAGE_INDEX: usize = 412;
-
-const DAMAGE_AP: usize = 147;
-const DAMAGE_SAP: usize = 148;
-const DAMAGE_HE: usize = 149;
-const DAMAGE_SAP_SECONDARIES: usize = 151;
-const DAMAGE_HE_SECONDARIES: usize = 152;
-const DAMAGE_NORMAL_TORPS: usize = 153;
-const DAMAGE_DEEP_WATER_TORPS: usize = 154;
-const DAMAGE_FIRE: usize = 166;
-const DAMAGE_FLOODS: usize = 167;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
+const DAMAGE_MAIN_AP: &str = "damage_main_ap";
+const DAMAGE_MAIN_CS: &str = "damage_main_cs";
+const DAMAGE_MAIN_HE: &str = "damage_main_he";
+const DAMAGE_ATBA_AP: &str = "damage_atba_ap";
+const DAMAGE_ATBA_CS: &str = "damage_atba_cs";
+const DAMAGE_ATBA_HE: &str = "damage_atba_he";
+const DAMAGE_TPD_NORMAL: &str = "damage_tpd_normal";
+const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
+const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
+const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
+const DAMAGE_BOMB: &str = "damage_bomb";
+const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
+const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
+const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
+const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
+const DAMAGE_TBOMB: &str = "damage_tbomb";
+const DAMAGE_TBOMB_ALT: &str = "damage_tbomb_alt";
+const DAMAGE_TBOMB_AIRSUPPORT: &str = "damage_tbomb_airsupport";
+const DAMAGE_FIRE: &str = "damage_fire";
+const DAMAGE_RAM: &str = "damage_ram";
+const DAMAGE_FLOOD: &str = "damage_flood";
+const DAMAGE_DBOMB_DIRECT: &str = "damage_dbomb_direct";
+const DAMAGE_DBOMB_SPLASH: &str = "damage_dbomb_splash";
+const DAMAGE_SEA_MINE: &str = "damage_sea_mine";
+const DAMAGE_ROCKET: &str = "damage_rocket";
+const DAMAGE_ROCKET_AIRSUPPORT: &str = "damage_rocket_airsupport";
+const DAMAGE_SKIP: &str = "damage_skip";
+const DAMAGE_SKIP_ALT: &str = "damage_skip_alt";
+const DAMAGE_SKIP_AIRSUPPORT: &str = "damage_skip_airsupport";
+const DAMAGE_WAVE: &str = "damage_wave";
+const DAMAGE_CHARGE_LASER: &str = "damage_charge_laser";
+const DAMAGE_PULSE_LASER: &str = "damage_pulse_laser";
+const DAMAGE_AXIS_LASER: &str = "damage_axis_laser";
+const DAMAGE_PHASER_LASER: &str = "damage_phaser_laser";
+
 static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
-    ("damage_main_ap", "AP"),
-    ("damage_main_cs", "SAP"),
-    ("damage_main_he", "HE"),
-    ("damage_atba_ap", "AP Sec"),
-    ("damage_atba_cs", "SAP Sec"),
-    ("damage_atba_he", "HE Sec"),
-    ("damage_tpd_normal", "Torps"),
-    ("damage_tpd_deep", "Deep Water Torps"),
-    ("damage_tpd_alter", "Alt Torps"),
-    ("damage_tpd_photon", "Photon Torps"),
-    ("damage_bomb", "HE Bomb"),
-    ("damage_bomb_avia", "Bomb"),
-    ("damage_bomb_alt", "Alt Bomb"),
-    ("damage_bomb_airsupport", "Air Support Bomb"),
-    ("damage_dbomb_airsupport", "Air Support Depth Charge"),
-    ("damage_tbomb", "Torpedo Bomber"),
-    ("damage_tbomb_alt", "Torpedo Bomber (Alt)"),
-    ("damage_tbomb_airsupport", "Torpedo Bomber Air Support"),
-    ("damage_fire", "Fire"),
-    ("damage_ram", "Ram"),
-    ("damage_flood", "Flood"),
-    ("damage_dbomb_direct", "Depth Charge (Direct)"),
-    ("damage_dbomb_splash", "Depth Charge (Splash)"),
-    ("damage_sea_mine", "Sea Mine"),
-    ("damage_rocket", "Rocket"),
-    // ("damage_rocket_avia", "Avia Rocket"),
-    ("damage_rocket_airsupport", "Air Supp Rocket"),
-    ("damage_skip", "Skip Bomb"),
-    // ("damage_skip_avia", "Avia Skip Bomb"),
-    ("damage_skip_alt", "Alt Skip Bomb"),
-    ("damage_skip_airsupport", "Air Supp Skip Bomb"),
-    ("damage_wave", "Wave"),
-    ("damage_charge_laser", "Charge Laser"),
-    ("damage_pulse_laser", "Pulse Laser"),
-    ("damage_axis_laser", "Axis Laser"),
-    ("damage_phaser_laser", "Phaser Laser"),
+    (DAMAGE_MAIN_AP, "AP"),
+    (DAMAGE_MAIN_CS, "SAP"),
+    (DAMAGE_MAIN_HE, "HE"),
+    (DAMAGE_ATBA_AP, "AP Sec"),
+    (DAMAGE_ATBA_CS, "SAP Sec"),
+    (DAMAGE_ATBA_HE, "HE Sec"),
+    (DAMAGE_TPD_NORMAL, "Torps"),
+    (DAMAGE_TPD_DEEP, "Deep Water Torps"),
+    (DAMAGE_TPD_ALTER, "Alt Torps"),
+    (DAMAGE_TPD_PHOTON, "Photon Torps"),
+    (DAMAGE_BOMB, "HE Bomb"),
+    (DAMAGE_BOMB_AVIA, "Bomb"),
+    (DAMAGE_BOMB_ALT, "Alt Bomb"),
+    (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
+    (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
+    (DAMAGE_TBOMB, "Torpedo Bomber"),
+    (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
+    (DAMAGE_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
+    (DAMAGE_FIRE, "Fire"),
+    (DAMAGE_RAM, "Ram"),
+    (DAMAGE_FLOOD, "Flood"),
+    (DAMAGE_DBOMB_DIRECT, "Depth Charge (Direct)"),
+    (DAMAGE_DBOMB_SPLASH, "Depth Charge (Splash)"),
+    (DAMAGE_SEA_MINE, "Sea Mine"),
+    (DAMAGE_ROCKET, "Rocket"),
+    (DAMAGE_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
+    (DAMAGE_SKIP, "Skip Bomb"),
+    (DAMAGE_SKIP_ALT, "Alt Skip Bomb"),
+    (DAMAGE_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
+    (DAMAGE_WAVE, "Wave"),
+    (DAMAGE_CHARGE_LASER, "Charge Laser"),
+    (DAMAGE_PULSE_LASER, "Pulse Laser"),
+    (DAMAGE_AXIS_LASER, "Axis Laser"),
+    (DAMAGE_PHASER_LASER, "Phaser Laser"),
+];
+
+static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] = [
+    ("agro_art", "Artillery"),
+    ("agro_tpd", "Torpedo"),
+    ("agro_air", "Planes"),
+    ("agro_dbomb", "Depth Charge"),
 ];
 
 fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
@@ -161,7 +189,7 @@ pub struct VehicleReport {
     spotting_damage_text: Option<String>,
     potential_damage: Option<u64>,
     potential_damage_text: Option<String>,
-    potential_damage_hover_text: Option<String>,
+    potential_damage_hover_text: Option<RichText>,
     potential_damage_report: Option<PotentialDamage>,
     time_lived_secs: Option<u64>,
     time_lived_text: Option<String>,
@@ -335,8 +363,9 @@ impl UiReport {
             let name_text = RichText::new(player.name()).color(name_color);
 
             let (base_xp, base_xp_text) = if let Some(base_xp) = vehicle.results_info().and_then(|info| {
+                let index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/exp")?.as_u64()? as usize;
                 info.as_array()
-                    .and_then(|info_array| info_array[XP_INDEX].as_number().and_then(|number| number.as_i64()))
+                    .and_then(|info_array| info_array[index].as_number().and_then(|number| number.as_i64()))
             }) {
                 let label_text = separate_number(base_xp, Some(locale));
                 (Some(base_xp), Some(RichText::new(label_text).color(player_color)))
@@ -345,8 +374,9 @@ impl UiReport {
             };
 
             let (raw_xp, raw_xp_text) = if let Some(raw_xp) = vehicle.results_info().and_then(|info| {
+                let index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/raw_exp")?.as_u64()? as usize;
                 info.as_array()
-                    .and_then(|info_array| info_array[XP_INDEX - 1].as_number().and_then(|number| number.as_i64()))
+                    .and_then(|info_array| info_array[index].as_number().and_then(|number| number.as_i64()))
             }) {
                 let label_text = separate_number(raw_xp, Some(locale));
                 (Some(raw_xp), Some(label_text))
@@ -385,20 +415,22 @@ impl UiReport {
                             + 1;
 
                         // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                        let breakdowns: Vec<String> = DAMAGE_DESCRIPTIONS
+                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
                                 let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
                                 info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                     if num > 0 {
-                                        let num = separate_number(num, Some(locale));
-                                        Some(format!("{:<longest_width$}: {}", description, num))
+                                        let num_str = separate_number(num, Some(locale));
+                                        Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
                                     } else {
                                         None
                                     }
                                 })
                             })
                             .collect();
+
+                        let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
 
                         let damage_report_text = separate_number(damage_number, Some(locale));
                         let damage_report_text = RichText::new(damage_report_text).color(player_color);
@@ -409,15 +441,15 @@ impl UiReport {
                             Some(damage_report_text),
                             Some(damage_report_hover_text),
                             Some(Damage {
-                                ap: info_array[DAMAGE_AP].as_number().and_then(|number| number.as_u64()),
-                                sap: info_array[DAMAGE_SAP].as_number().and_then(|number| number.as_u64()),
-                                he: info_array[DAMAGE_HE].as_number().and_then(|number| number.as_u64()),
-                                he_secondaries: info_array[DAMAGE_HE_SECONDARIES].as_number().and_then(|number| number.as_u64()),
-                                sap_secondaries: info_array[DAMAGE_SAP_SECONDARIES].as_number().and_then(|number| number.as_u64()),
-                                torps: info_array[DAMAGE_NORMAL_TORPS].as_number().and_then(|number| number.as_u64()),
-                                deep_water_torps: info_array[DAMAGE_DEEP_WATER_TORPS].as_number().and_then(|number| number.as_u64()),
-                                fire: info_array[DAMAGE_FIRE].as_number().and_then(|number| number.as_u64()),
-                                flooding: info_array[DAMAGE_FLOODS].as_number().and_then(|number| number.as_u64()),
+                                ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
+                                sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
+                                he: all_damage.get(DAMAGE_MAIN_HE).copied(),
+                                he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
+                                sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
+                                torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
+                                deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
+                                fire: all_damage.get(DAMAGE_FIRE).copied(),
+                                flooding: all_damage.get(DAMAGE_FLOOD).copied(),
                             }),
                         )
                     })
@@ -472,47 +504,67 @@ impl UiReport {
                 .unwrap_or_default();
 
             // Spotting damage
-            const SPOTTING_DAMAGE_INDEX: usize = 398;
-            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) = vehicle.results_info().and_then(|info| {
-                info.as_array()
-                    .and_then(|info_array| info_array[SPOTTING_DAMAGE_INDEX].as_number().and_then(|number| number.as_u64()))
+            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) = results_info.and_then(|info_array| {
+                let idx = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/scouting_damage")?.as_u64()? as usize;
+                info_array[idx].as_number().and_then(|number| number.as_u64())
             }) {
                 (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
             } else {
                 (None, None)
             };
 
-            // Potential damage
-            const ARTILLERY_POTENTIAL_DAMAGE: usize = 402;
-            const _TORPEDO_POTENTIAL_DAMAGE: usize = 403; // may not be accurate?
-            const AIRSTRIKE_POTENTIAL_DAMAGE: usize = 404;
-
-            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
-                if let Some(damage_numbers) = results_info.map(|info_array| &info_array[ARTILLERY_POTENTIAL_DAMAGE..=AIRSTRIKE_POTENTIAL_DAMAGE]) {
-                    let total_pot = damage_numbers
+            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) = results_info
+                .and_then(|info_array| {
+                    // First pass over damage numbers: grab the longest description so that we can later format it
+                    let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
                         .iter()
-                        .map(|num| num.as_f64())
-                        .fold(0, |accum, num| accum + num.map(|f| f as u64).unwrap_or_default());
+                        .filter_map(|(key, description)| {
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx]
+                                .as_number()
+                                .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
+                                .and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                        })
+                        .max()
+                        .unwrap_or_default()
+                        + 1;
 
-                    let potential_damage_text = separate_number(total_pot, Some(locale));
+                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                    let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx]
+                                .as_number()
+                                .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
+                                .and_then(|num| {
+                                    if num > 0 {
+                                        let num_str = separate_number(num, Some(locale));
+                                        Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                    } else {
+                                        None
+                                    }
+                                })
+                        })
+                        .unzip();
+                    let all_agro: HashMap<String, u64> = HashMap::from_iter(all_agro);
 
-                    let potential_damage_report = PotentialDamage {
-                        artillery: damage_numbers[0].as_f64().unwrap_or_default() as u64,
-                        torpedoes: damage_numbers[1].as_f64().unwrap_or_default() as u64,
-                        planes: damage_numbers[2].as_f64().unwrap_or_default() as u64,
-                    };
+                    let total_agro = all_agro.values().sum();
+                    let damage_report_text = separate_number(total_agro, Some(locale));
+                    let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
 
-                    let hover_string = format!(
-                        "Artillery: {}\nTorpedo: {}\nPlanes: {}",
-                        separate_number(potential_damage_report.artillery, Some(locale)),
-                        separate_number(potential_damage_report.torpedoes, Some(locale)),
-                        separate_number(potential_damage_report.planes, Some(locale)),
-                    );
-
-                    (Some(total_pot), Some(potential_damage_text), Some(hover_string), Some(potential_damage_report))
-                } else {
-                    (None, None, None, None)
-                };
+                    Some((
+                        Some(total_agro),
+                        Some(damage_report_text),
+                        Some(damage_report_hover_text),
+                        Some(PotentialDamage {
+                            artillery: all_agro.get("agro_art").copied().unwrap_or_default(),
+                            torpedoes: all_agro.get("agro_tpd").copied().unwrap_or_default(),
+                            planes: all_agro.get("agro_air").copied().unwrap_or_default(),
+                        }),
+                    ))
+                })
+                .unwrap_or_default();
 
             let (time_lived, time_lived_text) = vehicle
                 .death_info()
@@ -979,7 +1031,7 @@ impl UiReport {
                             } else {
                                 let response = ui.label(damage_text);
                                 if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
-                                    response.on_hover_text(hover_text);
+                                    response.on_hover_text(hover_text.clone());
                                 }
                             }
                         } else {
@@ -1182,7 +1234,7 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::Skills => {
-                        if !report.is_enemy && self.debug_mode {
+                        if !report.is_enemy || self.debug_mode {
                             if let Some(hover_text) = &report.skill_info.hover_text {
                                 ui.label(hover_text);
                             }
@@ -2075,7 +2127,7 @@ impl ToolkitTabViewer<'_> {
             if let Some(damage_text) = player_report.potential_damage_text.clone() {
                 let response = ui.label(damage_text);
                 if let Some(hover_text) = player_report.potential_damage_hover_text.as_ref() {
-                    response.on_hover_text(hover_text);
+                    response.on_hover_text(hover_text.clone());
                 }
             } else {
                 ui.label("-");
@@ -2334,23 +2386,15 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
-                if report.battle_results().is_some() {
+                if let Some(ui_report) = &replay_file.ui_report {
                     let mut team_damage = 0;
                     let mut red_team_damage = 0;
-                    for vehicle in report.player_entities() {
-                        if let Some(player) = vehicle.player() {
-                            if let Some(player_damage) = vehicle
-                                .results_info()
-                                .expect("no player info")
-                                .as_array()
-                                .and_then(|values| values[DAMAGE_INDEX].as_i64())
-                            {
-                                if player.relation() > 1 {
-                                    red_team_damage += player_damage;
-                                } else {
-                                    team_damage += player_damage;
-                                }
-                            }
+
+                    for vehicle_report in &ui_report.vehicle_reports {
+                        if vehicle_report.is_enemy {
+                            red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        } else {
+                            team_damage += vehicle_report.actual_damage.unwrap_or(0);
                         }
                     }
 

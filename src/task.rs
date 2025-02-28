@@ -1,18 +1,18 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::{read_dir, File},
+    fs::{File, read_dir},
     io::Cursor,
     path::{Path, PathBuf},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender, TryRecvError},
-        Arc,
     },
     thread,
     time::Duration,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use flate2::read::GzDecoder;
 use gettext::Catalog;
 use glob::glob;
@@ -38,6 +38,7 @@ use wowsunpack::{
 use zip::ZipArchive;
 
 use crate::{
+    WowsToolkitApp,
     app::TimedMessage,
     build_tracker,
     error::ToolkitError,
@@ -51,7 +52,6 @@ use crate::{
     },
     update_background_task,
     wows_data::{ShipIcon, WorldOfWarshipsData},
-    WowsToolkitApp,
 };
 
 pub struct DownloadProgress {
@@ -817,6 +817,7 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
         token_rx,
     );
 
+    #[cfg(feature = "mod_manager")]
     update_background_task!(toolkit.tab_state.background_tasks, Some(load_mods_db()));
 }
 
