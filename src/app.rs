@@ -98,7 +98,7 @@ impl ToolkitTabViewer<'_> {
                 if ui
                     .checkbox(
                         &mut self.tab_state.settings.send_replay_data,
-                        "Send Builds from Random Battles Replays to ShipBuilds.com",
+                        "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com",
                     )
                     .changed()
                 {
@@ -279,7 +279,7 @@ pub struct Settings {
     pub replay_settings: ReplaySettings,
     #[serde(default = "default_bool::<true>")]
     pub check_for_updates: bool,
-    #[serde(default = "default_bool::<true>")]
+    #[serde(default = "default_bool::<false>")]
     pub send_replay_data: bool,
     #[serde(default = "default_bool::<false>")]
     pub has_default_value_fix_015: bool,
@@ -297,6 +297,8 @@ pub struct Settings {
     pub constants_file_commit: Option<String>,
     #[serde(default)]
     pub debug_mode: bool,
+    #[serde(default)]
+    pub build_consent_window_shown: bool,
 }
 
 impl Default for Settings {
@@ -308,7 +310,7 @@ impl Default for Settings {
             locale: Some("en".to_string()),
             replay_settings: Default::default(),
             check_for_updates: true,
-            send_replay_data: true,
+            send_replay_data: false,
             has_default_value_fix_015: true,
             sent_replays: Default::default(),
             has_019_game_params_update: true,
@@ -317,6 +319,7 @@ impl Default for Settings {
             twitch_monitored_channel: Default::default(),
             constants_file_commit: None,
             debug_mode: false,
+            build_consent_window_shown: false,
         }
     }
 }
@@ -671,6 +674,8 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     update_window_open: bool,
     #[serde(skip)]
+    build_consent_window_open: bool,
+    #[serde(skip)]
     latest_release: Option<Release>,
     #[serde(skip)]
     show_about_window: bool,
@@ -692,6 +697,7 @@ impl Default for WowsToolkitApp {
         Self {
             checked_for_updates: false,
             update_window_open: false,
+            build_consent_window_open: false,
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
@@ -723,7 +729,7 @@ impl WowsToolkitApp {
 
             if !saved_state.tab_state.settings.has_default_value_fix_015 {
                 saved_state.tab_state.settings.check_for_updates = true;
-                saved_state.tab_state.settings.send_replay_data = true;
+                saved_state.tab_state.settings.send_replay_data = false;
                 saved_state.tab_state.settings.has_default_value_fix_015 = true;
             }
 
@@ -762,6 +768,10 @@ impl WowsToolkitApp {
 
             this
         };
+
+        if !state.tab_state.settings.build_consent_window_shown {
+            state.build_consent_window_open = true;
+        }
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
@@ -1149,6 +1159,26 @@ impl eframe::App for WowsToolkitApp {
 
         if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
             self.check_for_updates();
+        }
+
+        if self.build_consent_window_open {
+            egui::Window::new("Build Collection Consent").collapsible(false).show(ctx, |ui| {
+                ui.label("Would you like to send player build information information from ranked and random battles to the developer? This data collection helps the community bulk analyze player builds. You may opt out at any time in the settings.");
+                ui.horizontal(|ui| {
+                    if ui.button("Yes").clicked() {
+                        self.build_consent_window_open = false;
+                        self.tab_state.settings.build_consent_window_shown = true;
+                        self.tab_state.settings.send_replay_data = true;
+                        self.tab_state.should_send_replays.store(true, Ordering::Relaxed);
+                    }
+                    if ui.button("No").clicked() {
+                        self.build_consent_window_open = false;
+                        self.tab_state.settings.build_consent_window_shown = true;
+                        self.tab_state.settings.send_replay_data = false;
+                        self.tab_state.should_send_replays.store(false, Ordering::Relaxed);
+                    }
+                });
+            });
         }
 
         if self.update_window_open {
