@@ -1115,7 +1115,7 @@ impl UiReport {
                     }
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
-                            if !report.is_enemy && !self.debug_mode {
+                            if !report.is_enemy || self.debug_mode {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 

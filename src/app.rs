@@ -16,7 +16,7 @@ use std::{
 };
 
 use clipboard::{ClipboardContext, ClipboardProvider};
-use egui::{Color32, Context, KeyboardShortcut, Modifiers, OpenUrl, Ui, WidgetText, mutex::Mutex};
+use egui::{Color32, Context, KeyboardShortcut, Modifiers, OpenUrl, RichText, Ui, WidgetText, mutex::Mutex};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
 use egui_extras::{Size, StripBuilder};
@@ -784,6 +784,10 @@ impl WowsToolkitApp {
         // Try to update mod update tasks
         if let Some(new_task) = self.tab_state.background_task_receiver.try_recv().ok() {
             self.tab_state.background_tasks.push(new_task);
+        }
+
+        if self.tab_state.settings.debug_mode {
+            ui.label(RichText::new("⚠ Debug build ⚠").heading().color(ui.visuals().warn_fg_color));
         }
 
         ui.horizontal(|ui| {
