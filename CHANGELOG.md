@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.28] - 2025-03-01
+
+### 🚀 Features
+
+- *(replays)* Add fires/floods/cits/crits
+- *(replays)* Add icons for IFA/Dazzle builds
+- *(replays)* Add damage received and distance traveled
+- *(replays)* Move column filters to replay tab
+- *(replays)* Support file drag and drop
+- Refactor tables
+- *(replays)* Allow double clicking a table row to expand it
+- *(replays)* Improvements to the player listing table
+- *(replays)* Add skill info hover text to expanded row
+- Show data collection consent window
+
+### 🐛 Bug Fixes
+
+- *(replays)* Decode HTML entities in chat messages
+- *(replays)* Fix broken potential damage breakdown
+- *(replays)* Refactor background replay parsing logic to prevent possible panics
+- *(replays)* Fix hover labels for received damage
+- *(replays)* Fixed long damage hover text
+- *(replays)* Get rid of hardcoded stats indices
+
+### ⚙️ Miscellaneous Tasks
+
+- Update dependencies
+
+### Ui
+
+- Refactor UI code into its own module
+
+### Wip
+
+- *(replays)* Download constants file on app launch
+- Mod manager
+
 ## [0.1.27] - 2024-11-24
 
 ### 🚀 Features
