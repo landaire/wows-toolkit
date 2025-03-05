@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.28] - 2025-03-01
+## [0.1.29] - 2025-03-05
+
+### 🐛 Bug Fixes
+
+- *(replays)* Constants data was not being loaded from disk
+
+## [0.1.28] - 2025-03-05
 
 ### 🚀 Features
 
