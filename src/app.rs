@@ -1124,7 +1124,6 @@ impl WowsToolkitApp {
             if let Some(path) = &dropped_files[0].path {
                 if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                     self.tab_state.settings.current_replay_path = path.clone();
-                    println!("Updating background task");
                     update_background_task!(
                         self.tab_state.background_tasks,
                         parse_replay(

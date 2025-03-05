@@ -819,6 +819,19 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
 
     #[cfg(feature = "mod_manager")]
     update_background_task!(toolkit.tab_state.background_tasks, Some(load_mods_db()));
+
+    let mut constants_path = PathBuf::from("constants.json");
+    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        constants_path = storage_dir.join(constants_path)
+    }
+
+    if constants_path.exists() {
+        if let Ok(constants_data) = std::fs::read(&constants_path) {
+            update_background_task!(toolkit.tab_state.background_tasks, Some(load_constants(constants_data)));
+        } else {
+            error!("failed to read constants file");
+        }
+    }
 }
 
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
@@ -829,7 +842,7 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
             .map(BackgroundTaskCompletion::ConstantsLoaded)
             .map_err(|err| err.into());
 
-        tx.send(result);
+        tx.send(result).expect("tx closed");
     });
     BackgroundTask {
         receiver: rx.into(),
