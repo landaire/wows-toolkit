@@ -6,7 +6,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        mpsc::{self, Sender, TryRecvError},
     },
     thread,
     time::Duration,
@@ -15,12 +15,11 @@ use std::{
 use anyhow::{Context, anyhow};
 use flate2::read::GzDecoder;
 use gettext::Catalog;
-use glob::glob;
 use http_body_util::BodyExt;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use reqwest::Url;
 use scopeguard::defer;
 use tar::Archive;
@@ -940,7 +939,7 @@ fn unpack_mod(tarball: &[u8], wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_i
         globs.push(glob::Pattern::new("*").unwrap());
     }
 
-    let mut entries_count = 100;
+    let entries_count = 100;
     let mut paths = Vec::new();
     for (processed_files, entry) in archive.entries()?.enumerate() {
         defer! {

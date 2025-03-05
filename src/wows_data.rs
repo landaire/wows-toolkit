@@ -12,7 +12,6 @@ use wowsunpack::{
 };
 
 use crate::{
-    build_tracker,
     task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
     ui::replay_parser::{Replay, SortOrder},
 };

@@ -1,13 +1,11 @@
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
-use crate::{icons, task};
-use egui::{ahash::HashSet, CollapsingHeader, Hyperlink, ImageSource, Label, OpenUrl, Widget};
+use crate::icons;
+use egui::{CollapsingHeader, ImageSource, Label, Widget};
 use egui_commonmark::CommonMarkViewer;
 use egui_extras::{Column, TableBuilder};
-use parking_lot::{Mutex, RwLock};
-use reqwest::header::Iter;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime;
 
 use crate::app::ToolkitTabViewer;
 

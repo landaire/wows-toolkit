@@ -1,9 +1,9 @@
 use crate::icons;
 use egui::{Color32, RichText};
-use flate2::{write::DeflateEncoder, Compression};
+use flate2::{Compression, write::DeflateEncoder};
 use language_tags::LanguageTag;
 use serde_json::json;
-use std::{default, io::Write, path::Path, process::Command};
+use std::{io::Write, path::Path, process::Command};
 use thousands::Separable;
 use tracing::debug;
 use wows_replays::analyzer::battle_controller::VehicleEntity;

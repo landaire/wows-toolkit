@@ -9,10 +9,10 @@ use chrono::{DateTime, Local};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use twitch_api::{
+    HelixClient,
     helix::{self, chat::get_chatters},
     twitch_oauth2::{TwitchToken, UserToken},
     types::UserId,
-    HelixClient,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,11 +149,7 @@ impl TwitchState {
             }
         }
 
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
+        if results.is_empty() { None } else { Some(results) }
     }
 }
 

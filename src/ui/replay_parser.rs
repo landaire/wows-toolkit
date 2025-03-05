@@ -1,15 +1,13 @@
-use core::cell::RefCell;
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     io::{BufWriter, Write},
     path::PathBuf,
-    rc::Rc,
     sync::{Arc, atomic::AtomicBool, mpsc::Sender},
 };
 
 use crate::{
-    app::{ReplaySettings, Settings, TimedMessage},
+    app::{ReplaySettings, TimedMessage},
     icons,
     task::{BackgroundTask, BackgroundTaskKind},
     update_background_task,
@@ -18,23 +16,20 @@ use crate::{
 };
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{
-    Align2, Color32, ComboBox, Context, FontId, Id, Image, ImageSource, InnerResponse, Label, Margin, NumExt, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator,
-    TextFormat, Vec2, text::LayoutJob,
+    Color32, ComboBox, Context, FontId, Id, Image, ImageSource, Label, Margin, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator, TextFormat, Vec2, text::LayoutJob,
 };
 
-use egui_extras::{Column, TableBuilder, TableRow};
-use egui_table::Table;
+use egui_extras::TableRow;
 use escaper::decode_html;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use tap::Pipe;
 use tracing::debug;
 
 use wows_replays::{
     ReplayFile,
     analyzer::{
         AnalyzerMut,
-        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity, player},
+        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity},
     },
 };
 
@@ -1295,9 +1290,7 @@ impl UiReport {
 
 impl egui_table::TableDelegate for UiReport {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell_inf: &egui_table::HeaderCellInfo) {
-        let egui_table::HeaderCellInfo {
-            group_index, col_range, row_nr, ..
-        } = cell_inf;
+        let egui_table::HeaderCellInfo { group_index, .. } = cell_inf;
 
         let margin = 4;
 

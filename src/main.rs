@@ -4,8 +4,8 @@
 use tracing_subscriber::{
     field::RecordFields,
     fmt::{
-        format::{Pretty, Writer},
         FormatFields,
+        format::{Pretty, Writer},
     },
 };
 
@@ -23,13 +23,8 @@ impl<'writer> FormatFields<'writer> for NewType {
 fn main() -> eframe::Result<()> {
     use std::{env, path::Path};
 
-    use tracing::level_filters::LevelFilter;
     // use tracing_appender::rolling::Rotation;
-    use tracing_subscriber::{
-        fmt::{self, time::LocalTime},
-        layer::SubscriberExt,
-        Layer,
-    };
+    use tracing_subscriber::Layer;
 
     // let file_appender = tracing_appender::rolling::Builder::new()
     //     .rotation(Rotation::HOURLY)

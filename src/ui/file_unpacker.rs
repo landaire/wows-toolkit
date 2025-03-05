@@ -3,12 +3,13 @@ use std::{
     fs::{self, File},
     path::{Path, PathBuf},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
 };
 
-use egui::{mutex::Mutex, CollapsingHeader, Label, Response, Sense, Ui};
+use egui::{CollapsingHeader, Label, Response, Sense, Ui, mutex::Mutex};
 use egui_extras::{Size, StripBuilder};
 use egui_phosphor::regular as icons;
 use tracing::debug;

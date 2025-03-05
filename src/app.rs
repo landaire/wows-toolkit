@@ -1,12 +1,9 @@
-use core::cell::RefCell;
 use std::{
-    borrow::Borrow,
     collections::{HashMap, HashSet},
     env,
     error::Error,
     path::{Path, PathBuf},
     process::Command,
-    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -29,7 +26,6 @@ use notify::{
 };
 use octocrab::{models::repos::Release, params::repos::Reference};
 use parking_lot::RwLock;
-use serde_json::json;
 use tracing::{debug, trace};
 
 use serde::{Deserialize, Serialize};

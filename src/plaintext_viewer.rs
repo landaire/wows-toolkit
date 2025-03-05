@@ -1,9 +1,9 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
-use egui::{mutex::Mutex, Image, ImageSource, TextEdit, ViewportBuilder};
+use egui::{Image, ImageSource, TextEdit, ViewportBuilder, mutex::Mutex};
 
 pub enum FileType {
     PlainTextFile { ext: String, contents: String },
