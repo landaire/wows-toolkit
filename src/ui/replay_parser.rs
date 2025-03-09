@@ -18,12 +18,12 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use egui::{
     Color32, ComboBox, Context, FontId, Id, Image, ImageSource, Label, Margin, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator, TextFormat, Vec2, text::LayoutJob,
 };
+use tracing::{debug, error};
 
 use egui_extras::TableRow;
 use escaper::decode_html;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use wows_replays::{
     ReplayFile,
@@ -2366,6 +2366,39 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    fn generate_game_data(report: &BattleReport, ui_report: &UiReport, replay_file: &ReplayFile) -> serde_json::Value {
+        serde_json::json!({
+            "map": report.map_name(),
+            "game_type": report.game_type(),
+            "game_mode": report.game_mode(),
+            "version": report.version().to_path(),
+            "date_time": replay_file.meta.dateTime,
+            "players": ui_report.vehicle_reports.iter().map(|report| {
+                serde_json::json!({
+                    "name": report.name_text.text(),
+                    "clan": report.clan_text.as_ref().map(|clan| clan.text()),
+                    "ship": report.ship_name,
+                    "ship_class": report.ship_species_text,
+                    "is_enemy": report.is_enemy,
+                    "stats": {
+                        "damage": report.actual_damage,
+                        "spotting_damage": report.spotting_damage,
+                        "potential_damage": report.potential_damage,
+                        "base_xp": report.base_xp,
+                        "raw_xp": report.raw_xp,
+                        "time_lived_secs": report.time_lived_secs,
+                        "fires_caused": report.fires,
+                        "floods_caused": report.floods,
+                        "citadels": report.citadels,
+                        "critical_hits": report.crits,
+                        "damage_received": report.received_damage,
+                        "distance_traveled": report.distance_traveled
+                    }
+                })
+            }).collect::<Vec<_>>()
+        })
+    }
+
     fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui) {
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_entity = report.self_entity();
@@ -2482,6 +2515,36 @@ impl ToolkitTabViewer<'_> {
                         ui.close_menu();
                     }
                 });
+
+                ui.menu_button("Export Game Data", |ui| {
+                    if ui.small_button(format!("{} Save To File", icons::FLOPPY_DISK)).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!("{} {} {} - Game Data.json", report.game_type(), report.game_mode(), report.map_name()))
+                            .save_file()
+                        {
+                            if let Some(ui_report) = &replay_file.ui_report {
+                                let game_data = Self::generate_game_data(report, ui_report, &replay_file.replay_file);
+                                if let Err(err) = std::fs::write(
+                                    path,
+                                    serde_json::to_string_pretty(&game_data).unwrap(),
+                                ) {
+                                    error!("Failed to export game data: {}", err);
+                                }
+                            }
+                        }
+                        ui.close_menu();
+                    }
+
+                    if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
+                        if let Some(ui_report) = &replay_file.ui_report {
+                            let game_data = Self::generate_game_data(report, ui_report, &replay_file.replay_file);
+                            ui.ctx().copy_text(serde_json::to_string_pretty(&game_data).unwrap());
+                            *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Game data copied", icons::CHECK_CIRCLE)));
+                        }
+                        ui.close_menu();
+                    }
+                });
+
                 if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
