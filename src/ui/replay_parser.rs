@@ -24,6 +24,7 @@ use egui_extras::TableRow;
 use escaper::decode_html;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use wows_replays::{
     ReplayFile,
@@ -2367,35 +2368,188 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn generate_game_data(report: &BattleReport, ui_report: &UiReport, replay_file: &ReplayFile) -> serde_json::Value {
+        let players = ui_report.vehicle_reports.iter().map(|report| {
+            let damage_dealt_total = report.actual_damage.unwrap_or(0);
+            let potential_damage_total = report.potential_damage.unwrap_or(0);
+            let damage_received_total = report.received_damage.unwrap_or(0);
+
+            // Build damage dealt section
+            let mut damage_dealt = serde_json::Map::new();
+            
+            // Always include total
+            damage_dealt.insert("damage_total".to_string(), json!(damage_dealt_total));
+            
+            // Only include non-None values (don't include nulls at all)
+            if let Some(damage_report) = &report.actual_damage_report {
+                if let Some(v) = damage_report.ap { damage_dealt.insert("damage_ap".to_string(), json!(v)); }
+                if let Some(v) = damage_report.he { damage_dealt.insert("damage_he".to_string(), json!(v)); }
+                if let Some(v) = damage_report.he_secondaries { damage_dealt.insert("damage_he_secondary".to_string(), json!(v)); }
+                if let Some(v) = damage_report.sap { damage_dealt.insert("damage_sap".to_string(), json!(v)); }
+                if let Some(v) = damage_report.sap_secondaries { damage_dealt.insert("damage_sap_secondary".to_string(), json!(v)); }
+                if let Some(v) = damage_report.torps { damage_dealt.insert("damage_torpedoes".to_string(), json!(v)); }
+                if let Some(v) = damage_report.deep_water_torps { damage_dealt.insert("damage_deep_water_torpedoes".to_string(), json!(v)); }
+                if let Some(v) = damage_report.fire { damage_dealt.insert("damage_fire".to_string(), json!(v)); }
+                if let Some(v) = damage_report.flooding { damage_dealt.insert("damage_flooding".to_string(), json!(v)); }
+            }
+            
+            let damage_dealt = serde_json::Value::Object(damage_dealt);
+
+            // Build potential damage section
+            let potential_damage = serde_json::json!({
+                "potential_damage_total": potential_damage_total,
+                "potential_damage_artillery": report.potential_damage_report.as_ref().map(|d| d.artillery),
+                "potential_damage_torpedoes": report.potential_damage_report.as_ref().map(|d| d.torpedoes),
+                "potential_damage_planes": report.potential_damage_report.as_ref().map(|d| d.planes)
+            });
+
+            // Build damage received section using structured data
+            let results_info = report.vehicle.results_info().and_then(|info| info.as_array());
+            let constants = report.vehicle.player().map(|_| ui_report.constants.read());
+
+            let get_received_damage = |damage_type: &str| {
+                if let (Some(info_array), Some(constants)) = (results_info, constants.as_ref()) {
+                    constants.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", damage_type).as_str())
+                        .and_then(|idx| idx.as_u64())
+                        .and_then(|idx| info_array[idx as usize].as_number())
+                        .and_then(|num| num.as_u64())
+                } else {
+                    None
+                }
+            };
+
+            let damage_received = serde_json::json!({
+                "damage_received_total": damage_received_total,
+                "damage_received_ap": get_received_damage(DAMAGE_MAIN_AP),
+                "damage_received_he": get_received_damage(DAMAGE_MAIN_HE),
+                "damage_received_sap": get_received_damage(DAMAGE_MAIN_CS),
+                "damage_received_he_secondary": get_received_damage(DAMAGE_ATBA_HE),
+                "damage_received_sap_secondary": get_received_damage(DAMAGE_ATBA_CS),
+                "damage_received_torpedoes": get_received_damage(DAMAGE_TPD_NORMAL),
+                "damage_received_deep_water_torpedoes": get_received_damage(DAMAGE_TPD_DEEP),
+                "damage_received_fire": get_received_damage(DAMAGE_FIRE),
+                "damage_received_flooding": get_received_damage(DAMAGE_FLOOD)
+            });
+
+            // Build experience section
+            let experience = serde_json::json!({
+                "base_xp": report.base_xp,
+                "raw_xp": report.raw_xp
+            });
+
+            // Build battle life section
+            let battle_life = serde_json::json!({
+                "time_lived_secs": report.time_lived_secs,
+                "distance_traveled": report.distance_traveled
+            });
+
+            // Build combat achievements section
+            let combat = serde_json::json!({
+                "fires_caused": report.fires,
+                "floods_caused": report.floods,
+                "citadels": report.citadels,
+                "critical_hits": report.crits,
+                "spotting_damage": report.spotting_damage
+            });
+
+            // Build stats object based on enabled columns
+            let mut stats = serde_json::Map::new();
+
+            // Always include base stats
+            stats.insert("damage_total".to_string(), json!(damage_dealt["damage_total"]));
+            stats.insert("base_xp".to_string(), json!(experience["base_xp"]));
+            stats.insert("time_lived_secs".to_string(), json!(battle_life["time_lived_secs"]));
+            stats.insert("spotting_damage".to_string(), json!(combat["spotting_damage"]));
+
+            // Include damage breakdown
+            if let Some(v) = damage_dealt["damage_ap"].as_number() { stats.insert("damage_ap".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_he"].as_number() { stats.insert("damage_he".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_he_secondary"].as_number() { stats.insert("damage_he_secondary".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_sap"].as_number() { stats.insert("damage_sap".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_sap_secondary"].as_number() { stats.insert("damage_sap_secondary".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_torpedoes"].as_number() { stats.insert("damage_torpedoes".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_deep_water_torpedoes"].as_number() { stats.insert("damage_deep_water_torpedoes".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_fire"].as_number() { stats.insert("damage_fire".to_string(), json!(v)); }
+            if let Some(v) = damage_dealt["damage_flooding"].as_number() { stats.insert("damage_flooding".to_string(), json!(v)); }
+
+            // Include potential damage
+            stats.insert("potential_damage_total".to_string(), json!(potential_damage["potential_damage_total"]));
+            if let Some(v) = potential_damage["potential_damage_artillery"].as_number() { stats.insert("potential_damage_artillery".to_string(), json!(v)); }
+            if let Some(v) = potential_damage["potential_damage_torpedoes"].as_number() { stats.insert("potential_damage_torpedoes".to_string(), json!(v)); }
+            if let Some(v) = potential_damage["potential_damage_planes"].as_number() { stats.insert("potential_damage_planes".to_string(), json!(v)); }
+
+            // Include received damage if enabled
+            if ui_report.columns.contains(&ReplayColumn::ReceivedDamage) {
+                stats.insert("damage_received_total".to_string(), json!(damage_received["damage_received_total"]));
+                if let Some(v) = damage_received["damage_received_ap"].as_number() { stats.insert("damage_received_ap".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_he"].as_number() { stats.insert("damage_received_he".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_sap"].as_number() { stats.insert("damage_received_sap".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_he_secondary"].as_number() { stats.insert("damage_received_he_secondary".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_sap_secondary"].as_number() { stats.insert("damage_received_sap_secondary".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_torpedoes"].as_number() { stats.insert("damage_received_torpedoes".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_deep_water_torpedoes"].as_number() { stats.insert("damage_received_deep_water_torpedoes".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_fire"].as_number() { stats.insert("damage_received_fire".to_string(), json!(v)); }
+                if let Some(v) = damage_received["damage_received_flooding"].as_number() { stats.insert("damage_received_flooding".to_string(), json!(v)); }
+            }
+
+            // Include raw XP if enabled
+            if ui_report.columns.contains(&ReplayColumn::RawXp) {
+                if let Some(v) = experience["raw_xp"].as_number() { stats.insert("raw_xp".to_string(), json!(v)); }
+            }
+
+            // Include distance traveled if enabled
+            if ui_report.columns.contains(&ReplayColumn::DistanceTraveled) {
+                if let Some(v) = battle_life["distance_traveled"].as_number() { stats.insert("distance_traveled".to_string(), json!(v)); }
+            }
+
+            // Include fires if enabled
+            if ui_report.columns.contains(&ReplayColumn::Fires) {
+                if let Some(v) = combat["fires_caused"].as_number() { stats.insert("fires_caused".to_string(), json!(v)); }
+            }
+
+            // Include floods if enabled
+            if ui_report.columns.contains(&ReplayColumn::Floods) {
+                if let Some(v) = combat["floods_caused"].as_number() { stats.insert("floods_caused".to_string(), json!(v)); }
+            }
+
+            // Include citadels if enabled
+            if ui_report.columns.contains(&ReplayColumn::Citadels) {
+                if let Some(v) = combat["citadels"].as_number() { stats.insert("citadels".to_string(), json!(v)); }
+            }
+
+            // Include critical hits if enabled
+            if ui_report.columns.contains(&ReplayColumn::Crits) {
+                if let Some(v) = combat["critical_hits"].as_number() { stats.insert("critical_hits".to_string(), json!(v)); }
+            }
+
+            // Build final player object
+            serde_json::json!({
+                "name": report.name_text.text(),
+                "clan": report.clan_text.as_ref().map(|clan| clan.text()),
+                "ship": report.ship_name,
+                "ship_class": report.ship_species_text,
+                "is_enemy": report.is_enemy,
+                "is_test_ship": report.is_test_ship,
+                "division": report.division_label.as_ref()
+                    .and_then(|label| label.chars().nth(1))
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "false".to_string()),
+                "captain_skill_points": report.skill_info.skill_points,
+                "user_id": report.vehicle.player().map(|p| p.db_id()).unwrap_or_default(),
+                "stats_urls": {
+                    "wows_numbers": crate::util::build_wows_numbers_url(&report.vehicle),
+                    "tomato_gg": crate::util::build_tomato_gg_url(&report.vehicle)
+                },
+                "stats": serde_json::Value::Object(stats)
+            })
+        }).collect::<Vec<_>>();
+
         serde_json::json!({
             "map": report.map_name(),
             "game_type": report.game_type(),
             "game_mode": report.game_mode(),
             "version": report.version().to_path(),
             "date_time": replay_file.meta.dateTime,
-            "players": ui_report.vehicle_reports.iter().map(|report| {
-                serde_json::json!({
-                    "name": report.name_text.text(),
-                    "clan": report.clan_text.as_ref().map(|clan| clan.text()),
-                    "ship": report.ship_name,
-                    "ship_class": report.ship_species_text,
-                    "is_enemy": report.is_enemy,
-                    "stats": {
-                        "damage": report.actual_damage,
-                        "spotting_damage": report.spotting_damage,
-                        "potential_damage": report.potential_damage,
-                        "base_xp": report.base_xp,
-                        "raw_xp": report.raw_xp,
-                        "time_lived_secs": report.time_lived_secs,
-                        "fires_caused": report.fires,
-                        "floods_caused": report.floods,
-                        "citadels": report.citadels,
-                        "critical_hits": report.crits,
-                        "damage_received": report.received_damage,
-                        "distance_traveled": report.distance_traveled
-                    }
-                })
-            }).collect::<Vec<_>>()
+            "players": players
         })
     }
 
