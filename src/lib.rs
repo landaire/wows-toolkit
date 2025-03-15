@@ -6,6 +6,7 @@ mod consts;
 mod error;
 mod game_params;
 mod plaintext_viewer;
+mod replay_export;
 mod task;
 mod twitch;
 mod ui;

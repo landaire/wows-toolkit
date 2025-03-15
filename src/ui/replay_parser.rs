@@ -9,6 +9,7 @@ use std::{
 use crate::{
     app::{ReplaySettings, TimedMessage},
     icons,
+    replay_export::Match,
     task::{BackgroundTask, BackgroundTaskKind},
     update_background_task,
     util::build_tomato_gg_url,
@@ -29,7 +30,7 @@ use wows_replays::{
     ReplayFile,
     analyzer::{
         AnalyzerMut,
-        battle_controller::{BattleController, BattleReport, ChatChannel, GameMessage, Player, VehicleEntity},
+        battle_controller::{BattleController, BattleReport, BattleResult, ChatChannel, GameMessage, Player, VehicleEntity, player},
     },
 };
 
@@ -133,16 +134,20 @@ fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsDat
     wows_data.ship_icons.get(&species).cloned()
 }
 
-struct SkillInfo {
+#[derive(Clone, Serialize)]
+pub struct SkillInfo {
     skill_points: usize,
     num_skills: usize,
     highest_tier: usize,
     num_tier_1_skills: usize,
+    #[serde(skip)]
     hover_text: Option<String>,
+    #[serde(skip)]
     label_text: RichText,
 }
 
-struct Damage {
+#[derive(Clone, Serialize)]
+pub struct Damage {
     ap: Option<u64>,
     sap: Option<u64>,
     he: Option<u64>,
@@ -154,7 +159,8 @@ struct Damage {
     flooding: Option<u64>,
 }
 
-struct PotentialDamage {
+#[derive(Clone, Serialize)]
+pub struct PotentialDamage {
     artillery: u64,
     torpedoes: u64,
     planes: u64,
@@ -192,6 +198,7 @@ pub struct VehicleReport {
     received_damage: Option<u64>,
     received_damage_text: Option<RichText>,
     received_damage_hover_text: Option<RichText>,
+    received_damage_report: Option<Damage>,
     fires: Option<u64>,
     floods: Option<u64>,
     citadels: Option<u64>,
@@ -199,6 +206,9 @@ pub struct VehicleReport {
     distance_traveled: Option<f64>,
     is_test_ship: bool,
     is_enemy: bool,
+    // TODO: Maybe in the future refactor this to be a HashMap<Rc<Player>, DeathInfo> ?
+    kills: Option<i64>,
+    observed_kills: i64,
 }
 
 impl VehicleReport {
@@ -218,6 +228,166 @@ impl VehicleReport {
         self.floods = Some(0);
         self.citadels = Some(0);
         self.crits = Some(0);
+    }
+
+    pub fn vehicle(&self) -> &VehicleEntity {
+        &self.vehicle
+    }
+
+    pub fn color(&self) -> Color32 {
+        self.color
+    }
+
+    pub fn name_text(&self) -> &RichText {
+        &self.name_text
+    }
+
+    pub fn clan_text(&self) -> Option<&RichText> {
+        self.clan_text.as_ref()
+    }
+
+    pub fn ship_species_text(&self) -> &str {
+        &self.ship_species_text
+    }
+
+    pub fn icon(&self) -> Option<Arc<ShipIcon>> {
+        self.icon.clone()
+    }
+
+    pub fn division_label(&self) -> Option<&String> {
+        self.division_label.as_ref()
+    }
+
+    pub fn base_xp(&self) -> Option<i64> {
+        self.base_xp
+    }
+
+    pub fn base_xp_text(&self) -> Option<&RichText> {
+        self.base_xp_text.as_ref()
+    }
+
+    pub fn raw_xp(&self) -> Option<i64> {
+        self.raw_xp
+    }
+
+    pub fn raw_xp_text(&self) -> Option<&String> {
+        self.raw_xp_text.as_ref()
+    }
+
+    pub fn observed_damage(&self) -> u64 {
+        self.observed_damage
+    }
+
+    pub fn observed_damage_text(&self) -> &str {
+        &self.observed_damage_text
+    }
+
+    pub fn actual_damage(&self) -> Option<u64> {
+        self.actual_damage
+    }
+
+    pub fn actual_damage_report(&self) -> Option<&Damage> {
+        self.actual_damage_report.as_ref()
+    }
+
+    pub fn actual_damage_text(&self) -> Option<&RichText> {
+        self.actual_damage_text.as_ref()
+    }
+
+    pub fn actual_damage_hover_text(&self) -> Option<&RichText> {
+        self.actual_damage_hover_text.as_ref()
+    }
+
+    pub fn ship_name(&self) -> &str {
+        &self.ship_name
+    }
+
+    pub fn spotting_damage(&self) -> Option<u64> {
+        self.spotting_damage
+    }
+
+    pub fn spotting_damage_text(&self) -> Option<&String> {
+        self.spotting_damage_text.as_ref()
+    }
+
+    pub fn potential_damage(&self) -> Option<u64> {
+        self.potential_damage
+    }
+
+    pub fn potential_damage_text(&self) -> Option<&String> {
+        self.potential_damage_text.as_ref()
+    }
+
+    pub fn potential_damage_hover_text(&self) -> Option<&RichText> {
+        self.potential_damage_hover_text.as_ref()
+    }
+
+    pub fn potential_damage_report(&self) -> Option<&PotentialDamage> {
+        self.potential_damage_report.as_ref()
+    }
+
+    pub fn time_lived_secs(&self) -> Option<u64> {
+        self.time_lived_secs
+    }
+
+    pub fn time_lived_text(&self) -> Option<&String> {
+        self.time_lived_text.as_ref()
+    }
+
+    pub fn skill_info(&self) -> &SkillInfo {
+        &self.skill_info
+    }
+
+    pub fn received_damage(&self) -> Option<u64> {
+        self.received_damage
+    }
+
+    pub fn received_damage_text(&self) -> Option<&RichText> {
+        self.received_damage_text.as_ref()
+    }
+
+    pub fn received_damage_hover_text(&self) -> Option<&RichText> {
+        self.received_damage_hover_text.as_ref()
+    }
+
+    pub fn received_damage_report(&self) -> Option<&Damage> {
+        self.received_damage_report.as_ref()
+    }
+
+    pub fn fires(&self) -> Option<u64> {
+        self.fires
+    }
+
+    pub fn floods(&self) -> Option<u64> {
+        self.floods
+    }
+
+    pub fn citadels(&self) -> Option<u64> {
+        self.citadels
+    }
+
+    pub fn crits(&self) -> Option<u64> {
+        self.crits
+    }
+
+    pub fn distance_traveled(&self) -> Option<f64> {
+        self.distance_traveled
+    }
+
+    pub fn is_test_ship(&self) -> bool {
+        self.is_test_ship
+    }
+
+    pub fn is_enemy(&self) -> bool {
+        self.is_enemy
+    }
+
+    pub fn observed_kills(&self) -> i64 {
+        self.observed_kills
+    }
+
+    pub fn kills(&self) -> Option<i64> {
+        self.kills
     }
 }
 
@@ -452,7 +622,7 @@ impl UiReport {
                 .unwrap_or_default();
 
             // Received damage
-            let (received_damage, received_damage_text, received_damage_hover_text) = results_info
+            let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) = results_info
                 .map(|info_array| {
                     // First pass over damage numbers: grab the longest description so that we can later format it
                     let longest_width = DAMAGE_DESCRIPTIONS
@@ -471,7 +641,7 @@ impl UiReport {
                         + 1;
 
                     // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                    let breakdowns: Vec<(u64, String)> = DAMAGE_DESCRIPTIONS
+                    let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
                             let idx = constants_inner
@@ -480,7 +650,7 @@ impl UiReport {
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
-                                    Some((num, format!("{:<longest_width$}: {}", description, num_str)))
+                                    Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
                                 } else {
                                     None
                                 }
@@ -488,13 +658,30 @@ impl UiReport {
                         })
                         .collect();
 
-                    let total_received = breakdowns.iter().fold(0, |total, (dmg, _)| total + *dmg);
+                    let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
+
+                    let total_received = all_damage.values().fold(0, |total, dmg| total + *dmg);
 
                     let received_damage_report_text = separate_number(total_received, Some(locale));
                     let received_damage_report_text = RichText::new(received_damage_report_text).color(player_color);
-                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().map(|(_num, desc)| desc).join("\n")).font(FontId::monospace(12.0));
+                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().map(|desc| desc).join("\n")).font(FontId::monospace(12.0));
 
-                    (Some(total_received), Some(received_damage_report_text), Some(received_damage_report_hover_text))
+                    (
+                        Some(total_received),
+                        Some(received_damage_report_text),
+                        Some(received_damage_report_hover_text),
+                        Some(Damage {
+                            ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
+                            sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
+                            he: all_damage.get(DAMAGE_MAIN_HE).copied(),
+                            he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
+                            sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
+                            torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
+                            deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
+                            fire: all_damage.get(DAMAGE_FIRE).copied(),
+                            flooding: all_damage.get(DAMAGE_FLOOD).copied(),
+                        }),
+                    )
                 })
                 .unwrap_or_default();
 
@@ -693,6 +880,15 @@ impl UiReport {
                 results_info?[distance_idx].as_f64()
             });
 
+            let kills = constants_inner
+                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed")
+                .and_then(|distance_idx| {
+                    let distance_idx = distance_idx.as_i64()? as usize;
+                    results_info?[distance_idx].as_i64()
+                })
+                .unwrap_or_else(|| vehicle.frags().len() as i64);
+            let kills = vehicle.frags().len() as i64;
+
             let is_test_ship = vehicle_param
                 .data()
                 .vehicle_ref()
@@ -737,6 +933,9 @@ impl UiReport {
                 distance_traveled,
                 is_test_ship,
                 is_enemy,
+                received_damage_report,
+                kills: Some(kills),
+                observed_kills: kills,
             };
 
             Some(report)
@@ -762,6 +961,7 @@ impl UiReport {
                 ReplayColumn::ShipName,
                 ReplayColumn::BaseXp,
                 ReplayColumn::RawXp,
+                ReplayColumn::Kills,
                 ReplayColumn::ObservedDamage,
                 ReplayColumn::ActualDamage,
                 ReplayColumn::ReceivedDamage,
@@ -814,6 +1014,7 @@ impl UiReport {
                 SortColumn::Crits => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.crits }),
                 SortColumn::ReceivedDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.received_damage }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
+                SortColumn::Kills => SortKey::i64(report.kills.or_else(|| Some(report.observed_kills))),
             };
 
             (team_id, key, db_id)
@@ -983,6 +1184,13 @@ impl UiReport {
                     }
                     ReplayColumn::ShipName => {
                         ui.label(&report.ship_name);
+                    }
+                    ReplayColumn::Kills => {
+                        if let Some(kills) = report.kills {
+                            ui.label(kills.to_string());
+                        } else {
+                            ui.label(report.observed_kills.to_string());
+                        }
                     }
                     ReplayColumn::ObservedDamage => {
                         if report.is_test_ship && !self.debug_mode {
@@ -1286,6 +1494,14 @@ impl UiReport {
     fn metadata_provider(&self) -> Arc<GameMetadataProvider> {
         self.wows_data.read().game_metadata.as_ref().expect("no metadata provider?").clone()
     }
+
+    pub fn match_timestamp(&self) -> DateTime<Local> {
+        self.match_timestamp
+    }
+
+    pub fn vehicle_reports(&self) -> &[VehicleReport] {
+        &self.vehicle_reports
+    }
 }
 
 impl egui_table::TableDelegate for UiReport {
@@ -1336,6 +1552,16 @@ impl egui_table::TableDelegate for UiReport {
                         .clicked()
                     {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ShipName);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Kills => {
+                    if ui
+                        .strong(column_name_with_sort_order("Kills", false, *self.replay_sort.lock(), SortColumn::Kills))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Kills);
 
                         self.sort_players(new_sort);
                     };
@@ -1566,6 +1792,7 @@ pub enum ReplayColumn {
     Skills,
     BaseXp,
     RawXp,
+    Kills,
     ObservedDamage,
     ActualDamage,
     ReceivedDamage,
@@ -1587,6 +1814,7 @@ pub enum SortColumn {
     RawXp,
     ShipName,
     ShipClass,
+    Kills,
     ObservedDamage,
     ActualDamage,
     SpottingDamage,
@@ -1839,6 +2067,15 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
+                if let Some(battle_result) = report.battle_result() {
+                    let text = match battle_result {
+                        BattleResult::Win(_) => RichText::new(format!("{} Victory", icons::TROPHY)).color(Color32::LIGHT_GREEN),
+                        BattleResult::Loss(_) => RichText::new(format!("{} Defeat", icons::SMILEY_SAD)).color(Color32::LIGHT_RED),
+                        BattleResult::Draw => RichText::new(format!("{} Draw", icons::NOTCHES)).color(Color32::LIGHT_YELLOW),
+                    };
+
+                    ui.label(text);
+                }
                 if let Some(ui_report) = &replay_file.ui_report {
                     let mut team_damage = 0;
                     let mut red_team_damage = 0;
@@ -1942,6 +2179,17 @@ impl ToolkitTabViewer<'_> {
                         ui.close_menu();
                     }
                 });
+                if ui.button("Export Results").on_hover_text("Export the raw battle results JSON").clicked() {
+                    let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name(format!("{} {} {} - Battle Results.json", report.game_type(), report.game_mode(), report.map_name()))
+                        .save_file()
+                    {
+                        if let Ok(mut file) = std::fs::File::create(path) {
+                            serde_json::to_writer_pretty(&mut file, &transformed_results).expect("failed to serialize results");
+                        }
+                    }
+                }
                 if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
