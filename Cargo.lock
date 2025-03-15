@@ -6163,6 +6163,8 @@ dependencies = [
 [[package]]
 name = "wows_replays"
 version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bed9aaa6ad18de3451a29c8331f9529d90c14ba8490fcf51abcd02ac5928cd3"
 dependencies = [
  "bitreader",
  "derive_builder",
