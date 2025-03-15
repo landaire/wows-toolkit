@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use wows_replays::{
-    ReplayFile,
+    ReplayFile, VehicleInfoMeta,
     analyzer::{
         AnalyzerMut,
         battle_controller::{BattleController, BattleReport, BattleResult, ChatChannel, GameMessage, Player, VehicleEntity, player},
@@ -447,19 +447,19 @@ pub struct UiReport {
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
     row_heights: BTreeMap<u64, f32>,
-    background_task_sender: Sender<BackgroundTask>,
+    background_task_sender: Option<Sender<BackgroundTask>>,
     selected_row: Option<(u64, bool)>,
     debug_mode: bool,
 }
 
 impl UiReport {
-    fn new(
+    pub fn new(
         replay_file: &ReplayFile,
         report: &BattleReport,
         constants: Arc<RwLock<serde_json::Value>>,
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
         replay_sort: Arc<Mutex<SortOrder>>,
-        background_task_sender: Sender<BackgroundTask>,
+        background_task_sender: Option<Sender<BackgroundTask>>,
         is_debug_mode: bool,
     ) -> Self {
         let wows_data_inner = wows_data.read();
@@ -880,14 +880,11 @@ impl UiReport {
                 results_info?[distance_idx].as_f64()
             });
 
-            let kills = constants_inner
-                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed")
-                .and_then(|distance_idx| {
-                    let distance_idx = distance_idx.as_i64()? as usize;
-                    results_info?[distance_idx].as_i64()
-                })
-                .unwrap_or_else(|| vehicle.frags().len() as i64);
-            let kills = vehicle.frags().len() as i64;
+            let kills = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed").and_then(|distance_idx| {
+                let distance_idx = distance_idx.as_i64()? as usize;
+                results_info?[distance_idx].as_i64()
+            });
+            let observed_kills = vehicle.frags().len() as i64;
 
             let is_test_ship = vehicle_param
                 .data()
@@ -934,8 +931,8 @@ impl UiReport {
                 is_test_ship,
                 is_enemy,
                 received_damage_report,
-                kills: Some(kills),
-                observed_kills: kills,
+                kills,
+                observed_kills,
             };
 
             Some(report)
@@ -1334,9 +1331,11 @@ impl UiReport {
                                     let url = build_ship_config_url(&report.vehicle, &metadata_provider);
                                     ui.ctx().copy_text(url);
 
-                                    let _ = self.background_task_sender.send(BackgroundTask {
-                                        receiver: None,
-                                        kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                    let _ = self.background_task_sender.as_ref().map(|sender| {
+                                        sender.send(BackgroundTask {
+                                            receiver: None,
+                                            kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                        })
                                     });
 
                                     ui.close_menu();
@@ -1347,9 +1346,11 @@ impl UiReport {
 
                                     let url = build_short_ship_config_url(&report.vehicle, &metadata_provider);
                                     ui.ctx().copy_text(url);
-                                    let _ = self.background_task_sender.send(BackgroundTask {
-                                        receiver: None,
-                                        kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                    let _ = self.background_task_sender.as_ref().map(|sender| {
+                                        sender.send(BackgroundTask {
+                                            receiver: None,
+                                            kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                        })
                                     });
 
                                     ui.close_menu();
@@ -1390,9 +1391,12 @@ impl UiReport {
                                         };
 
                                         self.background_task_sender
-                                            .send(BackgroundTask {
-                                                receiver: None,
-                                                kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                            .as_ref()
+                                            .map(|sender| {
+                                                sender.send(BackgroundTask {
+                                                    receiver: None,
+                                                    kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                                })
                                             })
                                             .unwrap();
 
@@ -1860,6 +1864,69 @@ impl Replay {
             ui_report: None,
         }
     }
+
+    pub fn player_vehicle(&self) -> Option<&VehicleInfoMeta> {
+        let meta = &self.replay_file.meta;
+        meta.vehicles.iter().find(|vehicle| vehicle.relation == 0)
+    }
+
+    pub fn vehicle_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        self.player_vehicle()
+            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId as u32))
+            .and_then(|id| metadata_provider.localized_name_from_id(id))
+            .unwrap_or_else(|| "Spectator".to_string())
+    }
+
+    pub fn player_name(&self) -> Option<&str> {
+        self.player_vehicle().map(|vehicle| vehicle.name.as_str())
+    }
+
+    pub fn map_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        let meta = &self.replay_file.meta;
+        let map_id = format!("IDS_{}", meta.mapName.to_uppercase());
+        metadata_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone())
+    }
+
+    pub fn game_mode(&self, metadata_provider: &GameMetadataProvider) -> String {
+        let meta = &self.replay_file.meta;
+        let mode_id = format!("IDS_{}", meta.gameType.to_uppercase());
+        metadata_provider.localized_name_from_id(&mode_id).unwrap_or_else(|| meta.gameType.clone())
+    }
+
+    pub fn scenario(&self, metadata_provider: &GameMetadataProvider) -> String {
+        let meta = &self.replay_file.meta;
+        let scenario_id = format!("IDS_SCENARIO_{}", meta.scenario.to_uppercase());
+        metadata_provider.localized_name_from_id(&scenario_id).unwrap_or_else(|| meta.scenario.clone())
+    }
+
+    pub fn game_time(&self) -> &str {
+        &self.replay_file.meta.dateTime
+    }
+
+    pub fn label(&self, metadata_provider: &GameMetadataProvider) -> String {
+        [
+            self.vehicle_name(metadata_provider).as_str(),
+            self.map_name(metadata_provider).as_str(),
+            self.scenario(metadata_provider).as_str(),
+            self.game_mode(metadata_provider).as_str(),
+            self.game_time(),
+        ]
+        .iter()
+        .join(" - ")
+    }
+
+    pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
+        [
+            self.vehicle_name(metadata_provider).as_str(),
+            self.map_name(metadata_provider).as_str(),
+            self.scenario(metadata_provider).as_str(),
+            self.game_mode(metadata_provider).as_str(),
+            self.game_time().replace(['.', ':', ' '], "-").as_str(),
+        ]
+        .iter()
+        .join("_")
+    }
+
     pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
@@ -1894,7 +1961,7 @@ impl Replay {
         game_constants: Arc<RwLock<serde_json::Value>>,
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
         replay_sort: Arc<Mutex<SortOrder>>,
-        background_task_sender: Sender<BackgroundTask>,
+        background_task_sender: Option<Sender<BackgroundTask>>,
         is_debug_mode: bool,
     ) {
         if let Some(battle_report) = &self.battle_report {
@@ -2263,30 +2330,7 @@ impl ToolkitTabViewer<'_> {
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let metadata_provider = self.metadata_provider().unwrap();
                     for (path, replay) in files {
-                        let label = {
-                            let file = replay.read();
-                            let meta = &file.replay_file.meta;
-                            let player_vehicle = meta.vehicles.iter().find(|vehicle| vehicle.relation == 0);
-                            let vehicle_name = player_vehicle
-                                .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId as u32))
-                                .and_then(|id| metadata_provider.localized_name_from_id(id))
-                                .unwrap_or_else(|| "Spectator".to_string());
-                            let map_id = format!("IDS_{}", meta.mapName.to_uppercase());
-                            let map_name = metadata_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone());
-
-                            let mode = metadata_provider
-                                .localized_name_from_id(&format!("IDS_{}", meta.gameType.to_ascii_uppercase()))
-                                .expect("failed to get game type translation");
-
-                            let scenario = metadata_provider
-                                .localized_name_from_id(&format!("IDS_SCENARIO_{}", meta.scenario.to_ascii_uppercase()))
-                                .expect("failed to get scenario translation");
-
-                            let time = meta.dateTime.as_str();
-
-                            [vehicle_name.as_str(), map_name.as_str(), scenario.as_str(), mode.as_str(), time].iter().join(" - ")
-                        };
-
+                        let label = { replay.read().label(&metadata_provider) };
                         let mut label_text = egui::RichText::new(label.as_str());
                         if let Some(current_replay) = self.tab_state.current_replay.as_ref() {
                             if Arc::ptr_eq(current_replay, &replay) {

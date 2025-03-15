@@ -13,6 +13,7 @@ use std::{
 };
 
 use clipboard::{ClipboardContext, ClipboardProvider};
+use eframe::APP_KEY;
 use egui::{Color32, Context, KeyboardShortcut, Modifiers, OpenUrl, RichText, Ui, WidgetText, mutex::Mutex};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_dock::{DockArea, DockState, Style, TabViewer};
@@ -39,7 +40,7 @@ use crate::{
     game_params::game_params_bin_path,
     icons,
     plaintext_viewer::PlaintextFileViewer,
-    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
+    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, DataExportSettings, ReplayBackgroundParserThreadMessage, ReplayExportFormat},
     twitch::{Token, TwitchState},
     ui::{
         file_unpacker::{UNPACKER_STOP, UnpackerProgress},
@@ -98,7 +99,7 @@ impl ToolkitTabViewer<'_> {
                     )
                     .changed()
                 {
-                    self.tab_state.should_send_replays.store(self.tab_state.settings.send_replay_data, Ordering::Relaxed);
+                    self.tab_state.send_replay_consent_changed();
                 }
             });
             ui.label("World of Warships Settings");
@@ -117,7 +118,7 @@ impl ToolkitTabViewer<'_> {
                                     egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
                                         .interactive(self.tab_state.can_change_wows_dir)
                                         .hint_text("World of Warships Directory")
-                                        .text_color_opt(show_text_error.then(|| Color32::RED)),
+                                        .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
                                 );
 
                                 // If someone pastes a path in, let's do some basic validation to see if this
@@ -131,7 +132,7 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             strip.cell(|ui| {
-                                if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Open...")).clicked() {
+                                if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose...")).clicked() {
                                     let folder = rfd::FileDialog::new().pick_folder();
                                     if let Some(folder) = folder {
                                         self.tab_state.prevent_changing_wows_dir();
@@ -153,6 +154,68 @@ impl ToolkitTabViewer<'_> {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Show Floods Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Show Citadels Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Show Critical Module Hits Column");
+                ui.horizontal(|ui| {
+                    let mut alert_data_export_change = false;
+                    StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(60.0)).horizontal(|mut strip| {
+                        strip.cell(|ui| {
+                            if ui
+                                .checkbox(&mut self.tab_state.settings.replay_settings.auto_export_data, "Auto-Export Data")
+                                .changed()
+                            {
+                                alert_data_export_change = true;
+                            }
+
+                            let selected_format = &mut self.tab_state.settings.replay_settings.auto_export_format;
+                            let previously_selected_format = *selected_format;
+                            egui::ComboBox::from_id_salt("auto_export_format_combobox")
+                                .selected_text(selected_format.as_str())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(selected_format, ReplayExportFormat::Json, "JSON");
+                                    // CSV currently doesn't work. It's not a priority to fix, but should be explored at some point
+                                    // ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
+                                    ui.selectable_value(selected_format, ReplayExportFormat::Cbor, "CBOR");
+                                });
+                            if previously_selected_format != *selected_format {
+                                alert_data_export_change = true;
+                            }
+
+                            let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
+                            let path_is_valid = path.exists() && path.is_dir();
+                            let response = ui.add_sized(
+                                ui.available_size(),
+                                egui::TextEdit::singleline(&mut self.tab_state.settings.replay_settings.auto_export_path)
+                                    .hint_text("Data auto-export directory")
+                                    .text_color_opt((!path_is_valid).then_some(Color32::LIGHT_RED)),
+                            );
+
+                            if response.lost_focus() {
+                                let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
+                                if path.exists() && path.is_dir() {
+                                    alert_data_export_change = true;
+                                }
+                            }
+                        });
+                        strip.cell(|ui| {
+                            if ui.button("Choose...").clicked() {
+                                let folder = rfd::FileDialog::new().pick_folder();
+                                if let Some(folder) = folder {
+                                    self.tab_state.settings.replay_settings.auto_export_path = folder.to_string_lossy().to_string();
+                                    alert_data_export_change = true;
+                                }
+                            }
+                        });
+                    });
+
+                    if alert_data_export_change {
+                        let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
+                            tx.send(ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(DataExportSettings {
+                                should_auto_export: self.tab_state.settings.replay_settings.auto_export_data,
+                                export_path: PathBuf::from(self.tab_state.settings.replay_settings.auto_export_path.clone()),
+                                export_format: self.tab_state.settings.replay_settings.auto_export_format,
+                            }))
+                        });
+                    }
+                });
             });
             ui.label("Twitch Settings");
             ui.group(|ui| {
@@ -237,6 +300,12 @@ pub struct ReplaySettings {
     pub show_received_damage: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_distance_traveled: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub auto_export_data: bool,
+    #[serde(default)]
+    pub auto_export_path: String,
+    #[serde(default)]
+    pub auto_export_format: ReplayExportFormat,
 }
 
 impl Default for ReplaySettings {
@@ -252,6 +321,9 @@ impl Default for ReplaySettings {
             show_crits: false,
             show_received_damage: true,
             show_distance_traveled: true,
+            auto_export_data: false,
+            auto_export_path: String::new(),
+            auto_export_format: ReplayExportFormat::default(),
         }
     }
 }
@@ -408,9 +480,6 @@ pub struct TabState {
     #[serde(skip)]
     pub current_replay: Option<Arc<RwLock<Replay>>>,
 
-    #[serde(skip)]
-    pub should_send_replays: Arc<AtomicBool>,
-
     #[serde(default = "default_bool::<true>")]
     pub auto_load_latest_replay: bool,
 
@@ -443,6 +512,10 @@ pub struct TabState {
     pub background_task_receiver: Receiver<BackgroundTask>,
     #[serde(skip)]
     pub background_task_sender: Sender<BackgroundTask>,
+    #[serde(skip)]
+    pub background_parser_tx: Option<Sender<ReplayBackgroundParserThreadMessage>>,
+    #[serde(skip)]
+    pub parser_lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl Default for TabState {
@@ -470,7 +543,6 @@ impl Default for TabState {
             current_replay: None,
             used_filter: None,
             filtered_file_list: None,
-            should_send_replays: Arc::new(AtomicBool::new(false)),
             auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
@@ -482,21 +554,33 @@ impl Default for TabState {
             mod_action_receiver: Some(mod_action_receiver),
             background_task_receiver,
             background_task_sender,
+            background_parser_tx: None,
+            parser_lock: Arc::new(parking_lot::Mutex::new(())),
         }
     }
 }
 
 impl TabState {
+    fn send_replay_consent_changed(&self) {
+        let _ = self
+            .background_parser_tx
+            .as_ref()
+            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data)));
+    }
     fn try_update_replays(&mut self) {
+        // Sometimes we parse the replay too early. Let's try to parse it a couple times
+        let parser_lock = self.parser_lock.try_lock();
+        if parser_lock.is_none() {
+            // don't make the UI hang
+            return;
+        }
+
         if let Some(file) = self.file_receiver.as_ref() {
             while let Ok(file_event) = file.try_recv() {
                 match file_event {
                     NotifyFileEvent::Added(new_file) => {
                         if let Some(wows_data) = self.world_of_warships_data.as_ref() {
                             let wows_data = wows_data.read();
-
-                            // Sometimes we parse the replay too early. Let's try to parse it a couple times
-
                             if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
                                 for _ in 0..3 {
                                     if let Some(replay_file) = ReplayFile::from_file(&new_file).ok() {
@@ -576,14 +660,23 @@ impl TabState {
             let (tx, rx) = mpsc::channel();
             let (background_tx, background_rx) = mpsc::channel();
 
+            self.background_parser_tx = Some(background_tx.clone());
+
             if let Some(wows_data) = self.world_of_warships_data.clone() {
-                self.should_send_replays.store(self.settings.send_replay_data, Ordering::SeqCst);
                 task::start_background_parsing_thread(
                     background_rx,
                     Arc::clone(&self.settings.sent_replays),
                     wows_data,
-                    self.should_send_replays.clone(),
+                    self.settings.send_replay_data,
+                    DataExportSettings {
+                        should_auto_export: self.settings.replay_settings.auto_export_data,
+                        export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
+                        export_format: self.settings.replay_settings.auto_export_format,
+                    },
+                    Arc::clone(&self.game_constants),
                     Arc::clone(&self.settings.player_tracker),
+                    self.settings.debug_mode,
+                    Arc::clone(&self.parser_lock),
                 );
             }
 
@@ -600,23 +693,24 @@ impl TabState {
                                     {
                                         tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
                                         // Send this path to the thread watching for replays in background
-                                        let _ = background_tx.send(path);
+                                        let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::NewReplay(path));
                                     } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
                                         tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
                                             .expect("failed to send file creation event");
-                                        // Send this path to the thread watching for replays in background
-                                        let _ = background_tx.send(path);
                                     }
                                 }
                             }
                         }
-                        EventKind::Modify(_) => {
+                        EventKind::Modify(ModifyKind::Data(_)) => {
                             for path in event.paths {
                                 if let Some(filename) = path.file_name() {
                                     if filename == "preferences.xml" {
                                         debug!("Sending preferences changed event");
                                         tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
                                     }
+                                }
+                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                    let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
                                 }
                             }
                         }
@@ -721,7 +815,14 @@ impl WowsToolkitApp {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         let mut state = if let Some(storage) = cc.storage {
-            let mut saved_state: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+            let mut saved_state: Self = if storage.get_string(APP_KEY).is_some() {
+                // if the app key is present and we get no result back, that means deserialization
+                // failed and we should panic because this is an app bug -- likely caused by
+                // not setting a default value for a persisted field
+                eframe::get_value(storage, eframe::APP_KEY).expect("could not deserialize app state")
+            } else {
+                Default::default()
+            };
 
             if !saved_state.tab_state.settings.has_default_value_fix_015 {
                 saved_state.tab_state.settings.check_for_updates = true;
@@ -736,11 +837,6 @@ impl WowsToolkitApp {
                 let _ = std::fs::remove_file(game_params_bin_path());
             }
 
-            saved_state
-                .tab_state
-                .should_send_replays
-                .store(saved_state.tab_state.settings.send_replay_data, Ordering::Relaxed);
-
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
                 update_background_task!(saved_state.tab_state.background_tasks, task);
@@ -751,7 +847,6 @@ impl WowsToolkitApp {
             let mut this: Self = Default::default();
             // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
             this.tab_state.settings.locale = Some("en".to_string());
-            this.tab_state.should_send_replays.store(this.tab_state.settings.send_replay_data, Ordering::Relaxed);
 
             let default_wows_dir = "C:\\Games\\World_of_Warships";
             let default_wows_path = Path::new(default_wows_dir);
@@ -1168,13 +1263,13 @@ impl eframe::App for WowsToolkitApp {
                         self.build_consent_window_open = false;
                         self.tab_state.settings.build_consent_window_shown = true;
                         self.tab_state.settings.send_replay_data = true;
-                        self.tab_state.should_send_replays.store(true, Ordering::Relaxed);
+                        self.tab_state.send_replay_consent_changed();
                     }
                     if ui.button("No").clicked() {
                         self.build_consent_window_open = false;
                         self.tab_state.settings.build_consent_window_shown = true;
                         self.tab_state.settings.send_replay_data = false;
-                        self.tab_state.should_send_replays.store(false, Ordering::Relaxed);
+                        self.tab_state.send_replay_consent_changed();
                     }
                 });
             });

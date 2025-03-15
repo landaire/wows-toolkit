@@ -107,7 +107,7 @@ pub fn load_replay(
 
                 drop(wows_data_inner);
 
-                replay_guard.build_ui_report(game_constants, wows_data, replay_sort, background_task_sender, is_debug_mode);
+                replay_guard.build_ui_report(game_constants, wows_data, replay_sort, Some(background_task_sender), is_debug_mode);
             }
             BackgroundTaskCompletion::ReplayLoaded { replay }
         });

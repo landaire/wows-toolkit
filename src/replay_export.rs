@@ -12,7 +12,6 @@ use crate::ui::replay_parser::{Damage, PotentialDamage, Replay, SkillInfo, UiRep
 pub struct Match {
     vehicles: Vec<Vehicle>,
     metadata: Metadata,
-    battle_result: Option<BattleResult>,
     game_chat: Vec<Message>,
 }
 
@@ -28,6 +27,7 @@ impl Match {
             version: battle_report.version(),
             duration: replay.replay_file.meta.duration,
             timestamp: ui_report.match_timestamp(),
+            battle_result: battle_report.battle_result().cloned(),
         };
 
         let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(Vehicle::from).collect();
@@ -35,7 +35,6 @@ impl Match {
         let mut match_data = Match {
             vehicles,
             metadata,
-            battle_result: battle_report.battle_result().cloned(),
             game_chat: battle_report
                 .game_chat()
                 .iter()
@@ -64,6 +63,14 @@ impl Match {
 
         match_data
     }
+
+    pub fn vehicles(&self) -> &[Vehicle] {
+        &self.vehicles
+    }
+
+    pub fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
 }
 
 #[derive(Serialize)]
@@ -75,6 +82,7 @@ pub struct Metadata {
     version: Version,
     duration: u32,
     timestamp: DateTime<Local>,
+    battle_result: Option<BattleResult>,
 }
 
 #[derive(Serialize)]
@@ -90,6 +98,8 @@ pub struct Player {
     clan_color_rgb: u32,
     /// ID that can be used to find who is in the same division. This is `None` if the player is not in a division.
     division_id: Option<u32>,
+    /// Team assignment. This is `None` if the player is a spectator.
+    team_id: u32,
     /// Whether or not this is who the replay is from
     is_replay_perspective: bool,
 }
@@ -105,6 +115,7 @@ impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
             clan: value.clan().to_string(),
             clan_color_rgb: clan_color as u32,
             division_id: if value.division_id() > 0 { Some(value.division_id()) } else { None },
+            team_id: value.team_id(),
             is_replay_perspective: value.relation() == 0,
         }
     }

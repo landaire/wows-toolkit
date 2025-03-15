@@ -19,14 +19,15 @@ use http_body_util::BodyExt;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use reqwest::Url;
 use scopeguard::defer;
+use serde::{Deserialize, Serialize};
 use tar::Archive;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};
 use twitch_api::twitch_oauth2::{AccessToken, UserToken};
-use wows_replays::ReplayFile;
+use wows_replays::{ErrorKind, ReplayFile};
 use wowsunpack::{
     data::{
         idx::{self, FileNode},
@@ -43,14 +44,15 @@ use crate::{
     error::ToolkitError,
     game_params::load_game_params,
     plaintext_viewer::PlaintextFileViewer,
+    replay_export::Match,
     twitch::{self, Token, TwitchState, TwitchUpdate},
     ui::{
         mod_manager::{ModInfo, ModManagerIndex},
         player_tracker::PlayerTracker,
-        replay_parser::Replay,
+        replay_parser::{Replay, SortOrder, UiReport},
     },
     update_background_task,
-    wows_data::{ShipIcon, WorldOfWarshipsData},
+    wows_data::{self, ShipIcon, WorldOfWarshipsData},
 };
 
 pub struct DownloadProgress {
@@ -610,75 +612,147 @@ pub fn start_twitch_task(
 
 fn parse_replay_data_in_background(
     path: &Path,
-    wows_data: &WorldOfWarshipsData,
+    wows_data_arc: Arc<RwLock<WorldOfWarshipsData>>,
+    constants_arc: Arc<RwLock<serde_json::Value>>,
     client: &reqwest::blocking::Client,
-    should_send_replays: Arc<AtomicBool>,
+    send_replay_to_shipbuilds: bool,
+    data_export_settings: &DataExportSettings,
     player_tracker: Arc<RwLock<PlayerTracker>>,
+    is_debug_mode: bool,
+    replay_parsed_before: bool,
+    parser_lock: Arc<parking_lot::Mutex<()>>,
 ) -> Result<(), ()> {
+    // The parser lock serves to prevent file access issues when both the main
+    // and background thread are attempting to parse some data. This technically
+    // makes all parsers synchronous, but shouldn't be a big deal in practice.
+    let _parser_lock = parser_lock.lock();
+
     // Files may be getting written to. If we fail to parse the replay,
     // let's try try to parse this at least 3 times.
     debug!("Sending replay data for: {:?}", path);
     'main_loop: for _ in 0..3 {
         match ReplayFile::from_file(path) {
             Ok(replay_file) => {
+                debug!("replay parsed successfully");
                 // We only send back random battles
                 let game_type = replay_file.meta.gameType.clone();
-                if !matches!(game_type.as_str(), "RandomBattle" | "RankedBattle") {
-                    debug!("game type is: {}, not sending", &game_type);
-                    break;
-                }
+
+                let wows_data_clone = Arc::clone(&wows_data_arc);
+                let wows_data = wows_data_arc.read();
 
                 let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
                 if let Some(metadata_provider) = metadata_provider {
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
+                    let mut build_uploaded_successfully = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
-                            if should_send_replays.load(Ordering::Relaxed) {
-                                // Send the replay builds to the remote server
-                                for vehicle in report.player_entities() {
-                                    #[cfg(not(feature = "shipbuilds_debugging"))]
-                                    let url = "https://shipbuilds.com/api/ship_builds";
-                                    #[cfg(feature = "shipbuilds_debugging")]
-                                    let url = "http://192.168.1.215:3000/api/ship_builds";
+                            debug!("replay parsed successfully");
+                            let is_valid_game_type_for_shipbuilds = matches!(game_type.as_str(), "RandomBattle" | "RankedBattle");
+                            if !is_valid_game_type_for_shipbuilds {
+                                debug!("game type is: {}", &game_type);
+                            }
+                            if !replay_parsed_before {
+                                debug!("we've never seen this replay before");
+                                if send_replay_to_shipbuilds && is_valid_game_type_for_shipbuilds {
+                                    // Send the replay builds to the remote server
+                                    for vehicle in report.player_entities() {
+                                        #[cfg(not(feature = "shipbuilds_debugging"))]
+                                        let url = "https://shipbuilds.com/api/ship_builds";
+                                        #[cfg(feature = "shipbuilds_debugging")]
+                                        let url = "http://192.168.1.215:3000/api/ship_builds";
 
-                                    if let Some(player) = vehicle.player() {
-                                        // TODO: Bulk API
-                                        let res = client
-                                            .post(url)
-                                            .json(&build_tracker::BuildTrackerPayload::build_from(
-                                                vehicle,
-                                                player.realm().to_string(),
-                                                report.version(),
-                                                game_type.clone(),
-                                                &metadata_provider,
-                                            ))
-                                            .send();
-                                        if let Err(e) = res {
-                                            error!("error sending request: {:?}", e);
-                                            if e.is_connect() {
-                                                break 'main_loop;
+                                        if let Some(player) = vehicle.player() {
+                                            // TODO: Bulk API
+                                            let res = client
+                                                .post(url)
+                                                .json(&build_tracker::BuildTrackerPayload::build_from(
+                                                    vehicle,
+                                                    player.realm().to_string(),
+                                                    report.version(),
+                                                    game_type.clone(),
+                                                    &metadata_provider,
+                                                ))
+                                                .send();
+                                            if let Err(e) = res {
+                                                error!("error sending request: {:?}", e);
+                                                if e.is_connect() {
+                                                    break 'main_loop;
+                                                }
                                             }
+                                        } else {
+                                            error!("no player for replay?");
                                         }
-                                    } else {
-                                        error!("no player for replay?");
                                     }
+                                    debug!("Successfully sent all builds");
                                 }
-                                debug!("Successfully sent all builds");
+
+                                player_tracker.write().update_from_replay(&replay);
                             }
 
                             // Update the player tracker
                             replay.battle_report = Some(report);
-                            player_tracker.write().update_from_replay(&replay);
-
-                            return Ok(());
+                            build_uploaded_successfully = true;
                         }
                         Err(e) => {
                             error!("error parsing background replay: {:?}", e);
                         }
                     }
+
+                    if replay.battle_report.is_some() {
+                        replay.build_ui_report(
+                            Arc::clone(&constants_arc),
+                            wows_data_clone,
+                            Arc::new(Mutex::new(SortOrder::default())),
+                            None,
+                            is_debug_mode,
+                        );
+
+                        if data_export_settings.should_auto_export {
+                            let export_path = data_export_settings
+                                .export_path
+                                .join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
+                            let export_path = export_path.with_extension(match data_export_settings.export_format {
+                                ReplayExportFormat::Json => "json",
+                                ReplayExportFormat::Cbor => "cbor",
+                                ReplayExportFormat::Csv => "csv",
+                            });
+
+                            let transformed_data = Match::new(&replay, is_debug_mode);
+
+                            if let Err(e) = File::create(&export_path)
+                                .context("failed to create export file")
+                                .and_then(|file| match data_export_settings.export_format {
+                                    ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
+                                    ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
+                                    ReplayExportFormat::Csv => {
+                                        // TODO: this doesn't work
+                                        let mut comment_data = Vec::new();
+                                        csv::WriterBuilder::new()
+                                            .has_headers(true)
+                                            .from_writer(&mut comment_data)
+                                            .serialize(transformed_data.metadata());
+                                        let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
+
+                                        writer.write_record([b"# Metadata", comment_data.as_slice()]);
+                                        writer.serialize(transformed_data.vehicles()).context("failed to write export file")
+                                    }
+                                })
+                            {
+                                // fail gracefully
+                                println!("failed to write data export file: {:?}", e);
+                            }
+                        }
+                    }
+
+                    if build_uploaded_successfully {
+                        return Ok(());
+                    }
                 } else {
                     return Err(());
                 }
+            }
+            Err(ErrorKind::UnsupportedReplayVersion(_)) => {
+                return Err(()); // We don't want to keep trying to parse this
             }
             Err(e) => {
                 error!("error attempting to parse replay in background thread: {:?}", e);
@@ -690,12 +764,57 @@ fn parse_replay_data_in_background(
     Err(())
 }
 
+#[derive(Copy, Clone, Default, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum ReplayExportFormat {
+    #[default]
+    Json,
+    Cbor,
+    Csv,
+}
+
+impl ReplayExportFormat {
+    pub fn as_str(&self) -> &str {
+        self.as_ref()
+    }
+}
+
+impl AsRef<str> for ReplayExportFormat {
+    fn as_ref(&self) -> &str {
+        match self {
+            ReplayExportFormat::Json => "JSON",
+            ReplayExportFormat::Cbor => "CBOR",
+            ReplayExportFormat::Csv => "CSV",
+        }
+    }
+}
+
+pub struct DataExportSettings {
+    pub should_auto_export: bool,
+    pub export_path: PathBuf,
+    pub export_format: ReplayExportFormat,
+}
+
+pub enum ReplayBackgroundParserThreadMessage {
+    /// A new replay has been written
+    NewReplay(PathBuf),
+    /// A replay has been modified. This probably indicates that the post-battle
+    /// results have been written to the file.
+    ModifiedReplay(PathBuf),
+    ShouldSendReplaysToServer(bool),
+    DataAutoExportSettingChange(DataExportSettings),
+    DebugStateChange(bool),
+}
+
 pub fn start_background_parsing_thread(
-    rx: mpsc::Receiver<PathBuf>,
+    rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     sent_replays: Arc<RwLock<HashSet<String>>>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    should_send_replays: Arc<AtomicBool>,
+    mut should_send_replays: bool,
+    mut data_export_settings: DataExportSettings,
+    constants_file_data: Arc<RwLock<serde_json::Value>>,
     player_tracker: Arc<RwLock<PlayerTracker>>,
+    mut is_debug: bool,
+    parser_lock: Arc<Mutex<()>>,
 ) {
     debug!("starting background parsing thread");
     let _join_handle = std::thread::spawn(move || {
@@ -722,6 +841,7 @@ pub fn start_background_parsing_thread(
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
+            let wows_data_clone = Arc::clone(&wows_data);
             let wows_data = wows_data.read();
 
             // Try to see if we have any historical replays we can send
@@ -734,10 +854,22 @@ pub fn start_background_parsing_thread(
                         }
 
                         let path_str = path.to_string_lossy();
-                        let sent_replay = { sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
+                        let already_recorded_replay = { sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
 
-                        if !sent_replay
-                            && parse_replay_data_in_background(&path, &wows_data, &client, Arc::clone(&should_send_replays), Arc::clone(&player_tracker)).is_ok()
+                        if !already_recorded_replay
+                            && parse_replay_data_in_background(
+                                &path,
+                                Arc::clone(&wows_data_clone),
+                                Arc::clone(&constants_file_data),
+                                &client,
+                                should_send_replays,
+                                &data_export_settings,
+                                Arc::clone(&player_tracker),
+                                is_debug,
+                                already_recorded_replay,
+                                Arc::clone(&parser_lock),
+                            )
+                            .is_ok()
                         {
                             sent_replays.write().insert(path_str.into_owned());
                         }
@@ -750,18 +882,58 @@ pub fn start_background_parsing_thread(
         }
 
         debug!("Beginning backgorund replay receive loop");
-        while let Ok(path) = rx.recv() {
-            let path_str = path.to_string_lossy();
-            let sent_replay = { sent_replays.read().contains(path_str.as_ref()) };
+        while let Ok(message) = rx.recv() {
+            match message {
+                ReplayBackgroundParserThreadMessage::NewReplay(path) => {
+                    let path_str = path.to_string_lossy();
+                    let already_parsed_replay = { sent_replays.read().contains(path_str.as_ref()) };
 
-            if !sent_replay {
-                debug!("Attempting to send replay at {}", path_str);
-                let wows_data = wows_data.read();
-                if parse_replay_data_in_background(&path, &wows_data, &client, Arc::clone(&should_send_replays), Arc::clone(&player_tracker)).is_ok() {
-                    sent_replays.write().insert(path_str.into_owned());
+                    debug!("Attempting to parse replay at {}", path_str);
+                    if parse_replay_data_in_background(
+                        &path,
+                        Arc::clone(&wows_data),
+                        Arc::clone(&constants_file_data),
+                        &client,
+                        should_send_replays,
+                        &data_export_settings,
+                        Arc::clone(&player_tracker),
+                        is_debug,
+                        already_parsed_replay,
+                        Arc::clone(&parser_lock),
+                    )
+                    .is_ok()
+                    {
+                        sent_replays.write().insert(path_str.into_owned());
+                    }
                 }
-            } else {
-                debug!("Not sending replay as it's already been sent");
+                ReplayBackgroundParserThreadMessage::ModifiedReplay(path) => {
+                    let path_str = path.to_string_lossy();
+                    let already_parsed_replay = { sent_replays.read().contains(path_str.as_ref()) };
+
+                    // For a modified replay, we will always re-parse it but never send it.
+                    // TODO: this might export data multiple times?
+                    let _ = parse_replay_data_in_background(
+                        &path,
+                        Arc::clone(&wows_data),
+                        Arc::clone(&constants_file_data),
+                        &client,
+                        false,
+                        &data_export_settings,
+                        Arc::clone(&player_tracker),
+                        is_debug,
+                        already_parsed_replay,
+                        Arc::clone(&parser_lock),
+                    );
+                }
+                ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(should_send) => {
+                    should_send_replays = should_send;
+                }
+                ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(new_data_export_settings) => {
+                    data_export_settings = new_data_export_settings;
+                }
+                ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state) => {
+                    is_debug = new_debug_state;
+                }
             }
         }
     });
