@@ -127,7 +127,7 @@ impl ModManagerInfo {
             .flat_map(|(_macro_category, categories)| categories.iter())
             .flat_map(|category| category.mods.iter())
             .find(|mod_info| mod_info.borrow().meta.unique_id == id)
-            .map(|mod_info| Rc::clone(mod_info))
+            .map(Rc::clone)
     }
 
     pub fn update_index(&mut self, index_hash: String, index: ModManagerIndex) {
@@ -160,7 +160,7 @@ impl ModManagerInfo {
         // Build the new category list
         for modi in mods {
             let category_parts = modi.category.split('/').collect::<Vec<_>>();
-            match (category_parts.get(0), category_parts.get(1)) {
+            match (category_parts.first(), category_parts.get(1)) {
                 (Some(macro_group), Some(micro_group)) => {
                     let previous_mod = old_mods.remove(&modi.unique_id);
                     let (enabled, mod_paths) = if let Some(previous) = previous_mod {
@@ -252,8 +252,8 @@ impl ToolkitTabViewer<'_> {
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.button(format!("{} Save Mod Config", icons::FLOPPY_DISK)).clicked() {}
-                if ui.button(format!("{} Load Mod Config", icons::FOLDER)).clicked() {}
+                ui.button(format!("{} Save Mod Config", icons::FLOPPY_DISK)).clicked();
+                ui.button(format!("{} Load Mod Config", icons::FOLDER)).clicked();
                 ui.add(egui::TextEdit::singleline(&mut mod_manager_info.filter_text).hint_text("Filter"));
             });
 
@@ -290,12 +290,8 @@ impl ToolkitTabViewer<'_> {
                                     let mut mod_info = mod_info_arc.borrow_mut();
                                     // Apply the filter
                                     // TODO: maybe just build a raw list of mods to show so we aren't doing work in the UI thread
-                                    if !mod_manager_info.filter_text.is_empty() {
-                                        if !mod_info.meta.name.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())
-                                            || mod_info.meta.author.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())
-                                        {
-                                            continue;
-                                        }
+                                    if !mod_manager_info.filter_text.is_empty() && (!mod_info.meta.name.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase()) || mod_info.meta.author.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())) {
+                                        continue;
                                     }
 
                                     body.row(30.0, |mut row| {

@@ -310,7 +310,7 @@ impl ToolkitTabViewer<'_> {
                         });
                     });
                     strip.cell(|ui| {
-                        egui::ScrollArea::both().id_source("file_tree_scroll_area").show(ui, |ui| {
+                        egui::ScrollArea::both().id_salt("file_tree_scroll_area").show(ui, |ui| {
                             if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                                 let wows_data = wows_data.read();
                                 let file_tree = &wows_data.file_tree;
@@ -329,7 +329,7 @@ impl ToolkitTabViewer<'_> {
             StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(20.0)).vertical(|mut strip| {
                 strip.cell(|ui| {
                     ui.vertical(|ui| {
-                        egui::ScrollArea::both().id_source("selected_files_scroll_area").show(ui, |ui| {
+                        egui::ScrollArea::both().id_salt("selected_files_scroll_area").show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.heading("Selected Files");
                             });

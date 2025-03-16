@@ -1,5 +1,5 @@
 #![warn(clippy::all, rust_2018_idioms)]
-#![allow(clippy::blocks_in_if_conditions)]
+#![allow(clippy::blocks_in_conditions)]
 mod app;
 mod build_tracker;
 mod consts;

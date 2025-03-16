@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
         mpsc::{self, Sender, TryRecvError},
     },
     thread,
@@ -27,7 +26,7 @@ use tar::Archive;
 use tokio::runtime::Runtime;
 use tracing::{debug, error};
 use twitch_api::twitch_oauth2::{AccessToken, UserToken};
-use wows_replays::{ErrorKind, ReplayFile};
+use wows_replays::ReplayFile;
 use wowsunpack::{
     data::{
         idx::{self, FileNode},
@@ -231,7 +230,7 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
 
     if replays_dir.exists() {
-        for file in std::fs::read_dir(&replays_dir).expect("failed to read replay dir").flatten() {
+        for file in std::fs::read_dir(replays_dir).expect("failed to read replay dir").flatten() {
             if !file.file_type().expect("failed to get file type").is_file() {
                 continue;
             }
@@ -275,7 +274,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
 
         let icon_node = file_tree
             .find(&path)
-            .expect(format!("failed to find file {}", <&'static str>::from(species)).as_str());
+            .unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
@@ -357,7 +356,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     let number = latest_build.unwrap();
     let build_dir = wows_directory.join("bin").join(format!("{}", number));
-    for file in read_dir(&build_dir.join("idx"))? {
+    for file in read_dir(build_dir.join("idx"))? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
             let file_data = std::fs::read(file.path()).unwrap();
@@ -406,8 +405,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     let data = WorldOfWarshipsData {
         game_metadata: metadata_provider.clone(),
-        file_tree: file_tree,
-        pkg_loader: pkg_loader,
+        file_tree,
+        pkg_loader,
         filtered_files: files,
         game_version: number,
         ship_icons: icons,
@@ -481,7 +480,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
     let url = release.browser_download_url.clone();
 
     runtime.spawn(async move {
-        let result = download_update(progress_tx, url).await.map(|path| BackgroundTaskCompletion::UpdateDownloaded(path));
+        let result = download_update(progress_tx, url).await.map(BackgroundTaskCompletion::UpdateDownloaded);
 
         let _ = tx.send(result);
     });
@@ -602,7 +601,7 @@ pub fn start_twitch_task(
             // Do a period cleanup of old viewers
             let mut state = twitch_state.write();
             let now = chrono::offset::Local::now();
-            for (_, timestamps) in &mut state.participants {
+            for timestamps in state.participants.values_mut() {
                 // Retain only timestamps within the last 30 minutes
                 timestamps.retain(|ts| *ts > (now - Duration::from_secs(60 * 30)));
             }
@@ -1083,7 +1082,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
         match frame {
             Ok(frame) => {
                 if let Some(data) = frame.data_ref() {
-                    result.extend_from_slice(&data);
+                    result.extend_from_slice(data);
                     tx.send(DownloadProgress {
                         downloaded: result.len() as u64,
                         total: total as u64,

@@ -57,7 +57,7 @@ impl BuildTrackerPayload {
             skills: entity.commander_skills_raw().to_vec(),
             consumables: indicies_to_index(config.abilities(), metadata_provider),
             signals: indicies_to_index(config.signals(), metadata_provider),
-            game_type: game_type,
+            game_type,
         }
     }
 }

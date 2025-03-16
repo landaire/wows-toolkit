@@ -583,7 +583,7 @@ impl TabState {
                             let wows_data = wows_data.read();
                             if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
                                 for _ in 0..3 {
-                                    if let Some(replay_file) = ReplayFile::from_file(&new_file).ok() {
+                                    if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
                                         let replay = Replay::new(replay_file, game_metadata.clone());
                                         let replay = Arc::new(RwLock::new(replay));
 
@@ -873,7 +873,7 @@ impl WowsToolkitApp {
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
         // Try to update mod update tasks
-        if let Some(new_task) = self.tab_state.background_task_receiver.try_recv().ok() {
+        if let Ok(new_task) = self.tab_state.background_task_receiver.try_recv() {
             self.tab_state.background_tasks.push(new_task);
         }
 
@@ -969,7 +969,7 @@ impl WowsToolkitApp {
                                         self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                     }
                                     {
-                                        self.tab_state.settings.player_tracker.write().update_from_replay(&*replay.read());
+                                        self.tab_state.settings.player_tracker.write().update_from_replay(&replay.read());
                                     }
                                     self.tab_state.current_replay = Some(replay);
                                     *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)));
@@ -1125,7 +1125,7 @@ impl WowsToolkitApp {
                     match frame {
                         Ok(frame) => {
                             if let Some(data) = frame.data_ref() {
-                                result.extend_from_slice(&data);
+                                result.extend_from_slice(data);
                             }
                         }
                         Err(_) => return (app_updates, None),

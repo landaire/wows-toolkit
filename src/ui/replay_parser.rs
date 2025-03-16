@@ -512,12 +512,12 @@ impl UiReport {
             // Assign division
             let div = player.division_id();
             let division_char = if div > 0 {
-                Some(divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')).clone())
+                Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')))
             } else {
                 None
             };
 
-            let div_text = if let Some(div) = division_char { Some(format!("({})", div)) } else { None };
+            let div_text = division_char.map(|div| format!("({})", div));
 
             let clan_text = if !player.clan().is_empty() {
                 Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()))
@@ -663,7 +663,7 @@ impl UiReport {
 
                     let received_damage_report_text = separate_number(total_received, Some(locale));
                     let received_damage_report_text = RichText::new(received_damage_report_text).color(player_color);
-                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().map(|desc| desc).join("\n")).font(FontId::monospace(12.0));
+                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().join("\n")).font(FontId::monospace(12.0));
 
                     (
                         Some(total_received),
@@ -695,7 +695,7 @@ impl UiReport {
             };
 
             let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) = results_info
-                .and_then(|info_array| {
+                .map(|info_array| {
                     // First pass over damage numbers: grab the longest description so that we can later format it
                     let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
                         .iter()
@@ -734,7 +734,7 @@ impl UiReport {
                     let damage_report_text = separate_number(total_agro, Some(locale));
                     let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
 
-                    Some((
+                    (
                         Some(total_agro),
                         Some(damage_report_text),
                         Some(damage_report_hover_text),
@@ -743,7 +743,7 @@ impl UiReport {
                             torpedoes: all_agro.get("agro_tpd").copied().unwrap_or_default(),
                             planes: all_agro.get("agro_air").copied().unwrap_or_default(),
                         }),
-                    ))
+                    )
                 })
                 .unwrap_or_default();
 
@@ -892,7 +892,7 @@ impl UiReport {
                 .unwrap_or_default();
 
             let report = VehicleReport {
-                vehicle: Arc::clone(&vehicle),
+                vehicle: Arc::clone(vehicle),
                 color: player_color,
                 name_text,
                 clan_text,
@@ -1010,7 +1010,7 @@ impl UiReport {
                 SortColumn::Crits => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.crits }),
                 SortColumn::ReceivedDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.received_damage }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
-                SortColumn::Kills => SortKey::i64(report.kills.or_else(|| Some(report.observed_kills))),
+                SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
             };
 
             (team_id, key, db_id)
@@ -1776,7 +1776,7 @@ impl SortOrder {
             _ => *self = SortOrder::Desc(new_column),
         }
 
-        self.clone()
+        *self
     }
 
     fn column(&self) -> SortColumn {
@@ -2044,11 +2044,7 @@ impl ToolkitTabViewer<'_> {
             } = message;
 
             let translated_text = if sender_relation.is_none() {
-                self.metadata_provider().and_then(|provider| {
-                    let name = provider.localized_name_from_id(message).map(|name| Cow::Owned(name));
-
-                    name
-                })
+                self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned))
             } else {
                 None
             };
@@ -2081,7 +2077,7 @@ impl ToolkitTabViewer<'_> {
                         &format!("[{}] ", player.clan()),
                         0.0,
                         TextFormat {
-                            color: clan_color_for_player(&*player).unwrap(),
+                            color: clan_color_for_player(player).unwrap(),
                             ..Default::default()
                         },
                     );
@@ -2416,7 +2412,7 @@ impl ToolkitTabViewer<'_> {
             });
 
             egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {
-                egui::ScrollArea::both().id_source("replay_chat_scroll_area").show(ui, |ui| {
+                egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
                     self.build_file_listing(ui);
                 });
             });

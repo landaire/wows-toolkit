@@ -98,7 +98,7 @@ impl PlayerTracker {
                 tracked_player.timestamps.insert(timestamp);
                 tracked_player.arena_ids.insert(report.arena_id());
 
-                tracked_players_by_ts.entry(timestamp.clone()).or_default().push(player.db_id());
+                tracked_players_by_ts.entry(timestamp).or_default().push(player.db_id());
             }
         }
     }
@@ -118,9 +118,11 @@ pub struct TrackedPlayer {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
 enum TimePeriod {
     LastHour,
     LastSixHours,
+    #[default]
     LastDay,
     LastWeek,
     LastMonth,
@@ -231,11 +233,6 @@ impl TimePeriod {
     }
 }
 
-impl Default for TimePeriod {
-    fn default() -> Self {
-        TimePeriod::LastDay
-    }
-}
 
 impl ToolkitTabViewer<'_> {
     pub fn build_player_tracker_tab(&mut self, ui: &mut egui::Ui) {
@@ -313,7 +310,7 @@ impl ToolkitTabViewer<'_> {
                                         row.col(|ui| {
                                             ui.label(player_name);
                                         });
-                                        if let Some(participant_info) = twitch_state.player_is_potential_stream_sniper(&player_name, *match_timestamp) {
+                                        if let Some(participant_info) = twitch_state.player_is_potential_stream_sniper(player_name, *match_timestamp) {
                                             row.col(|ui| {
                                                 for (participant, timestamps) in participant_info {
                                                     ui.label(participant).on_hover_text(format!(
@@ -444,7 +441,7 @@ impl ToolkitTabViewer<'_> {
                                     .cloned()
                                     .collect()
                             } else {
-                                tracked_players_by_ts.iter().map(|(_ts, ids)| ids).flatten().cloned().collect()
+                                tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
                             };
 
                             let tracked_players = &mut player_tracker_settings.tracked_players;
@@ -455,7 +452,7 @@ impl ToolkitTabViewer<'_> {
                                         player_range.contains(id)
                                             && (player.clan.to_ascii_lowercase().contains(&filter_lower)
                                                 || player.last_name.to_ascii_lowercase().contains(&filter_lower)
-                                                || player.names.iter().position(|name| name.to_ascii_lowercase().contains(&filter_lower)).is_some())
+                                                || player.names.iter().any(|name| name.to_ascii_lowercase().contains(&filter_lower)))
                                     } else {
                                         player_range.contains(id)
                                     }
@@ -476,7 +473,7 @@ impl ToolkitTabViewer<'_> {
                                         let playerb_clan = &playerb.clan;
 
                                         if sort_order == SortOrder::Asc {
-                                            playera_clan.cmp(&playerb_clan)
+                                            playera_clan.cmp(playerb_clan)
                                         } else {
                                             playerb_clan.cmp(playera_clan)
                                         }
@@ -486,9 +483,9 @@ impl ToolkitTabViewer<'_> {
                                         let playerb_last = playerb.timestamps.last().unwrap();
 
                                         if sort_order == SortOrder::Asc {
-                                            playera_last.cmp(&playerb_last)
+                                            playera_last.cmp(playerb_last)
                                         } else {
-                                            playerb_last.cmp(&playera_last)
+                                            playerb_last.cmp(playera_last)
                                         }
                                     }
                                     SortedBy::TimesEncountered(sort_order) => {

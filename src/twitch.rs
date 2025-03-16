@@ -127,11 +127,10 @@ impl TwitchState {
             .collect::<Vec<String>>();
 
         for (viewer_name, viewer_timestamps) in &self.participants {
-            if (name.len() > 5 && levenshtein::levenshtein(&viewer_name, name) <= 3)
+            if (name.len() > 5 && levenshtein::levenshtein(viewer_name, name) <= 3)
                 || name_chunks
                     .iter()
-                    .position(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
-                    .is_some()
+                    .any(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
             {
                 let timestamps: Vec<_> = viewer_timestamps
                     .iter()
