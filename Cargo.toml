@@ -71,16 +71,17 @@ csv = "1.3.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tracing-appender = "0.2"
+tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = [
     "local-time",
     "time",
     "env-filter",
-] }
+], optional = true }
 
 [features]
 shipbuilds_debugging = []
 mod_manager = []
+logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
 
 
 [profile.release]
