@@ -1,12 +1,20 @@
 use std::sync::Arc;
 
-use chrono::{DateTime, Local};
+use chrono::DateTime;
+use chrono::Local;
 use escaper::decode_html;
 use serde::Serialize;
-use wows_replays::analyzer::battle_controller::{BattleResult, ChatChannel, GameMessage, ShipConfig};
+use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ChatChannel;
+use wows_replays::analyzer::battle_controller::GameMessage;
+use wows_replays::analyzer::battle_controller::ShipConfig;
 use wowsunpack::data::Version;
 
-use crate::ui::replay_parser::{Damage, PotentialDamage, Replay, SkillInfo, VehicleReport};
+use crate::ui::replay_parser::Damage;
+use crate::ui::replay_parser::PotentialDamage;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SkillInfo;
+use crate::ui::replay_parser::VehicleReport;
 
 #[derive(Serialize)]
 pub struct Match {
@@ -32,16 +40,8 @@ impl Match {
 
         let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(Vehicle::from).collect();
 
-        let mut match_data = Match {
-            vehicles,
-            metadata,
-            game_chat: battle_report
-                .game_chat()
-                .iter()
-                .filter(|message| message.sender_relation.is_some())
-                .map(Message::from)
-                .collect(),
-        };
+        let mut match_data =
+            Match { vehicles, metadata, game_chat: battle_report.game_chat().iter().filter(|message| message.sender_relation.is_some()).map(Message::from).collect() };
 
         if is_debug_mode {
             return match_data;
@@ -183,10 +183,7 @@ impl From<&VehicleReport> for Vehicle {
             } else {
                 None
             },
-            observed_results: Some(ObservedResults {
-                damage: value.observed_damage(),
-                kills: value.observed_kills(),
-            }),
+            observed_results: Some(ObservedResults { damage: value.observed_damage(), kills: value.observed_kills() }),
             skill_info: Some(value.skill_info().clone()),
             time_lived_secs: value.time_lived_secs(),
         }
@@ -227,15 +224,7 @@ pub struct Message {
 
 impl From<&GameMessage> for Message {
     fn from(value: &GameMessage) -> Self {
-        let message = if let Ok(decoded) = decode_html(value.message.as_str()) {
-            decoded
-        } else {
-            value.message.clone()
-        };
-        Self {
-            sender_db_id: value.player.as_ref().expect("no player for message").db_id(),
-            channel: value.channel,
-            message,
-        }
+        let message = if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
+        Self { sender_db_id: value.player.as_ref().expect("no player for message").db_id(), channel: value.channel, message }
     }
 }

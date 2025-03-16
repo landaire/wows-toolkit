@@ -1,17 +1,20 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    fmt::Debug,
-    str::FromStr,
-};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::str::FromStr;
 
-use chrono::{DateTime, Local};
-use serde::{Deserialize, Serialize};
-use twitch_api::{
-    HelixClient,
-    helix::{self, chat::get_chatters},
-    twitch_oauth2::{TwitchToken, UserToken},
-    types::UserId,
+use chrono::DateTime;
+use chrono::Local;
+use serde::Deserialize;
+use serde::Serialize;
+use twitch_api::HelixClient;
+use twitch_api::helix::chat::get_chatters;
+use twitch_api::helix::{
+    self,
 };
+use twitch_api::twitch_oauth2::TwitchToken;
+use twitch_api::twitch_oauth2::UserToken;
+use twitch_api::types::UserId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Token {
@@ -78,12 +81,7 @@ impl FromStr for Token {
             }
         }
 
-        Ok(Token {
-            username: username.ok_or(())?,
-            user_id: user_id.ok_or(())?,
-            client_id: client_id.ok_or(())?,
-            oauth_token: oauth_token.ok_or(())?,
-        })
+        Ok(Token { username: username.ok_or(())?, user_id: user_id.ok_or(())?, client_id: client_id.ok_or(())?, oauth_token: oauth_token.ok_or(())? })
     }
 }
 
@@ -104,11 +102,7 @@ pub struct TwitchState {
 
 impl TwitchState {
     pub fn token_is_valid(&self) -> bool {
-        if let Some(token) = self.token.as_ref() {
-            token.expires_in().as_secs() > 0
-        } else {
-            false
-        }
+        if let Some(token) = self.token.as_ref() { token.expires_in().as_secs() > 0 } else { false }
     }
 
     pub fn client(&self) -> &HelixClient<'static, reqwest::Client> {
@@ -117,12 +111,7 @@ impl TwitchState {
 
     pub fn player_is_potential_stream_sniper(&self, name: &str, match_timestamp: DateTime<Local>) -> Option<HashMap<String, Vec<DateTime<Local>>>> {
         let mut results = HashMap::new();
-        let name_chunks = name
-            .chars()
-            .collect::<Vec<char>>()
-            .chunks(5)
-            .map(|c| c.iter().collect::<String>())
-            .collect::<Vec<String>>();
+        let name_chunks = name.chars().collect::<Vec<char>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<String>>();
 
         for (viewer_name, viewer_timestamps) in &self.participants {
             if (name.len() > 5 && levenshtein::levenshtein(viewer_name, name) <= 3)

@@ -1,12 +1,9 @@
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
-use wowsunpack::{
-    data::Version,
-    game_params::{
-        provider::GameMetadataProvider,
-        types::{GameParamProvider, Species},
-    },
-};
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Species;
 
 #[derive(Serialize)]
 pub(crate) struct BuildTrackerPayload {
@@ -34,9 +31,7 @@ pub(crate) struct BuildTrackerPayload {
 }
 
 fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> Vec<String> {
-    ids.iter()
-        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
-        .collect()
+    ids.iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect()
 }
 
 impl BuildTrackerPayload {

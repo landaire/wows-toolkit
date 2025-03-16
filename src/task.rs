@@ -1,58 +1,69 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fs::{File, read_dir},
-    io::Cursor,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        mpsc::{self, Sender, TryRecvError},
-    },
-    thread,
-    time::Duration,
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fs::File;
+use std::fs::read_dir;
+use std::io::Cursor;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{
+    self,
 };
+use std::thread;
+use std::time::Duration;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
+use anyhow::anyhow;
 use flate2::read::GzDecoder;
 use gettext::Catalog;
 use http_body_util::BodyExt;
 use image::EncodableLayout;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
+use parking_lot::RwLock;
 use reqwest::Url;
 use scopeguard::defer;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tar::Archive;
 use tokio::runtime::Runtime;
-use tracing::{debug, error};
-use twitch_api::twitch_oauth2::{AccessToken, UserToken};
+use tracing::debug;
+use tracing::error;
+use twitch_api::twitch_oauth2::AccessToken;
+use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
-use wowsunpack::{
-    data::{
-        idx::{self, FileNode},
-        pkg::PkgFileLoader,
-    },
-    game_params::types::Species,
+use wowsunpack::data::idx::FileNode;
+use wowsunpack::data::idx::{
+    self,
 };
+use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
 
-use crate::{
-    WowsToolkitApp,
-    app::TimedMessage,
-    build_tracker,
-    error::ToolkitError,
-    game_params::load_game_params,
-    plaintext_viewer::PlaintextFileViewer,
-    replay_export::Match,
-    twitch::{self, Token, TwitchState, TwitchUpdate},
-    ui::{
-        mod_manager::{ModInfo, ModManagerIndex},
-        player_tracker::PlayerTracker,
-        replay_parser::{Replay, SortOrder},
-    },
-    update_background_task,
-    wows_data::{ShipIcon, WorldOfWarshipsData},
+use crate::WowsToolkitApp;
+use crate::app::TimedMessage;
+use crate::build_tracker;
+use crate::error::ToolkitError;
+use crate::game_params::load_game_params;
+use crate::plaintext_viewer::PlaintextFileViewer;
+use crate::replay_export::Match;
+use crate::twitch::Token;
+use crate::twitch::TwitchState;
+use crate::twitch::TwitchUpdate;
+use crate::twitch::{
+    self,
 };
+use crate::ui::mod_manager::ModInfo;
+use crate::ui::mod_manager::ModManagerIndex;
+use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SortOrder;
+use crate::update_background_task;
+use crate::wows_data::ShipIcon;
+use crate::wows_data::WorldOfWarshipsData;
 
 pub struct DownloadProgress {
     downloaded: u64,
@@ -67,28 +78,13 @@ pub struct BackgroundTask {
 pub enum BackgroundTaskKind {
     LoadingData,
     LoadingReplay,
-    Updating {
-        rx: mpsc::Receiver<DownloadProgress>,
-        last_progress: Option<DownloadProgress>,
-    },
+    Updating { rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
     PopulatePlayerInspectorFromReplays,
     LoadingConstants,
     LoadingModDatabase,
-    DownloadingMod {
-        mod_info: ModInfo,
-        rx: mpsc::Receiver<DownloadProgress>,
-        last_progress: Option<DownloadProgress>,
-    },
-    InstallingMod {
-        mod_info: ModInfo,
-        rx: mpsc::Receiver<DownloadProgress>,
-        last_progress: Option<DownloadProgress>,
-    },
-    UninstallingMod {
-        mod_info: ModInfo,
-        rx: mpsc::Receiver<DownloadProgress>,
-        last_progress: Option<DownloadProgress>,
-    },
+    DownloadingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
+    InstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
+    UninstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
     UpdateTimedMessage(TimedMessage),
     OpenFileViewer(PlaintextFileViewer),
 }
@@ -186,14 +182,8 @@ impl BackgroundTask {
 }
 
 pub enum BackgroundTaskCompletion {
-    DataLoaded {
-        new_dir: PathBuf,
-        wows_data: WorldOfWarshipsData,
-        replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
-    },
-    ReplayLoaded {
-        replay: Arc<RwLock<Replay>>,
-    },
+    DataLoaded { new_dir: PathBuf, wows_data: WorldOfWarshipsData, replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>> },
+    ReplayLoaded { replay: Arc<RwLock<Replay>> },
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     ConstantsLoaded(serde_json::Value),
@@ -207,16 +197,9 @@ pub enum BackgroundTaskCompletion {
 impl std::fmt::Debug for BackgroundTaskCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DataLoaded {
-                new_dir,
-                wows_data: _,
-                replays: _,
-            } => f
-                .debug_struct("DataLoaded")
-                .field("new_dir", new_dir)
-                .field("wows_data", &"<...>")
-                .field("replays", &"<...>")
-                .finish(),
+            Self::DataLoaded { new_dir, wows_data: _, replays: _ } => {
+                f.debug_struct("DataLoaded").field("new_dir", new_dir).field("wows_data", &"<...>").field("replays", &"<...>").finish()
+            }
             Self::ReplayLoaded { replay: _ } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
@@ -260,14 +243,7 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 
 fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<ShipIcon>> {
     // Try loading ship icons
-    let species = [
-        Species::AirCarrier,
-        Species::Battleship,
-        Species::Cruiser,
-        Species::Destroyer,
-        Species::Submarine,
-        Species::Auxiliary,
-    ];
+    let species = [Species::AirCarrier, Species::Battleship, Species::Cruiser, Species::Destroyer, Species::Submarine, Species::Auxiliary];
 
     let icons: HashMap<Species, Arc<ShipIcon>> = HashMap::from_iter(species.iter().map(|species| {
         let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
@@ -276,9 +252,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
         //     <&'static str>::from(species).to_ascii_lowercase()
         // );
 
-        let icon_node = file_tree
-            .find(&path)
-            .unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
+        let icon_node = file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
@@ -433,11 +407,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     debug!("Sending background task completion");
 
-    Ok(BackgroundTaskCompletion::DataLoaded {
-        new_dir: wows_directory,
-        wows_data: data,
-        replays,
-    })
+    Ok(BackgroundTaskCompletion::DataLoaded { new_dir: wows_directory, wows_data: data, replays })
 }
 
 async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, ToolkitError> {
@@ -453,10 +423,7 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
 
     while let Some(chunk) = body.chunk().await? {
         downloaded += chunk.len();
-        let _ = tx.send(DownloadProgress {
-            downloaded: downloaded as u64,
-            total,
-        });
+        let _ = tx.send(DownloadProgress { downloaded: downloaded as u64, total });
 
         zip_data.extend_from_slice(chunk.as_bytes());
     }
@@ -489,13 +456,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
         let _ = tx.send(result);
     });
 
-    BackgroundTask {
-        receiver: rx.into(),
-        kind: BackgroundTaskKind::Updating {
-            rx: progress_rx,
-            last_progress: None,
-        },
-    }
+    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::Updating { rx: progress_rx, last_progress: None } }
 }
 
 async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) {
@@ -686,10 +647,7 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                             replay.battle_report = Some(report);
                             build_uploaded_successfully = true;
                         }
-                        Err(ToolkitError::ReplayVersionMismatch {
-                            game_version: _,
-                            replay_version: _,
-                        }) => {
+                        Err(ToolkitError::ReplayVersionMismatch { game_version: _, replay_version: _ }) => {
                             return Ok(()); // We don't want to keep trying to parse this
                         }
                         Err(e) => {
@@ -710,10 +668,8 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                             );
 
                             if data.data_export_settings.should_auto_export {
-                                let export_path = data
-                                    .data_export_settings
-                                    .export_path
-                                    .join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
+                                let export_path =
+                                    data.data_export_settings.export_path.join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
                                 let export_path = export_path.with_extension(match data.data_export_settings.export_format {
                                     ReplayExportFormat::Json => "json",
                                     ReplayExportFormat::Cbor => "cbor",
@@ -723,24 +679,19 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                                 let transformed_data = Match::new(&replay, data.is_debug);
 
                                 if let Err(e) =
-                                    File::create(&export_path)
-                                        .context("failed to create export file")
-                                        .and_then(|file| match data.data_export_settings.export_format {
-                                            ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
-                                            ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
-                                            ReplayExportFormat::Csv => {
-                                                // TODO: this doesn't work
-                                                let mut comment_data = Vec::new();
-                                                let _ = csv::WriterBuilder::new()
-                                                    .has_headers(true)
-                                                    .from_writer(&mut comment_data)
-                                                    .serialize(transformed_data.metadata());
-                                                let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
+                                    File::create(&export_path).context("failed to create export file").and_then(|file| match data.data_export_settings.export_format {
+                                        ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
+                                        ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
+                                        ReplayExportFormat::Csv => {
+                                            // TODO: this doesn't work
+                                            let mut comment_data = Vec::new();
+                                            let _ = csv::WriterBuilder::new().has_headers(true).from_writer(&mut comment_data).serialize(transformed_data.metadata());
+                                            let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
 
-                                                let _ = writer.write_record([b"# Metadata", comment_data.as_slice()]);
-                                                writer.serialize(transformed_data.vehicles()).context("failed to write export file")
-                                            }
-                                        })
+                                            let _ = writer.write_record([b"# Metadata", comment_data.as_slice()]);
+                                            writer.serialize(transformed_data.vehicles()).context("failed to write export file")
+                                        }
+                                    })
                                 {
                                     // fail gracefully
                                     println!("failed to write data export file: {:?}", e);
@@ -937,10 +888,7 @@ pub fn start_populating_player_inspector(
         let _ = tx.send(Ok(BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays));
     });
 
-    BackgroundTask {
-        receiver: rx.into(),
-        kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays,
-    }
+    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays }
 }
 
 pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
@@ -972,17 +920,12 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = serde_json::from_slice(&constants)
-            .context("failed to deserialize constants file")
-            .map(BackgroundTaskCompletion::ConstantsLoaded)
-            .map_err(|err| err.into());
+        let result =
+            serde_json::from_slice(&constants).context("failed to deserialize constants file").map(BackgroundTaskCompletion::ConstantsLoaded).map_err(|err| err.into());
 
         tx.send(result).expect("tx closed");
     });
-    BackgroundTask {
-        receiver: rx.into(),
-        kind: BackgroundTaskKind::LoadingConstants,
-    }
+    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingConstants }
 }
 
 // Used in mod manager feature
@@ -998,10 +941,7 @@ pub fn load_mods_db() -> BackgroundTask {
 
         tx.send(result).expect("failed to send mod DB result");
     });
-    BackgroundTask {
-        receiver: rx.into(),
-        kind: BackgroundTaskKind::LoadingModDatabase,
-    }
+    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingModDatabase }
 }
 
 async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> anyhow::Result<Vec<u8>> {
@@ -1041,10 +981,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
             Ok(frame) => {
                 if let Some(data) = frame.data_ref() {
                     result.extend_from_slice(data);
-                    let _ = tx.send(DownloadProgress {
-                        downloaded: result.len() as u64,
-                        total: total as u64,
-                    });
+                    let _ = tx.send(DownloadProgress { downloaded: result.len() as u64, total: total as u64 });
                 }
             }
             Err(_) => Err(anyhow!("Error while downloading mod tarball"))?,
@@ -1147,11 +1084,7 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
     let (download_progress_tx, download_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
         receiver: download_task_rx.into(),
-        kind: BackgroundTaskKind::DownloadingMod {
-            mod_info: mod_info.clone(),
-            rx: download_progress_rx,
-            last_progress: None,
-        },
+        kind: BackgroundTaskKind::DownloadingMod { mod_info: mod_info.clone(), rx: download_progress_rx, last_progress: None },
     });
 
     // TODO: Download pending mods in parallel?
@@ -1166,17 +1099,9 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
             let _ = tx.send(BackgroundTask {
                 receiver: install_task_rx.into(),
                 kind: if mod_info.enabled {
-                    BackgroundTaskKind::InstallingMod {
-                        mod_info: mod_info.clone(),
-                        rx: install_progress_rx,
-                        last_progress: None,
-                    }
+                    BackgroundTaskKind::InstallingMod { mod_info: mod_info.clone(), rx: install_progress_rx, last_progress: None }
                 } else {
-                    BackgroundTaskKind::UninstallingMod {
-                        mod_info: mod_info.clone(),
-                        rx: install_progress_rx,
-                        last_progress: None,
-                    }
+                    BackgroundTaskKind::UninstallingMod { mod_info: mod_info.clone(), rx: install_progress_rx, last_progress: None }
                 },
             });
 
@@ -1197,11 +1122,7 @@ fn uninstall_mod(wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo,
     let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
         receiver: uninstall_task_rx.into(),
-        kind: BackgroundTaskKind::UninstallingMod {
-            mod_info: mod_info.clone(),
-            rx: uninstall_progress_rx,
-            last_progress: None,
-        },
+        kind: BackgroundTaskKind::UninstallingMod { mod_info: mod_info.clone(), rx: uninstall_progress_rx, last_progress: None },
     });
 
     let wows_dir = { wows_data.read().build_dir.join("res_mods") };
@@ -1220,10 +1141,7 @@ fn uninstall_mod(wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo,
             error!("failed to remove file {:?} for mod: {:?}", file, e);
         }
 
-        let _ = uninstall_progress_tx.send(DownloadProgress {
-            downloaded: i as u64,
-            total: paths.len() as u64,
-        });
+        let _ = uninstall_progress_tx.send(DownloadProgress { downloaded: i as u64, total: paths.len() as u64 });
     }
 
     uninstall_task_tx.send(Ok(BackgroundTaskCompletion::ModUninstalled(mod_info))).unwrap();

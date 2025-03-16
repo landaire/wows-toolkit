@@ -1,58 +1,93 @@
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    error::Error,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::{
-        Arc,
-        atomic::Ordering,
-        mpsc::{self, Receiver, Sender, TryRecvError},
-    },
-    time::{Duration, Instant},
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::env;
+use std::error::Error;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{
+    self,
 };
+use std::time::Duration;
+use std::time::Instant;
 
-use clipboard::{ClipboardContext, ClipboardProvider};
+use clipboard::ClipboardContext;
+use clipboard::ClipboardProvider;
 use eframe::APP_KEY;
-use egui::{Color32, Context, KeyboardShortcut, Modifiers, OpenUrl, RichText, Ui, WidgetText, mutex::Mutex};
-use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
-use egui_dock::{DockArea, DockState, Style, TabViewer};
-use egui_extras::{Size, StripBuilder};
+use egui::Color32;
+use egui::Context;
+use egui::KeyboardShortcut;
+use egui::Modifiers;
+use egui::OpenUrl;
+use egui::RichText;
+use egui::Ui;
+use egui::WidgetText;
+use egui::mutex::Mutex;
+use egui_commonmark::CommonMarkCache;
+use egui_commonmark::CommonMarkViewer;
+use egui_dock::DockArea;
+use egui_dock::DockState;
+use egui_dock::Style;
+use egui_dock::TabViewer;
+use egui_extras::Size;
+use egui_extras::StripBuilder;
 use gettext::Catalog;
 
 use http_body_util::BodyExt;
-use notify::{
-    EventKind, RecommendedWatcher, RecursiveMode, Watcher,
-    event::{ModifyKind, RenameMode},
-};
-use octocrab::{models::repos::Release, params::repos::Reference};
+use notify::EventKind;
+use notify::RecommendedWatcher;
+use notify::RecursiveMode;
+use notify::Watcher;
+use notify::event::ModifyKind;
+use notify::event::RenameMode;
+use octocrab::models::repos::Release;
+use octocrab::params::repos::Reference;
 use parking_lot::RwLock;
-use tracing::{debug, trace};
+use tracing::debug;
+use tracing::trace;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use tokio::runtime::Runtime;
-use wows_replays::{ReplayFile, analyzer::battle_controller::GameMessage};
+use wows_replays::ReplayFile;
+use wows_replays::analyzer::battle_controller::GameMessage;
 use wowsunpack::data::idx::FileNode;
 
-use crate::{
-    error::ToolkitError,
-    game_params::game_params_bin_path,
-    icons,
-    plaintext_viewer::PlaintextFileViewer,
-    task::{
-        self, BackgroundParserThread, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, DataExportSettings, ReplayBackgroundParserThreadMessage,
-        ReplayExportFormat,
-    },
-    twitch::{Token, TwitchState},
-    ui::{
-        file_unpacker::{UNPACKER_STOP, UnpackerProgress},
-        mod_manager::{ModInfo, ModManagerInfo},
-        player_tracker::PlayerTracker,
-        replay_parser::{self, Replay, SharedReplayParserTabState},
-    },
-    wows_data::{WorldOfWarshipsData, load_replay, parse_replay},
+use crate::error::ToolkitError;
+use crate::game_params::game_params_bin_path;
+use crate::icons;
+use crate::plaintext_viewer::PlaintextFileViewer;
+use crate::task::BackgroundParserThread;
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskCompletion;
+use crate::task::BackgroundTaskKind;
+use crate::task::DataExportSettings;
+use crate::task::ReplayBackgroundParserThreadMessage;
+use crate::task::ReplayExportFormat;
+use crate::task::{
+    self,
 };
+use crate::twitch::Token;
+use crate::twitch::TwitchState;
+use crate::ui::file_unpacker::UNPACKER_STOP;
+use crate::ui::file_unpacker::UnpackerProgress;
+use crate::ui::mod_manager::ModInfo;
+use crate::ui::mod_manager::ModManagerInfo;
+use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SharedReplayParserTabState;
+use crate::ui::replay_parser::{
+    self,
+};
+use crate::wows_data::WorldOfWarshipsData;
+use crate::wows_data::load_replay;
+use crate::wows_data::parse_replay;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -96,13 +131,7 @@ impl ToolkitTabViewer<'_> {
             ui.label("Application Settings");
             ui.group(|ui| {
                 ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
-                if ui
-                    .checkbox(
-                        &mut self.tab_state.settings.send_replay_data,
-                        "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com",
-                    )
-                    .changed()
-                {
+                if ui.checkbox(&mut self.tab_state.settings.send_replay_data, "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com").changed() {
                     self.tab_state.send_replay_consent_changed();
                 }
             });
@@ -162,23 +191,18 @@ impl ToolkitTabViewer<'_> {
                     let mut alert_data_export_change = false;
                     StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(60.0)).horizontal(|mut strip| {
                         strip.cell(|ui| {
-                            if ui
-                                .checkbox(&mut self.tab_state.settings.replay_settings.auto_export_data, "Auto-Export Data")
-                                .changed()
-                            {
+                            if ui.checkbox(&mut self.tab_state.settings.replay_settings.auto_export_data, "Auto-Export Data").changed() {
                                 alert_data_export_change = true;
                             }
 
                             let selected_format = &mut self.tab_state.settings.replay_settings.auto_export_format;
                             let previously_selected_format = *selected_format;
-                            egui::ComboBox::from_id_salt("auto_export_format_combobox")
-                                .selected_text(selected_format.as_str())
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(selected_format, ReplayExportFormat::Json, "JSON");
-                                    // CSV currently doesn't work. It's not a priority to fix, but should be explored at some point
-                                    // ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
-                                    ui.selectable_value(selected_format, ReplayExportFormat::Cbor, "CBOR");
-                                });
+                            egui::ComboBox::from_id_salt("auto_export_format_combobox").selected_text(selected_format.as_str()).show_ui(ui, |ui| {
+                                ui.selectable_value(selected_format, ReplayExportFormat::Json, "JSON");
+                                // CSV currently doesn't work. It's not a priority to fix, but should be explored at some point
+                                // ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
+                                ui.selectable_value(selected_format, ReplayExportFormat::Cbor, "CBOR");
+                            });
                             if previously_selected_format != *selected_format {
                                 alert_data_export_change = true;
                             }
@@ -417,10 +441,7 @@ pub struct TimedMessage {
 
 impl TimedMessage {
     pub fn new(message: String) -> Self {
-        TimedMessage {
-            message,
-            expiration: Instant::now() + Duration::from_secs(10),
-        }
+        TimedMessage { message, expiration: Instant::now() + Duration::from_secs(10) }
     }
 
     pub fn is_expired(&self) -> bool {
@@ -568,10 +589,7 @@ impl Default for TabState {
 
 impl TabState {
     fn send_replay_consent_changed(&self) {
-        let _ = self
-            .background_parser_tx
-            .as_ref()
-            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data)));
+        let _ = self.background_parser_tx.as_ref().map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data)));
     }
     fn try_update_replays(&mut self) {
         // Sometimes we parse the replay too early. Let's try to parse it a couple times
@@ -703,8 +721,7 @@ impl TabState {
                                         // Send this path to the thread watching for replays in background
                                         let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::NewReplay(path));
                                     } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
-                                            .expect("failed to send file creation event");
+                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone())).expect("failed to send file creation event");
                                     }
                                 }
                             }
@@ -756,10 +773,7 @@ impl TabState {
             let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
         });
 
-        BackgroundTask {
-            receiver: rx.into(),
-            kind: BackgroundTaskKind::LoadingData,
-        }
+        BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingData }
     }
 }
 
@@ -907,10 +921,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::LoadingReplay => {
                                 // nothing to do
                             }
-                            BackgroundTaskKind::Updating {
-                                rx: _rx,
-                                last_progress: _last_progress,
-                            } => {
+                            BackgroundTaskKind::Updating { rx: _rx, last_progress: _last_progress } => {
                                 // do nothing
                             }
                             BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
@@ -920,25 +931,13 @@ impl WowsToolkitApp {
                                 // do nothing
                             }
                             BackgroundTaskKind::LoadingModDatabase => {}
-                            BackgroundTaskKind::InstallingMod {
-                                mod_info: _,
-                                rx: _,
-                                last_progress: _,
-                            } => {
+                            BackgroundTaskKind::InstallingMod { mod_info: _, rx: _, last_progress: _ } => {
                                 // do nothing
                             }
-                            BackgroundTaskKind::UninstallingMod {
-                                mod_info: _,
-                                rx: _,
-                                last_progress: _,
-                            } => {
+                            BackgroundTaskKind::UninstallingMod { mod_info: _, rx: _, last_progress: _ } => {
                                 // do nothing
                             }
-                            BackgroundTaskKind::DownloadingMod {
-                                mod_info: _,
-                                rx: _,
-                                last_progress: _,
-                            } => {
+                            BackgroundTaskKind::DownloadingMod { mod_info: _, rx: _, last_progress: _ } => {
                                 // do nothing
                             }
                             BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
@@ -994,10 +993,7 @@ impl WowsToolkitApp {
                                     // Rename the new exe
                                     std::fs::rename(new_exe, &current_process).expect("failed to rename new process");
 
-                                    Command::new(current_process)
-                                        .arg(current_process_new_path)
-                                        .spawn()
-                                        .expect("failed to execute updated process");
+                                    Command::new(current_process).arg(current_process_new_path).spawn().expect("failed to execute updated process");
 
                                     std::process::exit(0);
                                 }
@@ -1011,18 +1007,12 @@ impl WowsToolkitApp {
                                     self.tab_state.mod_manager_info.update_index("test".to_string(), index);
                                 }
                                 BackgroundTaskCompletion::ModInstalled(mod_info) => {
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                        "{} Successfully installed mod: {}",
-                                        icons::CHECK_CIRCLE,
-                                        mod_info.meta.name()
-                                    )));
+                                    *self.tab_state.timed_message.write() =
+                                        Some(TimedMessage::new(format!("{} Successfully installed mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
                                 }
                                 BackgroundTaskCompletion::ModUninstalled(mod_info) => {
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                        "{} Successfully uninstalled mod: {}",
-                                        icons::CHECK_CIRCLE,
-                                        mod_info.meta.name()
-                                    )));
+                                    *self.tab_state.timed_message.write() =
+                                        Some(TimedMessage::new(format!("{} Successfully uninstalled mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
                                 }
                                 BackgroundTaskCompletion::ModDownloaded(_) => {
                                     // Do nothing when the mod is downloaded.
@@ -1047,13 +1037,8 @@ impl WowsToolkitApp {
             }
 
             // Remove whatever background tasks have yielded a result
-            self.tab_state.background_tasks = self
-                .tab_state
-                .background_tasks
-                .drain(..)
-                .enumerate()
-                .filter_map(|(i, task)| if remove_tasks.contains(&i) { None } else { Some(task) })
-                .collect();
+            self.tab_state.background_tasks =
+                self.tab_state.background_tasks.drain(..).enumerate().filter_map(|(i, task)| if remove_tasks.contains(&i) { None } else { Some(task) }).collect();
 
             if let Some(rx) = &self.tab_state.unpacker_progress {
                 if ui.button("Stop").clicked() {
@@ -1124,11 +1109,7 @@ impl WowsToolkitApp {
                 return (app_updates, None);
             }
 
-            if let Ok(constants_updates) = octocrab
-                .repos("padtrack", "wows-constants")
-                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
-                .await
-            {
+            if let Ok(constants_updates) = octocrab.repos("padtrack", "wows-constants").raw_file(Reference::Branch("main".to_string()), "data/latest.json").await {
                 let mut body = constants_updates.into_body();
                 let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
 
@@ -1178,7 +1159,12 @@ impl WowsToolkitApp {
     }
 
     fn ui_file_drag_and_drop(&mut self, ctx: &Context) {
-        use egui::{Align2, Color32, Id, LayerId, Order, TextStyle};
+        use egui::Align2;
+        use egui::Color32;
+        use egui::Id;
+        use egui::LayerId;
+        use egui::Order;
+        use egui::TextStyle;
 
         // Preview hovering files:
         if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
@@ -1203,13 +1189,7 @@ impl WowsToolkitApp {
 
                 let screen_rect = ctx.screen_rect();
                 painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
-                painter.text(
-                    screen_rect.center(),
-                    Align2::CENTER_CENTER,
-                    text,
-                    TextStyle::Heading.resolve(&ctx.style()),
-                    Color32::WHITE,
-                );
+                painter.text(screen_rect.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(&ctx.style()), Color32::WHITE);
             }
         }
 
@@ -1295,10 +1275,7 @@ impl eframe::App for WowsToolkitApp {
                 let url = latest_release.html_url.clone();
                 let mut notes = latest_release.body.clone();
                 let tag = latest_release.tag_name.clone();
-                let asset = latest_release
-                    .assets
-                    .iter()
-                    .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+                let asset = latest_release.assets.iter().find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
                 // Only show the update window if we have a valid artifact to download
                 if let Some(asset) = asset {
                     egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
@@ -1397,11 +1374,7 @@ impl eframe::App for WowsToolkitApp {
             }
         }
 
-        *file_viewer = file_viewer
-            .drain(..)
-            .enumerate()
-            .filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None })
-            .collect();
+        *file_viewer = file_viewer.drain(..).enumerate().filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None }).collect();
         drop(file_viewer);
 
         // Handle replay drag and drop events

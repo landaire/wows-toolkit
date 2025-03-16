@@ -1,20 +1,22 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::{Arc, mpsc},
-};
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
+use parking_lot::RwLock;
 use wows_replays::ReplayFile;
-use wowsunpack::{
-    data::{idx::FileNode, pkg::PkgFileLoader},
-    game_params::{provider::GameMetadataProvider, types::Species},
-};
+use wowsunpack::data::idx::FileNode;
+use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Species;
 
-use crate::{
-    task::{BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind},
-    ui::replay_parser::{Replay, SortOrder},
-};
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskCompletion;
+use crate::task::BackgroundTaskKind;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SortOrder;
 
 pub struct ShipIcon {
     pub path: String,
@@ -54,14 +56,7 @@ pub fn parse_replay<P: AsRef<Path>>(
     let game_metadata = { wows_data.read().game_metadata.clone()? };
     let replay = Replay::new(replay_file, game_metadata);
 
-    load_replay(
-        game_constants,
-        wows_data,
-        Arc::new(RwLock::new(replay)),
-        replay_sort,
-        background_task_sender,
-        is_debug_mode,
-    )
+    load_replay(game_constants, wows_data, Arc::new(RwLock::new(replay)), replay_sort, background_task_sender, is_debug_mode)
 }
 
 pub fn load_replay(
@@ -113,8 +108,5 @@ pub fn load_replay(
         let _ = tx.send(res);
     });
 
-    Some(BackgroundTask {
-        receiver: rx.into(),
-        kind: BackgroundTaskKind::LoadingReplay,
-    })
+    Some(BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingReplay })
 }

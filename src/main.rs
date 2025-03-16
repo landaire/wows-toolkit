@@ -4,7 +4,8 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
-    use std::{env, path::Path};
+    use std::env;
+    use std::path::Path;
 
     #[cfg(all(debug_assertions, feature = "logging"))]
     {
@@ -19,13 +20,10 @@ fn main() -> eframe::Result<()> {
 
         // use tracing_appender::rolling::Rotation;
         use tracing_subscriber::Layer;
-        use tracing_subscriber::{
-            field::RecordFields,
-            fmt::{
-                FormatFields,
-                format::{Pretty, Writer},
-            },
-        };
+        use tracing_subscriber::field::RecordFields;
+        use tracing_subscriber::fmt::FormatFields;
+        use tracing_subscriber::fmt::format::Pretty;
+        use tracing_subscriber::fmt::format::Writer;
 
         let file_appender = tracing_appender::rolling::Builder::new()
             .rotation(Rotation::HOURLY)
@@ -44,13 +42,7 @@ fn main() -> eframe::Result<()> {
                     .with_ansi(true)
                     .with_filter(LevelFilter::DEBUG),
             )
-            .with(
-                fmt::Layer::new()
-                    .with_writer(non_blocking)
-                    .with_timer(LocalTime::rfc_3339())
-                    .with_ansi(false)
-                    .with_filter(LevelFilter::DEBUG),
-            );
+            .with(fmt::Layer::new().with_writer(non_blocking).with_timer(LocalTime::rfc_3339()).with_ansi(false).with_filter(LevelFilter::DEBUG));
         #[cfg(all(debug_assertions, feature = "logging"))]
         tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     }
@@ -82,11 +74,7 @@ fn main() -> eframe::Result<()> {
         }
     }
 
-    eframe::run_native(
-        wows_toolkit::APP_NAME,
-        native_options,
-        Box::new(|cc| Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))),
-    )
+    eframe::run_native(wows_toolkit::APP_NAME, native_options, Box::new(|cc| Ok(Box::new(wows_toolkit::WowsToolkitApp::new(cc)))))
 }
 
 // When compiling to web using trunk:

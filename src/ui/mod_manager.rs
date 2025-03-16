@@ -1,12 +1,21 @@
 #![allow(dead_code)]
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::icons;
-use egui::{CollapsingHeader, ImageSource, Label, Widget};
+use egui::CollapsingHeader;
+use egui::ImageSource;
+use egui::Label;
+use egui::Widget;
 use egui_commonmark::CommonMarkViewer;
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
+use egui_extras::TableBuilder;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::app::ToolkitTabViewer;
 
@@ -178,11 +187,7 @@ impl ModManagerInfo {
                         .entry(macro_group.to_string())
                         .or_default()
                         .entry(micro_group.to_string())
-                        .or_insert_with(|| ModManagerCategory {
-                            name: micro_group.to_string(),
-                            enabled: category_enabled,
-                            mods: Vec::new(),
-                        })
+                        .or_insert_with(|| ModManagerCategory { name: micro_group.to_string(), enabled: category_enabled, mods: Vec::new() })
                         .mods
                         .push(Rc::new(RefCell::new(ModInfo { meta: modi, enabled, mod_paths })));
                 }
@@ -236,10 +241,7 @@ impl ToolkitTabViewer<'_> {
                     ui.heading(&selected_mod.meta.name);
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut selected_mod.enabled, "Enabled").changed() {
-                            self.tab_state
-                                .mod_action_sender
-                                .send(selected_mod.clone())
-                                .expect("failed to send selected mod on mod_action_sender");
+                            self.tab_state.mod_action_sender.send(selected_mod.clone()).expect("failed to send selected mod on mod_action_sender");
                         }
                         ui.hyperlink_to(format!("{} Mod Home Page", icons::BROWSER), &selected_mod.meta.repo_url);
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
@@ -305,10 +307,7 @@ impl ToolkitTabViewer<'_> {
                                     body.row(30.0, |mut row| {
                                         row.col(|ui| {
                                             if ui.checkbox(&mut mod_info.enabled, "").changed() {
-                                                self.tab_state
-                                                    .mod_action_sender
-                                                    .send(mod_info.clone())
-                                                    .expect("failed to send mod info on mod_action_sender");
+                                                self.tab_state.mod_action_sender.send(mod_info.clone()).expect("failed to send mod info on mod_action_sender");
                                             }
                                         });
                                         row.col(|ui| {

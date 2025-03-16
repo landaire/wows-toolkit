@@ -1,29 +1,36 @@
-use std::{
-    collections::HashSet,
-    fs::{self, File},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+use std::collections::HashSet;
+use std::fs::File;
+use std::fs::{
+    self,
 };
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 
-use egui::{CollapsingHeader, Label, Response, Sense, Ui, mutex::Mutex};
-use egui_extras::{Size, StripBuilder};
+use egui::CollapsingHeader;
+use egui::Label;
+use egui::Response;
+use egui::Sense;
+use egui::Ui;
+use egui::mutex::Mutex;
+use egui_extras::Size;
+use egui_extras::StripBuilder;
 use egui_phosphor::regular as icons;
 use tracing::debug;
-use wowsunpack::{
-    data::{idx::FileNode, pkg::PkgFileLoader},
-    game_params::{
-        convert::{game_params_to_pickle, pickle_to_cbor, pickle_to_json},
-        types::GameParamProvider,
-    },
-};
+use wowsunpack::data::idx::FileNode;
+use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_params::convert::game_params_to_pickle;
+use wowsunpack::game_params::convert::pickle_to_cbor;
+use wowsunpack::game_params::convert::pickle_to_json;
+use wowsunpack::game_params::types::GameParamProvider;
 
-use crate::{
-    app::ToolkitTabViewer,
-    plaintext_viewer::{self, FileType},
+use crate::app::ToolkitTabViewer;
+use crate::plaintext_viewer::FileType;
+use crate::plaintext_viewer::{
+    self,
 };
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
@@ -61,9 +68,7 @@ impl ToolkitTabViewer<'_> {
                         node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
 
                         let file_type = match (is_plaintext_file, is_image_file) {
-                            (Some(ext), None) => String::from_utf8(file_contents)
-                                .ok()
-                                .map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
+                            (Some(ext), None) => String::from_utf8(file_contents).ok().map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
                             (None, Some(_ext)) => Some(FileType::Image { contents: file_contents }),
                             (None, None) => None,
                             _ => unreachable!("this should be impossible"),
@@ -87,21 +92,19 @@ impl ToolkitTabViewer<'_> {
     }
     /// Builds a resource tree node from a [FileNode]
     fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
-        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() })
-            .default_open(file_tree.is_root())
-            .show(ui, |ui| {
-                for (name, node) in file_tree.children() {
-                    if node.is_file() {
-                        let file_label = ui.add(Label::new(name).sense(Sense::click()));
-                        self.add_view_file_menu(&file_label, node);
-                        if file_label.double_clicked() {
-                            self.tab_state.items_to_extract.lock().push(node.clone());
-                        }
-                    } else {
-                        self.build_resource_tree_node(ui, node);
+        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() }).default_open(file_tree.is_root()).show(ui, |ui| {
+            for (name, node) in file_tree.children() {
+                if node.is_file() {
+                    let file_label = ui.add(Label::new(name).sense(Sense::click()));
+                    self.add_view_file_menu(&file_label, node);
+                    if file_label.double_clicked() {
+                        self.tab_state.items_to_extract.lock().push(node.clone());
                     }
+                } else {
+                    self.build_resource_tree_node(ui, node);
                 }
-            });
+            }
+        });
 
         if header.header_response.double_clicked() {
             self.tab_state.items_to_extract.lock().push(file_tree.clone());
@@ -167,11 +170,7 @@ impl ToolkitTabViewer<'_> {
 
                         let path = output_dir.join(file.parent().unwrap().path().unwrap());
                         let file_path = path.join(file.filename());
-                        tx.send(UnpackerProgress {
-                            file_name: file_path.to_string_lossy().into(),
-                            progress: (files_written as f32) / (file_count as f32),
-                        })
-                        .unwrap();
+                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: (files_written as f32) / (file_count as f32) }).unwrap();
                         if !folders_created.contains(&path) {
                             fs::create_dir_all(&path).expect("failed to create folder");
                             folders_created.insert(path.clone());
@@ -210,11 +209,7 @@ impl ToolkitTabViewer<'_> {
 
                     game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
                     let _unpacker_thread = Some(std::thread::spawn(move || {
-                        tx.send(UnpackerProgress {
-                            file_name: file_path.to_string_lossy().into(),
-                            progress: 0.0,
-                        })
-                        .unwrap();
+                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
 
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
 
@@ -240,11 +235,7 @@ impl ToolkitTabViewer<'_> {
                             }
                         }
 
-                        tx.send(UnpackerProgress {
-                            file_name: file_path.to_string_lossy().into(),
-                            progress: 1.0,
-                        })
-                        .unwrap();
+                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 }).unwrap();
                     }));
                 }
             }
@@ -337,10 +328,7 @@ impl ToolkitTabViewer<'_> {
                             let mut items = self.tab_state.items_to_extract.lock();
                             let mut remove_idx = None;
                             for (i, item) in items.iter().enumerate() {
-                                if ui
-                                    .add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned()).sense(Sense::click()))
-                                    .double_clicked()
-                                {
+                                if ui.add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned()).sense(Sense::click())).double_clicked() {
                                     remove_idx = Some(i);
                                 }
                             }
@@ -353,18 +341,10 @@ impl ToolkitTabViewer<'_> {
                 });
 
                 strip.strip(|builder| {
-                    builder
-                        .size(Size::remainder())
-                        .size(Size::exact(60.0))
-                        .size(Size::exact(60.0))
-                        .size(Size::exact(150.0))
-                        .size(Size::exact(150.0))
-                        .horizontal(|mut strip| {
+                    builder.size(Size::remainder()).size(Size::exact(60.0)).size(Size::exact(60.0)).size(Size::exact(150.0)).size(Size::exact(150.0)).horizontal(
+                        |mut strip| {
                             strip.cell(|ui| {
-                                ui.add_sized(
-                                    ui.available_size(),
-                                    egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"),
-                                );
+                                ui.add_sized(ui.available_size(), egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"));
                             });
                             strip.cell(|ui| {
                                 if ui.button("Choose...").clicked() {
@@ -407,7 +387,8 @@ impl ToolkitTabViewer<'_> {
                                     }
                                 });
                             });
-                        });
+                        },
+                    );
                 });
             });
         });

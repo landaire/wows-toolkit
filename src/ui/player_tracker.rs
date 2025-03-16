@@ -1,17 +1,27 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
-use crate::{icons, task};
-use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
-use egui::{Color32, RichText};
-use egui_extras::{Column, TableBuilder};
+use crate::icons;
+use crate::task;
+use chrono::DateTime;
+use chrono::Duration;
+use chrono::Local;
+use chrono::NaiveDateTime;
+use chrono::TimeZone;
+use egui::Color32;
+use egui::RichText;
+use egui_extras::Column;
+use egui_extras::TableBuilder;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use wows_replays::ReplayMeta;
 
-use crate::{app::ToolkitTabViewer, ui::replay_parser::Replay};
+use crate::app::ToolkitTabViewer;
+use crate::ui::replay_parser::Replay;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
@@ -226,16 +236,14 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 let selected = &mut player_tracker_settings.filter_time_period;
-                egui::ComboBox::from_id_salt("player_inspector_time_period_selection")
-                    .selected_text(selected.description())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(selected, TimePeriod::LastHour, "Past Hour");
-                        ui.selectable_value(selected, TimePeriod::LastSixHours, "Past 6 Hours");
-                        ui.selectable_value(selected, TimePeriod::LastDay, "Past 24 Hours");
-                        ui.selectable_value(selected, TimePeriod::LastWeek, "Past Week");
-                        ui.selectable_value(selected, TimePeriod::LastMonth, "Past Month");
-                        ui.selectable_value(selected, TimePeriod::AllTime, "All Time");
-                    });
+                egui::ComboBox::from_id_salt("player_inspector_time_period_selection").selected_text(selected.description()).show_ui(ui, |ui| {
+                    ui.selectable_value(selected, TimePeriod::LastHour, "Past Hour");
+                    ui.selectable_value(selected, TimePeriod::LastSixHours, "Past 6 Hours");
+                    ui.selectable_value(selected, TimePeriod::LastDay, "Past 24 Hours");
+                    ui.selectable_value(selected, TimePeriod::LastWeek, "Past Week");
+                    ui.selectable_value(selected, TimePeriod::LastMonth, "Past Month");
+                    ui.selectable_value(selected, TimePeriod::AllTime, "All Time");
+                });
                 ui.label("Player Filter");
                 ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
                 if let Some(replay_files) = self.tab_state.replay_files.as_ref() {
@@ -338,11 +346,7 @@ impl ToolkitTabViewer<'_> {
                         .header(20.0, |mut header| {
                             header.col(|ui| {
                                 let raw_text = "Clan";
-                                let text = if let SortedBy::Clan(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text.to_string()
-                                };
+                                let text = if let SortedBy::Clan(sort_order) = sorted_by { format!("{} {}", raw_text, sort_order.icon()) } else { raw_text.to_string() };
 
                                 if ui.strong(text).clicked() {
                                     player_tracker_settings.sort_order.transition_to(SortedBy::Clan(SortOrder::Asc));
@@ -350,11 +354,7 @@ impl ToolkitTabViewer<'_> {
                             });
                             header.col(|ui| {
                                 let raw_text = "Player Name";
-                                let text = if let SortedBy::Name(sort_order) = sorted_by {
-                                    format!("{} {}", raw_text, sort_order.icon())
-                                } else {
-                                    raw_text.to_string()
-                                };
+                                let text = if let SortedBy::Name(sort_order) = sorted_by { format!("{} {}", raw_text, sort_order.icon()) } else { raw_text.to_string() };
 
                                 if ui.strong(text).clicked() {
                                     player_tracker_settings.sort_order.transition_to(SortedBy::Name(SortOrder::Asc));
@@ -384,9 +384,7 @@ impl ToolkitTabViewer<'_> {
                                 };
 
                                 if ui.strong(text).clicked() {
-                                    player_tracker_settings
-                                        .sort_order
-                                        .transition_to(SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc));
+                                    player_tracker_settings.sort_order.transition_to(SortedBy::TimesEncounteredInTimeRange(SortOrder::Asc));
                                 }
                             });
                             header.col(|ui| {
@@ -412,12 +410,7 @@ impl ToolkitTabViewer<'_> {
                             let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
                             // Filter by the date range
                             let player_range: BTreeSet<_> = if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
-                                tracked_players_by_ts
-                                    .iter()
-                                    .filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None })
-                                    .flatten()
-                                    .cloned()
-                                    .collect()
+                                tracked_players_by_ts.iter().filter_map(|(ts, ids)| if *ts > filter_range { Some(ids) } else { None }).flatten().cloned().collect()
                             } else {
                                 tracked_players_by_ts.iter().flat_map(|(_ts, ids)| ids).cloned().collect()
                             };
@@ -440,41 +433,25 @@ impl ToolkitTabViewer<'_> {
                                         let playera_name = &playera.last_name;
                                         let playerb_name = &playerb.last_name;
 
-                                        if sort_order == SortOrder::Asc {
-                                            playera_name.cmp(playerb_name)
-                                        } else {
-                                            playerb_name.cmp(playera_name)
-                                        }
+                                        if sort_order == SortOrder::Asc { playera_name.cmp(playerb_name) } else { playerb_name.cmp(playera_name) }
                                     }
                                     SortedBy::Clan(sort_order) => {
                                         let playera_clan = &playera.clan;
                                         let playerb_clan = &playerb.clan;
 
-                                        if sort_order == SortOrder::Asc {
-                                            playera_clan.cmp(playerb_clan)
-                                        } else {
-                                            playerb_clan.cmp(playera_clan)
-                                        }
+                                        if sort_order == SortOrder::Asc { playera_clan.cmp(playerb_clan) } else { playerb_clan.cmp(playera_clan) }
                                     }
                                     SortedBy::LastEncountered(sort_order) => {
                                         let playera_last = playera.timestamps.last().unwrap();
                                         let playerb_last = playerb.timestamps.last().unwrap();
 
-                                        if sort_order == SortOrder::Asc {
-                                            playera_last.cmp(playerb_last)
-                                        } else {
-                                            playerb_last.cmp(playera_last)
-                                        }
+                                        if sort_order == SortOrder::Asc { playera_last.cmp(playerb_last) } else { playerb_last.cmp(playera_last) }
                                     }
                                     SortedBy::TimesEncountered(sort_order) => {
                                         let playera_count = playera.timestamps.len();
                                         let playerb_count = playerb.timestamps.len();
 
-                                        if sort_order == SortOrder::Asc {
-                                            playera_count.cmp(&playerb_count)
-                                        } else {
-                                            playerb_count.cmp(&playera_count)
-                                        }
+                                        if sort_order == SortOrder::Asc { playera_count.cmp(&playerb_count) } else { playerb_count.cmp(&playera_count) }
                                     }
                                     SortedBy::TimesEncounteredInTimeRange(sort_order) => {
                                         let (playera_count, playerb_count) = if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
@@ -489,11 +466,7 @@ impl ToolkitTabViewer<'_> {
                                             (playera_count, playerb_count)
                                         };
 
-                                        if sort_order == SortOrder::Asc {
-                                            playera_count.cmp(&playerb_count)
-                                        } else {
-                                            playerb_count.cmp(&playera_count)
-                                        }
+                                        if sort_order == SortOrder::Asc { playera_count.cmp(&playerb_count) } else { playerb_count.cmp(&playera_count) }
                                     }
                                 });
 
