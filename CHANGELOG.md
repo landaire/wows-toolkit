@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- *(replays)* Add data export
+- *(replays)* Add data auto-export in settings tab
+
+### 🐛 Bug Fixes
+
+- *(replays)* Only make one attempt to parse historical replays
+
+### Replays
+
+- Remove dead code
+- Only write results if server-provided data is available
+
 ## [0.1.29] - 2025-03-05
 
 ### 🐛 Bug Fixes
