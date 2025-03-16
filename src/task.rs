@@ -698,48 +698,53 @@ fn parse_replay_data_in_background(
                         }
                     }
 
-                    if replay.battle_report.is_some() {
-                        replay.build_ui_report(
-                            Arc::clone(&constants_arc),
-                            wows_data_clone,
-                            Arc::new(Mutex::new(SortOrder::default())),
-                            None,
-                            is_debug_mode,
-                        );
+                    if let Some(battle_report) = replay.battle_report.as_ref() {
+                        // We should only really be exporting data when the server-provided battle results
+                        // are available. Otherwise the data isn't very reliable or interesting.
+                        if battle_report.battle_results().is_some() {
+                            replay.build_ui_report(
+                                Arc::clone(&constants_arc),
+                                wows_data_clone,
+                                Arc::new(Mutex::new(SortOrder::default())),
+                                None,
+                                is_debug_mode,
+                            );
 
-                        if data_export_settings.should_auto_export {
-                            let export_path = data_export_settings
-                                .export_path
-                                .join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
-                            let export_path = export_path.with_extension(match data_export_settings.export_format {
-                                ReplayExportFormat::Json => "json",
-                                ReplayExportFormat::Cbor => "cbor",
-                                ReplayExportFormat::Csv => "csv",
-                            });
+                            if data_export_settings.should_auto_export {
+                                let export_path = data_export_settings
+                                    .export_path
+                                    .join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
+                                let export_path = export_path.with_extension(match data_export_settings.export_format {
+                                    ReplayExportFormat::Json => "json",
+                                    ReplayExportFormat::Cbor => "cbor",
+                                    ReplayExportFormat::Csv => "csv",
+                                });
 
-                            let transformed_data = Match::new(&replay, is_debug_mode);
+                                let transformed_data = Match::new(&replay, is_debug_mode);
 
-                            if let Err(e) = File::create(&export_path)
-                                .context("failed to create export file")
-                                .and_then(|file| match data_export_settings.export_format {
-                                    ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
-                                    ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
-                                    ReplayExportFormat::Csv => {
-                                        // TODO: this doesn't work
-                                        let mut comment_data = Vec::new();
-                                        csv::WriterBuilder::new()
-                                            .has_headers(true)
-                                            .from_writer(&mut comment_data)
-                                            .serialize(transformed_data.metadata());
-                                        let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
+                                if let Err(e) =
+                                    File::create(&export_path)
+                                        .context("failed to create export file")
+                                        .and_then(|file| match data_export_settings.export_format {
+                                            ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
+                                            ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
+                                            ReplayExportFormat::Csv => {
+                                                // TODO: this doesn't work
+                                                let mut comment_data = Vec::new();
+                                                csv::WriterBuilder::new()
+                                                    .has_headers(true)
+                                                    .from_writer(&mut comment_data)
+                                                    .serialize(transformed_data.metadata());
+                                                let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
 
-                                        writer.write_record([b"# Metadata", comment_data.as_slice()]);
-                                        writer.serialize(transformed_data.vehicles()).context("failed to write export file")
-                                    }
-                                })
-                            {
-                                // fail gracefully
-                                println!("failed to write data export file: {:?}", e);
+                                                writer.write_record([b"# Metadata", comment_data.as_slice()]);
+                                                writer.serialize(transformed_data.vehicles()).context("failed to write export file")
+                                            }
+                                        })
+                                {
+                                    // fail gracefully
+                                    println!("failed to write data export file: {:?}", e);
+                                }
                             }
                         }
                     }
