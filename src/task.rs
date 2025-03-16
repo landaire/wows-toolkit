@@ -626,6 +626,7 @@ fn parse_replay_data_in_background(
     // and background thread are attempting to parse some data. This technically
     // makes all parsers synchronous, but shouldn't be a big deal in practice.
     let _parser_lock = parser_lock.lock();
+    println!("{:#?}", path);
 
     // Files may be getting written to. If we fail to parse the replay,
     // let's try try to parse this at least 3 times.
@@ -693,6 +694,12 @@ fn parse_replay_data_in_background(
                             replay.battle_report = Some(report);
                             build_uploaded_successfully = true;
                         }
+                        Err(ToolkitError::ReplayVersionMismatch {
+                            game_version: _,
+                            replay_version: _,
+                        }) => {
+                            return Ok(()); // We don't want to keep trying to parse this
+                        }
                         Err(e) => {
                             error!("error parsing background replay: {:?}", e);
                         }
@@ -755,9 +762,6 @@ fn parse_replay_data_in_background(
                 } else {
                     return Err(());
                 }
-            }
-            Err(ErrorKind::UnsupportedReplayVersion(_)) => {
-                return Err(()); // We don't want to keep trying to parse this
             }
             Err(e) => {
                 error!("error attempting to parse replay in background thread: {:?}", e);
