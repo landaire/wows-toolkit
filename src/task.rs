@@ -78,13 +78,30 @@ pub struct BackgroundTask {
 pub enum BackgroundTaskKind {
     LoadingData,
     LoadingReplay,
-    Updating { rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
+    // Updates only occur on Windows
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    Updating {
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
     PopulatePlayerInspectorFromReplays,
     LoadingConstants,
     LoadingModDatabase,
-    DownloadingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
-    InstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
-    UninstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
+    DownloadingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    InstallingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    UninstallingMod {
+        mod_info: ModInfo,
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
     UpdateTimedMessage(TimedMessage),
     OpenFileViewer(PlaintextFileViewer),
 }
@@ -182,8 +199,15 @@ impl BackgroundTask {
 }
 
 pub enum BackgroundTaskCompletion {
-    DataLoaded { new_dir: PathBuf, wows_data: WorldOfWarshipsData, replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>> },
-    ReplayLoaded { replay: Arc<RwLock<Replay>> },
+    DataLoaded {
+        new_dir: PathBuf,
+        wows_data: WorldOfWarshipsData,
+        replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+    },
+    ReplayLoaded {
+        replay: Arc<RwLock<Replay>>,
+    },
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     ConstantsLoaded(serde_json::Value),
@@ -410,6 +434,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     Ok(BackgroundTaskCompletion::DataLoaded { new_dir: wows_directory, wows_data: data, replays })
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, ToolkitError> {
     let mut body = reqwest::get(file).await?;
 
@@ -444,6 +469,7 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
     Ok(file_path.to_path_buf())
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
 

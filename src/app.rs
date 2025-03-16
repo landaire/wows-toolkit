@@ -1292,6 +1292,11 @@ impl eframe::App for WowsToolkitApp {
                                         update_background_task!(self.tab_state.background_tasks, task);
                                     }
                                 }
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    let _ = asset;
+                                    ui.label("Update available, but only Windows is supported at this time.");
+                                }
                                 if ui.button("View Release").clicked() {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }

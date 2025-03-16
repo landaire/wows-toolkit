@@ -1623,17 +1623,14 @@ impl egui_table::TableDelegate for UiReport {
     }
 
     fn row_top_offset(&self, ctx: &Context, _table_id: Id, row_nr: u64) -> f32 {
-        let offset = self
-            .is_row_expanded
+        self.is_row_expanded
             .range(0..row_nr)
             .map(|(expanded_row_nr, expanded)| {
                 let how_expanded = ctx.animate_bool(Id::new(expanded_row_nr), *expanded);
                 how_expanded * self.row_heights.get(expanded_row_nr).copied().unwrap()
             })
             .sum::<f32>()
-            + row_nr as f32 * ROW_HEIGHT;
-
-        offset
+            + row_nr as f32 * ROW_HEIGHT
     }
 }
 
