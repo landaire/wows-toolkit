@@ -207,13 +207,17 @@ pub enum BackgroundTaskCompletion {
 impl std::fmt::Debug for BackgroundTaskCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DataLoaded { new_dir, wows_data, replays } => f
+            Self::DataLoaded {
+                new_dir,
+                wows_data: _,
+                replays: _,
+            } => f
                 .debug_struct("DataLoaded")
                 .field("new_dir", new_dir)
                 .field("wows_data", &"<...>")
                 .field("replays", &"<...>")
                 .finish(),
-            Self::ReplayLoaded { replay } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
+            Self::ReplayLoaded { replay: _ } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
@@ -609,22 +613,11 @@ pub fn start_twitch_task(
     });
 }
 
-fn parse_replay_data_in_background(
-    path: &Path,
-    wows_data_arc: Arc<RwLock<WorldOfWarshipsData>>,
-    constants_arc: Arc<RwLock<serde_json::Value>>,
-    client: &reqwest::blocking::Client,
-    send_replay_to_shipbuilds: bool,
-    data_export_settings: &DataExportSettings,
-    player_tracker: Arc<RwLock<PlayerTracker>>,
-    is_debug_mode: bool,
-    replay_parsed_before: bool,
-    parser_lock: Arc<parking_lot::Mutex<()>>,
-) -> Result<(), ()> {
+fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Client, replay_parsed_before: bool, data: &BackgroundParserThread) -> Result<(), ()> {
     // The parser lock serves to prevent file access issues when both the main
     // and background thread are attempting to parse some data. This technically
     // makes all parsers synchronous, but shouldn't be a big deal in practice.
-    let _parser_lock = parser_lock.lock();
+    let _parser_lock = data.parser_lock.lock();
     println!("{:#?}", path);
 
     // Files may be getting written to. If we fail to parse the replay,
@@ -637,8 +630,8 @@ fn parse_replay_data_in_background(
                 // We only send back random battles
                 let game_type = replay_file.meta.gameType.clone();
 
-                let wows_data_clone = Arc::clone(&wows_data_arc);
-                let wows_data = wows_data_arc.read();
+                let cloned = data.wows_data.clone();
+                let wows_data = cloned.read();
 
                 let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
                 if let Some(metadata_provider) = metadata_provider {
@@ -653,7 +646,7 @@ fn parse_replay_data_in_background(
                             }
                             if !replay_parsed_before {
                                 debug!("we've never seen this replay before");
-                                if send_replay_to_shipbuilds && is_valid_game_type_for_shipbuilds {
+                                if data.should_send_replays && is_valid_game_type_for_shipbuilds {
                                     // Send the replay builds to the remote server
                                     for vehicle in report.player_entities() {
                                         #[cfg(not(feature = "shipbuilds_debugging"))]
@@ -686,7 +679,7 @@ fn parse_replay_data_in_background(
                                     debug!("Successfully sent all builds");
                                 }
 
-                                player_tracker.write().update_from_replay(&replay);
+                                data.player_tracker.write().update_from_replay(&replay);
                             }
 
                             // Update the player tracker
@@ -709,41 +702,42 @@ fn parse_replay_data_in_background(
                         // are available. Otherwise the data isn't very reliable or interesting.
                         if battle_report.battle_results().is_some() {
                             replay.build_ui_report(
-                                Arc::clone(&constants_arc),
-                                wows_data_clone,
+                                Arc::clone(&data.constants_file_data),
+                                Arc::clone(&data.wows_data),
                                 Arc::new(Mutex::new(SortOrder::default())),
                                 None,
-                                is_debug_mode,
+                                data.is_debug,
                             );
 
-                            if data_export_settings.should_auto_export {
-                                let export_path = data_export_settings
+                            if data.data_export_settings.should_auto_export {
+                                let export_path = data
+                                    .data_export_settings
                                     .export_path
                                     .join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
-                                let export_path = export_path.with_extension(match data_export_settings.export_format {
+                                let export_path = export_path.with_extension(match data.data_export_settings.export_format {
                                     ReplayExportFormat::Json => "json",
                                     ReplayExportFormat::Cbor => "cbor",
                                     ReplayExportFormat::Csv => "csv",
                                 });
 
-                                let transformed_data = Match::new(&replay, is_debug_mode);
+                                let transformed_data = Match::new(&replay, data.is_debug);
 
                                 if let Err(e) =
                                     File::create(&export_path)
                                         .context("failed to create export file")
-                                        .and_then(|file| match data_export_settings.export_format {
+                                        .and_then(|file| match data.data_export_settings.export_format {
                                             ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
                                             ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
                                             ReplayExportFormat::Csv => {
                                                 // TODO: this doesn't work
                                                 let mut comment_data = Vec::new();
-                                                csv::WriterBuilder::new()
+                                                let _ = csv::WriterBuilder::new()
                                                     .has_headers(true)
                                                     .from_writer(&mut comment_data)
                                                     .serialize(transformed_data.metadata());
                                                 let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
 
-                                                writer.write_record([b"# Metadata", comment_data.as_slice()]);
+                                                let _ = writer.write_record([b"# Metadata", comment_data.as_slice()]);
                                                 writer.serialize(transformed_data.vehicles()).context("failed to write export file")
                                             }
                                         })
@@ -813,17 +807,18 @@ pub enum ReplayBackgroundParserThreadMessage {
     DebugStateChange(bool),
 }
 
-pub fn start_background_parsing_thread(
-    rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
-    sent_replays: Arc<RwLock<HashSet<String>>>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    mut should_send_replays: bool,
-    mut data_export_settings: DataExportSettings,
-    constants_file_data: Arc<RwLock<serde_json::Value>>,
-    player_tracker: Arc<RwLock<PlayerTracker>>,
-    mut is_debug: bool,
-    parser_lock: Arc<Mutex<()>>,
-) {
+pub struct BackgroundParserThread {
+    pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
+    pub sent_replays: Arc<RwLock<HashSet<String>>>,
+    pub wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    pub should_send_replays: bool,
+    pub data_export_settings: DataExportSettings,
+    pub constants_file_data: Arc<RwLock<serde_json::Value>>,
+    pub player_tracker: Arc<RwLock<PlayerTracker>>,
+    pub is_debug: bool,
+    pub parser_lock: Arc<Mutex<()>>,
+}
+pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
     debug!("starting background parsing thread");
     let _join_handle = std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
@@ -833,7 +828,7 @@ pub fn start_background_parsing_thread(
             debug!("Attempting to prune old replay paths from settings");
 
             // Prune files that no longer exist to prevent the settings from growing too large
-            let mut sent_replays = sent_replays.write();
+            let mut sent_replays = data.sent_replays.write();
             let mut to_remove = Vec::new();
             for file_path in &*sent_replays {
                 if !Path::new(file_path).exists() {
@@ -849,8 +844,7 @@ pub fn start_background_parsing_thread(
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
-            let wows_data_clone = Arc::clone(&wows_data);
-            let wows_data = wows_data.read();
+            let wows_data = data.wows_data.read();
 
             // Try to see if we have any historical replays we can send
             match std::fs::read_dir(&wows_data.replays_dir) {
@@ -862,24 +856,10 @@ pub fn start_background_parsing_thread(
                         }
 
                         let path_str = path.to_string_lossy();
-                        let already_recorded_replay = { sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
+                        let already_recorded_replay = { data.sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
 
-                        if !already_recorded_replay
-                            && parse_replay_data_in_background(
-                                &path,
-                                Arc::clone(&wows_data_clone),
-                                Arc::clone(&constants_file_data),
-                                &client,
-                                should_send_replays,
-                                &data_export_settings,
-                                Arc::clone(&player_tracker),
-                                is_debug,
-                                already_recorded_replay,
-                                Arc::clone(&parser_lock),
-                            )
-                            .is_ok()
-                        {
-                            sent_replays.write().insert(path_str.into_owned());
+                        if !already_recorded_replay && parse_replay_data_in_background(&path, &client, already_recorded_replay, &data).is_ok() {
+                            data.sent_replays.write().insert(path_str.into_owned());
                         }
                     }
                 }
@@ -890,57 +870,33 @@ pub fn start_background_parsing_thread(
         }
 
         debug!("Beginning backgorund replay receive loop");
-        while let Ok(message) = rx.recv() {
+        while let Ok(message) = data.rx.recv() {
             match message {
                 ReplayBackgroundParserThreadMessage::NewReplay(path) => {
                     let path_str = path.to_string_lossy();
-                    let already_parsed_replay = { sent_replays.read().contains(path_str.as_ref()) };
+                    let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
 
                     debug!("Attempting to parse replay at {}", path_str);
-                    if parse_replay_data_in_background(
-                        &path,
-                        Arc::clone(&wows_data),
-                        Arc::clone(&constants_file_data),
-                        &client,
-                        should_send_replays,
-                        &data_export_settings,
-                        Arc::clone(&player_tracker),
-                        is_debug,
-                        already_parsed_replay,
-                        Arc::clone(&parser_lock),
-                    )
-                    .is_ok()
-                    {
-                        sent_replays.write().insert(path_str.into_owned());
+                    if parse_replay_data_in_background(&path, &client, already_parsed_replay, &data).is_ok() {
+                        data.sent_replays.write().insert(path_str.into_owned());
                     }
                 }
                 ReplayBackgroundParserThreadMessage::ModifiedReplay(path) => {
                     let path_str = path.to_string_lossy();
-                    let already_parsed_replay = { sent_replays.read().contains(path_str.as_ref()) };
+                    let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
 
                     // For a modified replay, we will always re-parse it but never send it.
                     // TODO: this might export data multiple times?
-                    let _ = parse_replay_data_in_background(
-                        &path,
-                        Arc::clone(&wows_data),
-                        Arc::clone(&constants_file_data),
-                        &client,
-                        false,
-                        &data_export_settings,
-                        Arc::clone(&player_tracker),
-                        is_debug,
-                        already_parsed_replay,
-                        Arc::clone(&parser_lock),
-                    );
+                    let _ = parse_replay_data_in_background(&path, &client, already_parsed_replay, &data);
                 }
                 ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(should_send) => {
-                    should_send_replays = should_send;
+                    data.should_send_replays = should_send;
                 }
                 ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(new_data_export_settings) => {
-                    data_export_settings = new_data_export_settings;
+                    data.data_export_settings = new_data_export_settings;
                 }
                 ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state) => {
-                    is_debug = new_debug_state;
+                    data.is_debug = new_debug_state;
                 }
             }
         }
@@ -1029,6 +985,8 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     }
 }
 
+// Used in mod manager feature
+#[allow(dead_code)]
 pub fn load_mods_db() -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -1038,7 +996,7 @@ pub fn load_mods_db() -> BackgroundTask {
             .map(BackgroundTaskCompletion::ModDatabaseLoaded)
             .map_err(|err| err.into());
 
-        tx.send(result);
+        tx.send(result).expect("failed to send mod DB result");
     });
     BackgroundTask {
         receiver: rx.into(),
@@ -1083,7 +1041,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
             Ok(frame) => {
                 if let Some(data) = frame.data_ref() {
                     result.extend_from_slice(data);
-                    tx.send(DownloadProgress {
+                    let _ = tx.send(DownloadProgress {
                         downloaded: result.len() as u64,
                         total: total as u64,
                     });
@@ -1233,7 +1191,7 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
     }
 }
 
-fn uninstall_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) -> anyhow::Result<()> {
+fn uninstall_mod(wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) -> anyhow::Result<()> {
     eprintln!("downloading mod");
     let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
     let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
@@ -1255,9 +1213,11 @@ fn uninstall_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsDat
 
         eprintln!("deleting {}", file.display());
         if file.is_dir() {
-            std::fs::remove_dir_all(file);
-        } else {
-            std::fs::remove_file(file);
+            if let Err(e) = std::fs::remove_dir_all(file) {
+                error!("failed to remove directory {:?} for mod: {:?}", file, e);
+            }
+        } else if let Err(e) = std::fs::remove_file(file) {
+            error!("failed to remove file {:?} for mod: {:?}", file, e);
         }
 
         let _ = uninstall_progress_tx.send(DownloadProgress {
@@ -1286,7 +1246,7 @@ pub fn start_mod_manager_thread(
                 install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
             } else {
                 eprintln!("uninstalling mod: {:?}", mod_info.meta.name());
-                uninstall_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
+                uninstall_mod(wows_data.clone(), mod_info.clone(), background_task_sender.clone()).expect("failed to uninstall mod");
             }
         }
     });

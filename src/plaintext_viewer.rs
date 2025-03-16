@@ -7,7 +7,7 @@ use egui::{Image, ImageSource, TextEdit, ViewportBuilder, mutex::Mutex};
 
 pub enum FileType {
     PlainTextFile { ext: String, contents: String },
-    Image { ext: String, contents: Vec<u8> },
+    Image { contents: Vec<u8> },
 }
 
 #[derive(Clone)]
@@ -41,7 +41,7 @@ impl PlaintextFileViewer {
                             ui.add(text_editor);
                         });
                     }
-                    FileType::Image { ext: _, contents } => {
+                    FileType::Image { contents } => {
                         let image = Image::new(ImageSource::Bytes {
                             uri: format!("bytes://{}", &*title).into(),
                             // the icon size is <1k, this clone is fairly cheap

@@ -2,11 +2,9 @@ use std::{
     collections::{BTreeSet, HashMap},
     fmt::Debug,
     str::FromStr,
-    time::Instant,
 };
 
 use chrono::{DateTime, Local};
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use twitch_api::{
     HelixClient,
@@ -23,6 +21,8 @@ pub struct Token {
     oauth_token: String,
 }
 
+// TODO: some features here may be desired.
+#[allow(dead_code)]
 impl Token {
     pub fn username(&self) -> &str {
         &self.username
@@ -100,8 +100,6 @@ pub struct TwitchState {
     client: HelixClient<'static, reqwest::Client>,
     pub token: Option<UserToken>,
     pub participants: ParticipantList,
-    last_participants_update: Option<Instant>,
-    pub watched_channel: String,
 }
 
 impl TwitchState {
@@ -128,9 +126,7 @@ impl TwitchState {
 
         for (viewer_name, viewer_timestamps) in &self.participants {
             if (name.len() > 5 && levenshtein::levenshtein(viewer_name, name) <= 3)
-                || name_chunks
-                    .iter()
-                    .any(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
+                || name_chunks.iter().any(|chunk| if chunk.len() > 5 { viewer_name.contains(chunk) } else { false })
             {
                 let timestamps: Vec<_> = viewer_timestamps
                     .iter()

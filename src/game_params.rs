@@ -4,8 +4,6 @@ use std::{
     time::Instant,
 };
 
-use itertools::Itertools;
-
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use wowsunpack::{

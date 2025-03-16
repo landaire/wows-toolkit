@@ -40,7 +40,10 @@ use crate::{
     game_params::game_params_bin_path,
     icons,
     plaintext_viewer::PlaintextFileViewer,
-    task::{self, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, DataExportSettings, ReplayBackgroundParserThreadMessage, ReplayExportFormat},
+    task::{
+        self, BackgroundParserThread, BackgroundTask, BackgroundTaskCompletion, BackgroundTaskKind, DataExportSettings, ReplayBackgroundParserThreadMessage,
+        ReplayExportFormat,
+    },
     twitch::{Token, TwitchState},
     ui::{
         file_unpacker::{UNPACKER_STOP, UnpackerProgress},
@@ -61,6 +64,7 @@ macro_rules! update_background_task {
     };
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum Tab {
     Unpacker,
@@ -424,6 +428,8 @@ impl TimedMessage {
     }
 }
 
+type PathFileNodePair = (Arc<PathBuf>, FileNode);
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabState {
@@ -435,7 +441,7 @@ pub struct TabState {
     #[serde(skip)]
     pub used_filter: Option<String>,
     #[serde(skip)]
-    pub filtered_file_list: Option<Arc<Vec<(Arc<PathBuf>, FileNode)>>>,
+    pub filtered_file_list: Option<Arc<Vec<PathFileNodePair>>>,
 
     #[serde(skip)]
     pub items_to_extract: Mutex<Vec<FileNode>>,
@@ -663,21 +669,23 @@ impl TabState {
             self.background_parser_tx = Some(background_tx.clone());
 
             if let Some(wows_data) = self.world_of_warships_data.clone() {
-                task::start_background_parsing_thread(
-                    background_rx,
-                    Arc::clone(&self.settings.sent_replays),
+                let background_thread_data = BackgroundParserThread {
+                    rx: background_rx,
+                    sent_replays: Arc::clone(&self.settings.sent_replays),
                     wows_data,
-                    self.settings.send_replay_data,
-                    DataExportSettings {
+                    should_send_replays: self.settings.send_replay_data,
+                    data_export_settings: DataExportSettings {
                         should_auto_export: self.settings.replay_settings.auto_export_data,
                         export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
                         export_format: self.settings.replay_settings.auto_export_format,
                     },
-                    Arc::clone(&self.game_constants),
-                    Arc::clone(&self.settings.player_tracker),
-                    self.settings.debug_mode,
-                    Arc::clone(&self.parser_lock),
-                );
+
+                    constants_file_data: Arc::clone(&self.game_constants),
+                    player_tracker: Arc::clone(&self.settings.player_tracker),
+                    is_debug: self.settings.debug_mode,
+                    parser_lock: Arc::clone(&self.parser_lock),
+                };
+                task::start_background_parsing_thread(background_thread_data);
             }
 
             let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
@@ -926,7 +934,11 @@ impl WowsToolkitApp {
                             } => {
                                 // do nothing
                             }
-                            BackgroundTaskKind::DownloadingMod { mod_info, rx, last_progress } => {
+                            BackgroundTaskKind::DownloadingMod {
+                                mod_info: _,
+                                rx: _,
+                                last_progress: _,
+                            } => {
                                 // do nothing
                             }
                             BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
@@ -1247,6 +1259,9 @@ impl eframe::App for WowsToolkitApp {
 
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D))) {
             self.tab_state.settings.debug_mode = !self.tab_state.settings.debug_mode;
+            if let Some(sender) = self.tab_state.background_parser_tx.as_ref() {
+                let _ = sender.send(ReplayBackgroundParserThreadMessage::DebugStateChange(self.tab_state.settings.debug_mode));
+            }
         }
 
         self.tab_state.try_update_replays();

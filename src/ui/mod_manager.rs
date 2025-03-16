@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use crate::icons;
@@ -28,6 +29,7 @@ pub struct IndexModInfo {
     dependencies: Vec<String>,
 }
 
+// TODO: remove if we ever complete this feature.
 impl IndexModInfo {
     pub fn name(&self) -> &str {
         &self.name
@@ -234,7 +236,10 @@ impl ToolkitTabViewer<'_> {
                     ui.heading(&selected_mod.meta.name);
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut selected_mod.enabled, "Enabled").changed() {
-                            self.tab_state.mod_action_sender.send(selected_mod.clone());
+                            self.tab_state
+                                .mod_action_sender
+                                .send(selected_mod.clone())
+                                .expect("failed to send selected mod on mod_action_sender");
                         }
                         ui.hyperlink_to(format!("{} Mod Home Page", icons::BROWSER), &selected_mod.meta.repo_url);
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
@@ -290,14 +295,20 @@ impl ToolkitTabViewer<'_> {
                                     let mut mod_info = mod_info_arc.borrow_mut();
                                     // Apply the filter
                                     // TODO: maybe just build a raw list of mods to show so we aren't doing work in the UI thread
-                                    if !mod_manager_info.filter_text.is_empty() && (!mod_info.meta.name.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase()) || mod_info.meta.author.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())) {
+                                    if !mod_manager_info.filter_text.is_empty()
+                                        && (!mod_info.meta.name.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())
+                                            || mod_info.meta.author.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase()))
+                                    {
                                         continue;
                                     }
 
                                     body.row(30.0, |mut row| {
                                         row.col(|ui| {
                                             if ui.checkbox(&mut mod_info.enabled, "").changed() {
-                                                self.tab_state.mod_action_sender.send(mod_info.clone());
+                                                self.tab_state
+                                                    .mod_action_sender
+                                                    .send(mod_info.clone())
+                                                    .expect("failed to send mod info on mod_action_sender");
                                             }
                                         });
                                         row.col(|ui| {

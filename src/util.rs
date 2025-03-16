@@ -223,21 +223,24 @@ pub fn colorize_captain_points(
 }
 
 pub fn open_file_explorer(path: &Path) {
-    #[cfg(target_os = "linux")]
+    #[allow(clippy::zombie_processes)]
     {
-        Command::new("xdg-open")
-            .arg(path.parent().expect("failed to get replayparent directory"))
-            .spawn()
-            .unwrap();
-    }
+        #[cfg(target_os = "linux")]
+        {
+            Command::new("xdg-open")
+                .arg(path.parent().expect("failed to get replayparent directory"))
+                .spawn()
+                .unwrap();
+        }
 
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open").arg("--reveal").arg(path).spawn().unwrap();
-    }
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open").arg("--reveal").arg(path).spawn().unwrap();
+        }
 
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("explorer.exe").arg("/select,").arg(path).spawn().unwrap();
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("explorer.exe").arg("/select,").arg(path).spawn().unwrap();
+        }
     }
 }

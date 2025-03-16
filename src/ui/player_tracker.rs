@@ -117,8 +117,7 @@ pub struct TrackedPlayer {
     notes: String,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(Default)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 enum TimePeriod {
     LastHour,
     LastSixHours,
@@ -161,16 +160,6 @@ enum SortedBy {
 }
 
 impl SortedBy {
-    fn description(&self) -> &'static str {
-        match self {
-            SortedBy::Name(_) => "Name",
-            SortedBy::Clan(_) => "Clan",
-            SortedBy::LastEncountered(_) => "Last Encountered",
-            SortedBy::TimesEncountered(_) => "Times Encountered",
-            SortedBy::TimesEncounteredInTimeRange(_) => "Times Encountered in Time Range",
-        }
-    }
-
     fn transition_to(&mut self, new: SortedBy) {
         match (self, new) {
             (SortedBy::Name(sort_order), SortedBy::Name(_)) => sort_order.toggle(),
@@ -189,16 +178,6 @@ impl SortedBy {
             (old, new) => {
                 *old = new;
             }
-        }
-    }
-
-    fn order(&self) -> SortOrder {
-        match self {
-            SortedBy::Name(sort_order)
-            | SortedBy::Clan(sort_order)
-            | SortedBy::LastEncountered(sort_order)
-            | SortedBy::TimesEncountered(sort_order)
-            | SortedBy::TimesEncounteredInTimeRange(sort_order) => *sort_order,
         }
     }
 }
@@ -221,7 +200,7 @@ impl TimePeriod {
         }
     }
 
-    fn to_date(&self) -> Option<DateTime<Local>> {
+    fn to_date(self) -> Option<DateTime<Local>> {
         match self {
             TimePeriod::LastHour => Some(Local::now() - Duration::hours(1)),
             TimePeriod::LastSixHours => Some(Local::now() - Duration::hours(6)),
@@ -232,7 +211,6 @@ impl TimePeriod {
         }
     }
 }
-
 
 impl ToolkitTabViewer<'_> {
     pub fn build_player_tracker_tab(&mut self, ui: &mut egui::Ui) {
@@ -326,7 +304,7 @@ impl ToolkitTabViewer<'_> {
                                                 }
                                             });
                                         } else {
-                                            row.col(|ui| {
+                                            row.col(|_| {
                                                 // nothing to show
                                             });
                                         }

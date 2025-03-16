@@ -64,10 +64,7 @@ impl ToolkitTabViewer<'_> {
                             (Some(ext), None) => String::from_utf8(file_contents)
                                 .ok()
                                 .map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
-                            (None, Some(ext)) => Some(FileType::Image {
-                                ext: ext.to_string(),
-                                contents: file_contents,
-                            }),
+                            (None, Some(_ext)) => Some(FileType::Image { contents: file_contents }),
                             (None, None) => None,
                             _ => unreachable!("this should be impossible"),
                         };
@@ -149,6 +146,7 @@ impl ToolkitTabViewer<'_> {
                 let output_dir = output_dir.to_owned();
                 let mut file_queue = items_to_unpack.to_vec();
                 let _unpacker_thread = Some(std::thread::spawn(move || {
+                    #[allow(clippy::mutable_key_type)]
                     let mut files_to_extract: HashSet<FileNode> = HashSet::default();
                     let mut folders_created: HashSet<PathBuf> = HashSet::default();
                     while let Some(file) = file_queue.pop() {

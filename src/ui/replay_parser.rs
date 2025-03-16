@@ -2,7 +2,6 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     io::{BufWriter, Write},
-    path::PathBuf,
     sync::{Arc, atomic::AtomicBool, mpsc::Sender},
 };
 
@@ -210,6 +209,7 @@ pub struct VehicleReport {
     observed_kills: i64,
 }
 
+#[allow(dead_code)]
 impl VehicleReport {
     fn remove_nda_info(&mut self) {
         self.observed_damage = 0;
@@ -441,7 +441,6 @@ pub struct UiReport {
     vehicle_reports: Vec<VehicleReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
-    constants: Arc<RwLock<serde_json::Value>>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
@@ -794,12 +793,15 @@ impl UiReport {
                     let interactions_idx = interactions_idx.as_u64()? as usize;
                     let dict = results_info?[interactions_idx].as_object()?;
                     for (victim, victim_interactions) in dict {
-                        let victim_id: i64 = victim.parse().expect("failed to convert victim ID to name");
-                        let victim_vehicle = players
-                            .iter()
-                            .find(|vehicle| if let Some(player) = vehicle.player() { player.db_id() == victim_id } else { false });
+                        let _ = victim;
+                        // TODO: for later when building a graph of who did damage to who
 
-                        let victim_interactions = victim_interactions.as_array()?;
+                        // let victim_id: i64 = victim.parse().expect("failed to convert victim ID to name");
+                        // let victim_vehicle = players
+                        //     .iter()
+                        //     .find(|vehicle| if let Some(player) = vehicle.player() { player.db_id() == victim_id } else { false });
+
+                        // let victim_interactions = victim_interactions.as_array()?;
 
                         // if let Some(victim_vehicle) = victim_vehicle {
                         //     if vehicle.player().unwrap().name() != "Paulo_Rogerio1" {
@@ -948,7 +950,6 @@ impl UiReport {
             self_player,
             replay_sort,
             wows_data,
-            constants,
             is_row_expanded: Default::default(),
             sorted: false,
             columns: vec![
@@ -1389,15 +1390,14 @@ impl UiReport {
                                             open: Arc::new(AtomicBool::new(true)),
                                         };
 
-                                        self.background_task_sender
-                                            .as_ref()
-                                            .map(|sender| {
-                                                sender.send(BackgroundTask {
+                                        if let Some(sender) = self.background_task_sender.as_ref() {
+                                            sender
+                                                .send(BackgroundTask {
                                                     receiver: None,
                                                     kind: BackgroundTaskKind::OpenFileViewer(viewer),
                                                 })
-                                            })
-                                            .unwrap();
+                                                .expect("failed to send file viewer task")
+                                        }
 
                                         ui.close_menu();
                                     }
@@ -1876,6 +1876,7 @@ impl Replay {
             .unwrap_or_else(|| "Spectator".to_string())
     }
 
+    #[allow(dead_code)]
     pub fn player_name(&self) -> Option<&str> {
         self.player_vehicle().map(|vehicle| vehicle.name.as_str())
     }
@@ -2000,11 +2001,7 @@ impl ToolkitTabViewer<'_> {
             .and_then(|wows_data| wows_data.read().game_metadata.clone())
     }
 
-    fn replays_dir(&self) -> Option<PathBuf> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().replays_dir.clone())
-    }
-
-    fn build_replay_player_list(&self, ui_report: &mut UiReport, report: &BattleReport, ui: &mut egui::Ui) {
+    fn build_replay_player_list(&self, ui_report: &mut UiReport, ui: &mut egui::Ui) {
         if !ui_report.sorted {
             let replay_sort = self.tab_state.replay_sort.lock();
             ui_report.sort_players(*replay_sort);
@@ -2039,7 +2036,7 @@ impl ToolkitTabViewer<'_> {
                 sender_name,
                 channel,
                 message,
-                entity_id,
+                entity_id: _,
                 player,
             } = message;
 
@@ -2194,7 +2191,7 @@ impl ToolkitTabViewer<'_> {
                                         sender_name,
                                         channel,
                                         message,
-                                        entity_id,
+                                        entity_id: _,
                                         player,
                                     } = message;
 
@@ -2221,7 +2218,7 @@ impl ToolkitTabViewer<'_> {
                                 sender_name,
                                 channel,
                                 message,
-                                entity_id,
+                                entity_id: _,
                                 player,
                             } = message;
                             match player {
@@ -2305,7 +2302,7 @@ impl ToolkitTabViewer<'_> {
                 egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
                     if let Some(ui_report) = replay_file.ui_report.as_mut() {
                         ui_report.debug_mode = self.tab_state.settings.debug_mode;
-                        self.build_replay_player_list(ui_report, report, ui);
+                        self.build_replay_player_list(ui_report, ui);
                     }
                 });
             });
@@ -2365,10 +2362,6 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
-    }
-
-    pub fn clear_chat(&mut self, _replay: Arc<RwLock<Replay>>) {
-        self.tab_state.replay_parser_tab.lock().game_chat.clear();
     }
 
     /// Builds the replay parser tab

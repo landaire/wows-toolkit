@@ -80,17 +80,16 @@ pub fn load_replay(
         let res = { replay.read().parse(game_version.to_string().as_str()) };
         let res = res.map(move |report| {
             {
-                let wows_data_inner = wows_data.read();
-                let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
-
                 #[cfg(feature = "shipbuilds_debugging")]
                 {
+                    let wows_data_inner = wows_data.read();
+                    let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
                     // Send the replay builds to the remote server
                     for player in report.player_entities() {
                         let client = reqwest::blocking::Client::new();
                         client
                             .post("http://shipbuilds.com/api/ship_builds")
-                            .json(&build_tracker::BuildTrackerPayload::build_from(
+                            .json(&crate::build_tracker::BuildTrackerPayload::build_from(
                                 player,
                                 player.player().unwrap().realm().to_owned(),
                                 report.version(),
@@ -100,12 +99,11 @@ pub fn load_replay(
                             .send()
                             .expect("failed to POST build data");
                     }
+                    drop(wows_data_inner);
                 }
 
                 let mut replay_guard = replay.write();
                 replay_guard.battle_report = Some(report);
-
-                drop(wows_data_inner);
 
                 replay_guard.build_ui_report(game_constants, wows_data, replay_sort, Some(background_task_sender), is_debug_mode);
             }
