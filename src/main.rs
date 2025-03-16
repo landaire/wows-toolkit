@@ -19,11 +19,16 @@ fn main() -> eframe::Result<()> {
         }
 
         // use tracing_appender::rolling::Rotation;
+        use tracing::level_filters::LevelFilter;
+        use tracing_appender::rolling::Rotation;
         use tracing_subscriber::Layer;
         use tracing_subscriber::field::RecordFields;
+        use tracing_subscriber::fmt;
         use tracing_subscriber::fmt::FormatFields;
         use tracing_subscriber::fmt::format::Pretty;
         use tracing_subscriber::fmt::format::Writer;
+        use tracing_subscriber::fmt::time::LocalTime;
+        use tracing_subscriber::layer::SubscriberExt;
 
         let file_appender = tracing_appender::rolling::Builder::new()
             .rotation(Rotation::HOURLY)
