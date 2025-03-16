@@ -6,7 +6,7 @@ use std::{
     process::Command,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::Ordering,
         mpsc::{self, Receiver, Sender, TryRecvError},
     },
     time::{Duration, Instant},

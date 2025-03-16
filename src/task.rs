@@ -49,10 +49,10 @@ use crate::{
     ui::{
         mod_manager::{ModInfo, ModManagerIndex},
         player_tracker::PlayerTracker,
-        replay_parser::{Replay, SortOrder, UiReport},
+        replay_parser::{Replay, SortOrder},
     },
     update_background_task,
-    wows_data::{self, ShipIcon, WorldOfWarshipsData},
+    wows_data::{ShipIcon, WorldOfWarshipsData},
 };
 
 pub struct DownloadProgress {

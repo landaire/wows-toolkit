@@ -20,7 +20,6 @@ use egui::{
     Color32, ComboBox, Context, FontId, Id, Image, ImageSource, Label, Margin, OpenUrl, PopupCloseBehavior, RichText, Sense, Separator, TextFormat, Vec2, text::LayoutJob,
 };
 
-use egui_extras::TableRow;
 use escaper::decode_html;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -30,7 +29,7 @@ use wows_replays::{
     ReplayFile, VehicleInfoMeta,
     analyzer::{
         AnalyzerMut,
-        battle_controller::{BattleController, BattleReport, BattleResult, ChatChannel, GameMessage, Player, VehicleEntity, player},
+        battle_controller::{BattleController, BattleReport, BattleResult, ChatChannel, GameMessage, Player, VehicleEntity},
     },
 };
 

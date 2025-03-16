@@ -3,10 +3,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Local};
 use escaper::decode_html;
 use serde::Serialize;
-use wows_replays::analyzer::battle_controller::{BattleReport, BattleResult, ChatChannel, GameMessage, ShipConfig, VehicleEntity};
+use wows_replays::analyzer::battle_controller::{BattleResult, ChatChannel, GameMessage, ShipConfig};
 use wowsunpack::data::Version;
 
-use crate::ui::replay_parser::{Damage, PotentialDamage, Replay, SkillInfo, UiReport, VehicleReport};
+use crate::ui::replay_parser::{Damage, PotentialDamage, Replay, SkillInfo, VehicleReport};
 
 #[derive(Serialize)]
 pub struct Match {
