@@ -40,6 +40,6 @@ jobs:
           RUSTTARGET: ${{ matrix.target }}
           UPLOAD_MODE: none
           TOOLCHAIN_VERSION: 1.85.0
-          ARCHIVE_NAME: wows_toolkit_${{ github.event.release.tag_name }}
+          ARCHIVE_NAME: wows_toolkit_${{ github.event.release.tag_name }}_windows
       - name: Checkout output
         run: ls -laR
