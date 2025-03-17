@@ -9,11 +9,14 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::ShipConfig;
 use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Species;
 
 use crate::ui::replay_parser::Damage;
 use crate::ui::replay_parser::PotentialDamage;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SkillInfo;
+use crate::ui::replay_parser::TranslatedBuild;
 use crate::ui::replay_parser::VehicleReport;
 
 #[derive(Serialize)]
@@ -24,7 +27,7 @@ pub struct Match {
 }
 
 impl Match {
-    pub fn new(replay: &Replay, is_debug_mode: bool) -> Self {
+    pub fn new(replay: &Replay, metadata_provider: &GameMetadataProvider, is_debug_mode: bool) -> Self {
         let battle_report = replay.battle_report.as_ref().expect("no battle report for replay?");
         let ui_report = replay.ui_report.as_ref().expect("no UI report for replay?");
         let metadata = Metadata {
@@ -38,7 +41,7 @@ impl Match {
             battle_result: battle_report.battle_result().cloned(),
         };
 
-        let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(Vehicle::from).collect();
+        let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(|vehicle| Vehicle::new(vehicle, metadata_provider)).collect();
 
         let mut match_data =
             Match { vehicles, metadata, game_chat: battle_report.game_chat().iter().filter(|message| message.sender_relation.is_some()).map(Message::from).collect() };
@@ -49,9 +52,10 @@ impl Match {
 
         for vehicle in &mut match_data.vehicles {
             // Remove enemy build information
-            if vehicle.is_test_ship {
-                vehicle.config = None;
-                vehicle.skill_info = None;
+            if vehicle.is_enemy {
+                vehicle.translated_build = None;
+                vehicle.raw_config = None;
+                vehicle.skill_meta_info = None;
             }
 
             // Remove stats the game doesn't show for test ships
@@ -130,10 +134,16 @@ pub struct Vehicle {
     name: String,
     /// Ship nation (e.g. "usa", "pan asia", etc.)
     nation: String,
+    /// Ship class
+    class: Species,
+    /// Ship tier
+    tier: u32,
     /// Whether this is a test ship
     is_test_ship: bool,
-    /// Ship config which includes modules, upgrades, signals, etc.
-    config: Option<ShipConfig>,
+    /// Whether this is an enemy
+    is_enemy: bool,
+    raw_config: Option<ShipConfig>,
+    translated_build: Option<TranslatedBuild>,
     /// Captain ID that can be mapped to a GameParam
     captain_id: String,
     /// Player's results as provided by the WG server at match end. May not be present
@@ -145,12 +155,12 @@ pub struct Vehicle {
     /// Observed results from the replay file. This is the minimum stats possible for the player,
     /// but some results such as actual damage may be higher than what was provided.
     observed_results: Option<ObservedResults>,
-    skill_info: Option<SkillInfo>,
+    skill_meta_info: Option<SkillInfo>,
     time_lived_secs: Option<u64>,
 }
 
-impl From<&VehicleReport> for Vehicle {
-    fn from(value: &VehicleReport) -> Self {
+impl Vehicle {
+    fn new(value: &VehicleReport, metadata_provider: &GameMetadataProvider) -> Self {
         let vehicle_entity = value.vehicle();
         let player_entity = vehicle_entity.player().expect("vehicle has no player?");
         let player = Player::from(Arc::as_ref(player_entity));
@@ -159,8 +169,12 @@ impl From<&VehicleReport> for Vehicle {
             index: player_entity.vehicle().index().to_string(),
             name: value.ship_name().to_string(),
             nation: player_entity.vehicle().nation().to_string(),
+            class: player_entity.vehicle().species().expect("no species"),
+            tier: player_entity.vehicle().data().vehicle_ref().expect("no vehicle ref").level(),
             is_test_ship: value.is_test_ship(),
-            config: Some(vehicle_entity.props().ship_config().clone()),
+            is_enemy: value.is_enemy(),
+            raw_config: Some(vehicle_entity.props().ship_config().clone()),
+            translated_build: value.translated_build().clone,
             captain_id: vehicle_entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string(),
             server_results: if value.actual_damage_report().is_some() {
                 Some(ServerResults {
@@ -184,7 +198,7 @@ impl From<&VehicleReport> for Vehicle {
                 None
             },
             observed_results: Some(ObservedResults { damage: value.observed_damage(), kills: value.observed_kills() }),
-            skill_info: Some(value.skill_info().clone()),
+            skill_meta_info: Some(value.skill_info().clone()),
             time_lived_secs: value.time_lived_secs(),
         }
     }

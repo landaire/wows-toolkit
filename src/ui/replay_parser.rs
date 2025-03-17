@@ -64,6 +64,8 @@ use wows_replays::analyzer::battle_controller::VehicleEntity;
 use itertools::Itertools;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::CrewSkill;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
 use crate::app::ReplayParserTabState;
@@ -196,6 +198,79 @@ pub struct PotentialDamage {
     planes: u64,
 }
 
+#[derive(Clone, Serialize)]
+pub struct TranslatedAbility {
+    name: Option<String>,
+    game_params_name: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TranslatedModule {
+    name: Option<String>,
+    game_params_name: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TranslatedBuild {
+    modules: Vec<TranslatedModule>,
+    abilities: Vec<TranslatedAbility>,
+    captain_skills: Option<Vec<TranslatedCrewSkill>>,
+}
+
+impl TranslatedBuild {
+    pub fn new(vehicle_entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+        let config = vehicle_entity.props().ship_config();
+        let result = Self {
+            modules: config
+                .modernization()
+                .iter()
+                .filter_map(|id| {
+                    let game_params_name = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?.name().to_string();
+                    let translation_id = format!("IDS_TITLE_{}", game_params_name.to_uppercase());
+                    let name = metadata_provider.localized_name_from_id(&translation_id);
+
+                    Some(TranslatedModule { name, game_params_name })
+                })
+                .collect(),
+            abilities: config
+                .abilities()
+                .iter()
+                .filter_map(|id| {
+                    let game_params_name = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?.name().to_string();
+
+                    let translation_id = format!("IDS_DOCK_CONSUME_TITLE_{}", game_params_name.to_uppercase());
+                    let name = metadata_provider.localized_name_from_id(&translation_id);
+
+                    Some(TranslatedAbility { name, game_params_name })
+                })
+                .collect(),
+            captain_skills: vehicle_entity.commander_skills().map(|skills| {
+                let mut skills: Vec<TranslatedCrewSkill> =
+                    skills.iter().filter_map(|skill| Some(TranslatedCrewSkill::new(skill, vehicle_entity.player()?.vehicle().species()?, metadata_provider))).collect();
+
+                skills.sort_by_key(|skill| skill.tier);
+
+                skills
+            }),
+        };
+
+        Some(result)
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub struct TranslatedCrewSkill {
+    tier: usize,
+    name: Option<String>,
+    internal_name: String,
+}
+
+impl TranslatedCrewSkill {
+    fn new(skill: &CrewSkill, species: Species, metadata_provider: &GameMetadataProvider) -> Self {
+        Self { tier: skill.tier().get_for_species(species), name: skill.translated_name(metadata_provider), internal_name: skill.internal_name().to_string() }
+    }
+}
+
 pub struct VehicleReport {
     vehicle: Arc<VehicleEntity>,
     color: Color32,
@@ -239,6 +314,7 @@ pub struct VehicleReport {
     // TODO: Maybe in the future refactor this to be a HashMap<Rc<Player>, DeathInfo> ?
     kills: Option<i64>,
     observed_kills: i64,
+    translated_build: Option<TranslatedBuild>,
 }
 
 #[allow(dead_code)]
@@ -419,6 +495,10 @@ impl VehicleReport {
 
     pub fn kills(&self) -> Option<i64> {
         self.kills
+    }
+
+    pub fn translated_build(&self) -> Option<&TranslatedBuild> {
+        self.translated_build.as_ref()
     }
 }
 
@@ -927,6 +1007,7 @@ impl UiReport {
                 received_damage_report,
                 kills,
                 observed_kills,
+                translated_build: TranslatedBuild::new(&vehicle, &metadata_provider),
             };
 
             Some(report)
@@ -2055,7 +2136,7 @@ impl ToolkitTabViewer<'_> {
                             rfd::FileDialog::new().set_file_name(format!("{}.{}", replay_file.better_file_name(metadata_provider), format.extension())).save_file()
                         {
                             if let Ok(mut file) = std::fs::File::create(path) {
-                                let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
+                                let transformed_results = Match::new(replay_file, metadata_provider, self.tab_state.settings.debug_mode);
                                 let result = match format {
                                     ReplayExportFormat::Json => {
                                         serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)

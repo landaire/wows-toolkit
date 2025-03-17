@@ -1037,6 +1037,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2960,7 +2969,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a13b4ddc5dcb32f45dac3d6f606da2a52fdb9964a18427e63cd5ef6c0d13288d"
 dependencies = [
- "convert_case",
+ "convert_case 0.6.0",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
@@ -6759,9 +6768,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bed9aaa6ad18de3451a29c8331f9529d90c14ba8490fcf51abcd02ac5928cd3"
+version = "0.2.2"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -6792,6 +6799,7 @@ dependencies = [
  "bincode",
  "chrono",
  "clipboard",
+ "convert_case 0.8.0",
  "csv",
  "data-encoding",
  "eframe",
@@ -6841,13 +6849,12 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d83b76ced0959a98cc5015c608ca7ffce49ceffcafcd0401eefe4914fdbfda40"
+version = "0.5.0"
 dependencies = [
  "binrw",
  "byteorder",
  "clap",
+ "convert_case 0.8.0",
  "csv",
  "derive_builder",
  "eyre",
