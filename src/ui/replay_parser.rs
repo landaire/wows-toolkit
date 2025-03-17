@@ -322,6 +322,8 @@ pub struct VehicleReport {
     distance_traveled: Option<f64>,
     is_test_ship: bool,
     is_enemy: bool,
+    is_self: bool,
+    manual_stat_hide_toggle: bool,
     // TODO: Maybe in the future refactor this to be a HashMap<Rc<Player>, DeathInfo> ?
     kills: Option<i64>,
     observed_kills: i64,
@@ -510,6 +512,14 @@ impl VehicleReport {
 
     pub fn translated_build(&self) -> Option<&TranslatedBuild> {
         self.translated_build.as_ref()
+    }
+
+    pub fn should_hide_stats(&self) -> bool {
+        self.manual_stat_hide_toggle || (!self.is_self && self.is_test_ship)
+    }
+
+    pub fn is_self(&self) -> bool {
+        self.is_self
     }
 }
 
@@ -1015,10 +1025,12 @@ impl UiReport {
                 distance_traveled,
                 is_test_ship,
                 is_enemy,
+                is_self: player.relation() == 0,
+                manual_stat_hide_toggle: false,
                 received_damage_report,
                 kills,
                 observed_kills,
-                translated_build: TranslatedBuild::new(&vehicle, &metadata_provider),
+                translated_build: TranslatedBuild::new(vehicle, metadata_provider),
             };
 
             Some(report)
@@ -1078,16 +1090,16 @@ impl UiReport {
                 SortColumn::RawXp => SortKey::i64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
                 SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
-                SortColumn::ObservedDamage => SortKey::u64(Some(if report.is_test_ship && !self.debug_mode { 0 } else { report.observed_damage })),
-                SortColumn::ActualDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.actual_damage }),
+                SortColumn::ObservedDamage => SortKey::u64(Some(if report.should_hide_stats() && !self.debug_mode { 0 } else { report.observed_damage })),
+                SortColumn::ActualDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.actual_damage }),
                 SortColumn::SpottingDamage => SortKey::u64(report.spotting_damage),
-                SortColumn::PotentialDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.potential_damage }),
+                SortColumn::PotentialDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.potential_damage }),
                 SortColumn::TimeLived => SortKey::u64(report.time_lived_secs),
-                SortColumn::Fires => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.fires }),
-                SortColumn::Floods => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.floods }),
-                SortColumn::Citadels => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.citadels }),
-                SortColumn::Crits => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.crits }),
-                SortColumn::ReceivedDamage => SortKey::u64(if report.is_test_ship && !self.debug_mode { None } else { report.received_damage }),
+                SortColumn::Fires => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires }),
+                SortColumn::Floods => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods }),
+                SortColumn::Citadels => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels }),
+                SortColumn::Crits => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits }),
+                SortColumn::ReceivedDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.received_damage }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
                 SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
             };
@@ -1264,7 +1276,7 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::ObservedDamage => {
-                        if report.is_test_ship && !self.debug_mode {
+                        if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
                         } else {
                             ui.label(&report.observed_damage_text);
@@ -1272,7 +1284,7 @@ impl UiReport {
                     }
                     ReplayColumn::ActualDamage => {
                         if let Some(damage_text) = report.actual_damage_text.clone() {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(damage_text);
@@ -1286,7 +1298,7 @@ impl UiReport {
                     }
                     ReplayColumn::ReceivedDamage => {
                         if let Some(received_damage_text) = report.received_damage_text.clone() {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(received_damage_text);
@@ -1300,7 +1312,7 @@ impl UiReport {
                     }
                     ReplayColumn::PotentialDamage => {
                         if let Some(damage_text) = report.potential_damage_text.clone() {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(damage_text);
@@ -1328,7 +1340,7 @@ impl UiReport {
                     }
                     ReplayColumn::Fires => {
                         if let Some(fires) = report.fires {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 ui.label(fires.to_string());
@@ -1339,7 +1351,7 @@ impl UiReport {
                     }
                     ReplayColumn::Floods => {
                         if let Some(floods) = report.floods {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 ui.label(floods.to_string());
@@ -1350,7 +1362,7 @@ impl UiReport {
                     }
                     ReplayColumn::Citadels => {
                         if let Some(citadels) = report.citadels {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 ui.label(citadels.to_string());
@@ -1361,7 +1373,7 @@ impl UiReport {
                     }
                     ReplayColumn::Crits => {
                         if let Some(crits) = report.crits {
-                            if report.is_test_ship && !self.debug_mode {
+                            if report.should_hide_stats() && !self.debug_mode {
                                 ui.label("NDA");
                             } else {
                                 ui.label(crits.to_string());
@@ -1487,21 +1499,21 @@ impl UiReport {
             if 0.0 < expandedness {
                 match column {
                     ReplayColumn::ActualDamage => {
-                        if report.is_test_ship && !self.debug_mode {
+                        if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
                         } else if let Some(damage_extended_info) = report.actual_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::PotentialDamage => {
-                        if report.is_test_ship && !self.debug_mode {
+                        if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
                         } else if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::ReceivedDamage => {
-                        if report.is_test_ship && !self.debug_mode {
+                        if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
                         } else if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
@@ -2086,6 +2098,9 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui, metadata_provider: &GameMetadataProvider) {
+        // little hack because of borrowing issues
+        let mut hide_my_stats = false;
+        let mut hide_my_stats_changed = false;
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
@@ -2107,7 +2122,8 @@ impl ToolkitTabViewer<'_> {
 
                     ui.label(text);
                 }
-                if let Some(ui_report) = &replay_file.ui_report {
+                let mut self_report = None;
+                if let Some(ui_report) = replay_file.ui_report.as_ref() {
                     let mut team_damage = 0;
                     let mut red_team_damage = 0;
 
@@ -2116,6 +2132,11 @@ impl ToolkitTabViewer<'_> {
                             red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
                         } else {
                             team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        }
+
+                        if vehicle_report.is_self {
+                            self_report = Some(vehicle_report);
+                            hide_my_stats = vehicle_report.manual_stat_hide_toggle;
                         }
                     }
 
@@ -2247,7 +2268,22 @@ impl ToolkitTabViewer<'_> {
                         self.tab_state.file_viewer.lock().push(viewer);
                     }
                 }
+
+                if let Some(self_report) = self_report {
+                    if self_report.is_test_ship() && ui.checkbox(&mut hide_my_stats, "Hide My Test Ship Stats").changed() {
+                        hide_my_stats_changed = true;
+                    }
+                }
             });
+
+            // Synchronize the hide_my_stats value
+            if hide_my_stats_changed {
+                if let Some(ui_report) = replay_file.ui_report.as_mut() {
+                    if let Some(self_report) = ui_report.vehicle_reports.iter_mut().find(|report| report.is_self) {
+                        self_report.manual_stat_hide_toggle = hide_my_stats;
+                    }
+                }
+            }
 
             if self.tab_state.settings.replay_settings.show_game_chat {
                 egui::SidePanel::left("replay_view_chat").default_width(CHAT_VIEW_WIDTH).max_width(CHAT_VIEW_WIDTH).show_inside(ui, |ui| {
