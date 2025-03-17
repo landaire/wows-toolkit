@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.30] - 2025-03-17
+
+### 🚀 Features
+
+- *(replays)* Add data export
+- *(replays)* Add data auto-export in settings tab
+- *(replays)* Data export provides module and skill names
+- *(replays)* Show build info when player details are expanded
+
+### 🐛 Bug Fixes
+
+- *(replays)* Only make one attempt to parse historical replays
+- *(replays)* Fix inconsistencies between auto data export and manual export
+
+### Replays
+
+- Remove dead code
+- Only write results if server-provided data is available
+
 ## [0.1.29] - 2025-03-05
 
 ### 🐛 Bug Fixes
@@ -114,6 +133,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(replays)* Add base xp
 - *(replays)* Add checkbox to auto-load most recent replay
 - *(replays)* Colorize base XP and damage
 - Add new player tracker tab
@@ -121,30 +141,18 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
+- *(replays)* Fixed total damage numbers reflecting incorrect teams
 - *(replays)* Fix operation replays failing to load
 
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update gui
 
 ### Replays
 
 - Adjust some table column sizes
 - Enable auto loading of latest replay by default
-
-## [0.1.22] - 2024-11-13
-
-### 🚀 Features
-
-- *(replays)* Add base xp
-
-### 🐛 Bug Fixes
-
-- *(replays)* Fixed total damage numbers reflecting incorrect teams
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
 
 ## [0.1.21] - 2024-11-12
 
@@ -228,24 +236,15 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
+- *(settings)* Sending replay data was not enabled by default
 - Log files were not cleared
 - *(replays)* Fix ci compilation error
-
-## [0.1.14] - 2024-08-30
-
-### 🐛 Bug Fixes
-
-- *(settings)* Sending replay data was not enabled by default
 
 ## [0.1.13] - 2024-08-30
 
 ### 🐛 Bug Fixes
 
 - *(replays)* Replays would not show any data when parsing
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
 
 ## [0.1.12] - 2024-08-30
 
@@ -262,6 +261,7 @@ All notable changes to this project will be documented in this file.
 
 - Cargo fix
 - Cargo fmt
+- Update changelog
 
 ## [0.1.11] - 2024-06-12
 
