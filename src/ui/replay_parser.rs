@@ -1954,10 +1954,11 @@ impl Replay {
             self.map_name(metadata_provider).as_str(),
             self.scenario(metadata_provider).as_str(),
             self.game_mode(metadata_provider).as_str(),
-            self.game_time().replace(['.', ':', ' '], "-").as_str(),
+            self.game_time(),
         ]
         .iter()
         .join("_")
+        .replace(['.', ':', ' '], "-")
     }
 
     pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
