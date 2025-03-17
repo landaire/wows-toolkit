@@ -702,7 +702,7 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                                     ReplayExportFormat::Csv => "csv",
                                 });
 
-                                let transformed_data = Match::new(&replay, &metadata_provider, data.is_debug);
+                                let transformed_data = Match::new(&replay, data.is_debug);
 
                                 if let Err(e) =
                                     File::create(&export_path).context("failed to create export file").and_then(|file| match data.data_export_settings.export_format {

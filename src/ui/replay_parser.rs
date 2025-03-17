@@ -207,6 +207,7 @@ pub struct TranslatedAbility {
 #[derive(Clone, Serialize)]
 pub struct TranslatedModule {
     name: Option<String>,
+    description: Option<String>,
     game_params_name: String,
 }
 
@@ -229,7 +230,11 @@ impl TranslatedBuild {
                     let translation_id = format!("IDS_TITLE_{}", game_params_name.to_uppercase());
                     let name = metadata_provider.localized_name_from_id(&translation_id);
 
-                    Some(TranslatedModule { name, game_params_name })
+                    let translation_id = format!("IDS_DESC_{}", game_params_name.to_uppercase());
+                    let description =
+                        metadata_provider.localized_name_from_id(&translation_id).and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
+
+                    Some(TranslatedModule { name, description, game_params_name })
                 })
                 .collect(),
             abilities: config
@@ -262,12 +267,18 @@ impl TranslatedBuild {
 pub struct TranslatedCrewSkill {
     tier: usize,
     name: Option<String>,
+    description: Option<String>,
     internal_name: String,
 }
 
 impl TranslatedCrewSkill {
     fn new(skill: &CrewSkill, species: Species, metadata_provider: &GameMetadataProvider) -> Self {
-        Self { tier: skill.tier().get_for_species(species), name: skill.translated_name(metadata_provider), internal_name: skill.internal_name().to_string() }
+        Self {
+            tier: skill.tier().get_for_species(species),
+            name: skill.translated_name(metadata_provider),
+            description: skill.translated_description(metadata_provider),
+            internal_name: skill.internal_name().to_string(),
+        }
     }
 }
 
@@ -1498,9 +1509,61 @@ impl UiReport {
                     }
                     ReplayColumn::Skills => {
                         if !report.is_enemy || self.debug_mode {
-                            if let Some(hover_text) = &report.skill_info.hover_text {
-                                ui.label(hover_text);
-                            }
+                            ui.vertical(|ui| {
+                                if let Some(hover_text) = &report.skill_info.hover_text {
+                                    ui.label(hover_text);
+                                }
+                                if let Some(build_info) = &report.translated_build {
+                                    ui.separator();
+
+                                    if build_info.modules.is_empty() {
+                                        ui.label("No Modules");
+                                    } else {
+                                        ui.label("Modules:");
+                                        for module in &build_info.modules {
+                                            if let Some(name) = &module.name {
+                                                let label = ui.label(name);
+                                                if let Some(hover_text) = module.description.as_ref() {
+                                                    label.on_hover_text(hover_text);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    if build_info.abilities.is_empty() {
+                                        ui.label("No Abilities");
+                                    } else {
+                                        ui.label("Abilities:");
+                                        for ability in &build_info.abilities {
+                                            if let Some(name) = &ability.name {
+                                                ui.label(name);
+                                            }
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    if let Some(captain_skills) = build_info.captain_skills.as_ref() {
+                                        ui.label("Captain Skills:");
+                                        if captain_skills.is_empty() {
+                                            ui.label("No Captain Skills");
+                                        } else {
+                                            for skill in captain_skills {
+                                                if let Some(name) = &skill.name {
+                                                    let label = ui.label(format!("({}) {}", skill.tier, name));
+                                                    if let Some(hover_text) = skill.description.as_ref() {
+                                                        label.on_hover_text(hover_text);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        ui.label("No Captain Skills");
+                                    }
+                                }
+                            });
                         }
                     }
                     _ => {
@@ -2136,7 +2199,7 @@ impl ToolkitTabViewer<'_> {
                             rfd::FileDialog::new().set_file_name(format!("{}.{}", replay_file.better_file_name(metadata_provider), format.extension())).save_file()
                         {
                             if let Ok(mut file) = std::fs::File::create(path) {
-                                let transformed_results = Match::new(replay_file, metadata_provider, self.tab_state.settings.debug_mode);
+                                let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
                                 let result = match format {
                                     ReplayExportFormat::Json => {
                                         serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)

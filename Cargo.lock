@@ -6769,6 +6769,8 @@ dependencies = [
 [[package]]
 name = "wows_replays"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175d3b75f882ab4309276a3d7e0c5025c7fc3c26811de3a7345d8124f52db6b3"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -6799,7 +6801,6 @@ dependencies = [
  "bincode",
  "chrono",
  "clipboard",
- "convert_case 0.8.0",
  "csv",
  "data-encoding",
  "eframe",
@@ -6850,6 +6851,8 @@ dependencies = [
 [[package]]
 name = "wowsunpack"
 version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "026ff09139257f3c21b2627ddeb9f24764821b7361e386d0a52dc185ec55c1d2"
 dependencies = [
  "binrw",
  "byteorder",

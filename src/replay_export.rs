@@ -9,7 +9,6 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::ShipConfig;
 use wowsunpack::data::Version;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
 
 use crate::ui::replay_parser::Damage;
@@ -27,7 +26,7 @@ pub struct Match {
 }
 
 impl Match {
-    pub fn new(replay: &Replay, metadata_provider: &GameMetadataProvider, is_debug_mode: bool) -> Self {
+    pub fn new(replay: &Replay, is_debug_mode: bool) -> Self {
         let battle_report = replay.battle_report.as_ref().expect("no battle report for replay?");
         let ui_report = replay.ui_report.as_ref().expect("no UI report for replay?");
         let metadata = Metadata {
@@ -41,7 +40,7 @@ impl Match {
             battle_result: battle_report.battle_result().cloned(),
         };
 
-        let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(|vehicle| Vehicle::new(vehicle, metadata_provider)).collect();
+        let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(Vehicle::new).collect();
 
         let mut match_data =
             Match { vehicles, metadata, game_chat: battle_report.game_chat().iter().filter(|message| message.sender_relation.is_some()).map(Message::from).collect() };
@@ -160,7 +159,7 @@ pub struct Vehicle {
 }
 
 impl Vehicle {
-    fn new(value: &VehicleReport, metadata_provider: &GameMetadataProvider) -> Self {
+    fn new(value: &VehicleReport) -> Self {
         let vehicle_entity = value.vehicle();
         let player_entity = vehicle_entity.player().expect("vehicle has no player?");
         let player = Player::from(Arc::as_ref(player_entity));
@@ -174,7 +173,7 @@ impl Vehicle {
             is_test_ship: value.is_test_ship(),
             is_enemy: value.is_enemy(),
             raw_config: Some(vehicle_entity.props().ship_config().clone()),
-            translated_build: value.translated_build().clone,
+            translated_build: value.translated_build().cloned(),
             captain_id: vehicle_entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string(),
             server_results: if value.actual_damage_report().is_some() {
                 Some(ServerResults {
