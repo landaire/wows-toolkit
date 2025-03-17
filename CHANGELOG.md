@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(replays)* Test ship players can see their own stats
+
+### 🐛 Bug Fixes
+
+- *(replays)* Replay export filename replaces all characters which may bug filename
+
+## [0.1.30-alpha2] - 2025-03-17
+
+### 🚀 Features
+
 - *(replays)* Add data export
 - *(replays)* Add data auto-export in settings tab
 - *(replays)* Data export provides module and skill names
