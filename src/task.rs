@@ -755,6 +755,14 @@ impl ReplayExportFormat {
     pub fn as_str(&self) -> &str {
         self.as_ref()
     }
+
+    pub fn extension(&self) -> &str {
+        match self {
+            ReplayExportFormat::Json => "json",
+            ReplayExportFormat::Cbor => "cbor",
+            ReplayExportFormat::Csv => "csv",
+        }
+    }
 }
 
 impl AsRef<str> for ReplayExportFormat {

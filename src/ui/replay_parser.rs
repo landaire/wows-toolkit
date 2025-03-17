@@ -13,6 +13,7 @@ use crate::icons;
 use crate::replay_export::Match;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
+use crate::task::ReplayExportFormat;
 use crate::update_background_task;
 use crate::util::build_tomato_gg_url;
 use crate::wows_data::ShipIcon;
@@ -48,6 +49,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
 
+use tracing::error;
 use wows_replays::ReplayFile;
 use wows_replays::VehicleInfoMeta;
 use wows_replays::analyzer::AnalyzerMut;
@@ -1938,7 +1940,7 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui) {
+    fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui, metadata_provider: &GameMetadataProvider) {
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_entity = report.self_entity();
             let self_player = self_entity.player().unwrap();
@@ -2040,17 +2042,36 @@ impl ToolkitTabViewer<'_> {
                         ui.close_menu();
                     }
                 });
-                if ui.button("Export Results").on_hover_text("Export the raw battle results JSON").clicked() {
-                    let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(format!("{} {} {} - Battle Results.json", report.game_type(), report.game_mode(), report.map_name()))
-                        .save_file()
-                    {
-                        if let Ok(mut file) = std::fs::File::create(path) {
-                            serde_json::to_writer_pretty(&mut file, &transformed_results).expect("failed to serialize results");
+                ui.menu_button("Export Results", |ui| {
+                    let format = if ui.button("JSON").clicked() {
+                        Some(ReplayExportFormat::Json)
+                    } else if ui.button("CBOR").clicked() {
+                        Some(ReplayExportFormat::Cbor)
+                    } else {
+                        None
+                    };
+                    if let Some(format) = format {
+                        if let Some(path) =
+                            rfd::FileDialog::new().set_file_name(format!("{}.{}", replay_file.better_file_name(metadata_provider), format.extension())).save_file()
+                        {
+                            if let Ok(mut file) = std::fs::File::create(path) {
+                                let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
+                                let result = match format {
+                                    ReplayExportFormat::Json => {
+                                        serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                                    }
+                                    ReplayExportFormat::Cbor => {
+                                        serde_cbor::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                                    }
+                                    ReplayExportFormat::Csv => todo!("CSV isn't supported yet"),
+                                };
+                                if let Err(e) = result {
+                                    error!("Failed to write results to file: {}", e);
+                                }
+                            }
                         }
                     }
-                }
+                });
                 if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
@@ -2198,7 +2219,7 @@ impl ToolkitTabViewer<'_> {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
                     let mut replay_file = replay_file.write();
-                    self.build_replay_view(&mut replay_file, ui);
+                    self.build_replay_view(&mut replay_file, ui, self.metadata_provider().expect("no metadata provider?").as_ref());
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                         ui.heading("Double click or load a replay to view data");
