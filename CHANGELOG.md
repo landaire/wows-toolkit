@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.31] - 2025-03-18
+
+### 🚀 Features
+
+- *(replays)* Allow exporting as CSV
+
 ## [0.1.30] - 2025-03-17
 
 ### 🚀 Features
