@@ -49,6 +49,7 @@ use crate::build_tracker;
 use crate::error::ToolkitError;
 use crate::game_params::load_game_params;
 use crate::plaintext_viewer::PlaintextFileViewer;
+use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
@@ -709,18 +710,21 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                                         ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
                                         ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
                                         ReplayExportFormat::Csv => {
-                                            // TODO: this doesn't work
-                                            let mut comment_data = Vec::new();
-                                            let _ = csv::WriterBuilder::new().has_headers(true).from_writer(&mut comment_data).serialize(transformed_data.metadata());
-                                            let mut writer = csv::WriterBuilder::new().has_headers(true).comment(Some(b'#')).from_writer(file);
+                                            let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                                            let mut result = Ok(());
+                                            for vehicle in transformed_data.vehicles {
+                                                result = writer.serialize(FlattenedVehicle::from(vehicle));
+                                                if result.is_err() {
+                                                    break;
+                                                }
+                                            }
 
-                                            let _ = writer.write_record([b"# Metadata", comment_data.as_slice()]);
-                                            writer.serialize(transformed_data.vehicles()).context("failed to write export file")
+                                            result.context("failed to write export file")
                                         }
                                     })
                                 {
                                     // fail gracefully
-                                    println!("failed to write data export file: {:?}", e);
+                                    error!("failed to write data export file: {:?}", e);
                                 }
                             }
                         }

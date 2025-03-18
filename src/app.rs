@@ -199,8 +199,7 @@ impl ToolkitTabViewer<'_> {
                             let previously_selected_format = *selected_format;
                             egui::ComboBox::from_id_salt("auto_export_format_combobox").selected_text(selected_format.as_str()).show_ui(ui, |ui| {
                                 ui.selectable_value(selected_format, ReplayExportFormat::Json, "JSON");
-                                // CSV currently doesn't work. It's not a priority to fix, but should be explored at some point
-                                // ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
+                                ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
                                 ui.selectable_value(selected_format, ReplayExportFormat::Cbor, "CBOR");
                             });
                             if previously_selected_format != *selected_format {

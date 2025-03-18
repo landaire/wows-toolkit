@@ -10,6 +10,7 @@ use std::sync::mpsc::Sender;
 use crate::app::ReplaySettings;
 use crate::app::TimedMessage;
 use crate::icons;
+use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
@@ -168,10 +169,10 @@ fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsDat
 
 #[derive(Clone, Serialize)]
 pub struct SkillInfo {
-    skill_points: usize,
-    num_skills: usize,
-    highest_tier: usize,
-    num_tier_1_skills: usize,
+    pub skill_points: usize,
+    pub num_skills: usize,
+    pub highest_tier: usize,
+    pub num_tier_1_skills: usize,
     #[serde(skip)]
     hover_text: Option<String>,
     #[serde(skip)]
@@ -180,42 +181,42 @@ pub struct SkillInfo {
 
 #[derive(Clone, Serialize)]
 pub struct Damage {
-    ap: Option<u64>,
-    sap: Option<u64>,
-    he: Option<u64>,
-    he_secondaries: Option<u64>,
-    sap_secondaries: Option<u64>,
-    torps: Option<u64>,
-    deep_water_torps: Option<u64>,
-    fire: Option<u64>,
-    flooding: Option<u64>,
+    pub ap: Option<u64>,
+    pub sap: Option<u64>,
+    pub he: Option<u64>,
+    pub he_secondaries: Option<u64>,
+    pub sap_secondaries: Option<u64>,
+    pub torps: Option<u64>,
+    pub deep_water_torps: Option<u64>,
+    pub fire: Option<u64>,
+    pub flooding: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
 pub struct PotentialDamage {
-    artillery: u64,
-    torpedoes: u64,
-    planes: u64,
+    pub artillery: u64,
+    pub torpedoes: u64,
+    pub planes: u64,
 }
 
 #[derive(Clone, Serialize)]
 pub struct TranslatedAbility {
-    name: Option<String>,
-    game_params_name: String,
+    pub name: Option<String>,
+    pub game_params_name: String,
 }
 
 #[derive(Clone, Serialize)]
 pub struct TranslatedModule {
-    name: Option<String>,
-    description: Option<String>,
-    game_params_name: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub game_params_name: String,
 }
 
 #[derive(Clone, Serialize)]
 pub struct TranslatedBuild {
-    modules: Vec<TranslatedModule>,
-    abilities: Vec<TranslatedAbility>,
-    captain_skills: Option<Vec<TranslatedCrewSkill>>,
+    pub modules: Vec<TranslatedModule>,
+    pub abilities: Vec<TranslatedAbility>,
+    pub captain_skills: Option<Vec<TranslatedCrewSkill>>,
 }
 
 impl TranslatedBuild {
@@ -265,10 +266,10 @@ impl TranslatedBuild {
 
 #[derive(Clone, Serialize)]
 pub struct TranslatedCrewSkill {
-    tier: usize,
-    name: Option<String>,
-    description: Option<String>,
-    internal_name: String,
+    pub tier: usize,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub internal_name: String,
 }
 
 impl TranslatedCrewSkill {
@@ -2213,6 +2214,8 @@ impl ToolkitTabViewer<'_> {
                         Some(ReplayExportFormat::Json)
                     } else if ui.button("CBOR").clicked() {
                         Some(ReplayExportFormat::Cbor)
+                    } else if ui.button("CSV").clicked() {
+                        Some(ReplayExportFormat::Csv)
                     } else {
                         None
                     };
@@ -2229,7 +2232,20 @@ impl ToolkitTabViewer<'_> {
                                     ReplayExportFormat::Cbor => {
                                         serde_cbor::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
                                     }
-                                    ReplayExportFormat::Csv => todo!("CSV isn't supported yet"),
+                                    ReplayExportFormat::Csv => {
+                                        let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                                        let mut result = Ok(());
+                                        for vehicle in transformed_results.vehicles {
+                                            result = writer.serialize(FlattenedVehicle::from(vehicle));
+                                            if result.is_err() {
+                                                break;
+                                            }
+                                        }
+
+                                        let _ = writer.flush();
+
+                                        result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                                    }
                                 };
                                 if let Err(e) = result {
                                     error!("Failed to write results to file: {}", e);

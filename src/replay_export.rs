@@ -4,6 +4,7 @@ use chrono::DateTime;
 use chrono::Local;
 use escaper::decode_html;
 use serde::Serialize;
+use serde::Serializer;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
@@ -20,9 +21,9 @@ use crate::ui::replay_parser::VehicleReport;
 
 #[derive(Serialize)]
 pub struct Match {
-    vehicles: Vec<Vehicle>,
-    metadata: Metadata,
-    game_chat: Vec<Message>,
+    pub vehicles: Vec<Vehicle>,
+    pub metadata: Metadata,
+    pub game_chat: Vec<Message>,
 }
 
 impl Match {
@@ -65,14 +66,6 @@ impl Match {
         }
 
         match_data
-    }
-
-    pub fn vehicles(&self) -> &[Vehicle] {
-        &self.vehicles
-    }
-
-    pub fn metadata(&self) -> &Metadata {
-        &self.metadata
     }
 }
 
@@ -120,6 +113,177 @@ impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
             division_id: if value.division_id() > 0 { Some(value.division_id()) } else { None },
             team_id: value.team_id(),
             is_replay_perspective: value.relation() == 0,
+        }
+    }
+}
+
+fn serialize_option_vec<S>(opt_vec: &Option<Vec<String>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match opt_vec {
+        Some(vec) => {
+            let joined = vec.join(",");
+            serializer.serialize_str(&joined)
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct FlattenedVehicle {
+    player_name: String,
+    player_clan: String,
+    player_id: i64,
+    player_realm: String,
+    /// Ship index that can be mapped to a GameParam
+    index: String,
+    /// Ship name from EN localization
+    ship_name: String,
+    /// Ship nation (e.g. "usa", "pan asia", etc.)
+    ship_nation: String,
+    /// Ship class
+    ship_class: Species,
+    /// Ship tier
+    ship_tier: u32,
+    /// Whether this is a test ship
+    is_test_ship: bool,
+    /// Whether this is an enemy
+    is_enemy: bool,
+    #[serde(serialize_with = "serialize_option_vec")]
+    modules: Option<Vec<String>>,
+    #[serde(serialize_with = "serialize_option_vec")]
+    abilities: Option<Vec<String>>,
+    /// Captain ID that can be mapped to a GameParam
+    captain_id: Option<String>,
+    #[serde(serialize_with = "serialize_option_vec")]
+    captain_skills: Option<Vec<String>>,
+    xp: Option<i64>,
+    raw_xp: Option<i64>,
+    damage: Option<u64>,
+    ap: Option<u64>,
+    sap: Option<u64>,
+    he: Option<u64>,
+    he_secondaries: Option<u64>,
+    sap_secondaries: Option<u64>,
+    torps: Option<u64>,
+    deep_water_torps: Option<u64>,
+    fire: Option<u64>,
+    flooding: Option<u64>,
+    spotting_damage: Option<u64>,
+    potential_damage: Option<u64>,
+    potential_damage_artillery: Option<u64>,
+    potential_damage_torpedoes: Option<u64>,
+    potential_damage_planes: Option<u64>,
+    received_damage: Option<u64>,
+    received_damage_ap: Option<u64>,
+    received_damage_sap: Option<u64>,
+    received_damage_he: Option<u64>,
+    received_damage_he_secondaries: Option<u64>,
+    received_damage_sap_secondaries: Option<u64>,
+    received_damage_torps: Option<u64>,
+    received_damage_deep_water_torps: Option<u64>,
+    received_damage_fire: Option<u64>,
+    received_damage_flooding: Option<u64>,
+    fires_dealt: Option<u64>,
+    floods_dealt: Option<u64>,
+    citadels_dealt: Option<u64>,
+    crits_dealt: Option<u64>,
+    distance_traveled: Option<f64>,
+    kills: Option<i64>,
+    observed_damage: u64,
+    observed_kills: i64,
+    skill_points_allocated: Option<usize>,
+    num_skills: Option<usize>,
+    highest_tier_skill: Option<usize>,
+    num_tier_1_skills: Option<usize>,
+    time_lived_secs: Option<u64>,
+}
+
+impl From<Vehicle> for FlattenedVehicle {
+    fn from(value: Vehicle) -> Self {
+        let Vehicle {
+            player,
+            index,
+            name,
+            nation,
+            class,
+            tier,
+            is_test_ship,
+            is_enemy,
+            raw_config: _,
+            translated_build,
+            captain_id,
+            server_results,
+            observed_results,
+            skill_meta_info,
+            time_lived_secs,
+        } = value;
+
+        let (modules, abilities, captain_skills) = if let Some(translated_config) = translated_build {
+            let modules = translated_config.modules.iter().filter_map(|module| module.name.clone()).collect();
+            let abilities = translated_config.abilities.iter().filter_map(|ability| ability.name.clone()).collect();
+            let captain_skills = translated_config.captain_skills.map(|skills| skills.iter().filter_map(|skill| skill.name.clone()).collect());
+            (Some(modules), Some(abilities), captain_skills)
+        } else {
+            (None, None, None)
+        };
+        Self {
+            player_name: player.name,
+            player_clan: player.clan,
+            player_id: player.db_id,
+            player_realm: player.realm,
+            index,
+            ship_name: name,
+            ship_nation: nation,
+            ship_class: class,
+            ship_tier: tier,
+            is_test_ship,
+            is_enemy,
+            modules,
+            abilities,
+            captain_id: Some(captain_id),
+            captain_skills,
+            xp: server_results.as_ref().map(|results| results.xp),
+            raw_xp: server_results.as_ref().map(|results| results.raw_xp),
+            damage: server_results.as_ref().map(|results| results.damage),
+            ap: server_results.as_ref().and_then(|results| results.damage_details.ap),
+            sap: server_results.as_ref().and_then(|results| results.damage_details.sap),
+            he: server_results.as_ref().and_then(|results| results.damage_details.he),
+            he_secondaries: server_results.as_ref().and_then(|results| results.damage_details.he_secondaries),
+            sap_secondaries: server_results.as_ref().and_then(|results| results.damage_details.sap_secondaries),
+            torps: server_results.as_ref().and_then(|results| results.damage_details.torps),
+            deep_water_torps: server_results.as_ref().and_then(|results| results.damage_details.deep_water_torps),
+            fire: server_results.as_ref().and_then(|results| results.damage_details.fire),
+            flooding: server_results.as_ref().and_then(|results| results.damage_details.flooding),
+            spotting_damage: server_results.as_ref().map(|results| results.spotting_damage),
+            potential_damage: server_results.as_ref().map(|results| results.potential_damage),
+            potential_damage_artillery: server_results.as_ref().map(|results| results.potential_damage_details.artillery),
+            potential_damage_torpedoes: server_results.as_ref().map(|results| results.potential_damage_details.torpedoes),
+            potential_damage_planes: server_results.as_ref().map(|results| results.potential_damage_details.planes),
+            received_damage: server_results.as_ref().map(|results| results.received_damage),
+            received_damage_ap: server_results.as_ref().and_then(|results| results.received_damage_details.ap),
+            received_damage_sap: server_results.as_ref().and_then(|results| results.received_damage_details.sap),
+            received_damage_he: server_results.as_ref().and_then(|results| results.received_damage_details.he),
+            received_damage_he_secondaries: server_results.as_ref().and_then(|results| results.received_damage_details.he_secondaries),
+            received_damage_sap_secondaries: server_results.as_ref().and_then(|results| results.received_damage_details.sap_secondaries),
+            received_damage_torps: server_results.as_ref().and_then(|results| results.received_damage_details.torps),
+            received_damage_deep_water_torps: server_results.as_ref().and_then(|results| results.received_damage_details.deep_water_torps),
+            received_damage_fire: server_results.as_ref().and_then(|results| results.received_damage_details.fire),
+            received_damage_flooding: server_results.as_ref().and_then(|results| results.received_damage_details.flooding),
+            fires_dealt: server_results.as_ref().map(|results| results.fires_dealt),
+            floods_dealt: server_results.as_ref().map(|results| results.floods_dealt),
+            citadels_dealt: server_results.as_ref().map(|results| results.citadels_dealt),
+            crits_dealt: server_results.as_ref().map(|results| results.crits_dealt),
+            distance_traveled: server_results.as_ref().map(|results| results.distance_traveled),
+            kills: server_results.as_ref().map(|results| results.kills),
+            observed_damage: observed_results.as_ref().map(|results| results.damage).unwrap_or_default(),
+            observed_kills: observed_results.as_ref().map(|results| results.kills).unwrap_or_default(),
+            skill_points_allocated: skill_meta_info.as_ref().map(|info| info.skill_points),
+            num_skills: skill_meta_info.as_ref().map(|info| info.num_skills),
+            highest_tier_skill: skill_meta_info.as_ref().map(|info| info.highest_tier),
+            num_tier_1_skills: skill_meta_info.as_ref().map(|info| info.num_tier_1_skills),
+            time_lived_secs,
         }
     }
 }
