@@ -20,6 +20,7 @@ use flate2::read::GzDecoder;
 use gettext::Catalog;
 use http_body_util::BodyExt;
 use image::EncodableLayout;
+use jiff::Timestamp;
 use language_tags::LanguageTag;
 use octocrab::models::repos::Asset;
 use parking_lot::Mutex;
@@ -535,7 +536,7 @@ pub fn start_twitch_task(
                     if let Some(token) = token {
                         if let Some(monitored_user) = &monitored_user_id {
                             if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, &token).await {
-                                let now = chrono::offset::Local::now();
+                                let now = Timestamp::now();
                                 let mut state = twitch_state.write();
                                 for chatter in chatters {
                                     state.participants.entry(chatter).or_default().insert(now);
@@ -556,7 +557,7 @@ pub fn start_twitch_task(
                                 if let Some(token) = &token {
                                     if let Some(monitored_user) = &monitored_user_id {
                                         if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, token).await {
-                                            let now = chrono::offset::Local::now();
+                                            let now = Timestamp::now();
                                             let mut state = twitch_state.write();
                                             for chatter in chatters {
                                                 state.participants.entry(chatter).or_default().insert(now);
@@ -592,7 +593,7 @@ pub fn start_twitch_task(
 
             // Do a period cleanup of old viewers
             let mut state = twitch_state.write();
-            let now = chrono::offset::Local::now();
+            let now = Timestamp::now();
             for timestamps in state.participants.values_mut() {
                 // Retain only timestamps within the last 30 minutes
                 timestamps.retain(|ts| *ts > (now - Duration::from_secs(60 * 30)));

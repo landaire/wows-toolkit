@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use chrono::DateTime;
-use chrono::Local;
 use escaper::decode_html;
+use jiff::Timestamp;
 use serde::Serialize;
 use serde::Serializer;
 use wows_replays::analyzer::battle_controller::BattleResult;
@@ -77,7 +76,7 @@ pub struct Metadata {
     match_group: String,
     version: Version,
     duration: u32,
-    timestamp: DateTime<Local>,
+    timestamp: Timestamp,
     battle_result: Option<BattleResult>,
 }
 

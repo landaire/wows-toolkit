@@ -3,6 +3,7 @@ use egui::Color32;
 use egui::RichText;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
+use jiff::Timestamp;
 use language_tags::LanguageTag;
 use serde_json::json;
 use std::io::Write;
@@ -10,10 +11,17 @@ use std::path::Path;
 use std::process::Command;
 use thousands::Separable;
 use tracing::debug;
+use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
+
+pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
+    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+
+    Timestamp::strptime(REPLAY_DATE_FORMAT, &replay_meta.dateTime).expect("failed to parse replay timestamp")
+}
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     let language: LanguageTag = locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());

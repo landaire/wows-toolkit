@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use crate::icons;
 use crate::task;
-use chrono::DateTime;
-use chrono::Duration;
-use chrono::Local;
-use chrono::NaiveDateTime;
-use chrono::TimeZone;
+use crate::util;
 use egui::Color32;
 use egui::RichText;
 use egui_extras::Column;
 use egui_extras::TableBuilder;
 use itertools::Itertools;
+use jiff::Timestamp;
+use jiff::ToSpan;
+use jiff::fmt::friendly::Designator;
+use jiff::fmt::friendly::SpanPrinter;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
@@ -25,14 +25,14 @@ use crate::ui::replay_parser::Replay;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
-    tracked_players_by_time: BTreeMap<chrono::DateTime<Local>, Vec<i64>>,
+    tracked_players_by_time: BTreeMap<Timestamp, Vec<i64>>,
     tracked_players: HashMap<i64, TrackedPlayer>,
     filter_time_period: TimePeriod,
     sort_order: SortedBy,
     player_filter: String,
 
     #[serde(skip)]
-    live_game_players: Option<(chrono::DateTime<Local>, Vec<String>)>,
+    live_game_players: Option<(Timestamp, Vec<String>)>,
 }
 
 impl PlayerTracker {
@@ -40,8 +40,7 @@ impl PlayerTracker {
         // Clear the data from the last game
         self.live_game_players = None;
 
-        let timestamp = NaiveDateTime::parse_from_str(&meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
-        let timestamp = Local.from_local_datetime(&timestamp).single().expect("failed to convert to local time");
+        let timestamp = util::replay_timestamp(meta);
         let players = meta.vehicles.iter().map(|player| player.name.clone()).collect();
 
         self.live_game_players = Some((timestamp, players))
@@ -56,8 +55,7 @@ impl PlayerTracker {
             let tracked_players = &mut self.tracked_players;
             let tracked_players_by_ts = &mut self.tracked_players_by_time;
 
-            let timestamp = NaiveDateTime::parse_from_str(&replay.replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
-            let timestamp = Local.from_local_datetime(&timestamp).single().expect("failed to convert to local time");
+            let timestamp = util::replay_timestamp(&replay.replay_file.meta);
 
             let self_player = report.players().iter().find(|player| {
                 if let Some(meta_player) = replay.replay_file.meta.vehicles.iter().find(|metadata_player| metadata_player.name == player.name()) {
@@ -121,7 +119,7 @@ pub struct TrackedPlayer {
     names: HashSet<String>,
     clan_id: i64,
     clan: String,
-    timestamps: BTreeSet<chrono::DateTime<Local>>,
+    timestamps: BTreeSet<Timestamp>,
     arena_ids: BTreeSet<i64>,
     #[serde(default)]
     notes: String,
@@ -210,13 +208,14 @@ impl TimePeriod {
         }
     }
 
-    fn to_date(self) -> Option<DateTime<Local>> {
+    fn to_date(self) -> Option<Timestamp> {
+        let now = Timestamp::now();
         match self {
-            TimePeriod::LastHour => Some(Local::now() - Duration::hours(1)),
-            TimePeriod::LastSixHours => Some(Local::now() - Duration::hours(6)),
-            TimePeriod::LastDay => Some(Local::now() - Duration::hours(24)),
-            TimePeriod::LastWeek => Some(Local::now() - Duration::days(7)),
-            TimePeriod::LastMonth => Some(Local::now() - Duration::weeks(4)),
+            TimePeriod::LastHour => Some(now - 1.hour()),
+            TimePeriod::LastSixHours => Some(now - 6.hours()),
+            TimePeriod::LastDay => Some(now - 1.day()),
+            TimePeriod::LastWeek => Some(now - 7.days()),
+            TimePeriod::LastMonth => Some(now - 1.month()),
             TimePeriod::AllTime => None,
         }
     }
@@ -227,7 +226,7 @@ impl ToolkitTabViewer<'_> {
         let mut player_tracker_settings = self.tab_state.settings.player_tracker.write();
         let player_tracker_settings = &mut *player_tracker_settings;
         let filter_lower = player_tracker_settings.player_filter.to_ascii_lowercase();
-        let now = chrono::offset::Local::now();
+        let now = Timestamp::now();
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 if ui.button("Clear Stats").clicked() {
@@ -304,8 +303,8 @@ impl ToolkitTabViewer<'_> {
                                                         timestamps
                                                             .iter()
                                                             .map(|ts| {
-                                                                let delta = ts.signed_duration_since(match_timestamp);
-                                                                delta.num_minutes()
+                                                                let delta = *ts - *match_timestamp;
+                                                                delta.get_minutes()
                                                             })
                                                             .join(", ")
                                                     ));
@@ -510,19 +509,11 @@ impl ToolkitTabViewer<'_> {
                                     });
                                     row.col(|ui| {
                                         let timestamp = player.timestamps.last().unwrap();
-                                        let encounter_date = format!("{}", timestamp.format("%Y-%m-%d %H:%M:%S"));
-                                        let delta = now - timestamp;
+                                        let delta = now - *timestamp;
+                                        let printer = SpanPrinter::new().designator(Designator::HumanTime);
 
-                                        let delta_text = if delta.num_weeks() > 0 {
-                                            format!("{} weeks ago", delta.num_weeks())
-                                        } else if delta.num_days() > 0 {
-                                            format!("{} days ago", delta.num_days())
-                                        } else if delta.num_hours() > 0 {
-                                            format!("{} hours ago", delta.num_hours())
-                                        } else {
-                                            format!("{} minutes ago", delta.num_minutes())
-                                        };
-                                        ui.label(delta_text).on_hover_text(encounter_date);
+                                        let delta_text = printer.span_to_string(&delta);
+                                        ui.label(delta_text).on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
                                     });
                                     row.col(|ui| {
                                         ui.label(player.names.iter().join(", "));

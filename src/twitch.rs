@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use chrono::DateTime;
-use chrono::Local;
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use twitch_api::HelixClient;
@@ -91,7 +90,7 @@ pub enum TwitchUpdate {
     User(String),
 }
 
-type ParticipantList = HashMap<String, BTreeSet<DateTime<Local>>>;
+type ParticipantList = HashMap<String, BTreeSet<Timestamp>>;
 
 #[derive(Default)]
 pub struct TwitchState {
@@ -109,7 +108,7 @@ impl TwitchState {
         &self.client
     }
 
-    pub fn player_is_potential_stream_sniper(&self, name: &str, match_timestamp: DateTime<Local>) -> Option<HashMap<String, Vec<DateTime<Local>>>> {
+    pub fn player_is_potential_stream_sniper(&self, name: &str, match_timestamp: Timestamp) -> Option<HashMap<String, Vec<Timestamp>>> {
         let mut results = HashMap::new();
         let name_chunks = name.chars().collect::<Vec<char>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<String>>();
 
@@ -121,9 +120,9 @@ impl TwitchState {
                     .iter()
                     .cloned()
                     .filter(|timestamp| {
-                        let delta = timestamp.signed_duration_since(match_timestamp);
+                        let delta = *timestamp - match_timestamp;
 
-                        delta.num_minutes() < 20 && delta.num_minutes() > -2
+                        delta.get_minutes() < 20 && delta.get_minutes() > -2
                     })
                     .collect();
 

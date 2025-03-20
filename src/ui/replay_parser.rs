@@ -21,10 +21,6 @@ use crate::wows_data::ShipIcon;
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
-use chrono::DateTime;
-use chrono::Local;
-use chrono::NaiveDateTime;
-use chrono::TimeZone;
 use egui::Color32;
 use egui::ComboBox;
 use egui::Context;
@@ -44,6 +40,7 @@ use egui::Vec2;
 use egui::text::LayoutJob;
 
 use escaper::decode_html;
+use jiff::Timestamp;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -570,7 +567,7 @@ impl Ord for SortKey {
 }
 
 pub struct UiReport {
-    match_timestamp: DateTime<Local>,
+    match_timestamp: Timestamp,
     self_player: Option<Arc<VehicleEntity>>,
     vehicle_reports: Vec<VehicleReport>,
     sorted: bool,
@@ -598,8 +595,7 @@ impl UiReport {
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
         let constants_inner = constants.read();
 
-        let match_timestamp = NaiveDateTime::parse_from_str(&replay_file.meta.dateTime, "%d.%m.%Y %H:%M:%S").expect("parsing replay date failed");
-        let match_timestamp = Local.from_local_datetime(&match_timestamp).single().expect("failed to convert to local time");
+        let match_timestamp = util::replay_timestamp(&replay_file.meta);
 
         let players = report.player_entities().to_vec();
 
@@ -1631,7 +1627,7 @@ impl UiReport {
         self.wows_data.read().game_metadata.as_ref().expect("no metadata provider?").clone()
     }
 
-    pub fn match_timestamp(&self) -> DateTime<Local> {
+    pub fn match_timestamp(&self) -> Timestamp {
         self.match_timestamp
     }
 
