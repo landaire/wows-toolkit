@@ -45,7 +45,7 @@ image = { version = "0.25", features = ["jpeg", "png"] }
 octocrab = "0.43"
 semver = "1.0"
 tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "macros"] }
-zip = "2.4.2"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 egui-phosphor = "0.9"
 serde_cbor = "0.11"
