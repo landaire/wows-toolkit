@@ -5,6 +5,8 @@ mod build_tracker;
 mod consts;
 mod error;
 mod game_params;
+#[cfg(feature = "mod_manager")]
+mod mod_manager;
 mod plaintext_viewer;
 mod replay_export;
 mod task;

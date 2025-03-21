@@ -39,6 +39,7 @@ pub struct WorldOfWarshipsData {
 
     pub replays_dir: PathBuf,
 
+    #[allow(dead_code)]
     pub build_dir: PathBuf,
 }
 

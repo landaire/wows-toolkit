@@ -930,14 +930,8 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::LoadingConstants => {
                                 // do nothing
                             }
-                            BackgroundTaskKind::LoadingModDatabase => {}
-                            BackgroundTaskKind::InstallingMod { mod_info: _, rx: _, last_progress: _ } => {
-                                // do nothing
-                            }
-                            BackgroundTaskKind::UninstallingMod { mod_info: _, rx: _, last_progress: _ } => {
-                                // do nothing
-                            }
-                            BackgroundTaskKind::DownloadingMod { mod_info: _, rx: _, last_progress: _ } => {
+                            #[cfg(feature = "mod_manager")]
+                            BackgroundTaskKind::ModTask(_task_info) => {
                                 // do nothing
                             }
                             BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
@@ -961,7 +955,8 @@ impl WowsToolkitApp {
                                         let wows_data = Arc::new(RwLock::new(wows_data));
                                         self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
 
-                                        task::start_mod_manager_thread(
+                                        #[cfg(feature = "mod_manager")]
+                                        crate::mod_manager::start_mod_manager_thread(
                                             Arc::clone(&self.runtime),
                                             wows_data,
                                             self.tab_state.mod_action_receiver.take().unwrap(),
@@ -1003,19 +998,24 @@ impl WowsToolkitApp {
                                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
                                     *self.tab_state.game_constants.write() = constants;
                                 }
-                                BackgroundTaskCompletion::ModDatabaseLoaded(index) => {
-                                    self.tab_state.mod_manager_info.update_index("test".to_string(), index);
-                                }
-                                BackgroundTaskCompletion::ModInstalled(mod_info) => {
-                                    *self.tab_state.timed_message.write() =
-                                        Some(TimedMessage::new(format!("{} Successfully installed mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
-                                }
-                                BackgroundTaskCompletion::ModUninstalled(mod_info) => {
-                                    *self.tab_state.timed_message.write() =
-                                        Some(TimedMessage::new(format!("{} Successfully uninstalled mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
-                                }
-                                BackgroundTaskCompletion::ModDownloaded(_) => {
-                                    // Do nothing when the mod is downloaded.
+                                #[cfg(feature = "mod_manager")]
+                                BackgroundTaskCompletion::ModManager(mod_manager_info) => {
+                                    match *mod_manager_info {
+                                        crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
+                                            self.tab_state.mod_manager_info.update_index("test".to_string(), index);
+                                        }
+                                        crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
+                                            *self.tab_state.timed_message.write() =
+                                                Some(TimedMessage::new(format!("{} Successfully installed mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
+                                        }
+                                        crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
+                                            *self.tab_state.timed_message.write() =
+                                                Some(TimedMessage::new(format!("{} Successfully uninstalled mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
+                                        }
+                                        crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {
+                                            // Do nothing when the mod is downloaded.
+                                        }
+                                    }
                                 }
                             },
                             Err(ToolkitError::BackgroundTaskCompleted) => {}
