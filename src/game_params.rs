@@ -48,8 +48,8 @@ pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_v
     let params = cache_path
         .exists()
         .then(|| {
-            let cache_data = std::fs::File::open(&cache_path).ok()?;
-            let cached_params: CachedGameParams = bincode::deserialize_from(cache_data).ok()?;
+            let mut cache_data = std::fs::File::open(&cache_path).ok()?;
+            let cached_params: CachedGameParams = bincode::serde::decode_from_std_read(&mut cache_data, bincode::config::standard()).ok()?;
             if cached_params.game_version == game_version { Some(cached_params.params) } else { None }
         })
         .flatten();
@@ -65,8 +65,8 @@ pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_v
             params: metadata_provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect(),
         };
 
-        let file = std::fs::File::create(cache_path).unwrap();
-        bincode::serialize_into(file, &cached_params).expect("failed to serialize cached game params");
+        let mut file = std::fs::File::create(cache_path).unwrap();
+        bincode::serde::encode_into_std_write(&cached_params, &mut file, bincode::config::standard()).expect("failed to serialize cached game params");
 
         metadata_provider
     };
