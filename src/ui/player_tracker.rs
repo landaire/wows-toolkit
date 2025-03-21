@@ -14,8 +14,9 @@ use egui_extras::TableBuilder;
 use itertools::Itertools;
 use jiff::Timestamp;
 use jiff::ToSpan;
-use jiff::fmt::friendly::Designator;
-use jiff::fmt::friendly::SpanPrinter;
+use jiff::Unit;
+use jiff::ZonedDifference;
+use jiff::tz::TimeZone;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
@@ -508,12 +509,13 @@ impl ToolkitTabViewer<'_> {
                                         ui.label(text);
                                     });
                                     row.col(|ui| {
-                                        let timestamp = player.timestamps.last().unwrap();
-                                        let delta = now - *timestamp;
-                                        let printer = SpanPrinter::new().designator(Designator::HumanTime);
+                                        let timestamp = player.timestamps.last().unwrap().to_zoned(TimeZone::system());
+                                        let now = now.to_zoned(TimeZone::system());
+                                        let delta = now
+                                            .since(ZonedDifference::new(&timestamp).smallest(Unit::Minute).largest(Unit::Year).mode(jiff::RoundMode::HalfExpand))
+                                            .expect("failed to calculate player last seen delta");
 
-                                        let delta_text = printer.span_to_string(&delta);
-                                        ui.label(delta_text).on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
+                                        ui.label(format!("{:#}", delta)).on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
                                     });
                                     row.col(|ui| {
                                         ui.label(player.names.iter().join(", "));

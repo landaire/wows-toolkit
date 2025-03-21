@@ -4,6 +4,8 @@ use egui::RichText;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 use jiff::Timestamp;
+use jiff::civil::DateTime;
+use jiff::tz::TimeZone;
 use language_tags::LanguageTag;
 use serde_json::json;
 use std::io::Write;
@@ -20,7 +22,11 @@ use wowsunpack::game_params::types::GameParamProvider;
 pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
     const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
 
-    Timestamp::strptime(REPLAY_DATE_FORMAT, &replay_meta.dateTime).expect("failed to parse replay timestamp")
+    DateTime::strptime(REPLAY_DATE_FORMAT, &replay_meta.dateTime)
+        .expect("failed to parse replay timestamp")
+        .to_zoned(TimeZone::system())
+        .expect("failed to convert DateTime to zoned time")
+        .into()
 }
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
