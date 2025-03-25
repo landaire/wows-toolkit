@@ -1349,6 +1349,10 @@ impl eframe::App for WowsToolkitApp {
                 if ui.button(format!("{} Create Issue", icons::BUG)).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
                 }
+
+                if ui.button(format!("{} Discord", icons::DISCORD_LOGO)).clicked() {
+                    ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
+                }
             });
         });
 

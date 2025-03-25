@@ -8,6 +8,10 @@ This is a toolkit for interacting with World of Warships files
 
 ![WoWs Toolkit Unpacker Tab With Filtering](assets/wows_toolkit_unpacker_filtering.png)
 
+## Community Discussion
+
+If you'd like to discuss the toolkit features, bugs, or whatever, please feel free to open an issue here on GitHub or join the Discord server: https://discord.gg/SpmXzfSdux.
+
 ## Pre-Built Application Binaries
 
 Pre-built binaries for Windows are provided at https://github.com/landaire/wows-toolkit/releases/latest Download the `
