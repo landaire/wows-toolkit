@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.32] - 2025-03-27
+
+### 🐛 Bug Fixes
+
+- Application icon is now embedded in binary/shows when pinned to taskbar
+
+### App
+
+- Add Discord server link
+
+### Replays
+
+- Update builtin constants.json file for latest game version
+
 ## [0.1.31] - 2025-03-18
 
 ### 🚀 Features
