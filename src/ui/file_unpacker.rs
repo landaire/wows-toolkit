@@ -340,55 +340,48 @@ impl ToolkitTabViewer<'_> {
                     });
                 });
 
-                strip.strip(|builder| {
-                    builder.size(Size::remainder()).size(Size::exact(60.0)).size(Size::exact(60.0)).size(Size::exact(150.0)).size(Size::exact(150.0)).horizontal(
-                        |mut strip| {
-                            strip.cell(|ui| {
-                                ui.add_sized(ui.available_size(), egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"));
-                            });
-                            strip.cell(|ui| {
-                                if ui.button("Choose...").clicked() {
-                                    let folder = rfd::FileDialog::new().pick_folder();
-                                    if let Some(folder) = folder {
-                                        self.tab_state.output_dir = folder.to_string_lossy().into_owned();
-                                    }
+                strip.cell(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.menu_button(format!("{} Dump GameParams", icons::FLOPPY_DISK), |ui| {
+                            if ui.small_button("As JSON").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
+                                    self.dump_game_params(path, GameParamsFormat::Json);
                                 }
-                            });
-                            strip.cell(|ui| {
-                                if ui.button("Extract").clicked() {
-                                    self.extract_files_clicked(ui);
+                                ui.close_menu();
+                            }
+                            if ui.small_button("As CBOR").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
+                                    self.dump_game_params(path, GameParamsFormat::Cbor);
                                 }
-                            });
-                            strip.cell(|ui| {
-                                ui.menu_button(format!("{} Dump GameParams", icons::FLOPPY_DISK), |ui| {
-                                    if ui.small_button("As JSON").clicked() {
-                                        if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
-                                            self.dump_game_params(path, GameParamsFormat::Json);
-                                        }
-                                        ui.close_menu();
-                                    }
-                                    if ui.small_button("As CBOR").clicked() {
-                                        if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
-                                            self.dump_game_params(path, GameParamsFormat::Cbor);
-                                        }
-                                        ui.close_menu();
-                                    }
-                                    if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
-                                        if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
-                                            self.dump_game_params(path, GameParamsFormat::MinimalJson);
-                                        }
-                                        ui.close_menu();
-                                    }
-                                    if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
-                                        if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
-                                            self.dump_game_params(path, GameParamsFormat::MinimalCbor);
-                                        }
-                                        ui.close_menu();
-                                    }
-                                });
-                            });
-                        },
-                    );
+                                ui.close_menu();
+                            }
+                            if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
+                                    self.dump_game_params(path, GameParamsFormat::MinimalJson);
+                                }
+                                ui.close_menu();
+                            }
+                            if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
+                                    self.dump_game_params(path, GameParamsFormat::MinimalCbor);
+                                }
+                                ui.close_menu();
+                            }
+                        });
+
+                        if ui.button("Extract").clicked() {
+                            self.extract_files_clicked(ui);
+                        }
+
+                        if ui.button("Choose...").clicked() {
+                            let folder = rfd::FileDialog::new().pick_folder();
+                            if let Some(folder) = folder {
+                                self.tab_state.output_dir = folder.to_string_lossy().into_owned();
+                            }
+                        }
+
+                        ui.add_sized(ui.available_size(), egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"));
+                    });
                 });
             });
         });

@@ -25,6 +25,7 @@ use egui::KeyboardShortcut;
 use egui::Modifiers;
 use egui::OpenUrl;
 use egui::RichText;
+use egui::Slider;
 use egui::Ui;
 use egui::WidgetText;
 use egui::mutex::Mutex;
@@ -34,8 +35,6 @@ use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::Style;
 use egui_dock::TabViewer;
-use egui_extras::Size;
-use egui_extras::StripBuilder;
 use gettext::Catalog;
 
 use http_body_util::BodyExt;
@@ -134,45 +133,46 @@ impl ToolkitTabViewer<'_> {
                 if ui.checkbox(&mut self.tab_state.settings.send_replay_data, "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com").changed() {
                     self.tab_state.send_replay_consent_changed();
                 }
+                let mut zoom = ui.ctx().zoom_factor();
+                if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text("Zoom Factor")).changed() {
+                    ui.ctx().set_zoom_factor(zoom);
+                }
             });
             ui.label("World of Warships Settings");
             ui.group(|ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(50.0)).horizontal(|mut strip| {
-                            strip.cell(|ui| {
-                                let show_text_error = {
-                                    let path = Path::new(&self.tab_state.settings.wows_dir);
-                                    !(path.exists() && path.join("bin").exists())
-                                };
-
-                                let response = ui.add_sized(
-                                    ui.available_size(),
-                                    egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
-                                        .interactive(self.tab_state.can_change_wows_dir)
-                                        .hint_text("World of Warships Directory")
-                                        .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
-                                );
-
-                                // If someone pastes a path in, let's do some basic validation to see if this
-                                // can be a WoWs path. If so, reload game data.
-                                if response.changed() {
-                                    let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
-                                    if path.exists() && path.join("bin").exists() {
-                                        self.tab_state.prevent_changing_wows_dir();
-                                        crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
-                                    }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose...")).clicked() {
+                                let folder = rfd::FileDialog::new().pick_folder();
+                                if let Some(folder) = folder {
+                                    self.tab_state.prevent_changing_wows_dir();
+                                    crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(folder)));
                                 }
-                            });
-                            strip.cell(|ui| {
-                                if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose...")).clicked() {
-                                    let folder = rfd::FileDialog::new().pick_folder();
-                                    if let Some(folder) = folder {
-                                        self.tab_state.prevent_changing_wows_dir();
-                                        crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(folder)));
-                                    }
+                            }
+
+                            let show_text_error = {
+                                let path = Path::new(&self.tab_state.settings.wows_dir);
+                                !(path.exists() && path.join("bin").exists())
+                            };
+
+                            let response = ui.add_sized(
+                                ui.available_size(),
+                                egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
+                                    .interactive(self.tab_state.can_change_wows_dir)
+                                    .hint_text("World of Warships Directory")
+                                    .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
+                            );
+
+                            // If someone pastes a path in, let's do some basic validation to see if this
+                            // can be a WoWs path. If so, reload game data.
+                            if response.changed() {
+                                let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
+                                if path.exists() && path.join("bin").exists() {
+                                    self.tab_state.prevent_changing_wows_dir();
+                                    crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
                                 }
-                            });
+                            }
                         });
                     });
                 })
@@ -189,8 +189,16 @@ impl ToolkitTabViewer<'_> {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Show Critical Module Hits Column");
                 ui.horizontal(|ui| {
                     let mut alert_data_export_change = false;
-                    StripBuilder::new(ui).size(Size::remainder()).size(Size::exact(60.0)).horizontal(|mut strip| {
-                        strip.cell(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Choose...").clicked() {
+                            let folder = rfd::FileDialog::new().pick_folder();
+                            if let Some(folder) = folder {
+                                self.tab_state.settings.replay_settings.auto_export_path = folder.to_string_lossy().to_string();
+                                alert_data_export_change = true;
+                            }
+                        }
+
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             if ui.checkbox(&mut self.tab_state.settings.replay_settings.auto_export_data, "Auto-Export Data").changed() {
                                 alert_data_export_change = true;
                             }
@@ -205,7 +213,6 @@ impl ToolkitTabViewer<'_> {
                             if previously_selected_format != *selected_format {
                                 alert_data_export_change = true;
                             }
-
                             let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
                             let path_is_valid = path.exists() && path.is_dir();
                             let response = ui.add_sized(
@@ -218,15 +225,6 @@ impl ToolkitTabViewer<'_> {
                             if response.lost_focus() {
                                 let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
                                 if path.exists() && path.is_dir() {
-                                    alert_data_export_change = true;
-                                }
-                            }
-                        });
-                        strip.cell(|ui| {
-                            if ui.button("Choose...").clicked() {
-                                let folder = rfd::FileDialog::new().pick_folder();
-                                if let Some(folder) = folder {
-                                    self.tab_state.settings.replay_settings.auto_export_path = folder.to_string_lossy().to_string();
                                     alert_data_export_change = true;
                                 }
                             }
@@ -831,6 +829,25 @@ impl WowsToolkitApp {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
+        // TODO: Maybe at some point I want to use Berkeley Mono?
+        // fonts.font_data.insert("bm".into(), egui::FontData::from_static(include_bytes!("../assets/BerkeleyMono-Regular.otf")).into());
+
+        // if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        //     font_keys.insert(0, "bm".into());
+        // }
+        // if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        //     font_keys.insert(0, "bm".into());
+        // }
+
+        // fonts.add_font(FontInsert::new(
+        //     "bm",
+        //     egui::FontData::from_static(include_bytes!("")),
+        //     vec![
+        //         InsertFontFamily { family: egui::FontFamily::Proportional, priority: egui::epaint::text::FontPriority::Highest },
+        //         InsertFontFamily { family: egui::FontFamily::Monospace, priority: egui::epaint::text::FontPriority::Lowest },
+        //     ],
+        // ));
+
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_theme(egui::Theme::Dark);
 
@@ -863,6 +880,10 @@ impl WowsToolkitApp {
                 let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
                 update_background_task!(saved_state.tab_state.background_tasks, task);
             }
+
+            // By default set the zoom factor to 1.1. We don't persist this value because it's
+            // persisted with the application window instead.
+            cc.egui_ctx.set_zoom_factor(1.1);
 
             saved_state
         } else {
