@@ -855,6 +855,10 @@ impl WowsToolkitApp {
         // Note that you must enable the `persistence` feature for this to work.
         let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = if storage.get_string(APP_KEY).is_some() {
+                // By default set the zoom factor to 1.1. We don't persist this value because it's
+                // persisted with the application window instead.
+                cc.egui_ctx.set_zoom_factor(1.1);
+
                 // if the app key is present and we get no result back, that means deserialization
                 // failed and we should panic because this is an app bug -- likely caused by
                 // not setting a default value for a persisted field
@@ -880,10 +884,6 @@ impl WowsToolkitApp {
                 let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
                 update_background_task!(saved_state.tab_state.background_tasks, task);
             }
-
-            // By default set the zoom factor to 1.1. We don't persist this value because it's
-            // persisted with the application window instead.
-            cc.egui_ctx.set_zoom_factor(1.1);
 
             saved_state
         } else {
