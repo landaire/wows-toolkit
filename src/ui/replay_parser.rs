@@ -2366,42 +2366,46 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
+    fn build_replay_header(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked() {
+                if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
+                    self.tab_state.settings.current_replay_path = file;
+
+                    if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                        update_background_task!(
+                            self.tab_state.background_tasks,
+                            parse_replay(
+                                Arc::clone(&self.tab_state.game_constants),
+                                Arc::clone(wows_data),
+                                self.tab_state.settings.current_replay_path.clone(),
+                                Arc::clone(&self.tab_state.replay_sort),
+                                self.tab_state.background_task_sender.clone(),
+                                self.tab_state.settings.debug_mode
+                            )
+                        );
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
+            ComboBox::from_id_salt("column_filters").selected_text("Column Filters").close_behavior(PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
+                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
+            });
+        });
+    }
+
     /// Builds the replay parser tab
     pub fn build_replay_parser_tab(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked() {
-                    if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
-                        self.tab_state.settings.current_replay_path = file;
-
-                        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                            update_background_task!(
-                                self.tab_state.background_tasks,
-                                parse_replay(
-                                    Arc::clone(&self.tab_state.game_constants),
-                                    Arc::clone(wows_data),
-                                    self.tab_state.settings.current_replay_path.clone(),
-                                    Arc::clone(&self.tab_state.replay_sort),
-                                    self.tab_state.background_task_sender.clone(),
-                                    self.tab_state.settings.debug_mode
-                                )
-                            );
-                        }
-                    }
-                }
-
-                ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
-                ComboBox::from_id_salt("column_filters").selected_text("Column Filters").close_behavior(PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
-                });
-            });
+            self.build_replay_header(ui);
 
             egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {
                 egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
