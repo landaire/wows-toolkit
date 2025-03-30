@@ -8,6 +8,7 @@ fn main() -> eframe::Result<()> {
     use std::env;
     use std::io::Write;
 
+    use std::path::Path;
     use std::sync::Once;
 
     #[cfg(all(debug_assertions, feature = "logging"))]
@@ -53,6 +54,25 @@ fn main() -> eframe::Result<()> {
             .with(fmt::Layer::new().with_writer(non_blocking).with_timer(LocalTime::rfc_3339()).with_ansi(false).with_filter(LevelFilter::DEBUG));
         #[cfg(all(debug_assertions, feature = "logging"))]
         tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    }
+
+    // Check to see if we need to delete the previous application
+    let args: Vec<String> = env::args().collect();
+    if args.len() == 2 {
+        let current_path = Path::new(args[0].as_str());
+        let old_path = Path::new(args[1].as_str());
+        // Sanity check -- ensure that these files are in the same directory
+        if current_path.parent() == old_path.parent() {
+            if let Some(name) = old_path.file_name().and_then(|name| name.to_str()) {
+                if name.contains(".exe") && old_path.exists() {
+                    let _ = std::fs::remove_file(old_path);
+
+                    // Rename the update to the old path. This is useful
+                    // if people have desktop shortcuts / taskbar pins
+                    let _ = std::fs::rename(current_path, old_path);
+                }
+            }
+        }
     }
 
     // Enable the panic handler if the feature is explicitly enabled or
