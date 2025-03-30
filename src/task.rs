@@ -301,6 +301,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
+    let mut full_version = None;
     let mut latest_build = None;
     let mut replays_dir = wows_directory.join("replays");
 
@@ -309,20 +310,22 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     if prefs_file.exists() {
         // Try getting the version string from the preferences file
         if let Some(version_str) = current_build_from_preferences(&prefs_file) {
-            let parts: Vec<&str> = version_str.split(',').collect();
-            if let Some(build_num) = parts.get(3) {
-                latest_build = build_num.parse().ok();
-            }
+            if version_str.contains(',') {
+                let full_build_info = wowsunpack::data::Version::from_client_exe(&version_str);
+                latest_build = Some(full_build_info.build as usize);
 
-            // We want to build the version string without the build component to get the replays dir
-            let friendly_build = parts[..=2].join(".");
-            let friendly_build_with_extra_component = friendly_build.clone() + ".0";
+                // We want to build the version string without the patch component to get the replays dir
+                // that the replay manager mod uses
+                let friendly_build = format!("{}.{}.0", full_build_info.major, full_build_info.minor);
 
-            for temp_replays_dir in [replays_dir.join(friendly_build), replays_dir.join(friendly_build_with_extra_component)] {
-                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-                if temp_replays_dir.exists() {
-                    replays_dir = temp_replays_dir;
-                    break;
+                full_version = Some(full_build_info);
+
+                for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
+                    debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+                    if temp_replays_dir.exists() {
+                        replays_dir = temp_replays_dir;
+                        break;
+                    }
                 }
             }
         }
@@ -353,8 +356,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
     }
 
-    let number = latest_build.unwrap();
-    let build_dir = wows_directory.join("bin").join(format!("{}", number));
+    let game_patch = latest_build.unwrap();
+    let build_dir = wows_directory.join("bin").join(format!("{}", game_patch));
     for file in read_dir(build_dir.join("idx"))? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
@@ -378,7 +381,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let attempted_dirs = [locale, language_tag.primary_language(), "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
-        let localization_path = wows_directory.join(format!("bin/{}/res/texts/{}/LC_MESSAGES/global.mo", number, dir));
+        let localization_path = wows_directory.join(format!("bin/{}/res/texts/{}/LC_MESSAGES/global.mo", game_patch, dir));
         if !localization_path.exists() {
             continue;
         }
@@ -391,7 +394,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     debug!("Loading GameParams");
 
     // Try loading GameParams.data
-    let metadata_provider = load_game_params(&file_tree, &pkg_loader, number).ok().map(|mut metadata_provider| {
+    let metadata_provider = load_game_params(&file_tree, &pkg_loader, game_patch).ok().map(|mut metadata_provider| {
         if let Some(catalog) = found_catalog {
             metadata_provider.set_translations(catalog)
         }
@@ -407,7 +410,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         file_tree,
         pkg_loader,
         filtered_files: files,
-        game_version: number,
+        patch_version: game_patch,
+        full_version,
         ship_icons: icons,
         replays_dir: replays_dir.clone(),
         build_dir,
@@ -617,7 +621,7 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                 let cloned = data.wows_data.clone();
                 let wows_data = cloned.read();
 
-                let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
+                let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.patch_version) };
                 if let Some(metadata_provider) = metadata_provider {
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     let mut build_uploaded_successfully = false;
@@ -899,7 +903,7 @@ pub fn start_populating_player_inspector(
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {
                     let wows_data = wows_data.read();
-                    let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.game_version) };
+                    let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.patch_version) };
                     if let Some(metadata_provider) = metadata_provider {
                         let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                         match replay.parse(game_version.to_string().as_str()) {

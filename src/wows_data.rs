@@ -35,7 +35,9 @@ pub struct WorldOfWarshipsData {
 
     pub ship_icons: HashMap<Species, Arc<ShipIcon>>,
 
-    pub game_version: usize,
+    #[allow(dead_code)]
+    pub full_version: Option<wowsunpack::data::Version>,
+    pub patch_version: usize,
 
     pub replays_dir: PathBuf,
 
@@ -68,7 +70,7 @@ pub fn load_replay(
     background_task_sender: mpsc::Sender<BackgroundTask>,
     is_debug_mode: bool,
 ) -> Option<BackgroundTask> {
-    let game_version = { wows_data.read().game_version };
+    let game_version = { wows_data.read().patch_version };
 
     let (tx, rx) = mpsc::channel();
 
