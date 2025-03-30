@@ -1954,7 +1954,7 @@ impl Replay {
             self.game_time(),
         ]
         .iter()
-        .join(" - ")
+        .join("\n")
     }
 
     pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
