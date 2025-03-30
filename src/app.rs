@@ -1,7 +1,10 @@
+use core::f32;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::error::Error;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,7 +28,9 @@ use egui::KeyboardShortcut;
 use egui::Modifiers;
 use egui::OpenUrl;
 use egui::RichText;
+use egui::ScrollArea;
 use egui::Slider;
+use egui::TextStyle;
 use egui::Ui;
 use egui::WidgetText;
 use egui::mutex::Mutex;
@@ -783,6 +788,10 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     update_window_open: bool,
     #[serde(skip)]
+    panic_window_open: bool,
+    #[serde(skip)]
+    panic_info: Option<String>,
+    #[serde(skip)]
     build_consent_window_open: bool,
     #[serde(skip)]
     latest_release: Option<Release>,
@@ -806,6 +815,8 @@ impl Default for WowsToolkitApp {
         Self {
             checked_for_updates: false,
             update_window_open: false,
+            panic_info: None,
+            panic_window_open: false,
             build_consent_window_open: false,
             latest_release: None,
             show_about_window: false,
@@ -853,12 +864,10 @@ impl WowsToolkitApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
+        let mut had_saved_state = false;
         let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = if storage.get_string(APP_KEY).is_some() {
-                // By default set the zoom factor to 1.1. We don't persist this value because it's
-                // persisted with the application window instead.
-                cc.egui_ctx.set_zoom_factor(1.1);
-
+                had_saved_state = true;
                 // if the app key is present and we get no result back, that means deserialization
                 // failed and we should panic because this is an app bug -- likely caused by
                 // not setting a default value for a persisted field
@@ -887,6 +896,10 @@ impl WowsToolkitApp {
 
             saved_state
         } else {
+            Default::default()
+        };
+
+        if !had_saved_state {
             let mut this: Self = Default::default();
             // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
             this.tab_state.settings.locale = Some("en".to_string());
@@ -900,8 +913,22 @@ impl WowsToolkitApp {
                 update_background_task!(this.tab_state.background_tasks, Some(task));
             }
 
-            this
-        };
+            // By default set the zoom factor to 1.1. We don't persist this value because it's
+            // persisted with the application window instead.
+            cc.egui_ctx.set_zoom_factor(1.1);
+
+            state = this;
+        }
+
+        // Check if the application panicked
+        let panic_log_path = Self::panic_log_path();
+        if panic_log_path.exists() {
+            let mut file = File::open(panic_log_path).expect("failed to open panic log");
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).expect("failed to read panic log");
+            state.panic_info = Some(contents);
+            state.panic_window_open = true;
+        }
 
         if !state.tab_state.settings.build_consent_window_shown {
             state.build_consent_window_open = true;
@@ -1243,16 +1270,8 @@ impl WowsToolkitApp {
             }
         }
     }
-}
 
-impl eframe::App for WowsToolkitApp {
-    /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update_impl(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
@@ -1289,43 +1308,12 @@ impl eframe::App for WowsToolkitApp {
             });
         }
 
+        if self.panic_window_open {
+            self.show_panic_window(ctx);
+        }
+
         if self.update_window_open {
-            if let Some(latest_release) = self.latest_release.as_ref() {
-                let url = latest_release.html_url.clone();
-                let mut notes = latest_release.body.clone();
-                let tag = latest_release.tag_name.clone();
-                let asset = latest_release.assets.iter().find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
-                // Only show the update window if we have a valid artifact to download
-                if let Some(asset) = asset {
-                    egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(format!("Version {} of WoWs Toolkit is available", tag));
-                            if let Some(notes) = notes.as_mut() {
-                                CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
-                            }
-                            ui.horizontal(|ui| {
-                                #[cfg(target_os = "windows")]
-                                {
-                                    if ui.button("Install Update").clicked() {
-                                        let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
-                                        update_background_task!(self.tab_state.background_tasks, task);
-                                    }
-                                }
-                                #[cfg(not(target_os = "windows"))]
-                                {
-                                    let _ = asset;
-                                    ui.label("Update available, but only Windows is supported at this time.");
-                                }
-                                if ui.button("View Release").clicked() {
-                                    ui.ctx().open_url(OpenUrl::new_tab(url));
-                                }
-                            });
-                        });
-                    });
-                } else {
-                    self.update_window_open = false;
-                }
-            }
+            self.show_update_window(ctx);
         }
 
         if let Some(error) = self.error_to_show.as_ref() {
@@ -1410,6 +1398,131 @@ impl eframe::App for WowsToolkitApp {
 
         // Ensure we update at least every second
         ctx.request_repaint_after_secs(1.0);
+    }
+
+    fn show_panic_window(&mut self, ctx: &Context) {
+        if let Some(panic_info) = self.panic_info.as_mut() {
+            egui::Window::new("Application Crash Detected").open(&mut self.panic_window_open).show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        "It looks like WoWs Toolkit crashed the last time it ran. \
+                    If you would like to report this issue, please either post an issue on \
+                    GitHub or join the Discord server and provide the below information.",
+                    );
+                    ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        ui.scope(|ui| {
+                            let style = ui.style_mut();
+                            style.override_text_style = Some(TextStyle::Monospace);
+                            let widget = egui::TextEdit::multiline(panic_info).desired_width(f32::INFINITY);
+                            ui.add_enabled(false, widget);
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Copy").clicked() {
+                            Context::copy_text(ctx, panic_info.clone());
+                        }
+                        if ui.button(format!("{} GitHub", icons::GITHUB_LOGO)).clicked() {
+                            ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
+                        }
+                        if ui.button(format!("{} Discord", icons::DISCORD_LOGO)).clicked() {
+                            ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
+                        }
+                    });
+                    ui.collapsing("More Options", |ui| {
+                        ui.label(
+                            "If for some reason data that the application persists may \
+                        be responsible, you can try clearing settings by pressing the button below. \
+                        This will clear all settings, including tracked players. Your replays and any \
+                        WoWs data will be safe.",
+                        );
+                        ui.scope(|ui| {
+                            let visuals = &mut ui.style_mut().visuals;
+
+                            visuals.widgets.inactive.bg_fill = Color32::from_rgb(200, 50, 50); // Base red
+                            visuals.widgets.hovered.bg_fill = Color32::from_rgb(220, 70, 70); // Lighter on hover
+                            visuals.widgets.active.bg_fill = Color32::from_rgb(160, 30, 30); // Darker on click
+
+                            visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(200, 50, 50); // Base red
+                            visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(220, 70, 70); // Lighter on hover
+                            visuals.widgets.active.weak_bg_fill = Color32::from_rgb(160, 30, 30); // Darker on click
+
+                            visuals.widgets.inactive.fg_stroke.color = Color32::WHITE;
+                            visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
+                            visuals.widgets.active.fg_stroke.color = Color32::WHITE;
+
+                            if ui.button("Clear Settings").clicked() {
+                                self.tab_state.settings = Default::default();
+                            }
+                        });
+                    });
+                });
+            });
+        }
+
+        if !self.panic_window_open {
+            // Remove the panic log so we don't show it again
+            let _ = std::fs::remove_file(Self::panic_log_path());
+            self.panic_info = None;
+        }
+    }
+
+    fn show_update_window(&mut self, ctx: &Context) {
+        if let Some(latest_release) = self.latest_release.as_ref() {
+            let url = latest_release.html_url.clone();
+            let mut notes = latest_release.body.clone();
+            let tag = latest_release.tag_name.clone();
+            let asset = latest_release.assets.iter().find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+            // Only show the update window if we have a valid artifact to download
+            if let Some(asset) = asset {
+                egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.label(format!("Version {} of WoWs Toolkit is available", tag));
+                        if let Some(notes) = notes.as_mut() {
+                            CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
+                        }
+                        ui.horizontal(|ui| {
+                            #[cfg(target_os = "windows")]
+                            {
+                                if ui.button("Install Update").clicked() {
+                                    let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                    update_background_task!(self.tab_state.background_tasks, task);
+                                }
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                let _ = asset;
+                                ui.label("Update available, but only Windows is supported at this time.");
+                            }
+                            if ui.button("View Release").clicked() {
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                            }
+                        });
+                    });
+                });
+            } else {
+                self.update_window_open = false;
+            }
+        }
+    }
+
+    pub fn panic_log_path() -> PathBuf {
+        let mut panic_log_path = PathBuf::from("wows_toolkit_panic.log");
+        if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+            panic_log_path = storage_dir.join(panic_log_path)
+        }
+        panic_log_path
+    }
+}
+
+impl eframe::App for WowsToolkitApp {
+    /// Called by the frame work to save state before shutdown.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+
+    /// Called each time the UI needs repainting, which may be many times per second.
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.update_impl(ctx, frame);
     }
 }
 

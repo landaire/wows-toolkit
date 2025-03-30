@@ -85,6 +85,7 @@ tracing-subscriber = { version = "0.3", features = [
 shipbuilds_debugging = []
 mod_manager = ["dep:toml", "dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
+panic_handler = []
 
 
 [profile.release]
