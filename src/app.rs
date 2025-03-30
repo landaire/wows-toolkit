@@ -93,6 +93,8 @@ use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
 
+const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
+
 #[macro_export]
 macro_rules! update_background_task {
     ($saved_tasks:expr, $background_task:expr) => {
@@ -138,10 +140,15 @@ impl ToolkitTabViewer<'_> {
                 if ui.checkbox(&mut self.tab_state.settings.send_replay_data, "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com").changed() {
                     self.tab_state.send_replay_consent_changed();
                 }
-                let mut zoom = ui.ctx().zoom_factor();
-                if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text("Zoom Factor")).changed() {
-                    ui.ctx().set_zoom_factor(zoom);
-                }
+                ui.horizontal(|ui| {
+                    let mut zoom = ui.ctx().zoom_factor();
+                    if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text("Zoom Factor (Ctrl + and Ctrl - also changes this)")).changed() {
+                        ui.ctx().set_zoom_factor(zoom);
+                    }
+                    if ui.button("Reset").clicked() {
+                        ui.ctx().set_zoom_factor(DEFAULT_ZOOM_FACTOR);
+                    }
+                });
             });
             ui.label("World of Warships Settings");
             ui.group(|ui| {
@@ -913,9 +920,9 @@ impl WowsToolkitApp {
                 update_background_task!(this.tab_state.background_tasks, Some(task));
             }
 
-            // By default set the zoom factor to 1.1. We don't persist this value because it's
+            // By default set the zoom factor. We don't persist this value because it's
             // persisted with the application window instead.
-            cc.egui_ctx.set_zoom_factor(1.1);
+            cc.egui_ctx.set_zoom_factor(DEFAULT_ZOOM_FACTOR);
 
             state = this;
         }
