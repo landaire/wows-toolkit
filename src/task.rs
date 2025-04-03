@@ -85,7 +85,7 @@ pub enum BackgroundTaskKind {
     PopulatePlayerInspectorFromReplays,
     LoadingConstants,
     #[cfg(feature = "mod_manager")]
-    ModTask(crate::mod_manager::ModTaskInfo),
+    ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(TimedMessage),
     OpenFileViewer(PlaintextFileViewer),
 }
@@ -93,7 +93,7 @@ pub enum BackgroundTaskKind {
 #[cfg(feature = "mod_manager")]
 impl From<crate::mod_manager::ModTaskInfo> for BackgroundTaskKind {
     fn from(info: crate::mod_manager::ModTaskInfo) -> Self {
-        Self::ModTask(info)
+        Self::ModTask(Box::new(info))
     }
 }
 
@@ -138,7 +138,7 @@ impl BackgroundTask {
                         ui.label("Loading data constants...");
                     }
                     #[cfg(feature = "mod_manager")]
-                    BackgroundTaskKind::ModTask(mod_task) => match mod_task {
+                    BackgroundTaskKind::ModTask(mod_task) => match mod_task.as_mut() {
                         crate::mod_manager::ModTaskInfo::LoadingModDatabase => {
                             ui.spinner();
                             ui.label("Loading mod database...");
