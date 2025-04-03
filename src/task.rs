@@ -316,7 +316,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
                 // We want to build the version string without the patch component to get the replays dir
                 // that the replay manager mod uses
-                let friendly_build = format!("{}.{}.0", full_build_info.major, full_build_info.minor);
+                let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
 
                 full_version = Some(full_build_info);
 
@@ -606,7 +606,6 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
     // and background thread are attempting to parse some data. This technically
     // makes all parsers synchronous, but shouldn't be a big deal in practice.
     let _parser_lock = data.parser_lock.lock();
-    println!("{:#?}", path);
 
     // Files may be getting written to. If we fail to parse the replay,
     // let's try try to parse this at least 3 times.
