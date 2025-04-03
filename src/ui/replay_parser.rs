@@ -121,6 +121,36 @@ const DAMAGE_PULSE_LASER: &str = "damage_pulse_laser";
 const DAMAGE_AXIS_LASER: &str = "damage_axis_laser";
 const DAMAGE_PHASER_LASER: &str = "damage_phaser_laser";
 
+const HITS_MAIN_AP: &str = "hits_main_ap";
+const HITS_MAIN_CS: &str = "hits_main_cs";
+const HITS_MAIN_HE: &str = "hits_main_he";
+const HITS_ATBA_AP: &str = "hits_atba_ap";
+const HITS_ATBA_CS: &str = "hits_atba_cs";
+const HITS_ATBA_HE: &str = "hits_atba_he";
+const HITS_TPD_NORMAL: &str = "hits_tpd";
+const HITS_BOMB: &str = "hits_bomb";
+const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
+const HITS_BOMB_ALT: &str = "hits_bomb_alt";
+const HITS_BOMB_AIRSUPPORT: &str = "hits_bomb_airsupport";
+const HITS_DBOMB_AIRSUPPORT: &str = "hits_dbomb_airsupport";
+const HITS_TBOMB: &str = "hits_tbomb";
+const HITS_TBOMB_ALT: &str = "hits_tbomb_alt";
+const HITS_TBOMB_AIRSUPPORT: &str = "hits_tbomb_airsupport";
+const HITS_RAM: &str = "hits_ram";
+const HITS_DBOMB_DIRECT: &str = "hits_dbomb_direct";
+const HITS_DBOMB_SPLASH: &str = "hits_dbomb_splash";
+const HITS_SEA_MINE: &str = "hits_sea_mine";
+const HITS_ROCKET: &str = "hits_rocket";
+const HITS_ROCKET_AIRSUPPORT: &str = "hits_rocket_airsupport";
+const HITS_SKIP: &str = "hits_skip";
+const HITS_SKIP_ALT: &str = "hits_skip_alt";
+const HITS_SKIP_AIRSUPPORT: &str = "hits_skip_airsupport";
+const HITS_WAVE: &str = "hits_wave";
+const HITS_CHARGE_LASER: &str = "hits_charge_laser";
+const HITS_PULSE_LASER: &str = "hits_pulse_laser";
+const HITS_AXIS_LASER: &str = "hits_axis_laser";
+const HITS_PHASER_LASER: &str = "hits_phaser_laser";
+
 static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
@@ -158,6 +188,38 @@ static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
     (DAMAGE_PHASER_LASER, "Phaser Laser"),
 ];
 
+static HITS_DESCRIPTIONS: [(&str, &str); 29] = [
+    (HITS_MAIN_AP, "AP"),
+    (HITS_MAIN_CS, "SAP"),
+    (HITS_MAIN_HE, "HE"),
+    (HITS_ATBA_AP, "AP Sec"),
+    (HITS_ATBA_CS, "SAP Sec"),
+    (HITS_ATBA_HE, "HE Sec"),
+    (HITS_TPD_NORMAL, "Torps"),
+    (HITS_BOMB, "HE Bomb"),
+    (HITS_BOMB_AVIA, "Bomb"),
+    (HITS_BOMB_ALT, "Alt Bomb"),
+    (HITS_BOMB_AIRSUPPORT, "Air Support Bomb"),
+    (HITS_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
+    (HITS_TBOMB, "Torpedo Bomber"),
+    (HITS_TBOMB_ALT, "Torpedo Bomber (Alt)"),
+    (HITS_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
+    (HITS_RAM, "Ram"),
+    (HITS_DBOMB_DIRECT, "Depth Charge (Direct)"),
+    (HITS_DBOMB_SPLASH, "Depth Charge (Splash)"),
+    (HITS_SEA_MINE, "Sea Mine"),
+    (HITS_ROCKET, "Rocket"),
+    (HITS_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
+    (HITS_SKIP, "Skip Bomb"),
+    (HITS_SKIP_ALT, "Alt Skip Bomb"),
+    (HITS_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
+    (HITS_WAVE, "Wave"),
+    (HITS_CHARGE_LASER, "Charge Laser"),
+    (HITS_PULSE_LASER, "Pulse Laser"),
+    (HITS_AXIS_LASER, "Axis Laser"),
+    (HITS_PHASER_LASER, "Phaser Laser"),
+];
+
 static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] = [("agro_art", "Artillery"), ("agro_tpd", "Torpedo"), ("agro_air", "Planes"), ("agro_dbomb", "Depth Charge")];
 
 fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
@@ -187,6 +249,16 @@ pub struct Damage {
     pub deep_water_torps: Option<u64>,
     pub fire: Option<u64>,
     pub flooding: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct Hits {
+    pub ap: Option<u64>,
+    pub sap: Option<u64>,
+    pub he: Option<u64>,
+    pub he_secondaries: Option<u64>,
+    pub sap_secondaries: Option<u64>,
+    pub torps: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -299,6 +371,11 @@ pub struct VehicleReport {
     actual_damage_text: Option<RichText>,
     /// RichText to support monospace font
     actual_damage_hover_text: Option<RichText>,
+    hits: Option<u64>,
+    hits_report: Option<Hits>,
+    hits_text: Option<RichText>,
+    /// RichText to support monospace font
+    hits_hover_text: Option<RichText>,
     ship_name: String,
     spotting_damage: Option<u64>,
     spotting_damage_text: Option<String>,
@@ -519,6 +596,10 @@ impl VehicleReport {
     pub fn is_self(&self) -> bool {
         self.is_self
     }
+
+    pub fn hits_report(&self) -> Option<&Hits> {
+        self.hits_report.as_ref()
+    }
 }
 
 use std::cmp::Reverse;
@@ -728,6 +809,72 @@ impl UiReport {
                             }),
                         )
                     })
+                })
+                .unwrap_or_default();
+
+            // Armament hit information
+            let (hits, hits_text, hits_hover_text, hits_report) = results_info
+                .map(|info_array| {
+                    // First pass over damage numbers: grab the longest description so that we can later format it
+                    let longest_width = HITS_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                        })
+                        .max()
+                        .unwrap_or_default()
+                        + 1;
+
+                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                    let (all_hits, breakdowns): (Vec<(String, u64)>, Vec<String>) = HITS_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
+                                if num > 0 {
+                                    let num_str = separate_number(num, Some(locale));
+                                    Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+
+                    let all_hits: HashMap<String, u64> = HashMap::from_iter(all_hits);
+
+                    let main_hits = all_hits.get(HITS_MAIN_HE).copied().unwrap_or(0)
+                        + all_hits.get(HITS_MAIN_CS).copied().unwrap_or(0)
+                        + all_hits.get(HITS_MAIN_AP).copied().unwrap_or(0);
+
+                    let plane_hits = all_hits.get(HITS_ROCKET).copied().unwrap_or(0)
+                        + all_hits.get(HITS_ROCKET_AIRSUPPORT).copied().unwrap_or(0)
+                        + all_hits.get(HITS_SKIP).copied().unwrap_or(0)
+                        + all_hits.get(HITS_SKIP_ALT).copied().unwrap_or(0)
+                        + all_hits.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
+
+                    let relevant_hits_number =
+                        if vehicle_param.species().map(|species| species == Species::AirCarrier).unwrap_or(false) { plane_hits } else { main_hits };
+
+                    let main_hits_text = separate_number(relevant_hits_number, Some(locale));
+
+                    let main_hits_text = RichText::new(main_hits_text).color(player_color);
+                    let hits_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+
+                    (
+                        Some(relevant_hits_number),
+                        Some(main_hits_text),
+                        Some(hits_hover_text),
+                        Some(Hits {
+                            ap: all_hits.get(HITS_MAIN_AP).copied(),
+                            sap: all_hits.get(HITS_MAIN_CS).copied(),
+                            he: all_hits.get(HITS_MAIN_HE).copied(),
+                            he_secondaries: all_hits.get(HITS_ATBA_HE).copied(),
+                            sap_secondaries: all_hits.get(HITS_ATBA_CS).copied(),
+                            torps: all_hits.get(HITS_TPD_NORMAL).copied(),
+                        }),
+                    )
                 })
                 .unwrap_or_default();
 
@@ -1028,6 +1175,10 @@ impl UiReport {
                 kills,
                 observed_kills,
                 translated_build: TranslatedBuild::new(vehicle, metadata_provider),
+                hits,
+                hits_report,
+                hits_text,
+                hits_hover_text,
             };
 
             Some(report)
@@ -1055,6 +1206,7 @@ impl UiReport {
                 ReplayColumn::Kills,
                 ReplayColumn::ObservedDamage,
                 ReplayColumn::ActualDamage,
+                ReplayColumn::Hits,
                 ReplayColumn::ReceivedDamage,
                 ReplayColumn::PotentialDamage,
                 ReplayColumn::SpottingDamage,
@@ -1099,6 +1251,7 @@ impl UiReport {
                 SortColumn::ReceivedDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.received_damage }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
                 SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
+                SortColumn::Hits => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits }),
             };
 
             (team_id, key, db_id)
@@ -1482,6 +1635,20 @@ impl UiReport {
                             }
                         });
                     }
+                    ReplayColumn::Hits => {
+                        if let Some(hits_text) = report.hits_text.clone() {
+                            if report.should_hide_stats() && !self.debug_mode {
+                                ui.label("NDA");
+                            } else {
+                                let response = ui.label(hits_text);
+                                if let Some(hover_text) = report.hits_hover_text.clone() {
+                                    response.on_hover_text(hover_text);
+                                }
+                            }
+                        } else {
+                            ui.label("-");
+                        }
+                    }
                 }
             });
 
@@ -1573,6 +1740,13 @@ impl UiReport {
                                     }
                                 }
                             });
+                        }
+                    }
+                    ReplayColumn::Hits => {
+                        if report.should_hide_stats() && !self.debug_mode {
+                            ui.label("NDA");
+                        } else if let Some(hits_extended_info) = report.hits_hover_text.clone() {
+                            ui.label(hits_extended_info);
                         }
                     }
                     _ => {
@@ -1672,6 +1846,13 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::ShipName => {
                     if ui.strong(column_name_with_sort_order("Ship Name", false, *self.replay_sort.lock(), SortColumn::ShipName)).clicked() {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ShipName);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Hits => {
+                    if ui.strong(column_name_with_sort_order("Hits", false, *self.replay_sort.lock(), SortColumn::Hits)).clicked() {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
 
                         self.sort_players(new_sort);
                     };
@@ -1852,6 +2033,7 @@ pub enum ReplayColumn {
     ReceivedDamage,
     SpottingDamage,
     PotentialDamage,
+    Hits,
     Fires,
     Floods,
     Citadels,
@@ -1873,6 +2055,7 @@ pub enum SortColumn {
     ActualDamage,
     SpottingDamage,
     PotentialDamage,
+    Hits,
     TimeLived,
     Fires,
     Floods,

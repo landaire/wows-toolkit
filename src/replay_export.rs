@@ -12,6 +12,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
 use crate::ui::replay_parser::Damage;
+use crate::ui::replay_parser::Hits;
 use crate::ui::replay_parser::PotentialDamage;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SkillInfo;
@@ -169,6 +170,12 @@ pub struct FlattenedVehicle {
     deep_water_torps: Option<u64>,
     fire: Option<u64>,
     flooding: Option<u64>,
+    hits_ap: Option<u64>,
+    hits_sap: Option<u64>,
+    hits_he: Option<u64>,
+    hits_he_secondaries: Option<u64>,
+    hits_sap_secondaries: Option<u64>,
+    hits_torps: Option<u64>,
     spotting_damage: Option<u64>,
     potential_damage: Option<u64>,
     potential_damage_artillery: Option<u64>,
@@ -283,6 +290,12 @@ impl From<Vehicle> for FlattenedVehicle {
             highest_tier_skill: skill_meta_info.as_ref().map(|info| info.highest_tier),
             num_tier_1_skills: skill_meta_info.as_ref().map(|info| info.num_tier_1_skills),
             time_lived_secs,
+            hits_ap: server_results.as_ref().and_then(|results| results.hits_details.ap),
+            hits_sap: server_results.as_ref().and_then(|results| results.hits_details.sap),
+            hits_he: server_results.as_ref().and_then(|results| results.hits_details.he),
+            hits_he_secondaries: server_results.as_ref().and_then(|results| results.hits_details.he_secondaries),
+            hits_sap_secondaries: server_results.as_ref().and_then(|results| results.hits_details.sap_secondaries),
+            hits_torps: server_results.as_ref().and_then(|results| results.hits_details.torps),
         }
     }
 }
@@ -344,6 +357,7 @@ impl Vehicle {
                     raw_xp: value.raw_xp().unwrap_or_default(),
                     damage: value.actual_damage().unwrap_or_default(),
                     damage_details: value.actual_damage_report().cloned().expect("no actual damage report"),
+                    hits_details: value.hits_report().cloned().expect("no hit report"),
                     spotting_damage: value.spotting_damage().unwrap_or_default(),
                     potential_damage: value.potential_damage().unwrap_or_default(),
                     potential_damage_details: value.potential_damage_report().cloned().expect("no potential damage report"),
@@ -378,6 +392,7 @@ pub struct ServerResults {
     raw_xp: i64,
     damage: u64,
     damage_details: Damage,
+    hits_details: Hits,
     spotting_damage: u64,
     potential_damage: u64,
     potential_damage_details: PotentialDamage,
