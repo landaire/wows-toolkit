@@ -18,7 +18,7 @@ eframe = { version = "0.31.0", default-features = false, features = [
 ] }
 tracing = "0.1"
 
-wows_replays = { version = "0.2.2", features = ["arc"] }
+wows_replays = { version = "0.3.0", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
 wowsunpack = { version = "0.5", default-features = false, features = [
     "arc",
