@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.33] - 2025-04-03
+
+### App
+
+- Increase zoom factor to 1.1 by default and fix UI issues when changing zoom factor
+- Only set zoom factor if no settings have been saved
+- Add panic handler and detect crashes
+- Ensure that the new update filename matches the old one
+
+### Replays
+
+- Format replay file listing with newlines for easier reading
+- Expose hit information (CV data is not currently exported)
+
 ## [0.1.32] - 2025-03-27
 
 ### 🐛 Bug Fixes
