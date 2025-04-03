@@ -145,15 +145,15 @@
         "tbombers_killed_by_sfighters_alt": 368, 
         "scouts_killed_by_ship": 317, 
         "damage_rocket_avia": 172, 
-        "RIBBON_DBOMB_FULL_DAMAGE": 473, 
+        "RIBBON_DBOMB_FULL_DAMAGE": 474, 
         "received_hits_bomb_alt": 104, 
         "planes_killed_by_bombers": 306, 
         "planes_lost_tbombers_airsupport": 278, 
         "damage_main_cs": 148, 
         "received_damage_tbomb_airsupport": 201, 
-        "RIBBON_DEMINING_MINEFIELD": 477, 
+        "RIBBON_DEMINING_MINEFIELD": 478, 
         "hits_dbomb_airsupport": 90, 
-        "RIBBON_CITADEL": 438, 
+        "RIBBON_CITADEL": 439, 
         "received_damage_rocket_airsupport": 217, 
         "fighters_total_killed_avia": 289, 
         "bombers_killed_by_skipbombers": 355, 
@@ -165,11 +165,11 @@
         "fighters_killed_by_tbombers": 333, 
         "planes_killed_skipbombers": 421, 
         "hits_main_cs": 63, 
-        "pt_reward_boost": 428, 
-        "RIBBON_BUILDING_KILL": 448, 
+        "pt_reward_boost": 429, 
+        "RIBBON_BUILDING_KILL": 449, 
         "sfighters_killed_by_scouts": 315, 
         "tbombers_killed_by_fighters_airsupport": 363, 
-        "RIBBON_WAVE_CUT_WAVE": 467, 
+        "RIBBON_WAVE_CUT_WAVE": 468, 
         "skipbombers_total_killed_avia": 301, 
         "planes_lost_skipbombers": 279, 
         "sfighters_killed_by_tbombers": 313, 
@@ -177,7 +177,7 @@
         "received_hits_atba_ap": 97, 
         "bombers_killed_by_ship": 340, 
         "received_hits_skip_airsupport": 122, 
-        "RIBBON_SHIELD_REMOVED": 483, 
+        "RIBBON_SHIELD_REMOVED": 484, 
         "he_hits_bomb_avia": 423, 
         "fighters_killed_by_scouts": 338, 
         "received_hits_rocket_avia": 116, 
@@ -192,34 +192,34 @@
         "bombers_killed_by_ship_alt": 342, 
         "received_hits_fire": 111, 
         "killer_db_id": 393, 
-        "RIBBON_ACOUSTIC_HIT_VEHICLE_NEW": 469, 
+        "RIBBON_ACOUSTIC_HIT_VEHICLE_NEW": 470, 
         "received_hits_atba_he": 99, 
-        "RIBBON_BOMB_RICOCHET": 453, 
+        "RIBBON_BOMB_RICOCHET": 454, 
         "skipbombers_killed_by_ship_avia": 373, 
         "tbombers_total_killed_avia": 297, 
-        "RIBBON_MINE": 475, 
+        "RIBBON_MINE": 476, 
         "hits_skip": 86, 
         "received_damage_from_buildings_main_cs": 225, 
         "tbombers_total_killed_airsupport": 299, 
         "received_hits_from_buildings_skip_airsupport": 146, 
         "shots_bomb_avia": 43, 
         "hits_dbomb": 81, 
-        "RIBBON_BOMB": 432, 
+        "RIBBON_BOMB": 433, 
         "damage_sea_mine": 170, 
-        "RIBBON_TORPEDO": 431, 
+        "RIBBON_TORPEDO": 432, 
         "skipbombers_total_killed": 300, 
         "damage_tbomb_airsupport": 164, 
         "planes_lost_skipbombers_alt": 285, 
         "damage_bomb_alt": 159, 
         "shots_tbomb_airsupport": 50, 
-        "RIBBON_PHASER_LASER": 481, 
+        "RIBBON_PHASER_LASER": 482, 
         "team_dropped_points": 406, 
         "prebattle_id": 8, 
         "is_alive": 21, 
-        "RIBBON_FLOOD": 437, 
+        "RIBBON_FLOOD": 438, 
         "shots_tbomb_alt": 49, 
         "damage_fire": 166, 
-        "RIBBON_ACOUSTIC_HIT": 462, 
+        "RIBBON_ACOUSTIC_HIT": 463, 
         "battle_picked_drop_points": 263, 
         "scouts_killed_by_tbombers": 320, 
         "shots_atba_cs": 39, 
@@ -231,7 +231,7 @@
         "hits_skip_alt": 88, 
         "hits_rocket": 82, 
         "damage_atba_cs": 151, 
-        "RIBBON_ROCKET": 454, 
+        "RIBBON_ROCKET": 455, 
         "received_hits_from_buildings_atba_he": 131, 
         "skipbombers_killed_by_tbombers": 381, 
         "account_db_id": 0, 
@@ -239,7 +239,7 @@
         "tpds_spotted": 396, 
         "shots_rocket_avia": 52, 
         "planes_killed_by_ship": 265, 
-        "RIBBON_BASE_CAPTURE_ASSIST": 441, 
+        "RIBBON_BASE_CAPTURE_ASSIST": 442, 
         "planes_lost_tbombers": 276, 
         "sfighters_killed_by_fighters": 311, 
         "skipbombers_killed_by_scouts": 386, 
@@ -252,11 +252,11 @@
         "skipbombers_killed_by_fighters": 376, 
         "killer_veh_id": 394, 
         "received_damage_from_buildings_tbomb_alt": 237, 
-        "RIBBON_WAVE_KILL_TORPEDO": 466, 
+        "RIBBON_WAVE_KILL_TORPEDO": 467, 
         "damage_skip_airsupport": 178, 
         "damage_skip_alt": 177, 
         "hits_bomb_airsupport": 73, 
-        "RIBBON_SECONDARY_CALIBER": 443, 
+        "RIBBON_SECONDARY_CALIBER": 444, 
         "shots_main_he": 37, 
         "hits_skip_airsupport": 89, 
         "damage_axis_laser": 182, 
@@ -268,7 +268,7 @@
         "tbombers_killed_by_sfighters_avia": 367, 
         "hits_rocket_alt": 84, 
         "received_hits_from_buildings_skip_alt": 141, 
-        "RIBBON_DBOMB_PARTIAL_DAMAGE": 474, 
+        "RIBBON_DBOMB_PARTIAL_DAMAGE": 475, 
         "planes_lost_fighters": 270, 
         "hits_skip_avia": 87, 
         "received_damage_fire": 206, 
@@ -282,10 +282,10 @@
         "received_damage_rocket_avia": 215, 
         "ships_killed": 32, 
         "hits_tbomb_airsupport": 77, 
-        "RIBBON_ROCKET_RICOCHET": 464, 
+        "RIBBON_ROCKET_RICOCHET": 465, 
         "received_hits_skip_alt": 121, 
         "received_damage_from_buildings_tbomb_airsupport": 242, 
-        "RIBBON_MAIN_CALIBER_OVER_PENETRATION": 444, 
+        "RIBBON_MAIN_CALIBER_OVER_PENETRATION": 445, 
         "bombers_total_killed_alt": 294, 
         "received_damage_main_cs": 189, 
         "received_damage_sea_mine": 211, 
@@ -294,13 +294,13 @@
         "scouting_damage": 397, 
         "hits_rocket_avia": 83, 
         "clan_tag": 3, 
-        "RIBBON_ACOUSTIC_HIT_VEHICLE_CURR": 470, 
+        "RIBBON_ACOUSTIC_HIT_VEHICLE_CURR": 471, 
         "received_hits_skip": 119, 
-        "RIBBON_ACID": 472, 
+        "RIBBON_ACID": 473, 
         "name": 1, 
         "cp_capture_points": 399, 
         "clan_league": 5, 
-        "RIBBON_BOMB_BULGE": 459, 
+        "RIBBON_BOMB_BULGE": 460, 
         "skipbombers_total_killed_alt": 302, 
         "received_damage_from_buildings_atba_ap": 227, 
         "shots_dbomb_airsupport": 46, 
@@ -311,14 +311,14 @@
         "first_plane_items_spotted_by_plane": 31, 
         "bombers_killed_by_sfighters": 350, 
         "shots_bomb_alt": 44, 
-        "RIBBON_MAIN_CALIBER": 430, 
+        "RIBBON_MAIN_CALIBER": 431, 
         "hits_adbomb": 91, 
         "received_hits_from_buildings_main_he": 128, 
         "max_health": 15, 
         "received_hits_tpd": 100, 
         "hits_atba_ap": 65, 
         "planes_lost_fighters_airsupport": 272, 
-        "RIBBON_MAIN_CALIBER_NO_PENETRATION": 446, 
+        "RIBBON_MAIN_CALIBER_NO_PENETRATION": 447, 
         "shots_adbomb": 59, 
         "achievements": 10, 
         "sfighters_total_killed": 287, 
@@ -329,7 +329,7 @@
         "received_damage_tpd_alter": 193, 
         "received_damage_flood": 207, 
         "received_damage_rocket": 214, 
-        "RIBBON_BULGE": 458, 
+        "RIBBON_BULGE": 459, 
         "shots_main_cs": 36, 
         "received_hits_rocket_alt": 117, 
         "skipbombers_killed_by_fighters_airsupport": 379, 
@@ -337,7 +337,7 @@
         "damage_ram": 165, 
         "scouts_total_killed": 286, 
         "damage_skip": 175, 
-        "RIBBON_TORPEDO_PHOTON_HIT": 478, 
+        "RIBBON_TORPEDO_PHOTON_HIT": 479, 
         "skipbombers_killed_by_ship": 372, 
         "hits_phaser_laser": 93, 
         "received_hits_from_buildings_flood": 133, 
@@ -348,7 +348,7 @@
         "received_hits_main_ap": 94, 
         "team_id": 6, 
         "received_damage_from_buildings_bomb_avia": 232, 
-        "RIBBON_ROCKET_PENETRATION": 455, 
+        "RIBBON_ROCKET_PENETRATION": 456, 
         "clan_color": 4, 
         "received_damage_adbomb": 223, 
         "received_damage_tbomb": 198, 
@@ -359,7 +359,7 @@
         "received_damage_skip": 218, 
         "bombers_killed_by_ship_airsupport": 343, 
         "team_captured_points": 405, 
-        "RIBBON_ROCKET_BULGE": 460, 
+        "RIBBON_ROCKET_BULGE": 461, 
         "bombers_killed_by_tbombers": 349, 
         "damage_skip_avia": 176, 
         "received_hits_from_buildings_rocket_airsupport": 145, 
@@ -367,7 +367,7 @@
         "distance": 23, 
         "killer_weapon": 395, 
         "shots_tpd": 41, 
-        "RIBBON_DROP": 463, 
+        "RIBBON_DROP": 464, 
         "planes_lost_bombers": 273, 
         "remained_hp": 20, 
         "skipbombers_killed_by_ship_alt": 374, 
@@ -395,10 +395,10 @@
         "planes_killed_fighters": 418, 
         "bombers_killed_by_ship_avia": 341, 
         "scouts_killed_by_skipbombers": 323, 
-        "RIBBON_BASE_CAPTURE": 440, 
+        "RIBBON_BASE_CAPTURE": 441, 
         "enemy_energy_burned": 413, 
         "shots_tbomb_avia": 48, 
-        "RIBBON_MAIN_CALIBER_RICOCHET": 447, 
+        "RIBBON_MAIN_CALIBER_RICOCHET": 448, 
         "skipbombers_killed_by_sfighters": 382, 
         "first_ships_spotted_by_ship": 26, 
         "shots_bomb": 42, 
@@ -411,8 +411,8 @@
         "fighters_killed_by_fighters": 328, 
         "module_major_crits": 247, 
         "tbombers_killed_by_bombers": 364, 
-        "RIBBON_TORPEDO_PHOTON_SPLASH": 479, 
-        "RIBBON_BURN": 436, 
+        "RIBBON_TORPEDO_PHOTON_SPLASH": 480, 
+        "RIBBON_BURN": 437, 
         "module_fires": 248, 
         "received_damage_from_buildings_bomb_airsupport": 240, 
         "fighters_killed_by_fighters_airsupport": 331, 
@@ -423,7 +423,7 @@
         "received_damage_from_buildings_main_ap": 224, 
         "damage_tpd_normal": 153, 
         "received_damage_atba_ap": 203, 
-        "RIBBON_BOMB_OVER_PENETRATION": 450, 
+        "RIBBON_BOMB_OVER_PENETRATION": 451, 
         "team_captured_drop_count": 264, 
         "first_plane_items_spotted_by_ship": 30, 
         "received_damage_from_buildings_main_he": 226, 
@@ -440,19 +440,19 @@
         "hits_ram": 78, 
         "agro_art": 401, 
         "hits_main_he": 64, 
-        "RIBBON_DBOMB": 461, 
+        "RIBBON_DBOMB": 462, 
         "fighters_killed_by_ship_airsupport": 327, 
         "received_damage_from_buildings_dbomb_airsupport": 241, 
         "received_hits_from_buildings_atba_cs": 130, 
         "received_hits_tbomb_avia": 107, 
-        "RIBBON_DEMINING_MINE": 476, 
+        "RIBBON_DEMINING_MINE": 477, 
         "vehicle_type_id": 7, 
         "damage_rocket_airsupport": 174, 
         "received_module_kills_torpedo_tube": 258, 
         "hits_tpd_photon": 69, 
         "planes_lost_bombers_alt": 283, 
         "damage_phaser_laser": 183, 
-        "RIBBON_BASE_DEFENSE": 439, 
+        "RIBBON_BASE_DEFENSE": 440, 
         "home_realm": 9, 
         "received_damage_skip_airsupport": 221, 
         "skipbombers_killed_by_ship_airsupport": 375, 
@@ -462,7 +462,7 @@
         "received_hits_atba_cs": 98, 
         "raw_exp": 388, 
         "is_hidden": 16, 
-        "RIBBON_SUPPRESSED": 442, 
+        "RIBBON_SUPPRESSED": 443, 
         "team_damage": 426, 
         "planes_lost_tbombers_alt": 284, 
         "scouts_killed_by_fighters": 318, 
@@ -491,7 +491,7 @@
         "received_module_crits_steering_gear": 255, 
         "shots_rocket_airsupport": 54, 
         "received_damage_from_buildings_skip_avia": 235, 
-        "RIBBON_FRAG": 435, 
+        "RIBBON_FRAG": 436, 
         "received_damage_main_ap": 188, 
         "shots_atba_ap": 38, 
         "shots_rocket": 51, 
@@ -504,9 +504,9 @@
         "received_damage_from_buildings_skip_alt": 239, 
         "planes_lost_skipbombers_airsupport": 281, 
         "hits_main_ap": 62, 
-        "RIBBON_AIM_PULSE_TORPEDO_PHOTON": 480, 
+        "RIBBON_AIM_PULSE_TORPEDO_PHOTON": 481, 
         "received_module_crits_pinger": 256, 
-        "RIBBON_PLANE": 433, 
+        "RIBBON_PLANE": 434, 
         "hits_fire": 79, 
         "killer_building_id": 34, 
         "playerMode": 17, 
@@ -515,7 +515,7 @@
         "team_planes_killed": 267, 
         "isMercenary": 18, 
         "skipbombers_killed_by_fighters_alt": 377, 
-        "pt_reward_slow": 429, 
+        "pt_reward_slow": 430, 
         "tbombers_killed_by_ship_avia": 357, 
         "bombers_killed_by_fighters": 344, 
         "hits_rocket_airsupport": 85, 
@@ -525,19 +525,19 @@
         "damage_tpd_alter": 155, 
         "module_floods": 249, 
         "damage_rocket_alt": 173, 
-        "RIBBON_ACOUSTIC_HIT_VEHICLE_BLOCK": 471, 
+        "RIBBON_ACOUSTIC_HIT_VEHICLE_BLOCK": 472, 
         "received_damage_tbomb_alt": 200, 
         "received_module_crits_air_defense": 253, 
-        "RIBBON_SPLANE": 457, 
+        "RIBBON_SPLANE": 458, 
         "received_hits_main_cs": 95, 
         "received_hits_from_buildings_bomb_airsupport": 142, 
         "cp_dropped_points": 400, 
         "module_kills": 245, 
-        "RIBBON_SHIELD_HIT": 482, 
+        "RIBBON_SHIELD_HIT": 483, 
         "shots_dbomb": 60, 
         "damage_tbomb": 161, 
         "received_damage_from_buildings_fire": 230, 
-        "RIBBON_ROCKET_OVER_PENETRATION": 465, 
+        "RIBBON_ROCKET_OVER_PENETRATION": 466, 
         "fighters_killed_by_skipbombers": 339, 
         "shots_skip": 55, 
         "planes_killed_by_fighters": 305, 
@@ -555,14 +555,14 @@
         "damage_shields": 124, 
         "fighters_killed_by_ship_avia": 325, 
         "shots_tbomb": 47, 
-        "planes_lost": 427, 
+        "planes_lost": 428, 
         "damage_bomb": 157, 
         "received_damage_tpd_photon": 101, 
         "tbombers_killed_by_fighters": 360, 
-        "RIBBON_DETECTED": 449, 
+        "RIBBON_DETECTED": 450, 
         "received_hits_from_buildings_main_ap": 126, 
-        "RIBBON_MAIN_CALIBER_PENETRATION": 445, 
-        "RIBBON_CRIT": 434, 
+        "RIBBON_MAIN_CALIBER_PENETRATION": 446, 
+        "RIBBON_CRIT": 435, 
         "received_damage_tpd_deep": 192, 
         "planes_lost_bombers_airsupport": 275, 
         "teamLadder": 414, 
@@ -575,11 +575,12 @@
         "bombers_killed_by_fighters_airsupport": 347, 
         "tbombers_killed_by_fighters_alt": 362, 
         "received_module_crits_atba": 252, 
+        "ships_lost": 427, 
         "received_damage_tbomb_avia": 199, 
         "hits_tbomb": 74, 
         "fighters_total_killed_alt": 290, 
         "received_module_kills_air_defense": 260, 
-        "RIBBON_WAVE_HIT_VEHICLE": 468, 
+        "RIBBON_WAVE_HIT_VEHICLE": 469, 
         "sfighters_killed_by_ship": 310, 
         "received_hits_main_he": 96, 
         "damage_wave": 179, 
@@ -589,7 +590,7 @@
         "bombers_killed_by_fighters_avia": 345, 
         "received_module_crits_torpedo_tube": 251, 
         "module_crits": 246, 
-        "RIBBON_BOMB_PENETRATION": 451, 
+        "RIBBON_BOMB_PENETRATION": 452, 
         "tbombers_killed_by_ship": 356, 
         "received_damage_from_buildings_tbomb_avia": 233, 
         "damage_pulse_laser": 181, 
@@ -598,7 +599,7 @@
         "scouts_killed_by_bombers": 319, 
         "hits_tpd": 68, 
         "bombers_killed_by_sfighters_airsupport": 353, 
-        "RIBBON_ROCKET_NO_PENETRATION": 456, 
+        "RIBBON_ROCKET_NO_PENETRATION": 457, 
         "dropped_capture_points": 25, 
         "skipbombers_killed_by_sfighters_alt": 384, 
         "he_hits_bomb": 422, 
@@ -610,7 +611,7 @@
         "received_hits_from_buildings_tbomb_avia": 135, 
         "received_damage_dbomb": 213, 
         "scouts_killed_by_sfighters": 321, 
-        "RIBBON_BOMB_NO_PENETRATION": 452, 
+        "RIBBON_BOMB_NO_PENETRATION": 453, 
         "received_hits_from_buildings_tbomb_alt": 139, 
         "received_hits_rocket": 115, 
         "shots_skip_avia": 56, 
@@ -1324,6 +1325,7 @@
         "skipbombers_killed_by_scouts", 
         "skipbombers_killed_by_skipbombers", 
         "planes_killed", 
+        "ship_killed", 
         "damage_fighters_const", 
         "damage_bombers_const", 
         "damage_tbombers_const", 
@@ -7415,1078 +7417,1138 @@
         "980": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "981": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "982": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "983": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "984": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "985": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "986": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "987": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "988": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "989": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "domination_tournament_3point", 
+            "scenario": "domination_special_respawns", 
             "teamsCount": 2
         }, 
         "990": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "991": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "992": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "993": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "994": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "995": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "996": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "997": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "998": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "999": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "domination_tournament_3point_alt", 
+            "scenario": "domination_tournament_3point", 
             "teamsCount": 2
         }, 
         "1000": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1001": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1002": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1003": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1004": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1005": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1006": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1007": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1008": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1009": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "domination_tournament_4point", 
+            "scenario": "domination_tournament_3point_alt", 
             "teamsCount": 2
         }, 
         "1010": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1011": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1012": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1013": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1014": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1015": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1016": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1017": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1018": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1019": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "domination_tournament_4point_alt", 
+            "scenario": "domination_tournament_4point", 
             "teamsCount": 2
         }, 
         "1020": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1021": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1022": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1023": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1024": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1025": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1026": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1027": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1028": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1029": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "domination_tournament_5point", 
+            "scenario": "domination_tournament_4point_alt", 
             "teamsCount": 2
         }, 
         "1030": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1031": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1032": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1033": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1034": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1035": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1036": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1037": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1038": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1039": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "epicenter_shuffle", 
+            "scenario": "domination_tournament_5point", 
             "teamsCount": 2
         }, 
         "1040": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1041": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1042": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1043": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1044": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1045": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1046": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1047": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1048": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1049": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_1_vdl", 
+            "scenario": "epicenter_shuffle", 
             "teamsCount": 2
         }, 
         "1050": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1051": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1052": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1053": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1054": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1055": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1056": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1057": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1058": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1059": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_2_vdr", 
+            "scenario": "pinata_1_vdl", 
             "teamsCount": 2
         }, 
         "1060": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1061": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1062": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1063": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1064": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1065": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1066": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1067": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1068": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1069": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_3_vul", 
+            "scenario": "pinata_2_vdr", 
             "teamsCount": 2
         }, 
         "1070": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1071": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1072": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1073": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1074": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1075": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1076": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1077": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1078": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1079": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_4_vur", 
+            "scenario": "pinata_3_vul", 
             "teamsCount": 2
         }, 
         "1080": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1081": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1082": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1083": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1084": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1085": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1086": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1087": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1088": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1089": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_5_hru", 
+            "scenario": "pinata_4_vur", 
             "teamsCount": 2
         }, 
         "1090": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1091": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1092": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1093": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1094": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1095": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1096": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1097": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1098": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1099": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_6_hrd", 
+            "scenario": "pinata_5_hru", 
             "teamsCount": 2
         }, 
         "1100": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1101": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1102": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1103": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1104": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1105": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1106": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1107": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1108": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1109": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_7_hlu", 
+            "scenario": "pinata_6_hrd", 
             "teamsCount": 2
         }, 
         "1110": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1111": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1112": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1113": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1114": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1115": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1116": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1117": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1118": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1119": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "pinata_8_hld", 
+            "scenario": "pinata_7_hlu", 
             "teamsCount": 2
         }, 
         "1120": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1121": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1122": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1123": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1124": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1125": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1126": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1127": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1128": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1129": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "ranked_armsrace", 
+            "scenario": "pinata_8_hld", 
             "teamsCount": 2
         }, 
         "1130": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1131": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1132": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1133": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1134": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1135": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1136": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1137": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1138": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1139": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "ranked_domination", 
+            "scenario": "ranked_armsrace", 
             "teamsCount": 2
         }, 
         "1140": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1141": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1142": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1143": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1144": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1145": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1146": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1147": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1148": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1149": {
             "playersPerTeam": 12, 
             "name": "12x12", 
-            "scenario": "ranked_domination_brawl", 
+            "scenario": "ranked_domination", 
             "teamsCount": 2
         }, 
         "1150": {
             "playersPerTeam": 1, 
             "name": "1x1", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1151": {
             "playersPerTeam": 2, 
             "name": "2x2", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1152": {
             "playersPerTeam": 3, 
             "name": "3x3", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1153": {
             "playersPerTeam": 4, 
             "name": "4x4", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1154": {
             "playersPerTeam": 5, 
             "name": "5x5", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1155": {
             "playersPerTeam": 6, 
             "name": "6x6", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1156": {
             "playersPerTeam": 7, 
             "name": "7x7", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1157": {
             "playersPerTeam": 8, 
             "name": "8x8", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1158": {
             "playersPerTeam": 9, 
             "name": "9x9", 
-            "scenario": "two_airships", 
+            "scenario": "ranked_domination_brawl", 
             "teamsCount": 2
         }, 
         "1159": {
+            "playersPerTeam": 12, 
+            "name": "12x12", 
+            "scenario": "ranked_domination_brawl", 
+            "teamsCount": 2
+        }, 
+        "1160": {
+            "playersPerTeam": 1, 
+            "name": "1x1", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1161": {
+            "playersPerTeam": 2, 
+            "name": "2x2", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1162": {
+            "playersPerTeam": 3, 
+            "name": "3x3", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1163": {
+            "playersPerTeam": 4, 
+            "name": "4x4", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1164": {
+            "playersPerTeam": 5, 
+            "name": "5x5", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1165": {
+            "playersPerTeam": 6, 
+            "name": "6x6", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1166": {
+            "playersPerTeam": 7, 
+            "name": "7x7", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1167": {
+            "playersPerTeam": 8, 
+            "name": "8x8", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1168": {
+            "playersPerTeam": 9, 
+            "name": "9x9", 
+            "scenario": "two_airships", 
+            "teamsCount": 2
+        }, 
+        "1169": {
             "playersPerTeam": 12, 
             "name": "12x12", 
             "scenario": "two_airships", 
@@ -8971,6 +9033,7 @@
         "he_hits_bomb_airsupport", 
         "pierced_hits_main", 
         "team_damage", 
+        "ships_lost", 
         "planes_lost", 
         "pt_reward_boost", 
         "pt_reward_slow", 
@@ -9239,8 +9302,8 @@
         "hasPhotonTorpedoes"
     ], 
     "VERSION": {
-        "VERSION": "14.2", 
-        "BUILD": 9643943, 
+        "VERSION": "14.3", 
+        "BUILD": 9773198, 
         "PATCH": 0.0
     }, 
     "OBSERVER_NUM_MEMBER_MAP": {
@@ -10032,6 +10095,7 @@
         "he_hits_bomb_airsupport", 
         "pierced_hits_main", 
         "team_damage", 
+        "ships_lost", 
         "planes_lost", 
         "pt_reward_boost", 
         "pt_reward_slow", 
@@ -10115,7 +10179,8 @@
         "26": "ConvoyEvent", 
         "27": "ConvoyAirship", 
         "28": "TwoTeamsBattleRoyale", 
-        "29": "PinataEvent"
+        "29": "PinataEvent", 
+        "30": "Respawns"
     }, 
     "PLAYER_PRIVATE_RESULTS_INDICES": {
         "tasks": 11, 
