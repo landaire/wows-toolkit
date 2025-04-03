@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.34] - 2025-04-03
+
+### Play_tracker
+
+- Fix crash when using filter larger than hours
+
+### Replays
+
+- Fix regression with detecting replays stored in versioned folders
+
 ## [0.1.33] - 2025-04-03
 
 ### App
