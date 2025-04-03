@@ -214,9 +214,9 @@ impl TimePeriod {
         match self {
             TimePeriod::LastHour => Some(now - 1.hour()),
             TimePeriod::LastSixHours => Some(now - 6.hours()),
-            TimePeriod::LastDay => Some(now - 1.day()),
-            TimePeriod::LastWeek => Some(now - 7.days()),
-            TimePeriod::LastMonth => Some(now - 1.month()),
+            TimePeriod::LastDay => Some(now - 24.hours()),
+            TimePeriod::LastWeek => Some(now - (24 * 7).hours()),
+            TimePeriod::LastMonth => Some(now - (24 * 30).hours()),
             TimePeriod::AllTime => None,
         }
     }
