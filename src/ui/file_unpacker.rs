@@ -61,31 +61,31 @@ impl ToolkitTabViewer<'_> {
 
         if is_plaintext_file.is_some() || is_image_file.is_some() {
             file_label.context_menu(|ui| {
-                if let Some(pkg_loader) = self.pkg_loader() {
-                    if ui.button("View Contents").clicked() {
-                        let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
+                if let Some(pkg_loader) = self.pkg_loader()
+                    && ui.button("View Contents").clicked()
+                {
+                    let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
 
-                        node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
+                    node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
 
-                        let file_type = match (is_plaintext_file, is_image_file) {
-                            (Some(ext), None) => String::from_utf8(file_contents).ok().map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
-                            (None, Some(_ext)) => Some(FileType::Image { contents: file_contents }),
-                            (None, None) => None,
-                            _ => unreachable!("this should be impossible"),
+                    let file_type = match (is_plaintext_file, is_image_file) {
+                        (Some(ext), None) => String::from_utf8(file_contents).ok().map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
+                        (None, Some(_ext)) => Some(FileType::Image { contents: file_contents }),
+                        (None, None) => None,
+                        _ => unreachable!("this should be impossible"),
+                    };
+
+                    if let Some(file_type) = file_type {
+                        let viewer = plaintext_viewer::PlaintextFileViewer {
+                            title: Arc::new(Path::new("res").join(node.path().unwrap()).to_str().unwrap().to_string()),
+                            file_info: Arc::new(Mutex::new(file_type)),
+                            open: Arc::new(AtomicBool::new(true)),
                         };
 
-                        if let Some(file_type) = file_type {
-                            let viewer = plaintext_viewer::PlaintextFileViewer {
-                                title: Arc::new(Path::new("res").join(node.path().unwrap()).to_str().unwrap().to_string()),
-                                file_info: Arc::new(Mutex::new(file_type)),
-                                open: Arc::new(AtomicBool::new(true)),
-                            };
-
-                            self.tab_state.file_viewer.lock().push(viewer);
-                        }
-
-                        ui.close_menu();
+                        self.tab_state.file_viewer.lock().push(viewer);
                     }
+
+                    ui.close_menu();
                 }
             });
         }
@@ -288,12 +288,12 @@ impl ToolkitTabViewer<'_> {
                                 ui.add(egui::TextEdit::singleline(&mut self.tab_state.filter).hint_text("Filter"));
                             });
                             strip.cell(|ui| {
-                                if let Some(filter_list) = &filter_list {
-                                    if ui.button("Add All").clicked() {
-                                        let mut items_to_extract = self.tab_state.items_to_extract.lock();
-                                        for file in filter_list.iter() {
-                                            items_to_extract.push(file.1.clone());
-                                        }
+                                if let Some(filter_list) = &filter_list
+                                    && ui.button("Add All").clicked()
+                                {
+                                    let mut items_to_extract = self.tab_state.items_to_extract.lock();
+                                    for file in filter_list.iter() {
+                                        items_to_extract.push(file.1.clone());
                                     }
                                 }
                             });

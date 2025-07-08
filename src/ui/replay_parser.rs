@@ -691,10 +691,12 @@ impl UiReport {
             let is_enemy = player.relation() > 1;
             let mut player_color = player_color_for_team_relation(player.relation());
 
-            if let Some(self_player) = self_player.as_ref().and_then(|vehicle| vehicle.player().cloned()) {
-                if self_player.db_id() != player.db_id() && self_player.division_id() > 0 && player.division_id() == self_player.division_id() {
-                    player_color = Color32::GOLD;
-                }
+            if let Some(self_player) = self_player.as_ref().and_then(|vehicle| vehicle.player().cloned())
+                && self_player.db_id() != player.db_id()
+                && self_player.division_id() > 0
+                && player.division_id() == self_player.division_id()
+            {
+                player_color = Color32::GOLD;
             }
 
             let vehicle_param = player.vehicle();
@@ -1290,10 +1292,10 @@ impl UiReport {
         // For each column in our existing set, check to see if it's been disabled.
         // If so,
         for (i, column) in self.columns.iter().enumerate() {
-            if optional_columns.contains_key(column) {
-                if let Some(false) = optional_columns.remove(column) {
-                    remove_columns.push(i);
-                }
+            if optional_columns.contains_key(column)
+                && let Some(false) = optional_columns.remove(column)
+            {
+                remove_columns.push(i);
             }
         }
 
@@ -1614,23 +1616,23 @@ impl UiReport {
                             if self.debug_mode {
                                 ui.separator();
 
-                                if let Some(player) = report.vehicle.player() {
-                                    if ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked() {
-                                        let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
-                                        let viewer = plaintext_viewer::PlaintextFileViewer {
-                                            title: Arc::new("metadata.json".to_owned()),
-                                            file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
-                                            open: Arc::new(AtomicBool::new(true)),
-                                        };
+                                if let Some(player) = report.vehicle.player()
+                                    && ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked()
+                                {
+                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("metadata.json".to_owned()),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
 
-                                        if let Some(sender) = self.background_task_sender.as_ref() {
-                                            sender
-                                                .send(BackgroundTask { receiver: None, kind: BackgroundTaskKind::OpenFileViewer(viewer) })
-                                                .expect("failed to send file viewer task")
-                                        }
-
-                                        ui.close_menu();
+                                    if let Some(sender) = self.background_task_sender.as_ref() {
+                                        sender
+                                            .send(BackgroundTask { receiver: None, kind: BackgroundTaskKind::OpenFileViewer(viewer) })
+                                            .expect("failed to send file viewer task")
                                     }
+
+                                    ui.close_menu();
                                 }
                             }
                         });
@@ -2253,10 +2255,10 @@ impl ToolkitTabViewer<'_> {
             let name_color = if let Some(relation) = sender_relation { player_color_for_team_relation(*relation) } else { Color32::GRAY };
 
             let mut job = LayoutJob::default();
-            if let Some(player) = player {
-                if !player.clan().is_empty() {
-                    job.append(&format!("[{}] ", player.clan()), 0.0, TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() });
-                }
+            if let Some(player) = player
+                && !player.clan().is_empty()
+            {
+                job.append(&format!("[{}] ", player.clan()), 0.0, TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() });
             }
             job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
 
@@ -2347,18 +2349,17 @@ impl ToolkitTabViewer<'_> {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
                             .save_file()
+                            && let Ok(mut file) = std::fs::File::create(path)
                         {
-                            if let Ok(mut file) = std::fs::File::create(path) {
-                                for message in report.game_chat() {
-                                    let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
+                            for message in report.game_chat() {
+                                let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
 
-                                    match player {
-                                        Some(player) if !player.clan().is_empty() => {
-                                            let _ = writeln!(file, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
-                                        }
-                                        _ => {
-                                            let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
-                                        }
+                                match player {
+                                    Some(player) if !player.clan().is_empty() => {
+                                        let _ = writeln!(file, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
+                                    }
+                                    _ => {
+                                        let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
                                     }
                                 }
                             }
@@ -2398,38 +2399,32 @@ impl ToolkitTabViewer<'_> {
                     } else {
                         None
                     };
-                    if let Some(format) = format {
-                        if let Some(path) =
+                    if let Some(format) = format
+                        && let Some(path) =
                             rfd::FileDialog::new().set_file_name(format!("{}.{}", replay_file.better_file_name(metadata_provider), format.extension())).save_file()
-                        {
-                            if let Ok(mut file) = std::fs::File::create(path) {
-                                let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
-                                let result = match format {
-                                    ReplayExportFormat::Json => {
-                                        serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                        && let Ok(mut file) = std::fs::File::create(path)
+                    {
+                        let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
+                        let result = match format {
+                            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+                            ReplayExportFormat::Cbor => serde_cbor::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+                            ReplayExportFormat::Csv => {
+                                let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                                let mut result = Ok(());
+                                for vehicle in transformed_results.vehicles {
+                                    result = writer.serialize(FlattenedVehicle::from(vehicle));
+                                    if result.is_err() {
+                                        break;
                                     }
-                                    ReplayExportFormat::Cbor => {
-                                        serde_cbor::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-                                    }
-                                    ReplayExportFormat::Csv => {
-                                        let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
-                                        let mut result = Ok(());
-                                        for vehicle in transformed_results.vehicles {
-                                            result = writer.serialize(FlattenedVehicle::from(vehicle));
-                                            if result.is_err() {
-                                                break;
-                                            }
-                                        }
-
-                                        let _ = writer.flush();
-
-                                        result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-                                    }
-                                };
-                                if let Err(e) = result {
-                                    error!("Failed to write results to file: {}", e);
                                 }
+
+                                let _ = writer.flush();
+
+                                result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
                             }
+                        };
+                        if let Err(e) = result {
+                            error!("Failed to write results to file: {}", e);
                         }
                     }
                 });
@@ -2450,34 +2445,33 @@ impl ToolkitTabViewer<'_> {
                         .add_enabled(report.battle_results().is_some(), results_button)
                         .on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.")
                         .clicked()
+                    && let Some(results_json) = report.battle_results()
                 {
-                    if let Some(results_json) = report.battle_results() {
-                        let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
-                        let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");
-                        let viewer = plaintext_viewer::PlaintextFileViewer {
-                            title: Arc::new("results.json".to_owned()),
-                            file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
-                            open: Arc::new(AtomicBool::new(true)),
-                        };
+                    let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
+                    let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");
+                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                        title: Arc::new("results.json".to_owned()),
+                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
+                        open: Arc::new(AtomicBool::new(true)),
+                    };
 
-                        self.tab_state.file_viewer.lock().push(viewer);
-                    }
+                    self.tab_state.file_viewer.lock().push(viewer);
                 }
 
-                if let Some(self_report) = self_report {
-                    if self_report.is_test_ship() && ui.checkbox(&mut hide_my_stats, "Hide My Test Ship Stats").changed() {
-                        hide_my_stats_changed = true;
-                    }
+                if let Some(self_report) = self_report
+                    && self_report.is_test_ship()
+                    && ui.checkbox(&mut hide_my_stats, "Hide My Test Ship Stats").changed()
+                {
+                    hide_my_stats_changed = true;
                 }
             });
 
             // Synchronize the hide_my_stats value
-            if hide_my_stats_changed {
-                if let Some(ui_report) = replay_file.ui_report.as_mut() {
-                    if let Some(self_report) = ui_report.vehicle_reports.iter_mut().find(|report| report.is_self) {
-                        self_report.manual_stat_hide_toggle = hide_my_stats;
-                    }
-                }
+            if hide_my_stats_changed
+                && let Some(ui_report) = replay_file.ui_report.as_mut()
+                && let Some(self_report) = ui_report.vehicle_reports.iter_mut().find(|report| report.is_self)
+            {
+                self_report.manual_stat_hide_toggle = hide_my_stats;
             }
 
             if self.tab_state.settings.replay_settings.show_game_chat {
@@ -2509,10 +2503,10 @@ impl ToolkitTabViewer<'_> {
                     for (path, replay) in files {
                         let label = { replay.read().label(&metadata_provider) };
                         let mut label_text = egui::RichText::new(label.as_str());
-                        if let Some(current_replay) = self.tab_state.current_replay.as_ref() {
-                            if Arc::ptr_eq(current_replay, &replay) {
-                                label_text = label_text.background_color(Color32::DARK_GRAY).color(Color32::WHITE);
-                            }
+                        if let Some(current_replay) = self.tab_state.current_replay.as_ref()
+                            && Arc::ptr_eq(current_replay, &replay)
+                        {
+                            label_text = label_text.background_color(Color32::DARK_GRAY).color(Color32::WHITE);
                         }
 
                         let label = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
@@ -2527,20 +2521,20 @@ impl ToolkitTabViewer<'_> {
                             }
                         });
 
-                        if label.double_clicked() {
-                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                update_background_task!(
-                                    self.tab_state.background_tasks,
-                                    load_replay(
-                                        Arc::clone(&self.tab_state.game_constants),
-                                        Arc::clone(wows_data),
-                                        replay.clone(),
-                                        Arc::clone(&self.tab_state.replay_sort),
-                                        self.tab_state.background_task_sender.clone(),
-                                        self.tab_state.settings.debug_mode
-                                    )
-                                );
-                            }
+                        if label.double_clicked()
+                            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+                        {
+                            update_background_task!(
+                                self.tab_state.background_tasks,
+                                load_replay(
+                                    Arc::clone(&self.tab_state.game_constants),
+                                    Arc::clone(wows_data),
+                                    replay.clone(),
+                                    Arc::clone(&self.tab_state.replay_sort),
+                                    self.tab_state.background_task_sender.clone(),
+                                    self.tab_state.settings.debug_mode
+                                )
+                            );
                         }
                         ui.end_row();
                     }
@@ -2551,23 +2545,23 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked() {
-                if let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() {
-                    self.tab_state.settings.current_replay_path = file;
+            if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked()
+                && let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file()
+            {
+                self.tab_state.settings.current_replay_path = file;
 
-                    if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                        update_background_task!(
-                            self.tab_state.background_tasks,
-                            parse_replay(
-                                Arc::clone(&self.tab_state.game_constants),
-                                Arc::clone(wows_data),
-                                self.tab_state.settings.current_replay_path.clone(),
-                                Arc::clone(&self.tab_state.replay_sort),
-                                self.tab_state.background_task_sender.clone(),
-                                self.tab_state.settings.debug_mode
-                            )
-                        );
-                    }
+                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        parse_replay(
+                            Arc::clone(&self.tab_state.game_constants),
+                            Arc::clone(wows_data),
+                            self.tab_state.settings.current_replay_path.clone(),
+                            Arc::clone(&self.tab_state.replay_sort),
+                            self.tab_state.background_task_sender.clone(),
+                            self.tab_state.settings.debug_mode
+                        )
+                    );
                 }
             }
 

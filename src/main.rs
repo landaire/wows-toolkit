@@ -62,16 +62,16 @@ fn main() -> eframe::Result<()> {
         let current_path = Path::new(args[0].as_str());
         let old_path = Path::new(args[1].as_str());
         // Sanity check -- ensure that these files are in the same directory
-        if current_path.parent() == old_path.parent() {
-            if let Some(name) = old_path.file_name().and_then(|name| name.to_str()) {
-                if name.contains(".exe") && old_path.exists() {
-                    let _ = std::fs::remove_file(old_path);
+        if current_path.parent() == old_path.parent()
+            && let Some(name) = old_path.file_name().and_then(|name| name.to_str())
+            && name.contains(".exe")
+            && old_path.exists()
+        {
+            let _ = std::fs::remove_file(old_path);
 
-                    // Rename the update to the old path. This is useful
-                    // if people have desktop shortcuts / taskbar pins
-                    let _ = std::fs::rename(current_path, old_path);
-                }
-            }
+            // Rename the update to the old path. This is useful
+            // if people have desktop shortcuts / taskbar pins
+            let _ = std::fs::rename(current_path, old_path);
         }
     }
 

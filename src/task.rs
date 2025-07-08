@@ -245,10 +245,10 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 
             let file_path = file.path();
 
-            if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str")) {
-                if file.file_name() != "temp.wowsreplay" {
-                    files.push(file_path);
-                }
+            if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str"))
+                && file.file_name() != "temp.wowsreplay"
+            {
+                files.push(file_path);
             }
         }
     }
@@ -309,23 +309,23 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let prefs_file = wows_directory.join("preferences.xml");
     if prefs_file.exists() {
         // Try getting the version string from the preferences file
-        if let Some(version_str) = current_build_from_preferences(&prefs_file) {
-            if version_str.contains(',') {
-                let full_build_info = wowsunpack::data::Version::from_client_exe(&version_str);
-                latest_build = Some(full_build_info.build as usize);
+        if let Some(version_str) = current_build_from_preferences(&prefs_file)
+            && version_str.contains(',')
+        {
+            let full_build_info = wowsunpack::data::Version::from_client_exe(&version_str);
+            latest_build = Some(full_build_info.build as usize);
 
-                // We want to build the version string without the patch component to get the replays dir
-                // that the replay manager mod uses
-                let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
+            // We want to build the version string without the patch component to get the replays dir
+            // that the replay manager mod uses
+            let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
 
-                full_version = Some(full_build_info);
+            full_version = Some(full_build_info);
 
-                for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
-                    debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-                    if temp_replays_dir.exists() {
-                        replays_dir = temp_replays_dir;
-                        break;
-                    }
+            for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
+                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+                if temp_replays_dir.exists() {
+                    replays_dir = temp_replays_dir;
+                    break;
                 }
             }
         }
@@ -343,10 +343,10 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
                     continue;
                 }
 
-                if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok()) {
-                    if latest_build.is_none() || latest_build.map(|number| number < build_num).unwrap_or(false) {
-                        latest_build = Some(build_num)
-                    }
+                if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok())
+                    && (latest_build.is_none() || latest_build.map(|number| number < build_num).unwrap_or(false))
+                {
+                    latest_build = Some(build_num)
                 }
             }
         }
@@ -517,12 +517,11 @@ pub fn start_twitch_task(
             (state.client().clone(), state.token.clone())
         };
         let mut monitored_user_id = token.as_ref().map(|token| token.user_id.clone());
-        if !monitored_channel.is_empty() {
-            if let Some(token) = token {
-                if let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await {
-                    monitored_user_id = Some(user.id)
-                }
-            }
+        if !monitored_channel.is_empty()
+            && let Some(token) = token
+            && let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await
+        {
+            monitored_user_id = Some(user.id)
         }
 
         loop {
@@ -532,17 +531,15 @@ pub fn start_twitch_task(
                 // Every 2 minutes we attempt to get the participants list
                 _ = interval.tick() => {
                     let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
-                    if let Some(token) = token {
-                        if let Some(monitored_user) = &monitored_user_id {
-                            if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, &token).await {
+                    if let Some(token) = token
+                        && let Some(monitored_user) = &monitored_user_id
+                            && let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, &token).await {
                                 let now = Timestamp::now();
                                 let mut state = twitch_state.write();
                                 for chatter in chatters {
                                     state.participants.entry(chatter).or_default().insert(now);
                                 }
                             }
-                        }
-                    }
                 }
 
                 update = token_receive => {
@@ -553,37 +550,32 @@ pub fn start_twitch_task(
                                 update_twitch_token(&twitch_state, &token).await;
 
                                 let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
-                                if let Some(token) = &token {
-                                    if let Some(monitored_user) = &monitored_user_id {
-                                        if let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, token).await {
+                                if let Some(token) = &token
+                                    && let Some(monitored_user) = &monitored_user_id
+                                        && let Ok(chatters) = twitch::fetch_chatters(&client, monitored_user, token).await {
                                             let now = Timestamp::now();
                                             let mut state = twitch_state.write();
                                             for chatter in chatters {
                                                 state.participants.entry(chatter).or_default().insert(now);
                                             }
                                         }
-                                    }
-                                }
 
                                 if !had_previous_token {
                                     // If we didn't have a previous token, but we did have a username to watch, update the username
                                     monitored_user_id = token.as_ref().map(|token| token.user_id.clone());
-                                    if !monitored_channel.is_empty() {
-                                        if let Some(token) = token {
-                                            if let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await {
+                                    if !monitored_channel.is_empty()
+                                        && let Some(token) = token
+                                            && let Ok(Some(user)) = client.get_user_from_login(&monitored_channel, &token).await {
                                                 monitored_user_id = Some(user.id)
                                             }
-                                        }
-                                    }
                                 }
                             },
                             TwitchUpdate::User(user_name) => {
                                 let (client, token) = { let state = twitch_state.read(); (state.client().clone(), state.token.clone()) };
-                                if let Some(token) = token {
-                                    if let Ok(Some(user)) = client.get_user_from_login(&user_name, &token).await {
+                                if let Some(token) = token
+                                    && let Ok(Some(user)) = client.get_user_from_login(&user_name, &token).await {
                                         monitored_user_id = Some(user.id);
                                     }
-                                }
                             },
                         }
                     }

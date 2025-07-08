@@ -81,10 +81,10 @@ impl PlayerTracker {
 
                 let mut update_metadata = false;
 
-                if let Some(last_seen) = tracked_player.timestamps.first() {
-                    if *last_seen < timestamp {
-                        update_metadata = true;
-                    }
+                if let Some(last_seen) = tracked_player.timestamps.first()
+                    && *last_seen < timestamp
+                {
+                    update_metadata = true;
                 }
 
                 if update_metadata || tracked_player.timestamps.is_empty() {
@@ -246,19 +246,18 @@ impl ToolkitTabViewer<'_> {
                 });
                 ui.label("Player Filter");
                 ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
-                if let Some(replay_files) = self.tab_state.replay_files.as_ref() {
-                    if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                        if ui.button("Populate Data From Replays").clicked() {
-                            crate::update_background_task!(
-                                self.tab_state.background_tasks,
-                                Some(task::start_populating_player_inspector(
-                                    replay_files.keys().cloned().collect(),
-                                    Arc::clone(wows_data),
-                                    Arc::clone(&self.tab_state.settings.player_tracker)
-                                ))
-                            );
-                        }
-                    }
+                if let Some(replay_files) = self.tab_state.replay_files.as_ref()
+                    && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+                    && ui.button("Populate Data From Replays").clicked()
+                {
+                    crate::update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(task::start_populating_player_inspector(
+                            replay_files.keys().cloned().collect(),
+                            Arc::clone(wows_data),
+                            Arc::clone(&self.tab_state.settings.player_tracker)
+                        ))
+                    );
                 }
             });
 

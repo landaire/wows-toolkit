@@ -277,20 +277,20 @@ impl ToolkitTabViewer<'_> {
                     let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
                     if let Ok(contents) = ctx.get_contents() {
                         let token: Result<Token, _> = contents.parse();
-                        if let Ok(token) = token {
-                            if let Some(tx) = self.tab_state.twitch_update_sender.as_ref() {
-                                self.tab_state.settings.twitch_token = Some(token.clone());
-                                let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
-                            }
+                        if let Ok(token) = token
+                            && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
+                        {
+                            self.tab_state.settings.twitch_token = Some(token.clone());
+                            let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
                         }
                     }
                 }
                 ui.label("Monitored Channel (Default to Self)");
                 let response = ui.text_edit_singleline(&mut self.tab_state.settings.twitch_monitored_channel);
-                if response.lost_focus() {
-                    if let Some(tx) = self.tab_state.twitch_update_sender.as_ref() {
-                        let _ = tx.blocking_send(crate::twitch::TwitchUpdate::User(self.tab_state.settings.twitch_monitored_channel.clone()));
-                    }
+                if response.lost_focus()
+                    && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
+                {
+                    let _ = tx.blocking_send(crate::twitch::TwitchUpdate::User(self.tab_state.settings.twitch_monitored_channel.clone()));
                 }
             });
         });
@@ -624,20 +624,20 @@ impl TabState {
                                             replay_files.insert(new_file.clone(), Arc::clone(&replay));
                                         }
 
-                                        if self.auto_load_latest_replay {
-                                            if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                                                update_background_task!(
-                                                    self.background_tasks,
-                                                    load_replay(
-                                                        Arc::clone(&self.game_constants),
-                                                        Arc::clone(wows_data),
-                                                        replay,
-                                                        Arc::clone(&self.replay_sort),
-                                                        self.background_task_sender.clone(),
-                                                        self.settings.debug_mode,
-                                                    )
-                                                );
-                                            }
+                                        if self.auto_load_latest_replay
+                                            && let Some(wows_data) = self.world_of_warships_data.as_ref()
+                                        {
+                                            update_background_task!(
+                                                self.background_tasks,
+                                                load_replay(
+                                                    Arc::clone(&self.game_constants),
+                                                    Arc::clone(wows_data),
+                                                    replay,
+                                                    Arc::clone(&self.replay_sort),
+                                                    self.background_task_sender.clone(),
+                                                    self.settings.debug_mode,
+                                                )
+                                            );
                                         }
 
                                         break;
@@ -737,11 +737,11 @@ impl TabState {
                         }
                         EventKind::Modify(ModifyKind::Data(_)) => {
                             for path in event.paths {
-                                if let Some(filename) = path.file_name() {
-                                    if filename == "preferences.xml" {
-                                        debug!("Sending preferences changed event");
-                                        tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
-                                    }
+                                if let Some(filename) = path.file_name()
+                                    && filename == "preferences.xml"
+                                {
+                                    debug!("Sending preferences changed event");
+                                    tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
                                 }
                                 if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
                                     let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
@@ -1186,15 +1186,15 @@ impl WowsToolkitApp {
             }
         });
 
-        if let Ok(latest_release) = app_updates {
-            if let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..]) {
-                let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-                if app_version < version {
-                    self.update_window_open = true;
-                    self.latest_release = Some(latest_release);
-                } else {
-                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
-                }
+        if let Ok(latest_release) = app_updates
+            && let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..])
+        {
+            let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+            if app_version < version {
+                self.update_window_open = true;
+                self.latest_release = Some(latest_release);
+            } else {
+                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
             }
         }
 
@@ -1228,12 +1228,11 @@ impl WowsToolkitApp {
                     return Some("Only one file at a time, please.".to_owned());
                 }
 
-                if let Some(file) = i.raw.hovered_files.first() {
-                    if let Some(path) = &file.path {
-                        if path.is_file() {
-                            return Some(format!("Drop to load\n{}", path.file_name()?.to_str()?));
-                        }
-                    }
+                if let Some(file) = i.raw.hovered_files.first()
+                    && let Some(path) = &file.path
+                    && path.is_file()
+                {
+                    return Some(format!("Drop to load\n{}", path.file_name()?.to_str()?));
                 }
 
                 None
@@ -1258,23 +1257,22 @@ impl WowsToolkitApp {
         });
 
         // Only perform operations if we have one file
-        if dropped_files.len() == 1 {
-            if let Some(path) = &dropped_files[0].path {
-                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                    self.tab_state.settings.current_replay_path = path.clone();
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        parse_replay(
-                            Arc::clone(&self.tab_state.game_constants),
-                            Arc::clone(wows_data),
-                            self.tab_state.settings.current_replay_path.clone(),
-                            Arc::clone(&self.tab_state.replay_sort),
-                            self.tab_state.background_task_sender.clone(),
-                            self.tab_state.settings.debug_mode
-                        )
-                    );
-                }
-            }
+        if dropped_files.len() == 1
+            && let Some(path) = &dropped_files[0].path
+            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+        {
+            self.tab_state.settings.current_replay_path = path.clone();
+            update_background_task!(
+                self.tab_state.background_tasks,
+                parse_replay(
+                    Arc::clone(&self.tab_state.game_constants),
+                    Arc::clone(wows_data),
+                    self.tab_state.settings.current_replay_path.clone(),
+                    Arc::clone(&self.tab_state.replay_sort),
+                    self.tab_state.background_task_sender.clone(),
+                    self.tab_state.settings.debug_mode
+                )
+            );
         }
     }
 
