@@ -142,7 +142,7 @@ impl ModManagerInfo {
     }
 
     pub fn update_index(&mut self, index_hash: String, index: ModManagerIndex) {
-        println!("{:#?}", index);
+        println!("{index:#?}");
         self.index_hash = index_hash;
         self.update_categories(index.mods);
     }

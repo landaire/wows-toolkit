@@ -1037,7 +1037,7 @@ impl WowsToolkitApp {
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
                                     let current_process = env::args().next().expect("current process has no path?");
-                                    let current_process_new_path = format!("{}.old", current_process);
+                                    let current_process_new_path = format!("{current_process}.old");
                                     // Rename this process
                                     std::fs::rename(current_process.clone(), &current_process_new_path).expect("failed to rename current process");
                                     // Rename the new exe
@@ -1075,7 +1075,7 @@ impl WowsToolkitApp {
                             },
                             Err(ToolkitError::BackgroundTaskCompleted) => {}
                             Err(e) => {
-                                eprintln!("Background task error: {:?}", e);
+                                eprintln!("Background task error: {e:?}");
                                 self.show_error_window = true;
                                 self.error_to_show = Some(Box::new(e));
                             }
@@ -1483,7 +1483,7 @@ impl WowsToolkitApp {
             if let Some(asset) = asset {
                 egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
                     ui.vertical(|ui| {
-                        ui.label(format!("Version {} of WoWs Toolkit is available", tag));
+                        ui.label(format!("Version {tag} of WoWs Toolkit is available"));
                         if let Some(notes) = notes.as_mut() {
                             CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
                         }

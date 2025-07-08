@@ -202,7 +202,7 @@ pub fn colorize_captain_points(
     }
 
     (
-        RichText::new(format!("{}{}pts ({} skills)", extra_icons, points, skills)).color(color),
+        RichText::new(format!("{extra_icons}{points}pts ({skills} skills)")).color(color),
         if extra_hover_text.is_empty() { None } else { Some(format!("Player has {}", extra_hover_text.join(", "))) },
     )
 }

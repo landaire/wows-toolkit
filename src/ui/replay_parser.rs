@@ -720,7 +720,7 @@ impl UiReport {
             let div = player.division_id();
             let division_char = if div > 0 { Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?'))) } else { None };
 
-            let div_text = division_char.map(|div| format!("({})", div));
+            let div_text = division_char.map(|div| format!("({div})"));
 
             let clan_text =
                 if !player.clan().is_empty() { Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap())) } else { None };
@@ -763,7 +763,7 @@ impl UiReport {
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                                 info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
                             })
                             .max()
@@ -774,11 +774,11 @@ impl UiReport {
                         let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                                 info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                     if num > 0 {
                                         let num_str = separate_number(num, Some(locale));
-                                        Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                        Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
                                     } else {
                                         None
                                     }
@@ -819,7 +819,7 @@ impl UiReport {
                     let longest_width = HITS_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
                         })
                         .max()
@@ -830,11 +830,11 @@ impl UiReport {
                     let (all_hits, breakdowns): (Vec<(String, u64)>, Vec<String>) = HITS_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
                                 } else {
                                     None
                                 }
@@ -885,7 +885,7 @@ impl UiReport {
                     let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?.as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
                         })
                         .max()
@@ -896,11 +896,11 @@ impl UiReport {
                     let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?.as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
                                 } else {
                                     None
                                 }
@@ -951,7 +951,7 @@ impl UiReport {
                     let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                             info_array[idx]
                                 .as_number()
                                 .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
@@ -965,11 +965,11 @@ impl UiReport {
                     let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{}", key).as_str())?.as_u64()? as usize;
+                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64))).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{:<longest_width$}: {}", description, num_str)))
+                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
                                 } else {
                                     None
                                 }
@@ -1534,7 +1534,7 @@ impl UiReport {
                     }
                     ReplayColumn::DistanceTraveled => {
                         if let Some(distance) = report.distance_traveled {
-                            ui.label(format!("{:.2}km", distance));
+                            ui.label(format!("{distance:.2}km"));
                         } else {
                             ui.label("-");
                         }
@@ -2357,7 +2357,7 @@ impl ToolkitTabViewer<'_> {
                                             let _ = writeln!(file, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
                                         }
                                         _ => {
-                                            let _ = writeln!(file, "{} ({:?}): {}", sender_name, channel, message);
+                                            let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
                                         }
                                     }
                                 }
@@ -2376,7 +2376,7 @@ impl ToolkitTabViewer<'_> {
                                     let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
                                 }
                                 _ => {
-                                    let _ = writeln!(buf, "{} ({:?}): {}", sender_name, channel, message);
+                                    let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
                                 }
                             }
                         }

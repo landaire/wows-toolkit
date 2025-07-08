@@ -357,7 +357,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     let game_patch = latest_build.unwrap();
-    let build_dir = wows_directory.join("bin").join(format!("{}", game_patch));
+    let build_dir = wows_directory.join("bin").join(format!("{game_patch}"));
     for file in read_dir(build_dir.join("idx"))? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
@@ -381,7 +381,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let attempted_dirs = [locale, language_tag.primary_language(), "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
-        let localization_path = wows_directory.join(format!("bin/{}/res/texts/{}/LC_MESSAGES/global.mo", game_patch, dir));
+        let localization_path = wows_directory.join(format!("bin/{game_patch}/res/texts/{dir}/LC_MESSAGES/global.mo"));
         if !localization_path.exists() {
             continue;
         }
@@ -911,13 +911,13 @@ pub fn start_populating_player_inspector(
                                 player_tracker.write().update_from_replay(&replay);
                             }
                             Err(e) => {
-                                println!("error attempting to parse replay for replay inspector: {:?}", e);
+                                println!("error attempting to parse replay for replay inspector: {e:?}");
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    println!("error attempting to open replay for replay inspector: {:?}", e);
+                    println!("error attempting to open replay for replay inspector: {e:?}");
                 }
             }
         }

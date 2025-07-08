@@ -515,7 +515,7 @@ impl ToolkitTabViewer<'_> {
                                             .since(ZonedDifference::new(&timestamp).smallest(Unit::Minute).largest(Unit::Year).mode(jiff::RoundMode::HalfExpand))
                                             .expect("failed to calculate player last seen delta");
 
-                                        ui.label(format!("{:#}", delta)).on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
+                                        ui.label(format!("{delta:#}")).on_hover_text(timestamp.strftime("%Y-%m-%d %H:%M:%S").to_string());
                                     });
                                     row.col(|ui| {
                                         ui.label(player.names.iter().join(", "));

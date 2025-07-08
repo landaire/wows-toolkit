@@ -98,7 +98,7 @@ fn main() -> eframe::Result<()> {
                 let panic_path = wows_toolkit::WowsToolkitApp::panic_log_path();
                 // TOOD: possible race if multiple panics happen at once?
                 if let Ok(mut file) = std::fs::File::create(&panic_path) {
-                    let _ = writeln!(file, "{}", info);
+                    let _ = writeln!(file, "{info}");
                     let _ = writeln!(file, "Backtrace:\n{}", Backtrace::force_capture());
                 }
             }));
