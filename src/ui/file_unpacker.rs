@@ -253,8 +253,9 @@ impl ToolkitTabViewer<'_> {
                         let files = &wows_data.filtered_files;
                         if self.tab_state.filter.len() >= 3 {
                             let glob = glob::Pattern::new(self.tab_state.filter.as_str());
-                            if self.tab_state.filter.contains('*') && glob.is_ok() {
-                                let glob = glob.unwrap();
+                            if self.tab_state.filter.contains('*')
+                                && let Ok(glob) = glob
+                            {
                                 let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
 
                                 Some(leafs)
