@@ -7012,9 +7012,9 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf3e4b3fb7243188549f25d7cda1b9084e633f74ee5d4f9e65be740b4a71caf"
+checksum = "580ba235af407fd1b4443e30f783af4eb776c8712fce842025e81c54d7a50bc2"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -7034,7 +7034,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "variantly",
- "wowsunpack 0.5.0",
+ "wowsunpack",
 ]
 
 [[package]]
@@ -7087,34 +7087,8 @@ dependencies = [
  "twitch_api",
  "winresource",
  "wows_replays",
- "wowsunpack 0.6.0",
+ "wowsunpack",
  "zip",
-]
-
-[[package]]
-name = "wowsunpack"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "026ff09139257f3c21b2627ddeb9f24764821b7361e386d0a52dc185ec55c1d2"
-dependencies = [
- "binrw",
- "byteorder",
- "convert_case 0.8.0",
- "derive_builder",
- "flate2",
- "gettext",
- "itertools 0.13.0",
- "memmap",
- "nom",
- "pickled",
- "roxmltree",
- "serde",
- "serde_json",
- "strum 0.25.0",
- "strum_macros 0.25.3",
- "thiserror 1.0.69",
- "tracing",
- "variantly",
 ]
 
 [[package]]
