@@ -1,6 +1,6 @@
 [package]
 name = "wows_toolkit"
-version = "0.1.34"
+version = "0.1.35-alpha"
 authors = ["landaire"]
 edition = "2024"
 rust-version = "1.88"
