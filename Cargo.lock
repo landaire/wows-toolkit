@@ -7039,7 +7039,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.35-alpha"
+version = "0.1.35"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
