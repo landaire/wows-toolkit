@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.36] - 2025-10-02
+
+### Resource_unpacker
+
+- Fix slow conversion of GameParams
+- Fix base params unpacking
+
+## [0.1.35] - 2025-10-01
+
+### Resource_unpacker
+
+- Add button for dumping base GameParams
+
 ## [0.1.34] - 2025-04-03
 
 ### Play_tracker
