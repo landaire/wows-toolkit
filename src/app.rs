@@ -392,6 +392,8 @@ pub struct Settings {
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     #[serde(default = "default_bool::<false>")]
     pub has_019_game_params_update: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_037_crew_skills_fix: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -425,6 +427,7 @@ impl Default for Settings {
             constants_file_commit: None,
             debug_mode: false,
             build_consent_window_shown: false,
+            has_037_crew_skills_fix: true,
         }
     }
 }
@@ -891,6 +894,13 @@ impl WowsToolkitApp {
 
             if !saved_state.tab_state.settings.has_019_game_params_update {
                 saved_state.tab_state.settings.has_019_game_params_update = true;
+
+                // Remove the old game params
+                let _ = std::fs::remove_file(game_params_bin_path());
+            }
+
+            if !saved_state.tab_state.settings.has_037_crew_skills_fix {
+                saved_state.tab_state.settings.has_037_crew_skills_fix = true;
 
                 // Remove the old game params
                 let _ = std::fs::remove_file(game_params_bin_path());
