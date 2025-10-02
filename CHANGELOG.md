@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.37] - 2025-10-02
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog
+
+### Core
+
+- Bump wowsunpack + wowsreplay versions to fix replays in 14.9.0
+
 ## [0.1.36] - 2025-10-02
 
 ### Resource_unpacker
