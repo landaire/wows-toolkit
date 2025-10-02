@@ -215,14 +215,18 @@ impl ToolkitTabViewer<'_> {
                         tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
 
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
-                        let params_dict = match pickle {
-                            pickled::Value::Dict(mut params_dict) => {
-                                params_dict.remove(&HashableValue::String("".to_string())).expect("Could not find base game params with empty key")
+                        let params_dict = if base_params {
+                            match pickle {
+                                pickled::Value::Dict(mut params_dict) => {
+                                    params_dict.remove(&HashableValue::String("".to_string())).expect("Could not find base game params with empty key")
+                                }
+                                pickled::Value::List(mut params_list) => params_list.remove(0),
+                                _other => {
+                                    panic!("Unexpected GameParams root element type");
+                                }
                             }
-                            pickled::Value::List(mut params_list) => params_list.remove(0),
-                            _other => {
-                                panic!("Unexpected GameParams root element type");
-                            }
+                        } else {
+                            pickle
                         };
 
                         let mut file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
