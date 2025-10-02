@@ -3,6 +3,7 @@ use std::fs::File;
 use std::fs::{
     self,
 };
+use std::io::BufWriter;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -206,32 +207,25 @@ impl ToolkitTabViewer<'_> {
                 let metadata_provider = { wows_data.game_metadata.clone() };
 
                 if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
-                    let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
-
-                    game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
                     let _unpacker_thread = Some(std::thread::spawn(move || {
+                        let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
+
+                        game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
+
                         tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
 
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
-
-                        let params_dict = if base_params {
-                            if let Some(params_dict) = pickle.dict_ref() {
-                                params_dict
-                                    .get(&HashableValue::String("".to_string()))
-                                    .expect("failed to get default game_params")
-                            } else {
-                                let params_list = pickle.list_ref().expect("Root game params is not a list");
-
-                               &params_list[0]
+                        let params_dict = match pickle {
+                            pickled::Value::Dict(mut params_dict) => {
+                                params_dict.remove(&HashableValue::String("".to_string())).expect("Could not find base game params with empty key")
                             }
-                        } else {
-                            &pickle
+                            pickled::Value::List(mut params_list) => params_list.remove(0),
+                            _other => {
+                                panic!("Unexpected GameParams root element type");
+                            }
                         };
 
-                        // ugh, TODO
-                        let params_dict = params_dict.clone();
-
-                        let mut file = File::create(&file_path).expect("failed to create GameParams.json file");
+                        let mut file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
                         match format {
                             GameParamsFormat::Json => {
                                 let json = pickle_to_json(params_dict);
