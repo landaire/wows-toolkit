@@ -21,12 +21,12 @@ use egui_extras::Size;
 use egui_extras::StripBuilder;
 use egui_phosphor::regular as icons;
 use pickled::HashableValue;
+use serde::Serialize;
+use serde_cbor::ser::IoWrite;
 use tracing::debug;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::convert::game_params_to_pickle;
-use wowsunpack::game_params::convert::pickle_to_cbor;
-use wowsunpack::game_params::convert::pickle_to_json;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::app::ToolkitTabViewer;
@@ -217,10 +217,12 @@ impl ToolkitTabViewer<'_> {
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
                         let params_dict = if base_params {
                             match pickle {
-                                pickled::Value::Dict(mut params_dict) => {
-                                    params_dict.remove(&HashableValue::String("".to_string())).expect("Could not find base game params with empty key")
-                                }
-                                pickled::Value::List(mut params_list) => params_list.remove(0),
+                                pickled::Value::Dict(params_dict) => params_dict
+                                    .inner()
+                                    .get(&HashableValue::String("".to_string().into()))
+                                    .expect("Could not find base game params with empty key")
+                                    .clone(),
+                                pickled::Value::List(params_list) => params_list.inner_mut().remove(0),
                                 _other => {
                                     panic!("Unexpected GameParams root element type");
                                 }
@@ -229,15 +231,16 @@ impl ToolkitTabViewer<'_> {
                             pickle
                         };
 
-                        let mut file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
+                        let file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
                         match format {
                             GameParamsFormat::Json => {
-                                let json = pickle_to_json(params_dict);
-                                serde_json::to_writer_pretty(&mut file, &json).expect("failed to write JSON data");
+                                let mut serializer = serde_json::Serializer::pretty(file);
+                                params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
                             }
                             GameParamsFormat::Cbor => {
-                                let cbor = pickle_to_cbor(params_dict);
-                                serde_cbor::to_writer(file, &cbor).expect("failed to write CBOR data");
+                                let file = IoWrite::new(file);
+                                let mut serializer = serde_cbor::Serializer::new(file);
+                                params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
                             }
                             GameParamsFormat::MinimalJson => {
                                 if let Some(metadata_provider) = metadata_provider {

@@ -4041,12 +4041,13 @@ dependencies = [
 
 [[package]]
 name = "pickled"
-version = "1.2.0"
+version = "2.0.0-alpha2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c01521ef80e2ff9bc52e7142be1dd7664391168f076f620373eaaf913a9cd211"
+checksum = "b84339c6cde90bb2b3f2ad5e0fe3067e21471ffc1dbaebe1c7cce7744308054c"
 dependencies = [
  "byteorder",
  "iter-read",
+ "itertools 0.14.0",
  "num-bigint",
  "num-traits",
  "serde",
@@ -7012,9 +7013,9 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33c17459211bbf9ba9a58d48febc4ca89c2ec7a74632668206d1fdf35e7b22e5"
+checksum = "b1352664254edcdbe7628d7d7054615a16242963dbcabb2aa39347f1d7154355"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -7093,9 +7094,9 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0363afd450f52601c8b35554236452de6e0f29a00713baef58f17859325735d"
+checksum = "93af773acadaf955f07efcb6e2857e4f0e353821ab293103f93a12e4411f1041"
 dependencies = [
  "binrw",
  "byteorder",
