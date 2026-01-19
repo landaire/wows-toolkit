@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{
-    self,
-};
+use std::fs::{self};
 use std::io::BufWriter;
 use std::path::Path;
 use std::path::PathBuf;
@@ -11,12 +9,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
-use egui::CollapsingHeader;
 use egui::Label;
 use egui::Response;
 use egui::Sense;
 use egui::Ui;
 use egui::mutex::Mutex;
+use egui::{CollapsingHeader, UiKind};
 use egui_extras::Size;
 use egui_extras::StripBuilder;
 use egui_phosphor::regular as icons;
@@ -31,9 +29,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
+use crate::plaintext_viewer::{self};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -87,7 +83,7 @@ impl ToolkitTabViewer<'_> {
                         self.tab_state.file_viewer.lock().push(viewer);
                     }
 
-                    ui.close_menu();
+                    ui.close_kind(UiKind::Menu);
                 }
             });
         }
@@ -367,31 +363,31 @@ impl ToolkitTabViewer<'_> {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
                                     self.dump_game_params(path, GameParamsFormat::Json, true);
                                 }
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As JSON").clicked() {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
                                     self.dump_game_params(path, GameParamsFormat::Json, false);
                                 }
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As CBOR").clicked() {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
                                     self.dump_game_params(path, GameParamsFormat::Cbor, false);
                                 }
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
                                     self.dump_game_params(path, GameParamsFormat::MinimalJson, false);
                                 }
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
                                     self.dump_game_params(path, GameParamsFormat::MinimalCbor, false);
                                 }
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                         });
 

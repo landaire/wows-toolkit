@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 
 use egui::Image;
 use egui::ImageSource;
+use egui::TextBuffer;
 use egui::TextEdit;
 use egui::ViewportBuilder;
 use egui::mutex::Mutex;
@@ -29,12 +30,12 @@ impl PlaintextFileViewer {
             let mut file_info = info.lock();
             egui::CentralPanel::default().show(ctx, |ui| match &mut *file_info {
                 FileType::PlainTextFile { ext, contents } => {
-                    let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                    let mut layouter = |ui: &egui::Ui, text_buffer: &dyn TextBuffer, wrap_width: f32| {
                         let style = ui.style().as_ref();
                         let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), style);
-                        let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), style, &theme, string, &ext[1..]);
+                        let mut layout_job = egui_extras::syntax_highlighting::highlight(ui.ctx(), style, &theme, text_buffer.as_str(), &ext[1..]);
                         layout_job.wrap.max_width = wrap_width;
-                        ui.fonts(|f| f.layout_job(layout_job))
+                        ui.fonts_mut(|f| f.layout_job(layout_job))
                     };
                     let text_editor = TextEdit::multiline(contents).code_editor().desired_width(f32::INFINITY).layouter(&mut layouter);
                     egui::ScrollArea::vertical().show(ui, |ui| {

@@ -13,9 +13,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -32,6 +30,7 @@ use egui::ScrollArea;
 use egui::Slider;
 use egui::TextStyle;
 use egui::Ui;
+use egui::UiKind;
 use egui::WidgetText;
 use egui::mutex::Mutex;
 use egui_commonmark::CommonMarkCache;
@@ -74,9 +73,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
@@ -86,9 +83,7 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{
-    self,
-};
+use crate::ui::replay_parser::{self};
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
@@ -1261,7 +1256,7 @@ impl WowsToolkitApp {
             if let Some(text) = text {
                 let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("file_drop_target")));
 
-                let screen_rect = ctx.screen_rect();
+                let screen_rect = ctx.content_rect();
                 painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
                 painter.text(screen_rect.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(&ctx.style()), Color32::WHITE);
             }
@@ -1360,18 +1355,18 @@ impl WowsToolkitApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 // NOTE: no File->Quit on web pages!
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
                         if ui.button("Check for Updates").clicked() {
                             self.checked_for_updates = false;
-                            ui.close_menu();
+                            ui.close_kind(UiKind::Menu);
                         }
                         if ui.button("About").clicked() {
                             self.show_about_window = true;
-                            ui.close_menu();
+                            ui.close_kind(UiKind::Menu);
                         }
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

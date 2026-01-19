@@ -37,6 +37,7 @@ use egui::Sense;
 use egui::Separator;
 use egui::Style;
 use egui::TextFormat;
+use egui::UiKind;
 use egui::Vec2;
 use egui::text::LayoutJob;
 
@@ -1645,7 +1646,7 @@ impl UiReport {
                                     let url = build_ship_config_url(&report.vehicle, &metadata_provider);
 
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
-                                    ui.close_menu();
+                                    ui.close_kind(UiKind::Menu);
                                 }
 
                                 if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
@@ -1661,7 +1662,7 @@ impl UiReport {
                                         })
                                     });
 
-                                    ui.close_menu();
+                                    ui.close_kind(UiKind::Menu);
                                 }
 
                                 if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
@@ -1676,7 +1677,7 @@ impl UiReport {
                                         })
                                     });
 
-                                    ui.close_menu();
+                                    ui.close_kind(UiKind::Menu);
                                 }
 
                                 ui.separator();
@@ -1687,7 +1688,7 @@ impl UiReport {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
 
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
 
                             if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
@@ -1695,7 +1696,7 @@ impl UiReport {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
 
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
 
                             if self.debug_mode {
@@ -1717,7 +1718,7 @@ impl UiReport {
                                             .expect("failed to send file viewer task")
                                     }
 
-                                    ui.close_menu();
+                                    ui.close_kind(UiKind::Menu);
                                 }
                             }
                         });
@@ -2450,7 +2451,7 @@ impl ToolkitTabViewer<'_> {
                             }
                         }
 
-                        ui.close_menu();
+                        ui.close_kind(UiKind::Menu);
                     }
 
                     if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
@@ -2471,7 +2472,7 @@ impl ToolkitTabViewer<'_> {
 
                         ui.ctx().copy_text(game_chat);
 
-                        ui.close_menu();
+                        ui.close_kind(UiKind::Menu);
                     }
                 });
                 ui.menu_button("Export Results", |ui| {
@@ -2598,11 +2599,11 @@ impl ToolkitTabViewer<'_> {
                         label.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.ctx().copy_text(path.to_string_lossy().into_owned());
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                             if ui.button("Show in File Explorer").clicked() {
                                 util::open_file_explorer(&path);
-                                ui.close_menu();
+                                ui.close_kind(UiKind::Menu);
                             }
                         });
 
