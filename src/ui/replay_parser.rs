@@ -35,6 +35,7 @@ use egui::PopupCloseBehavior;
 use egui::RichText;
 use egui::Sense;
 use egui::Separator;
+use egui::Style;
 use egui::TextFormat;
 use egui::Vec2;
 use egui::text::LayoutJob;
@@ -70,17 +71,13 @@ use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
 use crate::error::ToolkitError;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
+use crate::plaintext_viewer::{self};
 use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
-use crate::util::{
-    self,
-};
+use crate::util::{self};
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 
@@ -352,6 +349,18 @@ impl TranslatedCrewSkill {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct DamageInteractions {
+    damage_dealt: u64,
+    damage_dealt_text: String,
+    damage_dealt_percentage: f64,
+    damage_dealt_percentage_text: String,
+    damage_received: u64,
+    damage_received_text: String,
+    damage_received_percentage: f64,
+    damage_received_percentage_text: String,
+}
+
 pub struct VehicleReport {
     vehicle: Arc<VehicleEntity>,
     color: Color32,
@@ -390,6 +399,7 @@ pub struct VehicleReport {
     received_damage_text: Option<RichText>,
     received_damage_hover_text: Option<RichText>,
     received_damage_report: Option<Damage>,
+    damage_interactions: Option<HashMap<i64, DamageInteractions>>,
     fires: Option<u64>,
     floods: Option<u64>,
     citadels: Option<u64>,
@@ -1026,9 +1036,10 @@ impl UiReport {
 
             let skill_info = SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
 
-            let (fires, floods, cits, crits) = constants_inner
+            let (damage_interactions, fires, floods, cits, crits) = constants_inner
                 .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/interactions")
                 .and_then(|interactions_idx| {
+                    let mut damage_interactions = HashMap::new();
                     let mut fires = 0;
                     let mut floods = 0;
                     let mut cits = 0;
@@ -1037,86 +1048,58 @@ impl UiReport {
                     let interactions_idx = interactions_idx.as_u64()? as usize;
                     let dict = results_info?[interactions_idx].as_object()?;
                     for (victim, victim_interactions) in dict {
-                        let _ = victim;
-                        // TODO: for later when building a graph of who did damage to who
+                        // Not sure if this can ever fail, but we can report wrong info to a "nobody" player
+                        // or something
+                        let victim_id: i64 = victim.parse().unwrap_or_default();
+                        let vehicle_interaction_details_idx = constants_inner.pointer("/CLIENT_VEH_INTERACTION_DETAILS")?.as_array();
 
-                        // let victim_id: i64 = victim.parse().expect("failed to convert victim ID to name");
-                        // let victim_vehicle = players
-                        //     .iter()
-                        //     .find(|vehicle| if let Some(player) = vehicle.player() { player.db_id() == victim_id } else { false });
-
-                        // let victim_interactions = victim_interactions.as_array()?;
-
-                        // if let Some(victim_vehicle) = victim_vehicle {
-                        //     if vehicle.player().unwrap().name() != "Paulo_Rogerio1" {
-                        //         continue;
-                        //     }
-                        //     println!(
-                        //         "Damage done from {} to {}:",
-                        //         vehicle.player().expect("no player").name(),
-                        //         victim_vehicle.player().unwrap().name(),
-                        //     );
-
-                        //     DAMAGE_DESCRIPTIONS.iter().for_each(|(key, description)| {
-                        //         if let Some(idx) = constants
-                        //             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")
-                        //             .and_then(|arr| arr.as_array())
-                        //             .and_then(|arr| arr.iter().position(|name| name.as_str().map(|name| name == *key).unwrap_or_default()))
-                        //         {
-                        //             if let Some(num) = victim_interactions[idx as usize].as_number().and_then(|number| number.as_u64()) {
-                        //                 if num > 0 {
-                        //                     let num_str = separate_number(num, Some(locale));
-                        //                     println!("{}: {}", description, num_str)
-                        //                 }
-                        //             }
-                        //         }
-
-                        //         let hits_key = key.replace("damage", "hits");
-                        //         if let Some(idx) = constants
-                        //             .pointer("/CLIENT_VEH_INTERACTION_DETAILS")
-                        //             .and_then(|arr| arr.as_array())
-                        //             .and_then(|arr| arr.iter().position(|name| name.as_str().map(|name| name == &hits_key).unwrap_or_default()))
-                        //         {
-                        //             if let Some(num) = victim_interactions[idx as usize].as_number().and_then(|number| number.as_u64()) {
-                        //                 if num > 0 {
-                        //                     let num_str = separate_number(num, Some(locale));
-                        //                     println!("Hits {}: {}", description, num_str)
-                        //                 }
-                        //             }
-                        //         }
-                        //     });
-                        // }
-
-                        fires += constants_inner
-                            .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
-                            .as_array()
+                        fires += vehicle_interaction_details_idx
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        floods += constants_inner
-                            .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
-                            .as_array()
+                        floods += vehicle_interaction_details_idx
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        cits += constants_inner
-                            .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
-                            .as_array()
+                        cits += vehicle_interaction_details_idx
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "citadels").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
-                        crits += constants_inner
-                            .pointer("/CLIENT_VEH_INTERACTION_DETAILS")?
-                            .as_array()
+                        crits += vehicle_interaction_details_idx
                             .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default()))
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
+
+                        // Add up all of the damage dealt
+                        let mut damage_interaction = DamageInteractions::default();
+
+                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                        let all_damage: u64 = DAMAGE_DESCRIPTIONS.iter().fold(0, |accum, (key, _description)| {
+                            let damage = vehicle_interaction_details_idx
+                                .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == *key).unwrap_or_default()))
+                                .and_then(|idx| victim_interactions[idx].as_u64())
+                                .unwrap_or_default();
+
+                            damage + accum
+                        });
+
+                        damage_interaction.damage_dealt = all_damage;
+                        if damage_interaction.damage_dealt > 0 {
+                            damage_interaction.damage_dealt_text = separate_number(damage_interaction.damage_dealt, Some(locale));
+
+                            if let Some(total_damage) = damage {
+                                damage_interaction.damage_dealt_percentage = (all_damage as f64 / total_damage as f64) * 100.0;
+                                damage_interaction.damage_dealt_percentage_text = format!("{:.0}%", damage_interaction.damage_dealt_percentage);
+                            }
+                        }
+
+                        damage_interactions.insert(victim_id, damage_interaction);
                     }
 
-                    Some((Some(fires), Some(floods), Some(cits), Some(crits)))
+                    Some((Some(damage_interactions), Some(fires), Some(floods), Some(cits), Some(crits)))
                 })
                 .unwrap_or_default();
 
@@ -1181,12 +1164,76 @@ impl UiReport {
                 hits_report,
                 hits_text,
                 hits_hover_text,
+                damage_interactions,
             };
 
             Some(report)
         });
 
-        let vehicle_reports = player_reports.collect();
+        let mut vehicle_reports: Vec<VehicleReport> = player_reports.collect();
+        let mut all_received_damages = HashMap::new();
+
+        // For each player report, we need to update the damage interactions so they
+        // have the correct received damage
+        for report in &vehicle_reports {
+            let mut received_damages = HashMap::new();
+            let Some(damage_interactions) = report.damage_interactions.as_ref() else {
+                continue;
+            };
+
+            let Some(this_player) = report.vehicle().player() else {
+                continue;
+            };
+
+            for (player_id, _interaction) in damage_interactions {
+                let Some(other_player) = vehicle_reports.iter().find(|report| {
+                    let Some(player_info) = report.vehicle().player() else {
+                        return false;
+                    };
+
+                    player_info.db_id() == *player_id
+                }) else {
+                    continue;
+                };
+
+                if let Some(interactions) = other_player.damage_interactions.as_ref() {
+                    let Some(interaction_with_this_player) = interactions.get(&this_player.db_id()) else {
+                        continue;
+                    };
+
+                    received_damages.insert(*player_id, (interaction_with_this_player.damage_dealt, interaction_with_this_player.damage_dealt_text.clone()));
+                }
+            }
+
+            all_received_damages.insert(this_player.db_id(), received_damages);
+        }
+
+        for report in &mut vehicle_reports {
+            let total_received_damage = report.received_damage().unwrap_or_default();
+            let Some(this_player) = report.vehicle().player() else {
+                continue;
+            };
+
+            let Some(this_player_received_damages) = all_received_damages.remove(&this_player.db_id()) else {
+                continue;
+            };
+
+            let Some(interaction_report) = report.damage_interactions.as_mut() else {
+                continue;
+            };
+
+            for (interacted_player_id, (received_damage, received_damage_text)) in this_player_received_damages {
+                let interacted_player = interaction_report.entry(interacted_player_id).or_default();
+                interacted_player.damage_received = received_damage;
+                interacted_player.damage_received_text = received_damage_text;
+
+                // This should never happen I think?
+                if total_received_damage > 0 {
+                    interacted_player.damage_received_percentage = (received_damage as f64 / total_received_damage as f64) * 100.0;
+                    interacted_player.damage_received_percentage_text = format!("{:.0}%", interacted_player.damage_received_percentage);
+                }
+            }
+        }
 
         drop(constants_inner);
         drop(wows_data_inner);
@@ -1314,6 +1361,43 @@ impl UiReport {
 
         // Finally, sort the remaining columns by their order in the enum.
         self.columns.sort_unstable_by_key(|column| *column as u8);
+    }
+
+    fn received_damage_details(&mut self, report: &VehicleReport, ui: &mut egui::Ui) {
+        let mut first = true;
+        let style = Style::default();
+        let mut layout_job = LayoutJob::default();
+
+        if let Some(interactions) = report.damage_interactions.as_ref() {
+            for interaction in interactions {
+                if interaction.1.damage_received == 0 {
+                    continue;
+                }
+
+                if !first {
+                    layout_job.append(&format!("\n"), 0.0, Default::default());
+                } else {
+                    first = false;
+                }
+
+                let interaction_player = self
+                    .vehicle_reports()
+                    .iter()
+                    .find(|report| {
+                        let player = report.vehicle().player().unwrap();
+                        player.db_id() == *interaction.0
+                    })
+                    .unwrap();
+
+                if let Some(clan_text) = interaction_player.clan_text() {
+                    clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+                }
+
+                interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+
+                layout_job.append(&format!(": {} ({})", interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text), 0.0, Default::default());
+            }
+        };
     }
 
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
@@ -1457,6 +1541,7 @@ impl UiReport {
                                 if let Some(hover_text) = report.received_damage_hover_text.clone() {
                                     response.on_hover_text(hover_text);
                                 }
+                                // self.received_damage_details(report, ui);
                             }
                         } else {
                             ui.label("-");
