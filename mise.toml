@@ -1,0 +1,3 @@
+[tasks.fmt]
+description = "Runs rust-nightly fmt"
+run = "cargo +nightly fmt"
