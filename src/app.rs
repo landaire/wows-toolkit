@@ -13,7 +13,9 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -73,7 +75,9 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
@@ -83,7 +87,9 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{self};
+use crate::ui::replay_parser::{
+    self,
+};
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
