@@ -9,6 +9,7 @@ use std::sync::mpsc::Sender;
 
 use rootcause::Report;
 
+use crate::app::ReplayGrouping;
 use crate::app::ReplaySettings;
 use crate::app::TimedMessage;
 use crate::icons;
@@ -696,6 +697,7 @@ pub struct UiReport {
     background_task_sender: Option<Sender<BackgroundTask>>,
     selected_row: Option<(u64, bool)>,
     debug_mode: bool,
+    battle_result: Option<BattleResult>,
 }
 
 impl UiReport {
@@ -720,6 +722,26 @@ impl UiReport {
         let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
 
         let self_player = players.iter().find(|vehicle| vehicle.player().map(|player| player.relation() == 0).unwrap_or(false)).cloned();
+
+        let battle_result = constants_inner.pointer("/COMMON_RESULTS").and_then(|common_results_names| {
+            let winner_team_id_idx =
+                common_results_names.as_array().and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "winner_team_id").unwrap_or_default()))?;
+            let battle_results: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
+
+            let self_team_id = self_player.as_ref().and_then(|vehicle| vehicle.player().map(|player| player.team_id()))?;
+
+            let common_list = battle_results.pointer("/commonList")?.as_array()?;
+            let winning_team_id = common_list.get(winner_team_id_idx)?.as_i64()?;
+
+            if winning_team_id == self_team_id as i64 {
+                Some(BattleResult::Win(self_team_id as i8))
+            } else if winning_team_id >= 0 {
+                Some(BattleResult::Loss(winning_team_id as i8))
+            } else {
+                Some(BattleResult::Draw)
+            }
+        });
+
         let locale = "en-US";
 
         let player_reports = players.iter().filter_map(|vehicle| {
@@ -1270,6 +1292,7 @@ impl UiReport {
             self_player,
             replay_sort,
             wows_data,
+            battle_result,
             is_row_expanded: Default::default(),
             sorted: false,
             columns: vec![
@@ -1977,6 +2000,10 @@ impl UiReport {
     pub fn vehicle_reports(&self) -> &[VehicleReport] {
         &self.vehicle_reports
     }
+
+    pub fn battle_result(&self) -> Option<BattleResult> {
+        self.battle_result
+    }
 }
 
 impl egui_table::TableDelegate for UiReport {
@@ -2297,6 +2324,11 @@ impl Replay {
         &self.replay_file.meta.dateTime
     }
 
+    /// Get the battle result, preferring battle_report if available, otherwise cached result.
+    pub fn battle_report(&self) -> Option<&BattleReport> {
+        self.battle_report.as_ref()
+    }
+
     pub fn label(&self, metadata_provider: &GameMetadataProvider) -> String {
         [
             self.vehicle_name(metadata_provider).as_str(),
@@ -2348,6 +2380,7 @@ impl Replay {
 
         Ok(report)
     }
+
     pub fn build_ui_report(
         &mut self,
         game_constants: Arc<RwLock<serde_json::Value>>,
@@ -2359,6 +2392,10 @@ impl Replay {
         if let Some(battle_report) = &self.battle_report {
             self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, game_constants, wows_data, replay_sort, background_task_sender, is_debug_mode))
         }
+    }
+
+    pub fn battle_result(&self) -> Option<BattleResult> {
+        self.battle_report().and_then(|report| report.battle_result().cloned()).or_else(|| self.ui_report.as_ref().and_then(|report| report.battle_result()))
     }
 }
 
@@ -2462,7 +2499,7 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
-                if let Some(battle_result) = report.battle_result() {
+                if let Some(battle_result) = replay_file.battle_result() {
                     let text = match battle_result {
                         BattleResult::Win(_) => RichText::new(format!("{} Victory", icons::TROPHY)).color(Color32::LIGHT_GREEN),
                         BattleResult::Loss(_) => RichText::new(format!("{} Defeat", icons::SMILEY_SAD)).color(Color32::LIGHT_RED),
@@ -2661,6 +2698,18 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing(&mut self, ui: &mut egui::Ui) {
+        let grouping = self.tab_state.settings.replay_settings.grouping;
+
+        match grouping {
+            ReplayGrouping::None => self.build_file_listing_ungrouped(ui),
+            ReplayGrouping::Date => self.build_file_listing_grouped_by_date(ui),
+            ReplayGrouping::Ship => self.build_file_listing_grouped_by_ship(ui),
+        }
+    }
+
+    fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui) {
+        let mut replay_to_load: Option<Arc<RwLock<Replay>>> = None;
+
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid").num_columns(1).striped(true).show(ui, |ui| {
                 if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
@@ -2668,16 +2717,27 @@ impl ToolkitTabViewer<'_> {
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let metadata_provider = self.metadata_provider().unwrap();
                     for (path, replay) in files {
-                        let label = { replay.read().label(&metadata_provider) };
-                        let mut label_text = egui::RichText::new(label.as_str());
-                        if let Some(current_replay) = self.tab_state.current_replay.as_ref()
-                            && Arc::ptr_eq(current_replay, &replay)
-                        {
-                            label_text = label_text.background_color(Color32::DARK_GRAY).color(Color32::WHITE);
-                        }
+                        let replay_guard = replay.read();
+                        let label = replay_guard.label(&metadata_provider);
+                        let battle_result = replay_guard.battle_result();
+                        drop(replay_guard);
 
-                        let label = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
-                        label.context_menu(|ui| {
+                        let is_selected = self.tab_state.current_replay.as_ref().map(|current| Arc::ptr_eq(current, &replay)).unwrap_or(false);
+
+                        // Apply color based on battle result (white for selected to be readable on dark background)
+                        let label_text = if is_selected {
+                            egui::RichText::new(label.as_str()).color(Color32::WHITE).background_color(Color32::DARK_GRAY)
+                        } else {
+                            match battle_result {
+                                Some(BattleResult::Win(_)) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_GREEN),
+                                Some(BattleResult::Loss(_)) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_RED),
+                                Some(BattleResult::Draw) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_YELLOW),
+                                None => egui::RichText::new(label.as_str()),
+                            }
+                        };
+
+                        let label_response = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
+                        label_response.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.ctx().copy_text(path.to_string_lossy().into_owned());
                                 ui.close_kind(UiKind::Menu);
@@ -2688,26 +2748,236 @@ impl ToolkitTabViewer<'_> {
                             }
                         });
 
-                        if label.double_clicked()
-                            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
-                        {
-                            update_background_task!(
-                                self.tab_state.background_tasks,
-                                load_replay(
-                                    Arc::clone(&self.tab_state.game_constants),
-                                    Arc::clone(wows_data),
-                                    replay.clone(),
-                                    Arc::clone(&self.tab_state.replay_sort),
-                                    self.tab_state.background_task_sender.clone(),
-                                    self.tab_state.settings.debug_mode
-                                )
-                            );
+                        if label_response.double_clicked() {
+                            replay_to_load = Some(replay.clone());
                         }
                         ui.end_row();
                     }
                 }
             });
         });
+
+        // Load replay outside of the closure to avoid borrow issues
+        if let Some(replay) = replay_to_load {
+            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    load_replay(
+                        Arc::clone(&self.tab_state.game_constants),
+                        Arc::clone(wows_data),
+                        replay,
+                        Arc::clone(&self.tab_state.replay_sort),
+                        self.tab_state.background_task_sender.clone(),
+                        self.tab_state.settings.debug_mode
+                    )
+                );
+            }
+        }
+    }
+
+    fn build_file_listing_grouped_by_date(&mut self, ui: &mut egui::Ui) {
+        if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
+            // Sort by filename (date) descending
+            files.sort_by(|a, b| b.0.cmp(&a.0));
+
+            let metadata_provider = self.metadata_provider().unwrap();
+
+            // Group by date (extract date part from game_time which is "DD.MM.YYYY HH:MM:SS")
+            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> = Vec::new();
+            for (path, replay) in files {
+                let game_time = replay.read().game_time().to_string();
+                // Extract just the date part (DD.MM.YYYY)
+                let date = game_time.split(' ').next().unwrap_or(&game_time).to_string();
+
+                if let Some((last_date, last_group)) = groups.last_mut() {
+                    if *last_date == date {
+                        last_group.push((path, replay));
+                        continue;
+                    }
+                }
+                groups.push((date, vec![(path, replay)]));
+            }
+
+            // Build a map from Id to replay for activation handling
+            let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
+
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"));
+            let (_response, actions) = tree.show(ui, |builder| {
+                for (date, replays) in &groups {
+                    // Calculate win/loss stats for this group
+                    let mut wins = 0;
+                    let mut losses = 0;
+                    for (_, replay) in replays {
+                        match replay.read().battle_result() {
+                            Some(BattleResult::Win(_)) => wins += 1,
+                            Some(BattleResult::Loss(_)) => losses += 1,
+                            _ => {}
+                        }
+                    }
+                    let total_with_result = wins + losses;
+                    let win_rate = if total_with_result > 0 {
+                        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total_with_result as f64) * 100.0)
+                    } else {
+                        String::new()
+                    };
+
+                    let is_open = builder.dir(egui::Id::new(("date_group", date)), format!("{} ({}){}", date, replays.len(), win_rate));
+                    if is_open {
+                        for (path, replay) in replays {
+                            let id = egui::Id::new(path);
+                            id_to_replay.insert(id, replay.clone());
+
+                            let replay_guard = replay.read();
+                            let ship_name = replay_guard.vehicle_name(&metadata_provider);
+                            let map_name = replay_guard.map_name(&metadata_provider);
+                            let game_time = replay_guard.game_time().to_string();
+                            let time_part = game_time.split(' ').nth(1).unwrap_or(&game_time);
+                            let battle_result = replay_guard.battle_result();
+                            drop(replay_guard);
+
+                            let label = format!("{} - {} ({})", ship_name, map_name, time_part);
+                            let label_text = match battle_result {
+                                Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
+                                Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
+                                Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
+                                None => RichText::new(label),
+                            };
+
+                            builder.leaf(id, label_text);
+                        }
+                    }
+                    builder.close_dir();
+                }
+            });
+
+            // Handle activation (double-click/enter) from tree
+            for action in actions {
+                if let egui_ltreeview::Action::Activate(activate) = action {
+                    for id in activate.selected {
+                        if let Some(replay) = id_to_replay.get(&id) {
+                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                update_background_task!(
+                                    self.tab_state.background_tasks,
+                                    load_replay(
+                                        Arc::clone(&self.tab_state.game_constants),
+                                        Arc::clone(wows_data),
+                                        replay.clone(),
+                                        Arc::clone(&self.tab_state.replay_sort),
+                                        self.tab_state.background_task_sender.clone(),
+                                        self.tab_state.settings.debug_mode
+                                    )
+                                );
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn build_file_listing_grouped_by_ship(&mut self, ui: &mut egui::Ui) {
+        if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
+            // Sort by filename (date) descending first
+            files.sort_by(|a, b| b.0.cmp(&a.0));
+
+            let metadata_provider = self.metadata_provider().unwrap();
+
+            // Group by ship name
+            let mut ship_groups: HashMap<String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>> = HashMap::new();
+            let mut ship_most_recent: HashMap<String, std::path::PathBuf> = HashMap::new();
+
+            for (path, replay) in files {
+                let ship_name = replay.read().vehicle_name(&metadata_provider);
+
+                ship_groups.entry(ship_name.clone()).or_default().push((path.clone(), replay));
+
+                // Track most recent replay path for each ship (first one since sorted desc)
+                ship_most_recent.entry(ship_name).or_insert(path);
+            }
+
+            // Sort groups by most recently played (using the path which contains the date)
+            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> = ship_groups.into_iter().collect();
+            groups.sort_by(|a, b| {
+                let a_recent = ship_most_recent.get(&a.0).unwrap();
+                let b_recent = ship_most_recent.get(&b.0).unwrap();
+                b_recent.cmp(a_recent)
+            });
+
+            // Build a map from Id to replay for activation handling
+            let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
+
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"));
+            let (_response, actions) = tree.show(ui, |builder| {
+                for (ship_name, replays) in &groups {
+                    // Calculate win/loss stats for this ship
+                    let mut wins = 0;
+                    let mut losses = 0;
+                    for (_, replay) in replays {
+                        match replay.read().battle_result() {
+                            Some(BattleResult::Win(_)) => wins += 1,
+                            Some(BattleResult::Loss(_)) => losses += 1,
+                            _ => {}
+                        }
+                    }
+                    let total_with_result = wins + losses;
+                    let win_rate = if total_with_result > 0 {
+                        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total_with_result as f64) * 100.0)
+                    } else {
+                        String::new()
+                    };
+
+                    let is_open = builder.dir(egui::Id::new(("ship_group", ship_name)), format!("{} ({}){}", ship_name, replays.len(), win_rate));
+                    if is_open {
+                        for (path, replay) in replays {
+                            let id = egui::Id::new(path);
+                            id_to_replay.insert(id, replay.clone());
+
+                            let replay_guard = replay.read();
+                            let map_name = replay_guard.map_name(&metadata_provider);
+                            let game_time = replay_guard.game_time().to_string();
+                            let battle_result = replay_guard.battle_result();
+                            drop(replay_guard);
+
+                            let label = format!("{} - {}", map_name, game_time);
+                            let label_text = match battle_result {
+                                Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
+                                Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
+                                Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
+                                None => RichText::new(label),
+                            };
+
+                            builder.leaf(id, label_text);
+                        }
+                    }
+                    builder.close_dir();
+                }
+            });
+
+            // Handle activation (double-click/enter) from tree
+            for action in actions {
+                if let egui_ltreeview::Action::Activate(activate) = action {
+                    for id in activate.selected {
+                        if let Some(replay) = id_to_replay.get(&id) {
+                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                update_background_task!(
+                                    self.tab_state.background_tasks,
+                                    load_replay(
+                                        Arc::clone(&self.tab_state.game_constants),
+                                        Arc::clone(wows_data),
+                                        replay.clone(),
+                                        Arc::clone(&self.tab_state.replay_sort),
+                                        self.tab_state.background_task_sender.clone(),
+                                        self.tab_state.settings.debug_mode
+                                    )
+                                );
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn build_replay_header(&mut self, ui: &mut egui::Ui) {
@@ -2733,6 +3003,13 @@ impl ToolkitTabViewer<'_> {
             }
 
             ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
+
+            ComboBox::from_id_salt("replay_grouping").selected_text(format!("Group: {}", self.tab_state.settings.replay_settings.grouping.label())).show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::Date, "Date");
+                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::Ship, "Ship");
+                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::None, "None");
+            });
+
             ComboBox::from_id_salt("column_filters").selected_text("Column Filters").close_behavior(PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");

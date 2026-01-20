@@ -315,6 +315,24 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReplayGrouping {
+    #[default]
+    Date,
+    Ship,
+    None,
+}
+
+impl ReplayGrouping {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ReplayGrouping::Date => "Date",
+            ReplayGrouping::Ship => "Ship",
+            ReplayGrouping::None => "None",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ReplaySettings {
     pub show_game_chat: bool,
@@ -340,6 +358,8 @@ pub struct ReplaySettings {
     pub auto_export_path: String,
     #[serde(default)]
     pub auto_export_format: ReplayExportFormat,
+    #[serde(default)]
+    pub grouping: ReplayGrouping,
 }
 
 impl Default for ReplaySettings {
@@ -358,6 +378,7 @@ impl Default for ReplaySettings {
             auto_export_data: false,
             auto_export_path: String::new(),
             auto_export_format: ReplayExportFormat::default(),
+            grouping: ReplayGrouping::default(),
         }
     }
 }
@@ -440,6 +461,7 @@ pub struct ReplayParserTabState {
 #[derive(Debug)]
 pub enum NotifyFileEvent {
     Added(PathBuf),
+    Modified(PathBuf),
     Removed(PathBuf),
     PreferencesChanged,
     TempArenaInfoCreated(PathBuf),
@@ -652,6 +674,16 @@ impl TabState {
                             }
                         }
                     }
+                    NotifyFileEvent::Modified(modified_file) => {
+                        // Invalidate cached data when file is modified
+                        if let Some(replay_files) = &self.replay_files {
+                            if let Some(replay) = replay_files.get(&modified_file) {
+                                let mut replay = replay.write();
+                                replay.battle_report = None;
+                                replay.ui_report = None;
+                            }
+                        }
+                    }
                     NotifyFileEvent::Removed(old_file) => {
                         if let Some(replay_files) = &mut self.replay_files {
                             replay_files.remove(&old_file);
@@ -747,6 +779,7 @@ impl TabState {
                                     tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
                                 }
                                 if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                    tx.send(NotifyFileEvent::Modified(path.clone())).expect("failed to send file modification event");
                                     let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
                                 }
                             }
