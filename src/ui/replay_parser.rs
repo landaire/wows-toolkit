@@ -2758,20 +2758,20 @@ impl ToolkitTabViewer<'_> {
         });
 
         // Load replay outside of the closure to avoid borrow issues
-        if let Some(replay) = replay_to_load {
-            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                update_background_task!(
-                    self.tab_state.background_tasks,
-                    load_replay(
-                        Arc::clone(&self.tab_state.game_constants),
-                        Arc::clone(wows_data),
-                        replay,
-                        Arc::clone(&self.tab_state.replay_sort),
-                        self.tab_state.background_task_sender.clone(),
-                        self.tab_state.settings.debug_mode
-                    )
-                );
-            }
+        if let Some(replay) = replay_to_load
+            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+        {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                load_replay(
+                    Arc::clone(&self.tab_state.game_constants),
+                    Arc::clone(wows_data),
+                    replay,
+                    Arc::clone(&self.tab_state.replay_sort),
+                    self.tab_state.background_task_sender.clone(),
+                    self.tab_state.settings.debug_mode
+                )
+            );
         }
     }
 
@@ -2789,11 +2789,11 @@ impl ToolkitTabViewer<'_> {
                 // Extract just the date part (DD.MM.YYYY)
                 let date = game_time.split(' ').next().unwrap_or(&game_time).to_string();
 
-                if let Some((last_date, last_group)) = groups.last_mut() {
-                    if *last_date == date {
-                        last_group.push((path, replay));
-                        continue;
-                    }
+                if let Some((last_date, last_group)) = groups.last_mut()
+                    && *last_date == date
+                {
+                    last_group.push((path, replay));
+                    continue;
                 }
                 groups.push((date, vec![(path, replay)]));
             }
