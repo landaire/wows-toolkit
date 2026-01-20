@@ -2798,8 +2798,18 @@ impl ToolkitTabViewer<'_> {
                 groups.push((date, vec![(path, replay)]));
             }
 
-            // Build a map from Id to replay for activation handling
+            // Build maps from Id to replay and path for activation and context menu handling
             let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
+            let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
+
+            // Pre-populate the maps before building the tree
+            for (_date, replays) in &groups {
+                for (path, replay) in replays {
+                    let id = egui::Id::new(path);
+                    id_to_replay.insert(id, replay.clone());
+                    id_to_path.insert(id, path.clone());
+                }
+            }
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"));
             let (_response, actions) = tree.show(ui, |builder| {
@@ -2823,11 +2833,11 @@ impl ToolkitTabViewer<'_> {
 
                     let is_open = builder.dir(egui::Id::new(("date_group", date)), format!("{} ({}){}", date, replays.len(), win_rate));
                     if is_open {
-                        for (path, replay) in replays {
+                        for (path, _replay) in replays {
                             let id = egui::Id::new(path);
-                            id_to_replay.insert(id, replay.clone());
+                            let path_clone = path.clone();
 
-                            let replay_guard = replay.read();
+                            let replay_guard = id_to_replay.get(&id).unwrap().read();
                             let ship_name = replay_guard.vehicle_name(&metadata_provider);
                             let map_name = replay_guard.map_name(&metadata_provider);
                             let game_time = replay_guard.game_time().to_string();
@@ -2843,7 +2853,17 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
-                            builder.leaf(id, label_text);
+                            let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                if ui.button("Copy Path").clicked() {
+                                    ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                    ui.close_kind(UiKind::Menu);
+                                }
+                                if ui.button("Show in File Explorer").clicked() {
+                                    util::open_file_explorer(&path_clone);
+                                    ui.close_kind(UiKind::Menu);
+                                }
+                            });
+                            builder.node(node);
                         }
                     }
                     builder.close_dir();
@@ -2904,8 +2924,18 @@ impl ToolkitTabViewer<'_> {
                 b_recent.cmp(a_recent)
             });
 
-            // Build a map from Id to replay for activation handling
+            // Build maps from Id to replay and path for activation and context menu handling
             let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
+            let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
+
+            // Pre-populate the maps before building the tree
+            for (_ship_name, replays) in &groups {
+                for (path, replay) in replays {
+                    let id = egui::Id::new(path);
+                    id_to_replay.insert(id, replay.clone());
+                    id_to_path.insert(id, path.clone());
+                }
+            }
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"));
             let (_response, actions) = tree.show(ui, |builder| {
@@ -2929,11 +2959,11 @@ impl ToolkitTabViewer<'_> {
 
                     let is_open = builder.dir(egui::Id::new(("ship_group", ship_name)), format!("{} ({}){}", ship_name, replays.len(), win_rate));
                     if is_open {
-                        for (path, replay) in replays {
+                        for (path, _replay) in replays {
                             let id = egui::Id::new(path);
-                            id_to_replay.insert(id, replay.clone());
+                            let path_clone = path.clone();
 
-                            let replay_guard = replay.read();
+                            let replay_guard = id_to_replay.get(&id).unwrap().read();
                             let map_name = replay_guard.map_name(&metadata_provider);
                             let game_time = replay_guard.game_time().to_string();
                             let battle_result = replay_guard.battle_result();
@@ -2947,7 +2977,17 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
-                            builder.leaf(id, label_text);
+                            let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                if ui.button("Copy Path").clicked() {
+                                    ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                    ui.close_kind(UiKind::Menu);
+                                }
+                                if ui.button("Show in File Explorer").clicked() {
+                                    util::open_file_explorer(&path_clone);
+                                    ui.close_kind(UiKind::Menu);
+                                }
+                            });
+                            builder.node(node);
                         }
                     }
                     builder.close_dir();
