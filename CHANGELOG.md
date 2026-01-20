@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.39] - 2026-01-20
+
+### 🚀 Features
+
+- Add damage breakdowns by player
+- Add damage dealt/received breakdowns to tooltip and expanded info
+- Add damage interactions to exported data
+
+### 🐛 Bug Fixes
+
+- Update embedded contants file
+
+### ⚙️ Miscellaneous Tasks
+
+- Update egui to v0.33.3
+
 ## [0.1.38] - 2025-10-05
 
 ### Core
