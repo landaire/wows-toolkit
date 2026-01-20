@@ -111,5 +111,5 @@ pub fn load_replay(
         let _ = tx.send(res);
     });
 
-    Some(BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingReplay })
+    Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
 }

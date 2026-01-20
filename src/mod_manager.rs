@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use anyhow::Context;
-use anyhow::anyhow;
 use http_body_util::BodyExt;
 use parking_lot::RwLock;
 use reqwest::Url;
@@ -47,15 +45,15 @@ pub fn load_mods_db() -> BackgroundTask {
 
         tx.send(result).expect("failed to send mod DB result");
     });
-    BackgroundTask { receiver: rx.into(), kind: ModTaskInfo::LoadingModDatabase.into() }
+    BackgroundTask { receiver: Some(rx), kind: ModTaskInfo::LoadingModDatabase.into() }
 }
 
-async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> anyhow::Result<Vec<u8>> {
+async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> Result<Vec<u8>, Report> {
     use http_body::Body;
 
     let Ok(url_parse) = Url::parse(mod_info.meta.repo_url()) else {
         eprintln!("failed to parse repo URL: {}", mod_info.meta.repo_url());
-        return Err(anyhow!("Failed to download mod tarball"));
+        return Err(report!("Failed to download mod tarball"));
     };
 
     let mut repo_parts = url_parse.path().split('/').filter(|s| !s.is_empty());

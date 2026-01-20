@@ -7,13 +7,10 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::Context;
 use gettext::Catalog;
 use image::EncodableLayout;
 use jiff::Timestamp;
@@ -22,6 +19,9 @@ use octocrab::models::repos::Asset;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use reqwest::Url;
+use rootcause::Report;
+
+use rootcause::prelude::ResultExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::runtime::Runtime;
@@ -31,9 +31,7 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{
-    self,
-};
+use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
@@ -53,9 +51,7 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{
-    self,
-};
+use crate::twitch::{self};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -69,7 +65,7 @@ pub struct DownloadProgress {
 }
 
 pub struct BackgroundTask {
-    pub receiver: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, ToolkitError>>>,
+    pub receiver: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, Report>>>,
     pub kind: BackgroundTaskKind,
 }
 
@@ -99,7 +95,7 @@ impl From<crate::mod_manager::ModTaskInfo> for BackgroundTaskKind {
 
 impl BackgroundTask {
     /// TODO: has a bug currently where if multiple tasks are running at the same time, the message looks a bit wonky
-    pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, ToolkitError>> {
+    pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, Report>> {
         if self.receiver.is_none() {
             return Some(Ok(BackgroundTaskCompletion::NoReceiver));
         }
@@ -187,7 +183,7 @@ impl BackgroundTask {
                 }
                 None
             }
-            Err(TryRecvError::Disconnected) => Some(Err(ToolkitError::BackgroundTaskCompleted)),
+            Err(TryRecvError::Disconnected) => Some(Err(ToolkitError::BackgroundTaskCompleted.into())),
         }
     }
 }
@@ -293,12 +289,12 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     Some(version_str.to_string())
 }
 
-pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, crate::error::ToolkitError> {
+pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, Report> {
     let mut idx_files = Vec::new();
     let bin_dir = wows_directory.join("bin");
     if !wows_directory.exists() || !bin_dir.exists() {
         debug!("WoWs or WoWs bin directory does not exist");
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
     }
 
     let mut full_version = None;
@@ -332,7 +328,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     if latest_build.is_none() {
-        for file in read_dir(wows_directory.join("bin"))? {
+        for file in read_dir(wows_directory.join("bin")).context("failed to read bin directory")? {
             if file.is_err() {
                 continue;
             }
@@ -353,12 +349,12 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     if latest_build.is_none() {
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
     }
 
     let game_patch = latest_build.unwrap();
     let build_dir = wows_directory.join("bin").join(format!("{game_patch}"));
-    for file in read_dir(build_dir.join("idx"))? {
+    for file in read_dir(build_dir.join("idx")).context("failed to read idx directory")? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
             let file_data = std::fs::read(file.path()).unwrap();
@@ -369,7 +365,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     let pkgs_path = wows_directory.join("res_packages");
     if !pkgs_path.exists() {
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()));
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
     }
 
     let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
@@ -436,8 +432,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, ToolkitError> {
-    let mut body = reqwest::get(file).await?;
+async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, Report> {
+    let mut body = reqwest::get(file).await.context("failed to get HTTP response for update file")?.error_for_status().context("HTTP error status for update file")?;
 
     let total = body.content_length().expect("body has no content-length");
     let mut downloaded = 0;
@@ -447,7 +443,7 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
     // application doesn't really use async
     let mut zip_data = Vec::new();
 
-    while let Some(chunk) = body.chunk().await? {
+    while let Some(chunk) = body.chunk().await.context("failed to get update body chunk")? {
         downloaded += chunk.len();
         let _ = tx.send(DownloadProgress { downloaded: downloaded as u64, total });
 
@@ -456,13 +452,12 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
 
     let cursor = Cursor::new(zip_data.as_slice());
 
-    let mut zip = ZipArchive::new(cursor)?;
+    let mut zip = ZipArchive::new(cursor).context("failed to create ZipArchive reader")?;
     for i in 0..zip.len() {
-        let mut file = zip.by_index(i)?;
+        let mut file = zip.by_index(i).context("failed to get zip inner file by index")?;
         if file.name().ends_with(".exe") {
-            let mut exe_data = Vec::with_capacity(file.size() as usize);
-            std::io::copy(&mut file, &mut exe_data)?;
-            std::fs::write(file_path, exe_data.as_slice())?;
+            let mut out_file = std::fs::File::create(file_path).context("failed to create update tmp file").attach_with(|| format!("{file_path:?}"))?;
+            std::io::copy(&mut file, &mut out_file).context("failed to decompress update file to disk")?;
             break;
         }
     }
@@ -483,7 +478,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
         let _ = tx.send(result);
     });
 
-    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::Updating { rx: progress_rx, last_progress: None } }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::Updating { rx: progress_rx, last_progress: None } }
 }
 
 async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) {
@@ -665,7 +660,7 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                             replay.battle_report = Some(report);
                             build_uploaded_successfully = true;
                         }
-                        Err(ToolkitError::ReplayVersionMismatch { game_version: _, replay_version: _ }) => {
+                        Err(e) if e.downcast_current_context::<ToolkitError>().map_or(false, |e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) => {
                             return Ok(()); // We don't want to keep trying to parse this
                         }
                         Err(e) => {
@@ -917,7 +912,7 @@ pub fn start_populating_player_inspector(
         let _ = tx.send(Ok(BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays));
     });
 
-    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays }
 }
 
 pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
@@ -949,10 +944,10 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result =
-            serde_json::from_slice(&constants).context("failed to deserialize constants file").map(BackgroundTaskCompletion::ConstantsLoaded).map_err(|err| err.into());
+        let result: Result<BackgroundTaskCompletion, Report> =
+            serde_json::from_slice(&constants).map(BackgroundTaskCompletion::ConstantsLoaded).map_err(|err| Report::from(ToolkitError::from(err)));
 
         tx.send(result).expect("tx closed");
     });
-    BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingConstants }
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingConstants }
 }

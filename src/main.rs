@@ -67,6 +67,12 @@ fn main() -> eframe::Result<()> {
             && name.contains(".exe")
             && old_path.exists()
         {
+            // Sleep for 1 second to give the parent process some time to exit.
+            // This is racy but better than just failing.
+
+            use std::time::Duration;
+            std::thread::sleep(Duration::from_secs(1));
+
             let _ = std::fs::remove_file(old_path);
 
             // Rename the update to the old path. This is useful

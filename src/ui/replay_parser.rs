@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
+use rootcause::Report;
+
 use crate::app::ReplaySettings;
 use crate::app::TimedMessage;
 use crate::icons;
@@ -2320,11 +2322,11 @@ impl Replay {
         .replace(['.', ':', ' '], "-")
     }
 
-    pub fn parse(&self, expected_build: &str) -> Result<BattleReport, ToolkitError> {
+    pub fn parse(&self, expected_build: &str) -> Result<BattleReport, Report> {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
         if version_parts[3] != expected_build {
-            return Err(ToolkitError::ReplayVersionMismatch { game_version: expected_build.to_string(), replay_version: version_parts[3].to_string() });
+            return Err(ToolkitError::ReplayVersionMismatch { game_version: expected_build.to_string(), replay_version: version_parts[3].to_string() }.into());
         }
 
         // Parse packets

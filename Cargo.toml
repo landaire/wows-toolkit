@@ -24,9 +24,9 @@ egui_table = "0.6.0"
 egui_commonmark = "0.22"
 
 tracing = "0.1"
-wows_replays = { version = "0.7.0", features = ["arc"] }
+wows_replays = { version = "0.8.0", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.9", default-features = false, features = [
+wowsunpack = { version = "0.10", default-features = false, features = [
     "arc",
     "cbor",
     "json",
@@ -38,7 +38,7 @@ glob = "0.3.1"
 itertools = "0.14.0"
 gettext = "0.4"
 language-tags = "0.3"
-pickled = { version = "2.0.0-alpha2", features = ["variantly"] }
+pickled = { version = "2.0.0-alpha3", features = ["variantly"] }
 flate2 = "1.0.28"
 bincode = { version = "2.0.1", features = ["serde"] }
 thousands = "0.2.0"
@@ -59,7 +59,6 @@ twitch_api = { version = "0.7.0-rc.8", features = [
     "reqwest",
 ] }
 clipboard = "0.5.0"
-anyhow = "1.0.93"
 levenshtein = "1.0.5"
 escaper = "0.1.1"
 http-body = "1.0.1"
@@ -69,6 +68,7 @@ tar = { version = "0.4.43", optional = true }
 scopeguard = { version = "1.2.0", optional = true }
 csv = "1.3.1"
 jiff = { version = "0.2.4", features = ["serde"] }
+rootcause = "0.11.1"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1.20"

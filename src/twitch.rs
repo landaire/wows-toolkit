@@ -8,9 +8,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use twitch_api::HelixClient;
 use twitch_api::helix::chat::get_chatters;
-use twitch_api::helix::{
-    self,
-};
+use twitch_api::helix::{self};
 use twitch_api::twitch_oauth2::TwitchToken;
 use twitch_api::twitch_oauth2::UserToken;
 use twitch_api::types::UserId;
@@ -136,7 +134,11 @@ impl TwitchState {
     }
 }
 
-pub async fn fetch_chatters(client: &HelixClient<'static, reqwest::Client>, user_id: &UserId, token: &UserToken) -> anyhow::Result<Vec<String>> {
+pub async fn fetch_chatters(
+    client: &HelixClient<'static, reqwest::Client>,
+    user_id: &UserId,
+    token: &UserToken,
+) -> Result<Vec<String>, twitch_api::helix::ClientRequestError<reqwest::Error>> {
     let request = get_chatters::GetChattersRequest::new(user_id, &token.user_id);
     let response: Vec<helix::chat::Chatter> = client.req_get(request, token).await?.data;
     Ok(response.iter().map(|chatter| chatter.user_login.to_string()).collect())

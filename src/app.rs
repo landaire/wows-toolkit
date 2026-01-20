@@ -2,7 +2,6 @@ use core::f32;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
-use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -13,9 +12,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -53,6 +50,9 @@ use notify::event::RenameMode;
 use octocrab::models::repos::Release;
 use octocrab::params::repos::Reference;
 use parking_lot::RwLock;
+use rootcause::Report;
+use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
+use rootcause::prelude::ResultExt;
 use tracing::debug;
 use tracing::trace;
 
@@ -75,9 +75,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
@@ -87,9 +85,7 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{
-    self,
-};
+use crate::ui::replay_parser::{self};
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
@@ -789,7 +785,7 @@ impl TabState {
             let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
         });
 
-        BackgroundTask { receiver: rx.into(), kind: BackgroundTaskKind::LoadingData }
+        BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
     }
 }
 
@@ -814,7 +810,7 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     show_error_window: bool,
     #[serde(skip)]
-    error_to_show: Option<Box<dyn Error>>,
+    error_to_show: Option<String>,
 
     pub(crate) tab_state: TabState,
     #[serde(skip)]
@@ -1060,13 +1056,22 @@ impl WowsToolkitApp {
                                     let current_process = env::args().next().expect("current process has no path?");
                                     let current_process_new_path = format!("{current_process}.old");
                                     // Rename this process
-                                    std::fs::rename(current_process.clone(), &current_process_new_path).expect("failed to rename current process");
-                                    // Rename the new exe
-                                    std::fs::rename(new_exe, &current_process).expect("failed to rename new process");
+                                    let rename_process = move || {
+                                        std::fs::rename(current_process.clone(), &current_process_new_path).context("failed to rename current process")?;
+                                        // Rename the new exe
+                                        std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
 
-                                    Command::new(current_process).arg(current_process_new_path).spawn().expect("failed to execute updated process");
+                                        Command::new(current_process).arg(current_process_new_path).spawn().context("failed to execute updated process")
+                                    };
 
-                                    std::process::exit(0);
+                                    match rename_process() {
+                                        Ok(_) => {
+                                            std::process::exit(0);
+                                        }
+                                        Err(e) => {
+                                            self.show_err_window(e.into());
+                                        }
+                                    }
                                 }
                                 BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
                                     // do nothing
@@ -1094,11 +1099,10 @@ impl WowsToolkitApp {
                                     }
                                 }
                             },
-                            Err(ToolkitError::BackgroundTaskCompleted) => {}
+                            Err(e) if e.downcast_current_context::<ToolkitError>().map_or(false, |e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
                             Err(e) => {
                                 eprintln!("Background task error: {e:?}");
-                                self.show_error_window = true;
-                                self.error_to_show = Some(Box::new(e));
+                                self.show_err_window(e);
                             }
                         }
                         true
@@ -1345,7 +1349,7 @@ impl WowsToolkitApp {
         if let Some(error) = self.error_to_show.as_ref() {
             if self.show_error_window {
                 egui::Window::new("Error").open(&mut self.show_error_window).show(ctx, |ui| {
-                    build_error_window(ui, error.as_ref());
+                    build_error_window(ui, error);
                 });
             } else {
                 self.error_to_show = None;
@@ -1538,6 +1542,12 @@ impl WowsToolkitApp {
         }
         panic_log_path
     }
+
+    fn show_err_window(&mut self, err: Report) {
+        self.show_error_window = true;
+        let formatted = err.format_with(&DefaultReportFormatter::ASCII);
+        self.error_to_show = Some(format!("{formatted}"));
+    }
 }
 
 impl eframe::App for WowsToolkitApp {
@@ -1571,9 +1581,9 @@ fn build_about_window(ui: &mut egui::Ui) {
     });
 }
 
-fn build_error_window(ui: &mut egui::Ui, error: &dyn Error) {
+fn build_error_window(ui: &mut egui::Ui, error: &str) {
     ui.vertical(|ui| {
         ui.label(format!("{} An error occurred:", icons::WARNING));
-        ui.label(error.to_string());
+        ui.label(error);
     });
 }
