@@ -72,14 +72,14 @@ use wowsunpack::game_params::types::Species;
 use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
 use crate::error::ToolkitError;
+use crate::plaintext_viewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{self};
+use crate::util;
 use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
-use crate::util::{self};
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 
