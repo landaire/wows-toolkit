@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.40] - 2026-01-20
+
+### 🚀 Features
+
+- Add replay grouping by ship/date + show win/loss
+
+### 🐛 Bug Fixes
+
+- Rework error propagation for better error info and app resiliance during updates
+
 ## [0.1.39] - 2026-01-20
 
 ### 🚀 Features
