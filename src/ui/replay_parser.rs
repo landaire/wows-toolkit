@@ -37,6 +37,7 @@ use egui::Sense;
 use egui::Separator;
 use egui::Style;
 use egui::TextFormat;
+use egui::Tooltip;
 use egui::UiKind;
 use egui::Vec2;
 use egui::text::LayoutJob;
@@ -1364,41 +1365,92 @@ impl UiReport {
         self.columns.sort_unstable_by_key(|column| *column as u8);
     }
 
-    fn received_damage_details(&mut self, report: &VehicleReport, ui: &mut egui::Ui) {
-        let mut first = true;
+    fn received_damage_details(&self, report: &VehicleReport, ui: &mut egui::Ui) {
         let style = Style::default();
-        let mut layout_job = LayoutJob::default();
 
-        if let Some(interactions) = report.damage_interactions.as_ref() {
-            for interaction in interactions {
-                if interaction.1.damage_received == 0 {
-                    continue;
+        ui.vertical(|ui| {
+            if let Some(received_hover_text) = report.received_damage_hover_text() {
+                ui.label(received_hover_text.clone());
+
+                if report.damage_interactions.is_some() {
+                    ui.separator();
                 }
-
-                if !first {
-                    layout_job.append(&format!("\n"), 0.0, Default::default());
-                } else {
-                    first = false;
-                }
-
-                let interaction_player = self
-                    .vehicle_reports()
-                    .iter()
-                    .find(|report| {
-                        let player = report.vehicle().player().unwrap();
-                        player.db_id() == *interaction.0
-                    })
-                    .unwrap();
-
-                if let Some(clan_text) = interaction_player.clan_text() {
-                    clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-                }
-
-                interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-
-                layout_job.append(&format!(": {} ({})", interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text), 0.0, Default::default());
             }
-        };
+
+            if let Some(interactions) = report.damage_interactions.as_ref() {
+                // TODO: this sucks, it allocates for each sort
+                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_received, &a.1.damage_received)) {
+                    if interaction.1.damage_received == 0 {
+                        continue;
+                    }
+                    let mut layout_job = LayoutJob::default();
+
+                    let interaction_player = self
+                        .vehicle_reports()
+                        .iter()
+                        .find(|report| {
+                            let player = report.vehicle().player().unwrap();
+                            player.db_id() == *interaction.0
+                        })
+                        .unwrap();
+
+                    if let Some(clan_text) = interaction_player.clan_text() {
+                        clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+                        layout_job.append(" ", 0.0, Default::default());
+                    }
+
+                    interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+
+                    layout_job.append(&format!(": {} ({})", interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text), 0.0, Default::default());
+
+                    ui.label(layout_job);
+                }
+            };
+        });
+    }
+
+    fn dealt_damage_details(&self, report: &VehicleReport, ui: &mut egui::Ui) {
+        let style = Style::default();
+
+        ui.vertical(|ui| {
+            if let Some(received_hover_text) = report.actual_damage_hover_text() {
+                ui.label(received_hover_text.clone());
+
+                if report.damage_interactions.is_some() {
+                    ui.separator();
+                }
+            }
+
+            if let Some(interactions) = report.damage_interactions.as_ref() {
+                // TODO: this sucks, it allocates for each sort
+                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_dealt, &a.1.damage_dealt)) {
+                    if interaction.1.damage_dealt == 0 {
+                        continue;
+                    }
+                    let mut layout_job = LayoutJob::default();
+
+                    let interaction_player = self
+                        .vehicle_reports()
+                        .iter()
+                        .find(|report| {
+                            let player = report.vehicle().player().unwrap();
+                            player.db_id() == *interaction.0
+                        })
+                        .unwrap();
+
+                    if let Some(clan_text) = interaction_player.clan_text() {
+                        clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+                        layout_job.append(" ", 0.0, Default::default());
+                    }
+
+                    interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
+
+                    layout_job.append(&format!(": {} ({})", interaction.1.damage_dealt_text, &interaction.1.damage_dealt_percentage_text), 0.0, Default::default());
+
+                    ui.label(layout_job);
+                }
+            };
+        });
     }
 
     fn cell_content_ui(&mut self, row_nr: u64, col_nr: usize, ui: &mut egui::Ui) {
@@ -1525,8 +1577,11 @@ impl UiReport {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(damage_text);
-                                if let Some(hover_text) = report.actual_damage_hover_text.clone() {
-                                    response.on_hover_text(hover_text);
+                                if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                                    let tooltip = Tooltip::for_enabled(&response);
+                                    tooltip.show(|ui| {
+                                        self.dealt_damage_details(report, ui);
+                                    });
                                 }
                             }
                         } else {
@@ -1539,10 +1594,12 @@ impl UiReport {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(received_damage_text);
-                                if let Some(hover_text) = report.received_damage_hover_text.clone() {
-                                    response.on_hover_text(hover_text);
+                                if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                                    let tooltip = Tooltip::for_enabled(&response);
+                                    tooltip.show(|ui| {
+                                        self.received_damage_details(report, ui);
+                                    });
                                 }
-                                // self.received_damage_details(report, ui);
                             }
                         } else {
                             ui.label("-");
@@ -1753,8 +1810,8 @@ impl UiReport {
                     ReplayColumn::ActualDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
-                        } else if let Some(damage_extended_info) = report.actual_damage_hover_text.clone() {
-                            ui.label(damage_extended_info);
+                        } else if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                            self.dealt_damage_details(report, ui);
                         }
                     }
                     ReplayColumn::PotentialDamage => {
@@ -1767,8 +1824,8 @@ impl UiReport {
                     ReplayColumn::ReceivedDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
-                        } else if let Some(damage_extended_info) = report.received_damage_hover_text.clone() {
-                            ui.label(damage_extended_info);
+                        } else if report.received_damage_hover_text.is_some() || report.damage_interactions.is_some() {
+                            self.received_damage_details(report, ui);
                         }
                     }
                     ReplayColumn::Skills => {
