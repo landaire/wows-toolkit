@@ -73,17 +73,13 @@ use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
 use crate::error::ToolkitError;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
+use crate::plaintext_viewer::{self};
 use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
-use crate::util::{
-    self,
-};
+use crate::util::{self};
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
 
@@ -356,7 +352,7 @@ impl TranslatedCrewSkill {
 }
 
 #[derive(Debug, Default)]
-pub struct DamageInteractions {
+pub struct DamageInteraction {
     damage_dealt: u64,
     damage_dealt_text: String,
     damage_dealt_percentage: f64,
@@ -365,6 +361,24 @@ pub struct DamageInteractions {
     damage_received_text: String,
     damage_received_percentage: f64,
     damage_received_percentage_text: String,
+}
+
+impl DamageInteraction {
+    pub fn damage_dealt(&self) -> u64 {
+        self.damage_dealt
+    }
+
+    pub fn damage_dealt_percentage(&self) -> f64 {
+        self.damage_dealt_percentage
+    }
+
+    pub fn damage_received(&self) -> u64 {
+        self.damage_received
+    }
+
+    pub fn damage_received_percentage(&self) -> f64 {
+        self.damage_received_percentage
+    }
 }
 
 pub struct VehicleReport {
@@ -405,7 +419,7 @@ pub struct VehicleReport {
     received_damage_text: Option<RichText>,
     received_damage_hover_text: Option<RichText>,
     received_damage_report: Option<Damage>,
-    damage_interactions: Option<HashMap<i64, DamageInteractions>>,
+    damage_interactions: Option<HashMap<i64, DamageInteraction>>,
     fires: Option<u64>,
     floods: Option<u64>,
     citadels: Option<u64>,
@@ -615,6 +629,10 @@ impl VehicleReport {
 
     pub fn hits_report(&self) -> Option<&Hits> {
         self.hits_report.as_ref()
+    }
+
+    pub fn damage_interactions(&self) -> Option<&HashMap<i64, DamageInteraction>> {
+        self.damage_interactions.as_ref()
     }
 }
 
@@ -1080,7 +1098,7 @@ impl UiReport {
                             .unwrap_or_default();
 
                         // Add up all of the damage dealt
-                        let mut damage_interaction = DamageInteractions::default();
+                        let mut damage_interaction = DamageInteraction::default();
 
                         // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
                         let all_damage: u64 = DAMAGE_DESCRIPTIONS.iter().fold(0, |accum, (key, _description)| {

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use escaper::decode_html;
@@ -127,6 +128,25 @@ where
             serializer.serialize_str(&joined)
         }
         None => serializer.serialize_none(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct DamageInteraction {
+    damage_dealt: u64,
+    damage_dealt_percentage: f64,
+    damage_received: u64,
+    damage_received_percentage: f64,
+}
+
+impl From<&crate::ui::replay_parser::DamageInteraction> for DamageInteraction {
+    fn from(value: &crate::ui::replay_parser::DamageInteraction) -> Self {
+        DamageInteraction {
+            damage_dealt: value.damage_dealt(),
+            damage_dealt_percentage: value.damage_dealt_percentage(),
+            damage_received: value.damage_received(),
+            damage_received_percentage: value.damage_received_percentage(),
+        }
     }
 }
 
@@ -369,6 +389,10 @@ impl Vehicle {
                     crits_dealt: value.crits().unwrap_or_default(),
                     distance_traveled: value.distance_traveled().unwrap_or_default(),
                     kills: value.kills().unwrap_or_default(),
+                    damage_interactions: value
+                        .damage_interactions()
+                        .map(|interactions| HashMap::from_iter(interactions.iter().map(|(key, value)| (*key, value.into()))))
+                        .unwrap_or_default(),
                 })
             } else {
                 None
@@ -392,6 +416,7 @@ pub struct ServerResults {
     raw_xp: i64,
     damage: u64,
     damage_details: Damage,
+    damage_interactions: HashMap<i64, DamageInteraction>,
     hits_details: Hits,
     spotting_damage: u64,
     potential_damage: u64,
