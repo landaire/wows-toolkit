@@ -1209,7 +1209,7 @@ impl UiReport {
                 continue;
             };
 
-            for (player_id, _interaction) in damage_interactions {
+            for player_id in damage_interactions.keys() {
                 let Some(other_player) = vehicle_reports.iter().find(|report| {
                     let Some(player_info) = report.vehicle().player() else {
                         return false;
