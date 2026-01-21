@@ -106,7 +106,7 @@ const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
 const DAMAGE_BOMB: &str = "damage_bomb";
 const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
 const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
-const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
+// const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
 const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
 const DAMAGE_TBOMB: &str = "damage_tbomb";
 const DAMAGE_TBOMB_ALT: &str = "damage_tbomb_alt";
@@ -158,7 +158,7 @@ const HITS_PULSE_LASER: &str = "hits_pulse_laser";
 const HITS_AXIS_LASER: &str = "hits_axis_laser";
 const HITS_PHASER_LASER: &str = "hits_phaser_laser";
 
-static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
+static DAMAGE_DESCRIPTIONS: [(&str, &str); 33] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
@@ -172,7 +172,7 @@ static DAMAGE_DESCRIPTIONS: [(&str, &str); 34] = [
     (DAMAGE_BOMB, "HE Bomb"),
     (DAMAGE_BOMB_AVIA, "Bomb"),
     (DAMAGE_BOMB_ALT, "Alt Bomb"),
-    (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
+    // (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
     (DAMAGE_TBOMB, "Torpedo Bomber"),
     (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
