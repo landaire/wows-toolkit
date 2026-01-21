@@ -1485,14 +1485,13 @@ impl UiReport {
                     }
                     let mut layout_job = LayoutJob::default();
 
-                    let interaction_player = self
-                        .vehicle_reports()
-                        .iter()
-                        .find(|report| {
-                            let player = report.vehicle().player().unwrap();
-                            player.db_id() == *interaction.0
-                        })
-                        .unwrap();
+                    let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
+                        let player = report.vehicle().player().unwrap();
+                        player.db_id() == *interaction.0
+                    }) else {
+                        // TODO: Handle bots?
+                        continue;
+                    };
 
                     if let Some(clan_text) = interaction_player.clan_text() {
                         clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
@@ -1529,14 +1528,13 @@ impl UiReport {
                     }
                     let mut layout_job = LayoutJob::default();
 
-                    let interaction_player = self
-                        .vehicle_reports()
-                        .iter()
-                        .find(|report| {
-                            let player = report.vehicle().player().unwrap();
-                            player.db_id() == *interaction.0
-                        })
-                        .unwrap();
+                    let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
+                        let player = report.vehicle().player().unwrap();
+                        player.db_id() == *interaction.0
+                    }) else {
+                        // In co-op, you may not have an interaction
+                        continue;
+                    };
 
                     if let Some(clan_text) = interaction_player.clan_text() {
                         clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
