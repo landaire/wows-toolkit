@@ -7,8 +7,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
+use egui::Layout;
+use egui::ScrollArea;
 use rootcause::Report;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ParamData;
 
+use crate::app::PerformanceInfo;
 use crate::app::ReplayGrouping;
 use crate::app::ReplaySettings;
 use crate::app::TimedMessage;
@@ -384,6 +389,14 @@ impl DamageInteraction {
     }
 }
 
+#[derive(Clone)]
+struct Achievement {
+    game_param: Arc<Param>,
+    display_name: String,
+    description: String,
+    count: usize,
+}
+
 pub struct VehicleReport {
     vehicle: Arc<VehicleEntity>,
     color: Color32,
@@ -436,6 +449,7 @@ pub struct VehicleReport {
     kills: Option<i64>,
     observed_kills: i64,
     translated_build: Option<TranslatedBuild>,
+    achievements: Vec<Achievement>,
 }
 
 #[allow(dead_code)]
@@ -1164,6 +1178,44 @@ impl UiReport {
 
             let is_test_ship = vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.group().starts_with("demo")).unwrap_or_default();
 
+            let achievements = constants_inner
+                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/achievements")
+                .and_then(|achievements_idx| {
+                    let achievements_idx = achievements_idx.as_u64()? as usize;
+                    let achievements_array = results_info?[achievements_idx].as_array()?;
+
+                    let achievements = achievements_array
+                        .iter()
+                        .filter_map(|achievement_info| {
+                            let achievement_info = achievement_info.as_array()?;
+                            let achievement_id = achievement_info[0].as_u64()?;
+                            let achievement_count = achievement_info[1].as_u64()?;
+
+                            // Look this achievement up from game params
+                            let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, achievement_id as u32)?;
+
+                            let ParamData::Achievement(achievement_data) = game_param.data() else {
+                                return None;
+                            };
+
+                            let Some(achievement_name) = metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name())) else {
+                                return None;
+                            };
+
+                            let Some(achievement_description) =
+                                metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_DESCRIPTION_{}", achievement_data.ui_name()))
+                            else {
+                                return None;
+                            };
+
+                            Some(Achievement { game_param, display_name: achievement_name, description: achievement_description, count: achievement_count as usize })
+                        })
+                        .collect::<Vec<_>>();
+
+                    Some(achievements)
+                })
+                .unwrap_or_default();
+
             let report = VehicleReport {
                 vehicle: Arc::clone(vehicle),
                 color: player_color,
@@ -1213,6 +1265,7 @@ impl UiReport {
                 hits_text,
                 hits_hover_text,
                 damage_interactions,
+                achievements,
             };
 
             Some(report)
@@ -1854,6 +1907,20 @@ impl UiReport {
             // Expanded content goes here
             if 0.0 < expandedness {
                 match column {
+                    ReplayColumn::Name => {
+                        for achievement in &report.achievements {
+                            ui.vertical(|ui| {
+                                ui.strong("Achievements");
+
+                                let response = if achievement.count > 1 {
+                                    ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
+                                } else {
+                                    ui.label(&achievement.display_name)
+                                };
+                                response.on_hover_text(&achievement.description);
+                            });
+                        }
+                    }
                     ReplayColumn::ActualDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
                             ui.label("NDA");
@@ -3060,6 +3127,10 @@ impl ToolkitTabViewer<'_> {
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
             });
+
+            if ui.button(format!("{} Show Session Stats", icons::CHART_BAR)).clicked() {
+                self.tab_state.show_session_stats = true;
+            }
         });
     }
 
@@ -3081,6 +3152,187 @@ impl ToolkitTabViewer<'_> {
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                         ui.heading("Double click or load a replay to view data");
+                    });
+                }
+            });
+        });
+
+        self.show_session_stats_window(ui);
+    }
+
+    pub fn show_session_stats_window(&mut self, ui: &mut egui::Ui) {
+        if !self.tab_state.show_session_stats {
+            return;
+        }
+
+        let Some(metadata_provider) = self.metadata_provider() else {
+            return;
+        };
+
+        let ctx = ui.ctx();
+
+        egui::Window::new("Session Stats").open(&mut self.tab_state.show_session_stats).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Overall Stats");
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(format!("{} Clear", icons::ERASER)).clicked() {
+                        self.tab_state.session_stats.clear();
+                    }
+                });
+            });
+
+            let wins = self.tab_state.session_stats.games_won();
+            let losses = self.tab_state.session_stats.games_lost();
+            let win_rate = self.tab_state.session_stats.win_rate().unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.strong("Win Rate:");
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{wins}W/{losses}L ({win_rate:.02}%)"));
+                });
+            });
+
+            let total_frags = self.tab_state.session_stats.total_frags();
+            ui.horizontal(|ui| {
+                ui.strong("Total Frags:");
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{total_frags}"));
+                });
+            });
+
+            if let Some((ship_name, max_frags)) = self.tab_state.session_stats.max_frags(&metadata_provider) {
+                ui.strong("Max Frags:");
+                ui.horizontal(|ui| {
+                    ui.label(ship_name);
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{max_frags}"));
+                    });
+                });
+            }
+
+            if let Some((ship_name, max_damage)) = self.tab_state.session_stats.max_damage(&metadata_provider) {
+                ui.strong("Max Damage:");
+                ui.horizontal(|ui| {
+                    ui.label(ship_name);
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(separate_number(max_damage, self.tab_state.settings.locale.as_deref()));
+                    });
+                });
+            }
+
+            let mut all_achievements: Vec<Achievement> = Vec::new();
+            for replay in &self.tab_state.session_stats.session_replays {
+                let replay = replay.read();
+                let Some(self_report) = replay.ui_report.as_ref().and_then(|report| report.vehicle_reports().iter().find(|report| report.is_self())) else {
+                    continue;
+                };
+
+                for achievement in self_report.achievements.as_slice() {
+                    match all_achievements.iter_mut().find(|existing_achievement| existing_achievement.game_param.id() == achievement.game_param.id()) {
+                        Some(existing_achievement) => {
+                            existing_achievement.count += achievement.count;
+                        }
+                        None => all_achievements.push(achievement.clone()),
+                    }
+                }
+            }
+
+            all_achievements.sort_by(|a, b| (Reverse(a.count), &b.display_name).cmp(&(Reverse(b.count), &b.display_name)));
+
+            if !all_achievements.is_empty() {
+                ui.strong("Achievements");
+
+                for achievement in all_achievements {
+                    ui.horizontal(|ui| {
+                        let response = ui.label(achievement.display_name);
+                        response.on_hover_text(&achievement.description);
+
+                        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(format!("{}", achievement.count));
+                        });
+                    });
+                }
+            }
+
+            ui.separator();
+
+            ui.heading("Ship Stats");
+
+            ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                let mut battle_results: Vec<(String, PerformanceInfo)> = self.tab_state.session_stats.ship_stats(&metadata_provider).drain().collect();
+                battle_results.sort_by(|a, b| (Reverse(a.1.wins()), a.1.losses(), &a.0).cmp(&(Reverse(b.1.wins()), b.1.losses(), &b.0)));
+                for (ship_name, perf_info) in battle_results {
+                    if perf_info.win_rate().is_none() {
+                        continue;
+                    }
+
+                    let locale = self.tab_state.settings.locale.as_deref();
+                    ui.collapsing(format!("{ship_name} {}W/{}L ({:.0}%)", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap()), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Avg Damage:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Max Damage:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.max_damage(), locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Avg Spotting Damage:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Max Spotting Damage:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.max_spotting_damage(), locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Avg Frags:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(format!("{:.2}", perf_info.avg_frags().unwrap_or_default()));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Total Frags:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.total_frags(), locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Max Frags:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.max_frags(), locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Avg Raw XP:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Max Raw XP:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.max_xp(), locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Avg Base XP:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64, locale));
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Max Base XP:");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(separate_number(perf_info.max_win_adjusted_xp(), locale));
+                            });
+                        });
                     });
                 }
             });
