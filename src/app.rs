@@ -415,6 +415,8 @@ pub struct Settings {
     pub has_037_crew_skills_fix: bool,
     #[serde(default = "default_bool::<false>")]
     pub has_038_game_params_fix: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_041_game_params_fix: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -450,6 +452,7 @@ impl Default for Settings {
             build_consent_window_shown: false,
             has_037_crew_skills_fix: true,
             has_038_game_params_fix: true,
+            has_041_game_params_fix: true,
         }
     }
 }
@@ -1204,6 +1207,14 @@ impl WowsToolkitApp {
 
             if !saved_state.tab_state.settings.has_038_game_params_fix {
                 saved_state.tab_state.settings.has_038_game_params_fix = true;
+
+                // Remove the old game params
+                let _ = std::fs::remove_file(game_params_bin_path());
+            }
+
+            // Added the Achievements to GameParams
+            if !saved_state.tab_state.settings.has_041_game_params_fix {
+                saved_state.tab_state.settings.has_041_game_params_fix = true;
 
                 // Remove the old game params
                 let _ = std::fs::remove_file(game_params_bin_path());
