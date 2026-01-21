@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.42] - 2026-01-21
+
+### 🚀 Features
+
+- Add ship name to interaction player name hover text
+- Add PR calculation (thanks WoWs Numbers)
+- Reverse the damage interaction details to show ship name normally and player name on hover
+
+### 🐛 Bug Fixes
+
+- Auto-updater had a bug in how it renamed files
+- Replay details no longer cause crash in matches with bots
+- Only show achievements header when player has achievements
+
 ## [0.1.41] - 2026-01-21
 
 ### 🚀 Features
