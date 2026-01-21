@@ -1503,7 +1503,7 @@ impl UiReport {
 
                     layout_job.append(&format!(": {} ({})", interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text), 0.0, Default::default());
 
-                    ui.label(layout_job);
+                    ui.label(layout_job).on_hover_text(interaction_player.ship_name());
                 }
             };
         });
@@ -1547,7 +1547,7 @@ impl UiReport {
 
                     layout_job.append(&format!(": {} ({})", interaction.1.damage_dealt_text, &interaction.1.damage_dealt_percentage_text), 0.0, Default::default());
 
-                    ui.label(layout_job);
+                    ui.label(layout_job).on_hover_text(interaction_player.ship_name());
                 }
             };
         });
