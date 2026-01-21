@@ -13,6 +13,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::{self};
+use std::thread::current;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -1361,11 +1362,14 @@ impl WowsToolkitApp {
                                     *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)));
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
-                                    let current_process = env::args().next().expect("current process has no path?");
-                                    let current_process_new_path = format!("{current_process}.old");
+                                    let current_process = std::env::current_exe().expect("current process has no path?");
+                                    let mut current_process_new_path = current_process.as_os_str().to_owned();
+                                    current_process_new_path.push(".old");
+                                    let current_process_new_path = PathBuf::from(current_process_new_path);
                                     // Rename this process
                                     let rename_process = move || {
                                         std::fs::rename(current_process.clone(), &current_process_new_path).context("failed to rename current process")?;
+
                                         // Rename the new exe
                                         std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
 
@@ -1816,7 +1820,9 @@ impl WowsToolkitApp {
                     ui.vertical(|ui| {
                         ui.label(format!("Version {tag} of WoWs Toolkit is available"));
                         if let Some(notes) = notes.as_mut() {
-                            CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
+                            ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
+                                CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
+                            });
                         }
                         ui.horizontal(|ui| {
                             #[cfg(target_os = "windows")]

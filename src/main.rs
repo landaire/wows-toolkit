@@ -74,10 +74,6 @@ fn main() -> eframe::Result<()> {
             std::thread::sleep(Duration::from_secs(1));
 
             let _ = std::fs::remove_file(old_path);
-
-            // Rename the update to the old path. This is useful
-            // if people have desktop shortcuts / taskbar pins
-            let _ = std::fs::rename(current_path, old_path);
         }
     }
 
