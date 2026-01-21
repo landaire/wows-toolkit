@@ -1907,7 +1907,10 @@ impl UiReport {
                 match column {
                     ReplayColumn::Name => {
                         ui.vertical(|ui| {
-                            ui.strong("Achievements");
+                            if !report.achievements.is_empty() {
+                                ui.strong("Achievements");
+                            }
+
                             for achievement in &report.achievements {
                                 let response = if achievement.count > 1 {
                                     ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
