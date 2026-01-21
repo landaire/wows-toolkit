@@ -1491,7 +1491,6 @@ impl UiReport {
                     if interaction.1.damage_received == 0 {
                         continue;
                     }
-                    let mut layout_job = LayoutJob::default();
 
                     let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
                         let player = report.vehicle().player().unwrap();
@@ -1501,16 +1500,16 @@ impl UiReport {
                         continue;
                     };
 
+                    // Build hover text with clan tag and player name
+                    let mut hover_layout = LayoutJob::default();
                     if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-                        layout_job.append(" ", 0.0, Default::default());
+                        clan_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                        hover_layout.append(" ", 0.0, Default::default());
                     }
+                    interaction_player.name_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
 
-                    interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-
-                    layout_job.append(&format!(": {} ({})", interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text), 0.0, Default::default());
-
-                    ui.label(layout_job).on_hover_text(interaction_player.ship_name());
+                    ui.label(format!("{}: {} ({})", interaction_player.ship_name(), interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text))
+                        .on_hover_text(hover_layout);
                 }
             };
         });
@@ -1534,7 +1533,6 @@ impl UiReport {
                     if interaction.1.damage_dealt == 0 {
                         continue;
                     }
-                    let mut layout_job = LayoutJob::default();
 
                     let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
                         let player = report.vehicle().player().unwrap();
@@ -1544,16 +1542,16 @@ impl UiReport {
                         continue;
                     };
 
+                    // Build hover text with clan tag and player name
+                    let mut hover_layout = LayoutJob::default();
                     if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-                        layout_job.append(" ", 0.0, Default::default());
+                        clan_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                        hover_layout.append(" ", 0.0, Default::default());
                     }
+                    interaction_player.name_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
 
-                    interaction_player.name_text.clone().append_to(&mut layout_job, &style, egui::FontSelection::Default, egui::Align::Center);
-
-                    layout_job.append(&format!(": {} ({})", interaction.1.damage_dealt_text, &interaction.1.damage_dealt_percentage_text), 0.0, Default::default());
-
-                    ui.label(layout_job).on_hover_text(interaction_player.ship_name());
+                    ui.label(format!("{}: {} ({})", interaction_player.ship_name(), interaction.1.damage_dealt_text, &interaction.1.damage_dealt_percentage_text))
+                        .on_hover_text(hover_layout);
                 }
             };
         });
