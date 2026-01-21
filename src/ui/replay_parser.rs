@@ -450,6 +450,7 @@ pub struct VehicleReport {
     observed_kills: i64,
     translated_build: Option<TranslatedBuild>,
     achievements: Vec<Achievement>,
+    personal_rating: Option<crate::personal_rating::PersonalRatingResult>,
 }
 
 #[allow(dead_code)]
@@ -650,6 +651,10 @@ impl VehicleReport {
 
     pub fn damage_interactions(&self) -> Option<&HashMap<i64, DamageInteraction>> {
         self.damage_interactions.as_ref()
+    }
+
+    pub fn personal_rating(&self) -> Option<&crate::personal_rating::PersonalRatingResult> {
+        self.personal_rating.as_ref()
     }
 }
 
@@ -1266,6 +1271,7 @@ impl UiReport {
                 hits_hover_text,
                 damage_interactions,
                 achievements,
+                personal_rating: None,
             };
 
             Some(report)
@@ -1352,6 +1358,7 @@ impl UiReport {
                 ReplayColumn::Actions,
                 ReplayColumn::Name,
                 ReplayColumn::ShipName,
+                ReplayColumn::PersonalRating,
                 ReplayColumn::BaseXp,
                 ReplayColumn::RawXp,
                 ReplayColumn::Kills,
@@ -1403,6 +1410,7 @@ impl UiReport {
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
                 SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
                 SortColumn::Hits => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits }),
+                SortColumn::PersonalRating => SortKey::f64(report.personal_rating.as_ref().map(|pr| pr.pr)),
             };
 
             (team_id, key, db_id)
@@ -1792,6 +1800,13 @@ impl UiReport {
                             }
                         }
                     }
+                    ReplayColumn::PersonalRating => {
+                        if let Some(pr) = report.personal_rating.as_ref() {
+                            ui.label(RichText::new(format!("{:.0}", pr.pr)).color(pr.category.color())).on_hover_text(pr.category.name());
+                        } else {
+                            ui.label("-");
+                        }
+                    }
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
                             if !report.is_enemy || self.debug_mode {
@@ -2071,6 +2086,34 @@ impl UiReport {
     pub fn battle_result(&self) -> Option<BattleResult> {
         self.battle_result
     }
+
+    /// Populate Personal Rating for all players using the provided PR data
+    pub fn populate_personal_ratings(&mut self, pr_data: &crate::personal_rating::PersonalRatingData) {
+        for report in &mut self.vehicle_reports {
+            if report.personal_rating.is_some() {
+                continue;
+            }
+
+            let Some(player) = report.vehicle.player() else {
+                continue;
+            };
+
+            let ship_id = player.vehicle().id();
+            let battle_result = self.battle_result;
+
+            // We need actual damage, kills, and win/loss for a single battle
+            let Some(actual_damage) = report.actual_damage else {
+                continue;
+            };
+
+            let is_win = matches!(battle_result, Some(BattleResult::Win(_)));
+            let frags = report.kills.unwrap_or(0);
+
+            let stats = crate::personal_rating::ShipBattleStats { ship_id: ship_id as u64, battles: 1, damage: actual_damage, wins: if is_win { 1 } else { 0 }, frags };
+
+            report.personal_rating = pr_data.calculate_pr(&[stats]);
+        }
+    }
 }
 
 impl egui_table::TableDelegate for UiReport {
@@ -2203,6 +2246,13 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::Skills => {
                     ui.strong("Skills");
                 }
+                ReplayColumn::PersonalRating => {
+                    if ui.strong(column_name_with_sort_order("PR", false, *self.replay_sort.lock(), SortColumn::PersonalRating)).clicked() {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::PersonalRating);
+
+                        self.sort_players(new_sort);
+                    };
+                }
             }
         });
     }
@@ -2288,6 +2338,7 @@ pub enum ReplayColumn {
     Name,
     ShipName,
     Skills,
+    PersonalRating,
     BaseXp,
     RawXp,
     Kills,
@@ -2326,6 +2377,7 @@ pub enum SortColumn {
     Crits,
     ReceivedDamage,
     DistanceTraveled,
+    PersonalRating,
 }
 
 pub struct Replay {
@@ -2464,6 +2516,24 @@ impl Replay {
     pub fn battle_result(&self) -> Option<BattleResult> {
         self.battle_report().and_then(|report| report.battle_result().cloned()).or_else(|| self.ui_report.as_ref().and_then(|report| report.battle_result()))
     }
+
+    /// Convert this replay's player stats to ShipBattleStats for PR calculation
+    pub fn to_battle_stats(&self) -> Option<crate::personal_rating::ShipBattleStats> {
+        let vehicle = self.player_vehicle()?;
+        let battle_result = self.battle_result()?;
+        let ui_report = self.ui_report.as_ref()?;
+        let self_report = ui_report.vehicle_reports().iter().find(|report| report.is_self())?;
+
+        let is_win = matches!(battle_result, BattleResult::Win(_));
+
+        Some(crate::personal_rating::ShipBattleStats {
+            ship_id: vehicle.shipId as u64,
+            battles: 1,
+            damage: self_report.actual_damage().unwrap_or_default(),
+            wins: if is_win { 1 } else { 0 },
+            frags: self_report.kills().unwrap_or_default(),
+        })
+    }
 }
 
 fn column_name_with_sort_order(text: &'static str, has_info: bool, sort_order: SortOrder, column: SortColumn) -> Cow<'static, str> {
@@ -2486,6 +2556,14 @@ impl ToolkitTabViewer<'_> {
         if !ui_report.sorted {
             let replay_sort = self.tab_state.replay_sort.lock();
             ui_report.sort_players(*replay_sort);
+        }
+
+        // Populate PR data if available
+        {
+            let pr_data = self.tab_state.personal_rating_data.read();
+            if pr_data.is_loaded() {
+                ui_report.populate_personal_ratings(&pr_data);
+            }
         }
 
         ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
@@ -2575,6 +2653,15 @@ impl ToolkitTabViewer<'_> {
 
                     ui.label(text);
                 }
+
+                // Show single-game PR
+                if let Some(battle_stats) = replay_file.to_battle_stats() {
+                    let pr_data = self.tab_state.personal_rating_data.read();
+                    if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
+                        ui.label(RichText::new(format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name())).color(pr_result.category.color()));
+                    }
+                }
+
                 let mut self_report = None;
                 if let Some(ui_report) = replay_file.ui_report.as_ref() {
                     let mut team_damage = 0;
@@ -3191,6 +3278,16 @@ impl ToolkitTabViewer<'_> {
                 });
             });
 
+            // Session PR
+            if let Some(pr_result) = self.tab_state.session_stats.calculate_pr(&self.tab_state.personal_rating_data.read()) {
+                ui.horizontal(|ui| {
+                    ui.strong("Personal Rating:");
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{:.0} ({})", pr_result.pr, pr_result.category.name())).color(pr_result.category.color()));
+                    });
+                });
+            }
+
             let total_frags = self.tab_state.session_stats.total_frags();
             ui.horizontal(|ui| {
                 ui.strong("Total Frags:");
@@ -3266,7 +3363,27 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     let locale = self.tab_state.settings.locale.as_deref();
-                    ui.collapsing(format!("{ship_name} {}W/{}L ({:.0}%)", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap()), |ui| {
+                    let pr_data = self.tab_state.personal_rating_data.read();
+                    let ship_pr = perf_info.calculate_pr(&pr_data);
+                    drop(pr_data);
+
+                    let header = if let Some(ref pr) = ship_pr {
+                        format!("{ship_name} {}W/{}L ({:.0}%) - PR: {:.0}", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap(), pr.pr)
+                    } else {
+                        format!("{ship_name} {}W/{}L ({:.0}%)", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap())
+                    };
+
+                    ui.collapsing(header, |ui| {
+                        // Show PR at the top of the expanded section
+                        if let Some(ref pr) = ship_pr {
+                            ui.horizontal(|ui| {
+                                ui.label("Personal Rating:");
+                                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(RichText::new(format!("{:.0} ({})", pr.pr, pr.category.name())).color(pr.category.color()));
+                                });
+                            });
+                        }
+
                         ui.horizontal(|ui| {
                             ui.label("Avg Damage:");
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {

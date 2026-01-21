@@ -13,7 +13,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::{self};
-use std::thread::current;
+
 use std::time::Duration;
 use std::time::Instant;
 
@@ -69,6 +69,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use crate::error::ToolkitError;
 use crate::game_params::game_params_bin_path;
 use crate::icons;
+use crate::personal_rating::PersonalRatingData;
 use crate::plaintext_viewer::PlaintextFileViewer;
 use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
@@ -567,7 +568,14 @@ impl SessionStats {
             };
 
             let ship_name = replay.vehicle_name(metadata_provider);
+            let ship_id = replay.player_vehicle().map(|v| v.shipId as u64);
             let performance_info = results.entry(ship_name).or_default();
+
+            // Set ship_id if not already set
+            if performance_info.ship_id.is_none() {
+                performance_info.ship_id = ship_id;
+            }
+
             match battle_result {
                 wows_replays::analyzer::battle_controller::BattleResult::Win(_) => {
                     performance_info.wins += 1;
@@ -647,10 +655,46 @@ impl SessionStats {
             accum + self_report.kills().unwrap_or_default()
         })
     }
+
+    /// Calculate overall Personal Rating for this session
+    pub fn calculate_pr(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> Option<crate::personal_rating::PersonalRatingResult> {
+        let stats: Vec<_> = self.session_replays.iter().filter_map(|replay| replay.read().to_battle_stats()).collect();
+        pr_data.calculate_pr(&stats)
+    }
+
+    /// Calculate Personal Rating per ship for this session
+    /// Returns a map of ship_id -> PR result
+    #[allow(dead_code)]
+    pub fn calculate_pr_per_ship(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> HashMap<u64, crate::personal_rating::PersonalRatingResult> {
+        use crate::personal_rating::ShipBattleStats;
+
+        // Group stats by ship_id
+        let mut ship_stats: HashMap<u64, ShipBattleStats> = HashMap::new();
+
+        for replay in &self.session_replays {
+            if let Some(stats) = replay.read().to_battle_stats() {
+                let entry = ship_stats.entry(stats.ship_id).or_insert(ShipBattleStats { ship_id: stats.ship_id, battles: 0, damage: 0, wins: 0, frags: 0 });
+                entry.battles += stats.battles;
+                entry.damage += stats.damage;
+                entry.wins += stats.wins;
+                entry.frags += stats.frags;
+            }
+        }
+
+        // Calculate PR for each ship
+        ship_stats
+            .into_iter()
+            .filter_map(|(ship_id, stats)| {
+                let pr = pr_data.calculate_pr(&[stats])?;
+                Some((ship_id, pr))
+            })
+            .collect()
+    }
 }
 
 #[derive(Default)]
 pub struct PerformanceInfo {
+    ship_id: Option<u64>,
     wins: usize,
     losses: usize,
     /// Total frags
@@ -742,6 +786,19 @@ impl PerformanceInfo {
             return None;
         }
         Some(self.total_win_adjusted_xp as f64 / self.total_games as f64)
+    }
+
+    /// Calculate Personal Rating for this ship's performance
+    pub fn calculate_pr(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> Option<crate::personal_rating::PersonalRatingResult> {
+        let ship_id = self.ship_id?;
+        let stats = crate::personal_rating::ShipBattleStats {
+            ship_id,
+            battles: self.total_games as u32,
+            damage: self.total_damage,
+            wins: self.wins as u32,
+            frags: self.total_frags,
+        };
+        pr_data.calculate_pr(&[stats])
     }
 }
 
@@ -842,6 +899,8 @@ pub struct TabState {
     pub show_session_stats: bool,
     #[serde(skip)]
     pub session_stats: SessionStats,
+    #[serde(skip)]
+    pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
 }
 
 impl Default for TabState {
@@ -884,6 +943,7 @@ impl Default for TabState {
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
             show_session_stats: false,
             session_stats: Default::default(),
+            personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
         }
     }
 }
@@ -1314,6 +1374,9 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::ModTask(_task_info) => {
                                 // do nothing
                             }
+                            BackgroundTaskKind::LoadingPersonalRatingData => {
+                                // do nothing
+                            }
                             BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
                                 self.tab_state.timed_message.write().replace(timed_message.clone());
                             }
@@ -1369,7 +1432,6 @@ impl WowsToolkitApp {
                                     // Rename this process
                                     let rename_process = move || {
                                         std::fs::rename(current_process.clone(), &current_process_new_path).context("failed to rename current process")?;
-
                                         // Rename the new exe
                                         std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
 
@@ -1390,6 +1452,9 @@ impl WowsToolkitApp {
                                 }
                                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
                                     *self.tab_state.game_constants.write() = constants;
+                                }
+                                BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
+                                    self.tab_state.personal_rating_data.write().load(pr_data);
                                 }
                                 #[cfg(feature = "mod_manager")]
                                 BackgroundTaskCompletion::ModManager(mod_manager_info) => {
@@ -1547,6 +1612,16 @@ impl WowsToolkitApp {
                 update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_updates)));
             }
         }
+
+        // Check and update PR expected values
+        if crate::personal_rating::needs_update() {
+            if let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values()) {
+                if crate::personal_rating::save_expected_values(&pr_data).is_ok() {
+                    update_background_task!(self.tab_state.background_tasks, Some(task::load_personal_rating_data(pr_data)));
+                }
+            }
+        }
+
         self.checked_for_updates = true;
     }
 
@@ -1880,7 +1955,11 @@ fn build_about_window(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.label("Made by landaire.");
         ui.label("Thanks to Trackpad, TTaro, lkolbly for their contributions.");
-        if ui.button("View on GitHub").clicked() {
+        ui.horizontal(|ui| {
+            ui.label("Personal rating (PR) calculation data and formula provided by WoWs Numbers.");
+            ui.hyperlink_to("More Info.", "https://wows-numbers.com/personal/rating");
+        });
+        if ui.button("View Project on GitHub").clicked() {
             ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
         }
 

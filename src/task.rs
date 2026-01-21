@@ -80,6 +80,7 @@ pub enum BackgroundTaskKind {
     },
     PopulatePlayerInspectorFromReplays,
     LoadingConstants,
+    LoadingPersonalRatingData,
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(TimedMessage),
@@ -177,7 +178,7 @@ impl BackgroundTask {
                             }
                         }
                     },
-                    BackgroundTaskKind::UpdateTimedMessage(_) | BackgroundTaskKind::OpenFileViewer(_) => {
+                    BackgroundTaskKind::LoadingPersonalRatingData | BackgroundTaskKind::UpdateTimedMessage(_) | BackgroundTaskKind::OpenFileViewer(_) => {
                         // do nothing
                     }
                 }
@@ -201,6 +202,7 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     ConstantsLoaded(serde_json::Value),
+    PersonalRatingDataLoaded(crate::personal_rating::ExpectedValuesData),
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -223,6 +225,7 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
+            Self::PersonalRatingDataLoaded(_) => f.write_str("PersonalRatingDataLoaded(_)"),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion)),
             Self::NoReceiver => f.debug_struct("NoReceiver").finish(),
@@ -939,6 +942,16 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
             error!("failed to read constants file");
         }
     }
+
+    // Load PR expected values from disk if available
+    let pr_path = crate::personal_rating::get_expected_values_path();
+    if pr_path.exists() {
+        if let Ok(pr_data) = std::fs::read(&pr_path) {
+            update_background_task!(toolkit.tab_state.background_tasks, Some(load_personal_rating_data(pr_data)));
+        } else {
+            error!("failed to read PR expected values file");
+        }
+    }
 }
 
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
@@ -950,4 +963,15 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
         tx.send(result).expect("tx closed");
     });
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingConstants }
+}
+
+pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result: Result<BackgroundTaskCompletion, Report> =
+            serde_json::from_slice(&data).map(BackgroundTaskCompletion::PersonalRatingDataLoaded).map_err(|err| Report::from(ToolkitError::from(err)));
+
+        tx.send(result).expect("tx closed");
+    });
+    BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingPersonalRatingData }
 }
