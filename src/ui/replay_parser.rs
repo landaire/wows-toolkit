@@ -1908,18 +1908,17 @@ impl UiReport {
             if 0.0 < expandedness {
                 match column {
                     ReplayColumn::Name => {
-                        for achievement in &report.achievements {
-                            ui.vertical(|ui| {
-                                ui.strong("Achievements");
-
+                        ui.vertical(|ui| {
+                            ui.strong("Achievements");
+                            for achievement in &report.achievements {
                                 let response = if achievement.count > 1 {
                                     ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
                                 } else {
                                     ui.label(&achievement.display_name)
                                 };
                                 response.on_hover_text(&achievement.description);
-                            });
-                        }
+                            }
+                        });
                     }
                     ReplayColumn::ActualDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
