@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.41] - 2026-01-21
+
+### 🚀 Features
+
+- Rudimentary session stats
+
+### 🐛 Bug Fixes
+
+- Restore replay view's context menus for grouped items
+- Remove air support bomb to prevent damage double-counting
+
 ## [0.1.40] - 2026-01-20
 
 ### 🚀 Features
