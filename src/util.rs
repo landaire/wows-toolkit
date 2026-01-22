@@ -14,7 +14,7 @@ use std::process::Command;
 use thousands::Separable;
 use tracing::debug;
 use wows_replays::ReplayMeta;
-use wows_replays::analyzer::battle_controller::VehicleEntity;
+use wows_replays::analyzer::battle_controller::Player;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -46,17 +46,15 @@ pub fn player_color_for_team_relation(relation: u32) -> Color32 {
     }
 }
 
-pub fn build_wows_numbers_url(entity: &VehicleEntity) -> Option<String> {
-    let player = entity.player()?;
+pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
     Some(format!("https://{}.wows-numbers.com/player/{},{}", player.realm(), player.db_id(), player.name()))
 }
 
-pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {
+pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
+    let entity = player.vehicle_entity()?;
     let config = entity.props().ship_config();
-    let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
-
-    eprintln!("{:#?}", entity.commander_skills());
+    let species = ship.species()?;
 
     let json = json!({
         "BuildName": format!("replay_{}", player.name()),
@@ -76,7 +74,7 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
         // If no captain is present, we use the default captain (wowssb does not allow for no captain to be used)
         "Captain": entity.captain().map(|captain| captain.index()).unwrap_or("PCW001"),
 
-        "Skills": entity.commander_skills_raw(),
+        "Skills": entity.commander_skills_raw(species),
 
         "Consumables": config.abilities().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
@@ -99,13 +97,14 @@ pub fn build_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMet
     let encoded_data = encoded_data.replace('/', "%2F").replace('+', "%2B");
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
 
-    url
+    Some(url)
 }
 
-pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> String {
+pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
+    let entity = player.vehicle_entity()?;
     let config = entity.props().ship_config();
-    let player = entity.player().expect("entity has no player?");
     let ship = player.vehicle();
+    let species = ship.species()?;
     let mut parts: Vec<String> = vec![String::new(); 9];
 
     // Ship
@@ -120,7 +119,7 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
     parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
 
     // Skills
-    parts[4] = entity.commander_skills_raw().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+    parts[4] = entity.commander_skills_raw(species).iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
 
     // Consumables
     parts[5] = config.abilities().iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect::<Vec<_>>().join(",");
@@ -138,7 +137,7 @@ pub fn build_short_ship_config_url(entity: &VehicleEntity, metadata_provider: &G
 
     let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
-    url
+    Some(url)
 }
 
 pub fn colorize_captain_points(

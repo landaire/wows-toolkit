@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use escaper::decode_html;
 use jiff::Timestamp;
@@ -14,11 +13,11 @@ use wowsunpack::game_params::types::Species;
 
 use crate::ui::replay_parser::Damage;
 use crate::ui::replay_parser::Hits;
+use crate::ui::replay_parser::PlayerReport;
 use crate::ui::replay_parser::PotentialDamage;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SkillInfo;
 use crate::ui::replay_parser::TranslatedBuild;
-use crate::ui::replay_parser::VehicleReport;
 
 #[derive(Serialize)]
 pub struct Match {
@@ -42,7 +41,7 @@ impl Match {
             battle_result: battle_report.battle_result().cloned(),
         };
 
-        let vehicles: Vec<Vehicle> = ui_report.vehicle_reports().iter().map(Vehicle::new).collect();
+        let vehicles: Vec<Vehicle> = ui_report.player_reports().iter().map(Vehicle::new).collect();
 
         let mut match_data =
             Match { vehicles, metadata, game_chat: battle_report.game_chat().iter().filter(|message| message.sender_relation.is_some()).map(Message::from).collect() };
@@ -355,22 +354,22 @@ pub struct Vehicle {
 }
 
 impl Vehicle {
-    fn new(value: &VehicleReport) -> Self {
-        let vehicle_entity = value.vehicle();
-        let player_entity = vehicle_entity.player().expect("vehicle has no player?");
-        let player = Player::from(Arc::as_ref(player_entity));
+    fn new(value: &PlayerReport) -> Self {
+        let player_data = value.player();
+        let vehicle_entity = player_data.vehicle_entity();
+        let player = Player::from(player_data);
         Self {
             player,
-            index: player_entity.vehicle().index().to_string(),
+            index: player_data.vehicle().index().to_string(),
             name: value.ship_name().to_string(),
-            nation: player_entity.vehicle().nation().to_string(),
-            class: player_entity.vehicle().species().expect("no species"),
-            tier: player_entity.vehicle().data().vehicle_ref().expect("no vehicle ref").level(),
+            nation: player_data.vehicle().nation().to_string(),
+            class: player_data.vehicle().species().expect("no species"),
+            tier: player_data.vehicle().data().vehicle_ref().expect("no vehicle ref").level(),
             is_test_ship: value.is_test_ship(),
             is_enemy: value.is_enemy(),
-            raw_config: Some(vehicle_entity.props().ship_config().clone()),
+            raw_config: vehicle_entity.map(|v| v.props().ship_config().clone()),
             translated_build: value.translated_build().cloned(),
-            captain_id: vehicle_entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string(),
+            captain_id: vehicle_entity.and_then(|v| v.captain()).map(|captain| captain.index()).unwrap_or("PCW001").to_string(),
             server_results: if value.actual_damage_report().is_some() {
                 Some(ServerResults {
                     xp: value.base_xp().unwrap_or_default(),

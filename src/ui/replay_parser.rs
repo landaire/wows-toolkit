@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::BufWriter;
 use std::io::Write;
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
@@ -295,8 +296,10 @@ pub struct TranslatedBuild {
 }
 
 impl TranslatedBuild {
-    pub fn new(vehicle_entity: &VehicleEntity, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+    pub fn new(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+        let vehicle_entity = player.vehicle_entity()?;
         let config = vehicle_entity.props().ship_config();
+        let species = player.vehicle().species()?;
         let result = Self {
             modules: config
                 .modernization()
@@ -325,9 +328,9 @@ impl TranslatedBuild {
                     Some(TranslatedAbility { name, game_params_name })
                 })
                 .collect(),
-            captain_skills: vehicle_entity.commander_skills().map(|skills| {
+            captain_skills: vehicle_entity.commander_skills(species.clone()).map(|skills| {
                 let mut skills: Vec<TranslatedCrewSkill> =
-                    skills.iter().filter_map(|skill| Some(TranslatedCrewSkill::new(skill, vehicle_entity.player()?.vehicle().species()?, metadata_provider))).collect();
+                    skills.iter().filter_map(|skill| Some(TranslatedCrewSkill::new(skill, species.clone(), metadata_provider))).collect();
 
                 skills.sort_by_key(|skill| skill.tier);
 
@@ -396,8 +399,8 @@ struct Achievement {
     count: usize,
 }
 
-pub struct VehicleReport {
-    vehicle: Arc<VehicleEntity>,
+pub struct PlayerReport {
+    player: Arc<Player>,
     color: Color32,
     name_text: RichText,
     clan_text: Option<RichText>,
@@ -453,7 +456,7 @@ pub struct VehicleReport {
 }
 
 #[allow(dead_code)]
-impl VehicleReport {
+impl PlayerReport {
     fn remove_nda_info(&mut self) {
         self.observed_damage = 0;
         self.observed_damage_text = "NDA".to_string();
@@ -472,8 +475,12 @@ impl VehicleReport {
         self.crits = Some(0);
     }
 
-    pub fn vehicle(&self) -> &VehicleEntity {
-        &self.vehicle
+    pub fn player(&self) -> &Player {
+        &self.player
+    }
+
+    pub fn vehicle(&self) -> Option<&VehicleEntity> {
+        self.player.vehicle_entity()
     }
 
     pub fn color(&self) -> Color32 {
@@ -704,8 +711,8 @@ impl Ord for SortKey {
 
 pub struct UiReport {
     match_timestamp: Timestamp,
-    self_player: Option<Arc<VehicleEntity>>,
-    vehicle_reports: Vec<VehicleReport>,
+    self_player: Option<Arc<Player>>,
+    player_reports: Vec<PlayerReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
@@ -734,19 +741,19 @@ impl UiReport {
 
         let match_timestamp = util::replay_timestamp(&replay_file.meta);
 
-        let players = report.player_entities().to_vec();
+        let players = report.players().to_vec();
 
         let mut divisions: HashMap<u32, char> = Default::default();
         let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
 
-        let self_player = players.iter().find(|vehicle| vehicle.player().map(|player| player.relation() == 0).unwrap_or(false)).cloned();
+        let self_player = players.iter().find(|player| player.relation() == 0).cloned();
 
         let battle_result = constants_inner.pointer("/COMMON_RESULTS").and_then(|common_results_names| {
             let winner_team_id_idx =
                 common_results_names.as_array().and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "winner_team_id").unwrap_or_default()))?;
             let battle_results: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
 
-            let self_team_id = self_player.as_ref().and_then(|vehicle| vehicle.player().map(|player| player.team_id()))?;
+            let self_team_id = self_player.as_ref().map(|player| player.team_id())?;
 
             let common_list = battle_results.pointer("/commonList")?.as_array()?;
             let winning_team_id = common_list.get(winner_team_id_idx)?.as_i64()?;
@@ -762,12 +769,13 @@ impl UiReport {
 
         let locale = "en-US";
 
-        let player_reports = players.iter().filter_map(|vehicle| {
-            let player = vehicle.player()?;
+        let player_reports = players.iter().filter_map(|player| {
+            // Get the VehicleEntity for this player
+            let vehicle = player.vehicle_entity()?;
             let is_enemy = player.relation() > 1;
             let mut player_color = player_color_for_team_relation(player.relation());
 
-            if let Some(self_player) = self_player.as_ref().and_then(|vehicle| vehicle.player().cloned())
+            if let Some(self_player) = self_player.as_ref()
                 && self_player.db_id() != player.db_id()
                 && self_player.division_id() > 0
                 && player.division_id() == self_player.division_id()
@@ -1083,7 +1091,7 @@ impl UiReport {
 
             let species = vehicle_param.species().expect("ship has no species?");
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
-                .commander_skills()
+                .commander_skills(species.clone())
                 .map(|skills| {
                     let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
                     let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
@@ -1098,7 +1106,7 @@ impl UiReport {
                 })
                 .unwrap_or((0, 0, 0, 0));
 
-            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills, vehicle.commander_skills());
+            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills, vehicle.commander_skills(species.clone()));
 
             let skill_info = SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
 
@@ -1220,8 +1228,8 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let report = VehicleReport {
-                vehicle: Arc::clone(vehicle),
+            let report = PlayerReport {
+                player: Arc::clone(player),
                 color: player_color,
                 name_text,
                 clan_text,
@@ -1263,7 +1271,7 @@ impl UiReport {
                 received_damage_report,
                 kills,
                 observed_kills,
-                translated_build: TranslatedBuild::new(vehicle, metadata_provider),
+                translated_build: TranslatedBuild::new(player, metadata_provider),
                 hits,
                 hits_report,
                 hits_text,
@@ -1276,29 +1284,21 @@ impl UiReport {
             Some(report)
         });
 
-        let mut vehicle_reports: Vec<VehicleReport> = player_reports.collect();
+        let mut player_reports: Vec<PlayerReport> = player_reports.collect();
         let mut all_received_damages = HashMap::new();
 
         // For each player report, we need to update the damage interactions so they
         // have the correct received damage
-        for report in &vehicle_reports {
+        for report in &player_reports {
             let mut received_damages = HashMap::new();
             let Some(damage_interactions) = report.damage_interactions.as_ref() else {
                 continue;
             };
 
-            let Some(this_player) = report.vehicle().player() else {
-                continue;
-            };
+            let this_player = report.player();
 
             for player_id in damage_interactions.keys() {
-                let Some(other_player) = vehicle_reports.iter().find(|report| {
-                    let Some(player_info) = report.vehicle().player() else {
-                        return false;
-                    };
-
-                    player_info.db_id() == *player_id
-                }) else {
+                let Some(other_player) = player_reports.iter().find(|report| report.player().db_id() == *player_id) else {
                     continue;
                 };
 
@@ -1314,11 +1314,9 @@ impl UiReport {
             all_received_damages.insert(this_player.db_id(), received_damages);
         }
 
-        for report in &mut vehicle_reports {
+        for report in &mut player_reports {
             let total_received_damage = report.received_damage().unwrap_or_default();
-            let Some(this_player) = report.vehicle().player() else {
-                continue;
-            };
+            let this_player = report.player();
 
             let Some(this_player_received_damages) = all_received_damages.remove(&this_player.db_id()) else {
                 continue;
@@ -1346,7 +1344,7 @@ impl UiReport {
 
         Self {
             match_timestamp,
-            vehicle_reports,
+            player_reports,
             self_player,
             replay_sort,
             wows_data,
@@ -1383,10 +1381,10 @@ impl UiReport {
     }
 
     fn sort_players(&mut self, sort_order: SortOrder) {
-        let self_player_team_id = self.self_player.as_ref().expect("no self player?").player().as_ref().expect("no self player player").team_id();
+        let self_player_team_id = self.self_player.as_ref().expect("no self player?").team_id();
 
-        let sort_key = |report: &VehicleReport, column: &SortColumn| {
-            let player = report.vehicle.player().expect("no player?");
+        let sort_key = |report: &PlayerReport, column: &SortColumn| {
+            let player = report.player();
             let team_id = player.team_id() != self_player_team_id;
             let db_id = player.db_id();
 
@@ -1417,13 +1415,13 @@ impl UiReport {
 
         match sort_order {
             SortOrder::Desc(column) => {
-                self.vehicle_reports.sort_unstable_by_key(|report| {
+                self.player_reports.sort_unstable_by_key(|report| {
                     let key = sort_key(report, &column);
                     (key.0, Reverse(key.1), key.2)
                 });
             }
             SortOrder::Asc(column) => {
-                self.vehicle_reports.sort_unstable_by_key(|report| sort_key(report, &column));
+                self.player_reports.sort_unstable_by_key(|report| sort_key(report, &column));
             }
         }
 
@@ -1472,7 +1470,7 @@ impl UiReport {
         self.columns.sort_unstable_by_key(|column| *column as u8);
     }
 
-    fn received_damage_details(&self, report: &VehicleReport, ui: &mut egui::Ui) {
+    fn received_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
         let style = Style::default();
 
         ui.vertical(|ui| {
@@ -1491,10 +1489,7 @@ impl UiReport {
                         continue;
                     }
 
-                    let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
-                        let player = report.vehicle().player().unwrap();
-                        player.db_id() == *interaction.0
-                    }) else {
+                    let Some(interaction_player) = self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0) else {
                         // TODO: Handle bots?
                         continue;
                     };
@@ -1514,7 +1509,7 @@ impl UiReport {
         });
     }
 
-    fn dealt_damage_details(&self, report: &VehicleReport, ui: &mut egui::Ui) {
+    fn dealt_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
         let style = Style::default();
 
         ui.vertical(|ui| {
@@ -1533,10 +1528,7 @@ impl UiReport {
                         continue;
                     }
 
-                    let Some(interaction_player) = self.vehicle_reports().iter().find(|report| {
-                        let player = report.vehicle().player().unwrap();
-                        player.db_id() == *interaction.0
-                    }) else {
+                    let Some(interaction_player) = self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0) else {
                         // In co-op, you may not have an interaction
                         continue;
                     };
@@ -1560,7 +1552,7 @@ impl UiReport {
         let is_expanded = self.is_row_expanded.get(&row_nr).copied().unwrap_or_default();
         let expandedness = ui.ctx().animate_bool(Id::new(row_nr), is_expanded);
 
-        let Some(report) = self.vehicle_reports.get(row_nr as usize) else {
+        let Some(report) = self.player_reports.get(row_nr as usize) else {
             return;
         };
 
@@ -1610,7 +1602,8 @@ impl UiReport {
                         ui.label(report.name_text.clone());
 
                         // Add icons for player properties
-                        if let Some(player) = report.vehicle.player() {
+                        {
+                            let player = report.player();
                             // Hidden profile icon
                             if player.is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
@@ -1810,24 +1803,25 @@ impl UiReport {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
-                                    let url = build_ship_config_url(&report.vehicle, &metadata_provider);
-
-                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
+                                        ui.ctx().open_url(OpenUrl::new_tab(url));
+                                    }
                                     ui.close_kind(UiKind::Menu);
                                 }
 
                                 if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
-                                    let url = build_ship_config_url(&report.vehicle, &metadata_provider);
-                                    ui.ctx().copy_text(url);
+                                    if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
+                                        ui.ctx().copy_text(url);
 
-                                    let _ = self.background_task_sender.as_ref().map(|sender| {
-                                        sender.send(BackgroundTask {
-                                            receiver: None,
-                                            kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
-                                        })
-                                    });
+                                        let _ = self.background_task_sender.as_ref().map(|sender| {
+                                            sender.send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                            })
+                                        });
+                                    }
 
                                     ui.close_kind(UiKind::Menu);
                                 }
@@ -1835,14 +1829,15 @@ impl UiReport {
                                 if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
-                                    let url = build_short_ship_config_url(&report.vehicle, &metadata_provider);
-                                    ui.ctx().copy_text(url);
-                                    let _ = self.background_task_sender.as_ref().map(|sender| {
-                                        sender.send(BackgroundTask {
-                                            receiver: None,
-                                            kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
-                                        })
-                                    });
+                                    if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider) {
+                                        ui.ctx().copy_text(url);
+                                        let _ = self.background_task_sender.as_ref().map(|sender| {
+                                            sender.send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                            })
+                                        });
+                                    }
 
                                     ui.close_kind(UiKind::Menu);
                                 }
@@ -1851,7 +1846,7 @@ impl UiReport {
                             }
 
                             if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
-                                if let Some(url) = build_wows_numbers_url(&report.vehicle) {
+                                if let Some(url) = build_wows_numbers_url(report.player()) {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
 
@@ -1861,7 +1856,7 @@ impl UiReport {
                             if self.debug_mode {
                                 ui.separator();
 
-                                if let Some(player) = report.vehicle.player()
+                                if let Some(player) = Some(report.player())
                                     && ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked()
                                 {
                                     let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
@@ -2068,8 +2063,8 @@ impl UiReport {
         self.match_timestamp
     }
 
-    pub fn vehicle_reports(&self) -> &[VehicleReport] {
-        &self.vehicle_reports
+    pub fn player_reports(&self) -> &[PlayerReport] {
+        &self.player_reports
     }
 
     pub fn battle_result(&self) -> Option<BattleResult> {
@@ -2078,12 +2073,12 @@ impl UiReport {
 
     /// Populate Personal Rating for all players using the provided PR data
     pub fn populate_personal_ratings(&mut self, pr_data: &crate::personal_rating::PersonalRatingData) {
-        for report in &mut self.vehicle_reports {
+        for report in &mut self.player_reports {
             if report.personal_rating.is_some() {
                 continue;
             }
 
-            let Some(player) = report.vehicle.player() else {
+            let Some(player) = Some(report.player()) else {
                 continue;
             };
 
@@ -2511,7 +2506,7 @@ impl Replay {
         let vehicle = self.player_vehicle()?;
         let battle_result = self.battle_result()?;
         let ui_report = self.ui_report.as_ref()?;
-        let self_report = ui_report.vehicle_reports().iter().find(|report| report.is_self())?;
+        let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
 
         let is_win = matches!(battle_result, BattleResult::Win(_));
 
@@ -2564,7 +2559,7 @@ impl ToolkitTabViewer<'_> {
 
         let table = egui_table::Table::new()
             .id_salt("replay_player_list")
-            .num_rows(ui_report.vehicle_reports.len() as u64)
+            .num_rows(ui_report.player_reports.len() as u64)
             .columns(columns)
             .num_sticky_cols(3)
             .headers([egui_table::HeaderRow { height: 14.0f32, groups: Default::default() }])
@@ -2622,8 +2617,7 @@ impl ToolkitTabViewer<'_> {
         let mut hide_my_stats = false;
         let mut hide_my_stats_changed = false;
         if let Some(report) = replay_file.battle_report.as_ref() {
-            let self_entity = report.self_entity();
-            let self_player = self_entity.player().unwrap();
+            let self_player = report.self_player();
             ui.horizontal(|ui| {
                 if !self_player.clan().is_empty() {
                     ui.label(format!("[{}]", self_player.clan()));
@@ -2656,7 +2650,7 @@ impl ToolkitTabViewer<'_> {
                     let mut team_damage = 0;
                     let mut red_team_damage = 0;
 
-                    for vehicle_report in &ui_report.vehicle_reports {
+                    for vehicle_report in &ui_report.player_reports {
                         if vehicle_report.is_enemy {
                             red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
                         } else {
@@ -2816,7 +2810,7 @@ impl ToolkitTabViewer<'_> {
             // Synchronize the hide_my_stats value
             if hide_my_stats_changed
                 && let Some(ui_report) = replay_file.ui_report.as_mut()
-                && let Some(self_report) = ui_report.vehicle_reports.iter_mut().find(|report| report.is_self)
+                && let Some(self_report) = ui_report.player_reports.iter_mut().find(|report| report.is_self)
             {
                 self_report.manual_stat_hide_toggle = hide_my_stats;
             }
@@ -3308,7 +3302,7 @@ impl ToolkitTabViewer<'_> {
             let mut all_achievements: Vec<Achievement> = Vec::new();
             for replay in &self.tab_state.session_stats.session_replays {
                 let replay = replay.read();
-                let Some(self_report) = replay.ui_report.as_ref().and_then(|report| report.vehicle_reports().iter().find(|report| report.is_self())) else {
+                let Some(self_report) = replay.ui_report.as_ref().and_then(|report| report.player_reports().iter().find(|report| report.is_self())) else {
                     continue;
                 };
 

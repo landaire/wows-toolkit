@@ -625,24 +625,21 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                                 debug!("we've never seen this replay before");
                                 if data.should_send_replays && is_valid_game_type_for_shipbuilds {
                                     // Send the replay builds to the remote server
-                                    for vehicle in report.player_entities() {
+                                    for player in report.players() {
                                         #[cfg(not(feature = "shipbuilds_debugging"))]
                                         let url = "https://shipbuilds.com/api/ship_builds";
                                         #[cfg(feature = "shipbuilds_debugging")]
                                         let url = "http://192.168.1.215:3000/api/ship_builds";
 
-                                        if let Some(player) = vehicle.player() {
+                                        if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
+                                            player,
+                                            player.realm().to_string(),
+                                            report.version(),
+                                            game_type.clone(),
+                                            &metadata_provider,
+                                        ) {
                                             // TODO: Bulk API
-                                            let res = client
-                                                .post(url)
-                                                .json(&build_tracker::BuildTrackerPayload::build_from(
-                                                    vehicle,
-                                                    player.realm().to_string(),
-                                                    report.version(),
-                                                    game_type.clone(),
-                                                    &metadata_provider,
-                                                ))
-                                                .send();
+                                            let res = client.post(url).json(&payload).send();
                                             if let Err(e) = res {
                                                 error!("error sending request: {:?}", e);
                                                 if e.is_connect() {
@@ -650,7 +647,7 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                                                 }
                                             }
                                         } else {
-                                            error!("no player for replay?");
+                                            error!("no vehicle entity for player?");
                                         }
                                     }
                                     debug!("Successfully sent all builds");

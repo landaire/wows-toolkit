@@ -591,7 +591,7 @@ impl SessionStats {
             let Some(ui_report) = replay.ui_report.as_ref() else {
                 continue;
             };
-            let Some(self_report) = ui_report.vehicle_reports().iter().find(|report| report.is_self()) else { continue };
+            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else { continue };
 
             performance_info.total_frags += self_report.kills().unwrap_or_default();
             performance_info.max_frags = performance_info.max_frags.max(self_report.kills().unwrap_or_default());
@@ -621,7 +621,7 @@ impl SessionStats {
                 let replay = replay.read();
 
                 let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.vehicle_reports().iter().find(|report| report.is_self())?;
+                let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
 
                 Some((replay.vehicle_name(metadata_provider), self_report.actual_damage()?))
             })
@@ -635,7 +635,7 @@ impl SessionStats {
                 let replay = replay.read();
 
                 let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.vehicle_reports().iter().find(|report| report.is_self())?;
+                let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
 
                 Some((replay.vehicle_name(metadata_provider), self_report.kills()?))
             })
@@ -650,7 +650,7 @@ impl SessionStats {
                 return accum;
             };
 
-            let Some(self_report) = ui_report.vehicle_reports().iter().find(|report| report.is_self()) else { return accum };
+            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else { return accum };
 
             accum + self_report.kills().unwrap_or_default()
         })

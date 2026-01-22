@@ -24,7 +24,7 @@ egui_table = "0.6.0"
 egui_commonmark = "0.22"
 
 tracing = "0.1"
-wows_replays = { version = "0.10.0", features = ["arc"] }
+wows_replays = { version = "0.11.0", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
 wowsunpack = { version = "0.11", default-features = false, features = [
     "arc",

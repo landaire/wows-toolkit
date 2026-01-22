@@ -1,5 +1,5 @@
 use serde::Serialize;
-use wows_replays::analyzer::battle_controller::VehicleEntity;
+use wows_replays::analyzer::battle_controller::Player;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -35,12 +35,12 @@ fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> V
 }
 
 impl BuildTrackerPayload {
-    pub fn build_from(entity: &VehicleEntity, realm: String, version: Version, game_type: String, metadata_provider: &GameMetadataProvider) -> Self {
+    pub fn build_from(player: &Player, realm: String, version: Version, game_type: String, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+        let entity = player.vehicle_entity()?;
         let config = entity.props().ship_config();
-        let player = entity.player().expect("entity has no player?");
         let ship = player.vehicle();
 
-        Self {
+        Some(Self {
             game_version: version,
             realm,
             player_id: player.db_id(),
@@ -49,10 +49,10 @@ impl BuildTrackerPayload {
             modules: indicies_to_index(config.units(), metadata_provider),
             upgrades: indicies_to_index(config.modernization(), metadata_provider),
             captain: entity.captain().map(|capt| capt.index()).unwrap_or("PCW001").to_string(),
-            skills: entity.commander_skills_raw().to_vec(),
+            skills: entity.commander_skills_raw(ship.species()?).to_vec(),
             consumables: indicies_to_index(config.abilities(), metadata_provider),
             signals: indicies_to_index(config.signals(), metadata_provider),
             game_type,
-        }
+        })
     }
 }
