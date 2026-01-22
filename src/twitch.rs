@@ -80,7 +80,12 @@ impl FromStr for Token {
             }
         }
 
-        Ok(Token { username: username.ok_or(())?, user_id: user_id.ok_or(())?, client_id: client_id.ok_or(())?, oauth_token: oauth_token.ok_or(())? })
+        Ok(Token {
+            username: username.ok_or(())?,
+            user_id: user_id.ok_or(())?,
+            client_id: client_id.ok_or(())?,
+            oauth_token: oauth_token.ok_or(())?,
+        })
     }
 }
 
@@ -108,9 +113,18 @@ impl TwitchState {
         &self.client
     }
 
-    pub fn player_is_potential_stream_sniper(&self, name: &str, match_timestamp: Timestamp) -> Option<HashMap<String, Vec<Timestamp>>> {
+    pub fn player_is_potential_stream_sniper(
+        &self,
+        name: &str,
+        match_timestamp: Timestamp,
+    ) -> Option<HashMap<String, Vec<Timestamp>>> {
         let mut results = HashMap::new();
-        let name_chunks = name.chars().collect::<Vec<char>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<String>>();
+        let name_chunks = name
+            .chars()
+            .collect::<Vec<char>>()
+            .chunks(5)
+            .map(|c| c.iter().collect::<String>())
+            .collect::<Vec<String>>();
 
         for (viewer_name, viewer_timestamps) in &self.participants {
             if (name.len() > 5 && levenshtein::levenshtein(viewer_name, name) <= 3)

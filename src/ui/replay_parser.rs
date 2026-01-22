@@ -227,7 +227,8 @@ static HITS_DESCRIPTIONS: [(&str, &str); 29] = [
     (HITS_PHASER_LASER, "Phaser Laser"),
 ];
 
-static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] = [("agro_art", "Artillery"), ("agro_tpd", "Torpedo"), ("agro_air", "Planes"), ("agro_dbomb", "Depth Charge")];
+static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] =
+    [("agro_art", "Artillery"), ("agro_tpd", "Torpedo"), ("agro_air", "Planes"), ("agro_dbomb", "Depth Charge")];
 
 fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
     wows_data.ship_icons.get(&species).cloned()
@@ -305,13 +306,17 @@ impl TranslatedBuild {
                 .modernization()
                 .iter()
                 .filter_map(|id| {
-                    let game_params_name = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?.name().to_string();
+                    let game_params_name =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
+                            .name()
+                            .to_string();
                     let translation_id = format!("IDS_TITLE_{}", game_params_name.to_uppercase());
                     let name = metadata_provider.localized_name_from_id(&translation_id);
 
                     let translation_id = format!("IDS_DESC_{}", game_params_name.to_uppercase());
-                    let description =
-                        metadata_provider.localized_name_from_id(&translation_id).and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
+                    let description = metadata_provider
+                        .localized_name_from_id(&translation_id)
+                        .and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
 
                     Some(TranslatedModule { name, description, game_params_name })
                 })
@@ -320,7 +325,10 @@ impl TranslatedBuild {
                 .abilities()
                 .iter()
                 .filter_map(|id| {
-                    let game_params_name = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?.name().to_string();
+                    let game_params_name =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
+                            .name()
+                            .to_string();
 
                     let translation_id = format!("IDS_DOCK_CONSUME_TITLE_{}", game_params_name.to_uppercase());
                     let name = metadata_provider.localized_name_from_id(&translation_id);
@@ -329,8 +337,10 @@ impl TranslatedBuild {
                 })
                 .collect(),
             captain_skills: vehicle_entity.commander_skills(species.clone()).map(|skills| {
-                let mut skills: Vec<TranslatedCrewSkill> =
-                    skills.iter().filter_map(|skill| Some(TranslatedCrewSkill::new(skill, species.clone(), metadata_provider))).collect();
+                let mut skills: Vec<TranslatedCrewSkill> = skills
+                    .iter()
+                    .filter_map(|skill| Some(TranslatedCrewSkill::new(skill, species.clone(), metadata_provider)))
+                    .collect();
 
                 skills.sort_by_key(|skill| skill.tier);
 
@@ -749,8 +759,9 @@ impl UiReport {
         let self_player = players.iter().find(|player| player.relation() == 0).cloned();
 
         let battle_result = constants_inner.pointer("/COMMON_RESULTS").and_then(|common_results_names| {
-            let winner_team_id_idx =
-                common_results_names.as_array().and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "winner_team_id").unwrap_or_default()))?;
+            let winner_team_id_idx = common_results_names.as_array().and_then(|names| {
+                names.iter().position(|name| name.as_str().map(|name| name == "winner_team_id").unwrap_or_default())
+            })?;
             let battle_results: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
 
             let self_team_id = self_player.as_ref().map(|player| player.team_id())?;
@@ -794,7 +805,8 @@ impl UiReport {
                 })
                 .unwrap_or_else(|| "unk".to_string());
 
-            let icon = ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), &wows_data_inner);
+            let icon =
+                ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), &wows_data_inner);
 
             let name_color = if player.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
@@ -804,12 +816,19 @@ impl UiReport {
 
             // Assign division
             let div = player.division_id();
-            let division_char = if div > 0 { Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?'))) } else { None };
+            let division_char = if div > 0 {
+                Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')))
+            } else {
+                None
+            };
 
             let div_text = division_char.map(|div| format!("({div})"));
 
-            let clan_text =
-                if !player.clan().is_empty() { Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap())) } else { None };
+            let clan_text = if !player.clan().is_empty() {
+                Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()))
+            } else {
+                None
+            };
             let name_text = RichText::new(player.name()).color(name_color);
 
             let (base_xp, base_xp_text) = if let Some(base_xp) = vehicle.results_info().and_then(|info| {
@@ -832,7 +851,10 @@ impl UiReport {
                 (None, None)
             };
 
-            let ship_name = metadata_provider.localized_name_from_param(vehicle_param).map(ToString::to_string).unwrap_or_else(|| format!("{}", vehicle_param.id()));
+            let ship_name = metadata_provider
+                .localized_name_from_param(vehicle_param)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("{}", vehicle_param.id()));
 
             let observed_damage = vehicle.damage().ceil() as u64;
             let observed_damage_text = separate_number(observed_damage, Some(locale));
@@ -842,15 +864,21 @@ impl UiReport {
             // Actual damage done to other players
             let (damage, damage_text, damage_hover_text, damage_report) = results_info
                 .and_then(|info_array| {
-                    let total_damage_index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
+                    let total_damage_index =
+                        constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
 
                     info_array[total_damage_index].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
                         // First pass over damage numbers: grab the longest description so that we can later format it
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
-                                info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                    .as_u64()? as usize;
+                                info_array[idx]
+                                    .as_number()
+                                    .and_then(|number| number.as_u64())
+                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
                             })
                             .max()
                             .unwrap_or_default()
@@ -860,11 +888,16 @@ impl UiReport {
                         let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                    .as_u64()? as usize;
                                 info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                     if num > 0 {
                                         let num_str = separate_number(num, Some(locale));
-                                        Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
+                                        Some((
+                                            (key.to_string(), num),
+                                            format!("{description:<longest_width$}: {num_str}"),
+                                        ))
                                     } else {
                                         None
                                     }
@@ -876,7 +909,8 @@ impl UiReport {
 
                         let damage_report_text = separate_number(damage_number, Some(locale));
                         let damage_report_text = RichText::new(damage_report_text).color(player_color);
-                        let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+                        let damage_report_hover_text =
+                            RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
 
                         (
                             Some(damage_number),
@@ -905,8 +939,13 @@ impl UiReport {
                     let longest_width = HITS_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
-                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                            let idx = constants_inner
+                                .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                .as_u64()? as usize;
+                            info_array[idx]
+                                .as_number()
+                                .and_then(|number| number.as_u64())
+                                .and_then(|num| if num > 0 { Some(description.len()) } else { None })
                         })
                         .max()
                         .unwrap_or_default()
@@ -916,7 +955,9 @@ impl UiReport {
                     let (all_hits, breakdowns): (Vec<(String, u64)>, Vec<String>) = HITS_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
+                            let idx = constants_inner
+                                .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                .as_u64()? as usize;
                             info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
@@ -941,7 +982,11 @@ impl UiReport {
                         + all_hits.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
 
                     let relevant_hits_number =
-                        if vehicle_param.species().map(|species| species == Species::AirCarrier).unwrap_or(false) { plane_hits } else { main_hits };
+                        if vehicle_param.species().map(|species| species == Species::AirCarrier).unwrap_or(false) {
+                            plane_hits
+                        } else {
+                            main_hits
+                        };
 
                     let main_hits_text = separate_number(relevant_hits_number, Some(locale));
 
@@ -965,121 +1010,148 @@ impl UiReport {
                 .unwrap_or_default();
 
             // Received damage
-            let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) = results_info
-                .map(|info_array| {
-                    // First pass over damage numbers: grab the longest description so that we can later format it
-                    let longest_width = DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?.as_u64()? as usize;
-                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| if num > 0 { Some(description.len()) } else { None })
-                        })
-                        .max()
-                        .unwrap_or_default()
-                        + 1;
-
-                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                    let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?.as_u64()? as usize;
-                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
-                                if num > 0 {
-                                    let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                                } else {
-                                    None
-                                }
+            let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
+                results_info
+                    .map(|info_array| {
+                        // First pass over damage numbers: grab the longest description so that we can later format it
+                        let longest_width = DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .filter_map(|(key, description)| {
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?
+                                    .as_u64()? as usize;
+                                info_array[idx]
+                                    .as_number()
+                                    .and_then(|number| number.as_u64())
+                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
                             })
-                        })
-                        .collect();
+                            .max()
+                            .unwrap_or_default()
+                            + 1;
 
-                    let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
+                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .filter_map(|(key, description)| {
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?
+                                    .as_u64()? as usize;
+                                info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
+                                    if num > 0 {
+                                        let num_str = separate_number(num, Some(locale));
+                                        Some((
+                                            (key.to_string(), num),
+                                            format!("{description:<longest_width$}: {num_str}"),
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .collect();
 
-                    let total_received = all_damage.values().fold(0, |total, dmg| total + *dmg);
+                        let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
 
-                    let received_damage_report_text = separate_number(total_received, Some(locale));
-                    let received_damage_report_text = RichText::new(received_damage_report_text).color(player_color);
-                    let received_damage_report_hover_text = RichText::new(breakdowns.iter().join("\n")).font(FontId::monospace(12.0));
+                        let total_received = all_damage.values().fold(0, |total, dmg| total + *dmg);
 
-                    (
-                        Some(total_received),
-                        Some(received_damage_report_text),
-                        Some(received_damage_report_hover_text),
-                        Some(Damage {
-                            ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
-                            sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
-                            he: all_damage.get(DAMAGE_MAIN_HE).copied(),
-                            he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
-                            sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
-                            torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
-                            deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
-                            fire: all_damage.get(DAMAGE_FIRE).copied(),
-                            flooding: all_damage.get(DAMAGE_FLOOD).copied(),
-                        }),
-                    )
-                })
-                .unwrap_or_default();
+                        let received_damage_report_text = separate_number(total_received, Some(locale));
+                        let received_damage_report_text =
+                            RichText::new(received_damage_report_text).color(player_color);
+                        let received_damage_report_hover_text =
+                            RichText::new(breakdowns.iter().join("\n")).font(FontId::monospace(12.0));
+
+                        (
+                            Some(total_received),
+                            Some(received_damage_report_text),
+                            Some(received_damage_report_hover_text),
+                            Some(Damage {
+                                ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
+                                sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
+                                he: all_damage.get(DAMAGE_MAIN_HE).copied(),
+                                he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
+                                sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
+                                torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
+                                deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
+                                fire: all_damage.get(DAMAGE_FIRE).copied(),
+                                flooding: all_damage.get(DAMAGE_FLOOD).copied(),
+                            }),
+                        )
+                    })
+                    .unwrap_or_default();
 
             // Spotting damage
-            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) = results_info.and_then(|info_array| {
-                let idx = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/scouting_damage")?.as_u64()? as usize;
-                info_array[idx].as_number().and_then(|number| number.as_u64())
-            }) {
+            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) =
+                results_info.and_then(|info_array| {
+                    let idx =
+                        constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/scouting_damage")?.as_u64()? as usize;
+                    info_array[idx].as_number().and_then(|number| number.as_u64())
+                }) {
                 (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
             } else {
                 (None, None)
             };
 
-            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) = results_info
-                .map(|info_array| {
-                    // First pass over damage numbers: grab the longest description so that we can later format it
-                    let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
-                            info_array[idx]
-                                .as_number()
-                                .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
-                                .and_then(|num| if num > 0 { Some(description.len()) } else { None })
-                        })
-                        .max()
-                        .unwrap_or_default()
-                        + 1;
-
-                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                    let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
-                        .iter()
-                        .filter_map(|(key, description)| {
-                            let idx = constants_inner.pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?.as_u64()? as usize;
-                            info_array[idx].as_number().and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64))).and_then(|num| {
-                                if num > 0 {
-                                    let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                                } else {
-                                    None
-                                }
+            let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
+                results_info
+                    .map(|info_array| {
+                        // First pass over damage numbers: grab the longest description so that we can later format it
+                        let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .filter_map(|(key, description)| {
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                    .as_u64()? as usize;
+                                info_array[idx]
+                                    .as_number()
+                                    .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
+                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
                             })
-                        })
-                        .unzip();
-                    let all_agro: HashMap<String, u64> = HashMap::from_iter(all_agro);
+                            .max()
+                            .unwrap_or_default()
+                            + 1;
 
-                    let total_agro = all_agro.values().sum();
-                    let damage_report_text = separate_number(total_agro, Some(locale));
-                    let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                        let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .filter_map(|(key, description)| {
+                                let idx = constants_inner
+                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
+                                    .as_u64()? as usize;
+                                info_array[idx]
+                                    .as_number()
+                                    .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
+                                    .and_then(|num| {
+                                        if num > 0 {
+                                            let num_str = separate_number(num, Some(locale));
+                                            Some((
+                                                (key.to_string(), num),
+                                                format!("{description:<longest_width$}: {num_str}"),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            })
+                            .unzip();
+                        let all_agro: HashMap<String, u64> = HashMap::from_iter(all_agro);
 
-                    (
-                        Some(total_agro),
-                        Some(damage_report_text),
-                        Some(damage_report_hover_text),
-                        Some(PotentialDamage {
-                            artillery: all_agro.get("agro_art").copied().unwrap_or_default(),
-                            torpedoes: all_agro.get("agro_tpd").copied().unwrap_or_default(),
-                            planes: all_agro.get("agro_air").copied().unwrap_or_default(),
-                        }),
-                    )
-                })
-                .unwrap_or_default();
+                        let total_agro = all_agro.values().sum();
+                        let damage_report_text = separate_number(total_agro, Some(locale));
+                        let damage_report_hover_text =
+                            RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+
+                        (
+                            Some(total_agro),
+                            Some(damage_report_text),
+                            Some(damage_report_hover_text),
+                            Some(PotentialDamage {
+                                artillery: all_agro.get("agro_art").copied().unwrap_or_default(),
+                                torpedoes: all_agro.get("agro_tpd").copied().unwrap_or_default(),
+                                planes: all_agro.get("agro_air").copied().unwrap_or_default(),
+                            }),
+                        )
+                    })
+                    .unwrap_or_default();
 
             let (time_lived, time_lived_text) = vehicle
                 .death_info()
@@ -1093,7 +1165,9 @@ impl UiReport {
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
                 .commander_skills(species.clone())
                 .map(|skills| {
-                    let points = skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
+                    let points = skills
+                        .iter()
+                        .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
                     let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
                     let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
                         if skill.tier().get_for_species(species.clone()) == 1 {
@@ -1106,9 +1180,16 @@ impl UiReport {
                 })
                 .unwrap_or((0, 0, 0, 0));
 
-            let (label, hover_text) = util::colorize_captain_points(skill_points, num_skills, highest_tier, num_tier_1_skills, vehicle.commander_skills(species.clone()));
+            let (label, hover_text) = util::colorize_captain_points(
+                skill_points,
+                num_skills,
+                highest_tier,
+                num_tier_1_skills,
+                vehicle.commander_skills(species.clone()),
+            );
 
-            let skill_info = SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
+            let skill_info =
+                SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
 
             let (damage_interactions, fires, floods, cits, crits) = constants_inner
                 .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/interactions")
@@ -1125,25 +1206,42 @@ impl UiReport {
                         // Not sure if this can ever fail, but we can report wrong info to a "nobody" player
                         // or something
                         let victim_id: i64 = victim.parse().unwrap_or_default();
-                        let vehicle_interaction_details_idx = constants_inner.pointer("/CLIENT_VEH_INTERACTION_DETAILS")?.as_array();
+                        let vehicle_interaction_details_idx =
+                            constants_inner.pointer("/CLIENT_VEH_INTERACTION_DETAILS")?.as_array();
 
                         fires += vehicle_interaction_details_idx
-                            .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default()))
+                            .and_then(|names| {
+                                names
+                                    .iter()
+                                    .position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default())
+                            })
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
                         floods += vehicle_interaction_details_idx
-                            .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default()))
+                            .and_then(|names| {
+                                names
+                                    .iter()
+                                    .position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default())
+                            })
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
                         cits += vehicle_interaction_details_idx
-                            .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "citadels").unwrap_or_default()))
+                            .and_then(|names| {
+                                names
+                                    .iter()
+                                    .position(|name| name.as_str().map(|name| name == "citadels").unwrap_or_default())
+                            })
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
                         crits += vehicle_interaction_details_idx
-                            .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default()))
+                            .and_then(|names| {
+                                names
+                                    .iter()
+                                    .position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default())
+                            })
                             .and_then(|idx| victim_interactions[idx].as_u64())
                             .unwrap_or_default();
 
@@ -1153,7 +1251,11 @@ impl UiReport {
                         // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
                         let all_damage: u64 = DAMAGE_DESCRIPTIONS.iter().fold(0, |accum, (key, _description)| {
                             let damage = vehicle_interaction_details_idx
-                                .and_then(|names| names.iter().position(|name| name.as_str().map(|name| name == *key).unwrap_or_default()))
+                                .and_then(|names| {
+                                    names
+                                        .iter()
+                                        .position(|name| name.as_str().map(|name| name == *key).unwrap_or_default())
+                                })
                                 .and_then(|idx| victim_interactions[idx].as_u64())
                                 .unwrap_or_default();
 
@@ -1162,11 +1264,14 @@ impl UiReport {
 
                         damage_interaction.damage_dealt = all_damage;
                         if damage_interaction.damage_dealt > 0 {
-                            damage_interaction.damage_dealt_text = separate_number(damage_interaction.damage_dealt, Some(locale));
+                            damage_interaction.damage_dealt_text =
+                                separate_number(damage_interaction.damage_dealt, Some(locale));
 
                             if let Some(total_damage) = damage {
-                                damage_interaction.damage_dealt_percentage = (all_damage as f64 / total_damage as f64) * 100.0;
-                                damage_interaction.damage_dealt_percentage_text = format!("{:.0}%", damage_interaction.damage_dealt_percentage);
+                                damage_interaction.damage_dealt_percentage =
+                                    (all_damage as f64 / total_damage as f64) * 100.0;
+                                damage_interaction.damage_dealt_percentage_text =
+                                    format!("{:.0}%", damage_interaction.damage_dealt_percentage);
                             }
                         }
 
@@ -1177,18 +1282,24 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let distance_traveled = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
-                let distance_idx = distance_idx.as_u64()? as usize;
-                results_info?[distance_idx].as_f64()
-            });
+            let distance_traveled =
+                constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
+                    let distance_idx = distance_idx.as_u64()? as usize;
+                    results_info?[distance_idx].as_f64()
+                });
 
-            let kills = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed").and_then(|distance_idx| {
-                let distance_idx = distance_idx.as_i64()? as usize;
-                results_info?[distance_idx].as_i64()
-            });
+            let kills =
+                constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed").and_then(|distance_idx| {
+                    let distance_idx = distance_idx.as_i64()? as usize;
+                    results_info?[distance_idx].as_i64()
+                });
             let observed_kills = vehicle.frags().len() as i64;
 
-            let is_test_ship = vehicle_param.data().vehicle_ref().map(|vehicle| vehicle.group().starts_with("demo")).unwrap_or_default();
+            let is_test_ship = vehicle_param
+                .data()
+                .vehicle_ref()
+                .map(|vehicle| vehicle.group().starts_with("demo"))
+                .unwrap_or_default();
 
             let achievements = constants_inner
                 .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/achievements")
@@ -1204,23 +1315,34 @@ impl UiReport {
                             let achievement_count = achievement_info[1].as_u64()?;
 
                             // Look this achievement up from game params
-                            let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, achievement_id as u32)?;
+                            let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(
+                                metadata_provider,
+                                achievement_id as u32,
+                            )?;
 
                             let ParamData::Achievement(achievement_data) = game_param.data() else {
                                 return None;
                             };
 
-                            let Some(achievement_name) = metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name())) else {
-                                return None;
-                            };
-
-                            let Some(achievement_description) =
-                                metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_DESCRIPTION_{}", achievement_data.ui_name()))
+                            let Some(achievement_name) = metadata_provider
+                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name()))
                             else {
                                 return None;
                             };
 
-                            Some(Achievement { game_param, display_name: achievement_name, description: achievement_description, count: achievement_count as usize })
+                            let Some(achievement_description) = metadata_provider.localized_name_from_id(&format!(
+                                "IDS_ACHIEVEMENT_DESCRIPTION_{}",
+                                achievement_data.ui_name()
+                            )) else {
+                                return None;
+                            };
+
+                            Some(Achievement {
+                                game_param,
+                                display_name: achievement_name,
+                                description: achievement_description,
+                                count: achievement_count as usize,
+                            })
                         })
                         .collect::<Vec<_>>();
 
@@ -1298,7 +1420,8 @@ impl UiReport {
             let this_player = report.player();
 
             for player_id in damage_interactions.keys() {
-                let Some(other_player) = player_reports.iter().find(|report| report.player().db_id() == *player_id) else {
+                let Some(other_player) = player_reports.iter().find(|report| report.player().db_id() == *player_id)
+                else {
                     continue;
                 };
 
@@ -1307,7 +1430,13 @@ impl UiReport {
                         continue;
                     };
 
-                    received_damages.insert(*player_id, (interaction_with_this_player.damage_dealt, interaction_with_this_player.damage_dealt_text.clone()));
+                    received_damages.insert(
+                        *player_id,
+                        (
+                            interaction_with_this_player.damage_dealt,
+                            interaction_with_this_player.damage_dealt_text.clone(),
+                        ),
+                    );
                 }
             }
 
@@ -1333,8 +1462,10 @@ impl UiReport {
 
                 // This should never happen I think?
                 if total_received_damage > 0 {
-                    interacted_player.damage_received_percentage = (received_damage as f64 / total_received_damage as f64) * 100.0;
-                    interacted_player.damage_received_percentage_text = format!("{:.0}%", interacted_player.damage_received_percentage);
+                    interacted_player.damage_received_percentage =
+                        (received_damage as f64 / total_received_damage as f64) * 100.0;
+                    interacted_player.damage_received_percentage_text =
+                        format!("{:.0}%", interacted_player.damage_received_percentage);
                 }
             }
         }
@@ -1394,19 +1525,45 @@ impl UiReport {
                 SortColumn::RawXp => SortKey::i64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
                 SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
-                SortColumn::ObservedDamage => SortKey::u64(Some(if report.should_hide_stats() && !self.debug_mode { 0 } else { report.observed_damage })),
-                SortColumn::ActualDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.actual_damage }),
+                SortColumn::ObservedDamage => SortKey::u64(Some(if report.should_hide_stats() && !self.debug_mode {
+                    0
+                } else {
+                    report.observed_damage
+                })),
+                SortColumn::ActualDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.actual_damage
+                }),
                 SortColumn::SpottingDamage => SortKey::u64(report.spotting_damage),
-                SortColumn::PotentialDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.potential_damage }),
+                SortColumn::PotentialDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.potential_damage
+                }),
                 SortColumn::TimeLived => SortKey::u64(report.time_lived_secs),
-                SortColumn::Fires => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires }),
-                SortColumn::Floods => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods }),
-                SortColumn::Citadels => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels }),
-                SortColumn::Crits => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits }),
-                SortColumn::ReceivedDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.received_damage }),
+                SortColumn::Fires => {
+                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires })
+                }
+                SortColumn::Floods => {
+                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods })
+                }
+                SortColumn::Citadels => {
+                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels })
+                }
+                SortColumn::Crits => {
+                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits })
+                }
+                SortColumn::ReceivedDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                    None
+                } else {
+                    report.received_damage
+                }),
                 SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
                 SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
-                SortColumn::Hits => SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits }),
+                SortColumn::Hits => {
+                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits })
+                }
                 SortColumn::PersonalRating => SortKey::f64(report.personal_rating.as_ref().map(|pr| pr.pr)),
             };
 
@@ -1484,12 +1641,16 @@ impl UiReport {
 
             if let Some(interactions) = report.damage_interactions.as_ref() {
                 // TODO: this sucks, it allocates for each sort
-                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_received, &a.1.damage_received)) {
+                for interaction in
+                    interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_received, &a.1.damage_received))
+                {
                     if interaction.1.damage_received == 0 {
                         continue;
                     }
 
-                    let Some(interaction_player) = self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0) else {
+                    let Some(interaction_player) =
+                        self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0)
+                    else {
                         // TODO: Handle bots?
                         continue;
                     };
@@ -1497,13 +1658,28 @@ impl UiReport {
                     // Build hover text with clan tag and player name
                     let mut hover_layout = LayoutJob::default();
                     if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                        clan_text.clone().append_to(
+                            &mut hover_layout,
+                            &style,
+                            egui::FontSelection::Default,
+                            egui::Align::Center,
+                        );
                         hover_layout.append(" ", 0.0, Default::default());
                     }
-                    interaction_player.name_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                    interaction_player.name_text.clone().append_to(
+                        &mut hover_layout,
+                        &style,
+                        egui::FontSelection::Default,
+                        egui::Align::Center,
+                    );
 
-                    ui.label(format!("{}: {} ({})", interaction_player.ship_name(), interaction.1.damage_received_text, &interaction.1.damage_received_percentage_text))
-                        .on_hover_text(hover_layout);
+                    ui.label(format!(
+                        "{}: {} ({})",
+                        interaction_player.ship_name(),
+                        interaction.1.damage_received_text,
+                        &interaction.1.damage_received_percentage_text
+                    ))
+                    .on_hover_text(hover_layout);
                 }
             };
         });
@@ -1523,12 +1699,15 @@ impl UiReport {
 
             if let Some(interactions) = report.damage_interactions.as_ref() {
                 // TODO: this sucks, it allocates for each sort
-                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_dealt, &a.1.damage_dealt)) {
+                for interaction in interactions.iter().sorted_by(|a, b| Ord::cmp(&b.1.damage_dealt, &a.1.damage_dealt))
+                {
                     if interaction.1.damage_dealt == 0 {
                         continue;
                     }
 
-                    let Some(interaction_player) = self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0) else {
+                    let Some(interaction_player) =
+                        self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0)
+                    else {
                         // In co-op, you may not have an interaction
                         continue;
                     };
@@ -1536,13 +1715,28 @@ impl UiReport {
                     // Build hover text with clan tag and player name
                     let mut hover_layout = LayoutJob::default();
                     if let Some(clan_text) = interaction_player.clan_text() {
-                        clan_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                        clan_text.clone().append_to(
+                            &mut hover_layout,
+                            &style,
+                            egui::FontSelection::Default,
+                            egui::Align::Center,
+                        );
                         hover_layout.append(" ", 0.0, Default::default());
                     }
-                    interaction_player.name_text.clone().append_to(&mut hover_layout, &style, egui::FontSelection::Default, egui::Align::Center);
+                    interaction_player.name_text.clone().append_to(
+                        &mut hover_layout,
+                        &style,
+                        egui::FontSelection::Default,
+                        egui::Align::Center,
+                    );
 
-                    ui.label(format!("{}: {} ({})", interaction_player.ship_name(), interaction.1.damage_dealt_text, &interaction.1.damage_dealt_percentage_text))
-                        .on_hover_text(hover_layout);
+                    ui.label(format!(
+                        "{}: {} ({})",
+                        interaction_player.ship_name(),
+                        interaction.1.damage_dealt_text,
+                        &interaction.1.damage_dealt_percentage_text
+                    ))
+                    .on_hover_text(hover_layout);
                 }
             };
         });
@@ -1630,7 +1824,8 @@ impl UiReport {
                             //     ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
                             // }
 
-                            let disconnect_hover_text = if player.did_disconnect() { Some("Player disconnected from the match") } else { None };
+                            let disconnect_hover_text =
+                                if player.did_disconnect() { Some("Player disconnected from the match") } else { None };
                             if let Some(disconnect_text) = disconnect_hover_text {
                                 ui.label(icons::PLUGS).on_hover_text(disconnect_text);
                             }
@@ -1690,7 +1885,8 @@ impl UiReport {
                                 ui.label("NDA");
                             } else {
                                 let response = ui.label(received_damage_text);
-                                if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some() {
+                                if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some()
+                                {
                                     let tooltip = Tooltip::for_enabled(&response);
                                     tooltip.show(|ui| {
                                         self.received_damage_details(report, ui);
@@ -1792,7 +1988,8 @@ impl UiReport {
                     }
                     ReplayColumn::PersonalRating => {
                         if let Some(pr) = report.personal_rating.as_ref() {
-                            ui.label(RichText::new(format!("{:.0}", pr.pr)).color(pr.category.color())).on_hover_text(pr.category.name());
+                            ui.label(RichText::new(format!("{:.0}", pr.pr)).color(pr.category.color()))
+                                .on_hover_text(pr.category.name());
                         } else {
                             ui.label("-");
                         }
@@ -1818,7 +2015,9 @@ impl UiReport {
                                         let _ = self.background_task_sender.as_ref().map(|sender| {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
-                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(
+                                                    format!("{} Build link copied", icons::CHECK_CIRCLE),
+                                                )),
                                             })
                                         });
                                     }
@@ -1829,12 +2028,15 @@ impl UiReport {
                                 if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
-                                    if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider) {
+                                    if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider)
+                                    {
                                         ui.ctx().copy_text(url);
                                         let _ = self.background_task_sender.as_ref().map(|sender| {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
-                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(format!("{} Build link copied", icons::CHECK_CIRCLE))),
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(
+                                                    format!("{} Build link copied", icons::CHECK_CIRCLE),
+                                                )),
                                             })
                                         });
                                     }
@@ -1859,16 +2061,23 @@ impl UiReport {
                                 if let Some(player) = Some(report.player())
                                     && ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked()
                                 {
-                                    let pretty_meta = serde_json::to_string_pretty(player).expect("failed to serialize player");
+                                    let pretty_meta =
+                                        serde_json::to_string_pretty(player).expect("failed to serialize player");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("metadata.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty_meta,
+                                        })),
                                         open: Arc::new(AtomicBool::new(true)),
                                     };
 
                                     if let Some(sender) = self.background_task_sender.as_ref() {
                                         sender
-                                            .send(BackgroundTask { receiver: None, kind: BackgroundTaskKind::OpenFileViewer(viewer) })
+                                            .send(BackgroundTask {
+                                                receiver: None,
+                                                kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                            })
                                             .expect("failed to send file viewer task")
                                     }
 
@@ -2015,9 +2224,11 @@ impl UiReport {
         });
 
         match ui.input(|i| {
-            let double_clicked = i.pointer.button_double_clicked(egui::PointerButton::Primary) && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
-            let single_clicked =
-                i.pointer.button_clicked(egui::PointerButton::Primary) && i.modifiers.ctrl && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+            let double_clicked = i.pointer.button_double_clicked(egui::PointerButton::Primary)
+                && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
+            let single_clicked = i.pointer.button_clicked(egui::PointerButton::Primary)
+                && i.modifiers.ctrl
+                && ui.max_rect().contains(i.pointer.interact_pos().unwrap_or_default());
 
             (double_clicked, single_clicked)
         }) {
@@ -2093,7 +2304,13 @@ impl UiReport {
             let is_win = matches!(battle_result, Some(BattleResult::Win(_)));
             let frags = report.kills.unwrap_or(0);
 
-            let stats = crate::personal_rating::ShipBattleStats { ship_id: ship_id as u64, battles: 1, damage: actual_damage, wins: if is_win { 1 } else { 0 }, frags };
+            let stats = crate::personal_rating::ShipBattleStats {
+                ship_id: ship_id as u64,
+                battles: 1,
+                damage: actual_damage,
+                wins: if is_win { 1 } else { 0 },
+                frags,
+            };
 
             report.personal_rating = pr_data.calculate_pr(&[stats]);
         }
@@ -2113,70 +2330,145 @@ impl egui_table::TableDelegate for UiReport {
                     ui.label("Actions");
                 }
                 ReplayColumn::Name => {
-                    if ui.strong(column_name_with_sort_order("Player Name", false, *self.replay_sort.lock(), SortColumn::Name)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Player Name",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Name,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Name);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::BaseXp => {
-                    if ui.strong(column_name_with_sort_order("Base XP", false, *self.replay_sort.lock(), SortColumn::BaseXp)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Base XP",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::BaseXp,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::BaseXp);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::RawXp => {
-                    if ui.strong(column_name_with_sort_order("Raw XP", false, *self.replay_sort.lock(), SortColumn::RawXp)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Raw XP",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::RawXp,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::RawXp);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::ShipName => {
-                    if ui.strong(column_name_with_sort_order("Ship Name", false, *self.replay_sort.lock(), SortColumn::ShipName)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Ship Name",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ShipName,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ShipName);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::Hits => {
-                    if ui.strong(column_name_with_sort_order("Hits", false, *self.replay_sort.lock(), SortColumn::Hits)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order("Hits", false, *self.replay_sort.lock(), SortColumn::Hits))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::Kills => {
-                    if ui.strong(column_name_with_sort_order("Kills", false, *self.replay_sort.lock(), SortColumn::Kills)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Kills",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Kills,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Kills);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::ObservedDamage => {
-                    if ui.strong(column_name_with_sort_order("Observed Damage", false, *self.replay_sort.lock(), SortColumn::ObservedDamage)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Observed Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ObservedDamage,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ObservedDamage);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::ActualDamage => {
-                    if ui.strong(column_name_with_sort_order("Actual Damage", false, *self.replay_sort.lock(), SortColumn::ActualDamage)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Actual Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ActualDamage,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ActualDamage);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::SpottingDamage => {
-                    if ui.strong(column_name_with_sort_order("Spotting Damage", false, *self.replay_sort.lock(), SortColumn::SpottingDamage)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Spotting Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::SpottingDamage,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::SpottingDamage);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::PotentialDamage => {
-                    if ui.strong(column_name_with_sort_order("Potential Damage", false, *self.replay_sort.lock(), SortColumn::PotentialDamage)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Potential Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::PotentialDamage,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::PotentialDamage);
 
                         self.sort_players(new_sort);
@@ -2186,42 +2478,90 @@ impl egui_table::TableDelegate for UiReport {
                     ui.strong("Time Lived");
                 }
                 ReplayColumn::Fires => {
-                    if ui.strong(column_name_with_sort_order("Fires", false, *self.replay_sort.lock(), SortColumn::Fires)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Fires",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Fires,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Fires);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::Floods => {
-                    if ui.strong(column_name_with_sort_order("Floods", false, *self.replay_sort.lock(), SortColumn::Floods)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Floods",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Floods,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Floods);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::Citadels => {
-                    if ui.strong(column_name_with_sort_order("Citadels", false, *self.replay_sort.lock(), SortColumn::Citadels)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Citadels",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Citadels,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Citadels);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::Crits => {
-                    if ui.strong(column_name_with_sort_order("Crits", false, *self.replay_sort.lock(), SortColumn::Crits)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Crits",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Crits,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Crits);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::ReceivedDamage => {
-                    if ui.strong(column_name_with_sort_order("Received Damage", false, *self.replay_sort.lock(), SortColumn::ReceivedDamage)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Received Damage",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::ReceivedDamage,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::ReceivedDamage);
 
                         self.sort_players(new_sort);
                     };
                 }
                 ReplayColumn::DistanceTraveled => {
-                    if ui.strong(column_name_with_sort_order("Distance Traveled", false, *self.replay_sort.lock(), SortColumn::DistanceTraveled)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "Distance Traveled",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::DistanceTraveled,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::DistanceTraveled);
 
                         self.sort_players(new_sort);
@@ -2231,7 +2571,15 @@ impl egui_table::TableDelegate for UiReport {
                     ui.strong("Skills");
                 }
                 ReplayColumn::PersonalRating => {
-                    if ui.strong(column_name_with_sort_order("PR", false, *self.replay_sort.lock(), SortColumn::PersonalRating)).clicked() {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            "PR",
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::PersonalRating,
+                        ))
+                        .clicked()
+                    {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::PersonalRating);
 
                         self.sort_players(new_sort);
@@ -2379,7 +2727,11 @@ fn clan_color_for_player(player: &Player) -> Option<Color32> {
     } else {
         let clan_color = player.raw_props_with_name().get("clanColor").expect("no clan color?");
         let clan_color = clan_color.as_i64().expect("clan color is not an i64");
-        Some(Color32::from_rgb(((clan_color & 0xFF0000) >> 16) as u8, ((clan_color & 0xFF00) >> 8) as u8, (clan_color & 0xFF) as u8))
+        Some(Color32::from_rgb(
+            ((clan_color & 0xFF0000) >> 16) as u8,
+            ((clan_color & 0xFF00) >> 8) as u8,
+            (clan_color & 0xFF) as u8,
+        ))
     }
 }
 
@@ -2461,7 +2813,11 @@ impl Replay {
         let version_parts: Vec<_> = self.replay_file.meta.clientVersionFromExe.split(',').collect();
         assert!(version_parts.len() == 4);
         if version_parts[3] != expected_build {
-            return Err(ToolkitError::ReplayVersionMismatch { game_version: expected_build.to_string(), replay_version: version_parts[3].to_string() }.into());
+            return Err(ToolkitError::ReplayVersionMismatch {
+                game_version: expected_build.to_string(),
+                replay_version: version_parts[3].to_string(),
+            }
+            .into());
         }
 
         // Parse packets
@@ -2493,12 +2849,22 @@ impl Replay {
         is_debug_mode: bool,
     ) {
         if let Some(battle_report) = &self.battle_report {
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, game_constants, wows_data, replay_sort, background_task_sender, is_debug_mode))
+            self.ui_report = Some(UiReport::new(
+                &self.replay_file,
+                battle_report,
+                game_constants,
+                wows_data,
+                replay_sort,
+                background_task_sender,
+                is_debug_mode,
+            ))
         }
     }
 
     pub fn battle_result(&self) -> Option<BattleResult> {
-        self.battle_report().and_then(|report| report.battle_result().cloned()).or_else(|| self.ui_report.as_ref().and_then(|report| report.battle_result()))
+        self.battle_report()
+            .and_then(|report| report.battle_result().cloned())
+            .or_else(|| self.ui_report.as_ref().and_then(|report| report.battle_result()))
     }
 
     /// Convert this replay's player stats to ShipBattleStats for PR calculation
@@ -2520,9 +2886,18 @@ impl Replay {
     }
 }
 
-fn column_name_with_sort_order(text: &'static str, has_info: bool, sort_order: SortOrder, column: SortColumn) -> Cow<'static, str> {
+fn column_name_with_sort_order(
+    text: &'static str,
+    has_info: bool,
+    sort_order: SortOrder,
+    column: SortColumn,
+) -> Cow<'static, str> {
     if sort_order.column() == column {
-        let text_with_icon = if has_info { format!("{} {} {}", text, icons::INFO, sort_order.icon()) } else { format!("{} {}", text, sort_order.icon()) };
+        let text_with_icon = if has_info {
+            format!("{} {} {}", text, icons::INFO, sort_order.icon())
+        } else {
+            format!("{} {}", text, sort_order.icon())
+        };
         Cow::Owned(text_with_icon)
     } else if has_info {
         Cow::Owned(format!("{} {}", text, icons::INFO))
@@ -2552,8 +2927,13 @@ impl ToolkitTabViewer<'_> {
 
         ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
 
-        let mut columns = vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
-        let action_label_layout = ui.painter().layout_no_wrap("Actions".to_string(), egui::FontId::default(), ui.style().visuals.text_color());
+        let mut columns =
+            vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
+        let action_label_layout = ui.painter().layout_no_wrap(
+            "Actions".to_string(),
+            egui::FontId::default(),
+            ui.style().visuals.text_color(),
+        );
         let action_label_width = action_label_layout.rect.width() + 4.0;
         columns[ReplayColumn::Actions as usize] = egui_table::Column::new(action_label_width).resizable(false);
 
@@ -2571,27 +2951,46 @@ impl ToolkitTabViewer<'_> {
         for message in battle_report.game_chat() {
             let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player } = message;
 
-            let translated_text =
-                if sender_relation.is_none() { self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned)) } else { None };
+            let translated_text = if sender_relation.is_none() {
+                self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned))
+            } else {
+                None
+            };
 
-            let message = if let Ok(decoded) = decode_html(message.as_str()) { Cow::Owned(decoded) } else { Cow::Borrowed(message) };
+            let message = if let Ok(decoded) = decode_html(message.as_str()) {
+                Cow::Owned(decoded)
+            } else {
+                Cow::Borrowed(message)
+            };
 
             let text = match player {
                 Some(player) if !player.clan().is_empty() => {
-                    format!("[{}] {sender_name} ({channel:?}): {}", player.clan(), translated_text.as_ref().unwrap_or(&message))
+                    format!(
+                        "[{}] {sender_name} ({channel:?}): {}",
+                        player.clan(),
+                        translated_text.as_ref().unwrap_or(&message)
+                    )
                 }
                 _ => {
                     format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(&message))
                 }
             };
 
-            let name_color = if let Some(relation) = sender_relation { player_color_for_team_relation(*relation) } else { Color32::GRAY };
+            let name_color = if let Some(relation) = sender_relation {
+                player_color_for_team_relation(*relation)
+            } else {
+                Color32::GRAY
+            };
 
             let mut job = LayoutJob::default();
             if let Some(player) = player
                 && !player.clan().is_empty()
             {
-                job.append(&format!("[{}] ", player.clan()), 0.0, TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() });
+                job.append(
+                    &format!("[{}] ", player.clan()),
+                    0.0,
+                    TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() },
+                );
             }
             job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
 
@@ -2601,11 +3000,16 @@ impl ToolkitTabViewer<'_> {
                 ChatChannel::Team => Color32::LIGHT_GREEN,
             };
 
-            job.append(translated_text.as_ref().unwrap_or(&message), 0.0, TextFormat { color: text_color, ..Default::default() });
+            job.append(
+                translated_text.as_ref().unwrap_or(&message),
+                0.0,
+                TextFormat { color: text_color, ..Default::default() },
+            );
 
             if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                 ui.ctx().copy_text(text);
-                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
+                *self.tab_state.timed_message.write() =
+                    Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
             }
             ui.add(Separator::default());
             ui.end_row();
@@ -2816,11 +3220,14 @@ impl ToolkitTabViewer<'_> {
             }
 
             if self.tab_state.settings.replay_settings.show_game_chat {
-                egui::SidePanel::left("replay_view_chat").default_width(CHAT_VIEW_WIDTH).max_width(CHAT_VIEW_WIDTH).show_inside(ui, |ui| {
-                    egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
-                        self.build_replay_chat(report, ui);
+                egui::SidePanel::left("replay_view_chat")
+                    .default_width(CHAT_VIEW_WIDTH)
+                    .max_width(CHAT_VIEW_WIDTH)
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
+                            self.build_replay_chat(report, ui);
+                        });
                     });
-                });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -2849,7 +3256,12 @@ impl ToolkitTabViewer<'_> {
 
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid").num_columns(1).striped(true).show(ui, |ui| {
-                if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
+                if let Some(mut files) = self
+                    .tab_state
+                    .replay_files
+                    .as_ref()
+                    .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
+                {
                     // Sort by filename -- WoWs puts the date first in a sortable format
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let metadata_provider = self.metadata_provider().unwrap();
@@ -2859,21 +3271,36 @@ impl ToolkitTabViewer<'_> {
                         let battle_result = replay_guard.battle_result();
                         drop(replay_guard);
 
-                        let is_selected = self.tab_state.current_replay.as_ref().map(|current| Arc::ptr_eq(current, &replay)).unwrap_or(false);
+                        let is_selected = self
+                            .tab_state
+                            .current_replay
+                            .as_ref()
+                            .map(|current| Arc::ptr_eq(current, &replay))
+                            .unwrap_or(false);
 
                         // Apply color based on battle result (white for selected to be readable on dark background)
                         let label_text = if is_selected {
-                            egui::RichText::new(label.as_str()).color(Color32::WHITE).background_color(Color32::DARK_GRAY)
+                            egui::RichText::new(label.as_str())
+                                .color(Color32::WHITE)
+                                .background_color(Color32::DARK_GRAY)
                         } else {
                             match battle_result {
-                                Some(BattleResult::Win(_)) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_GREEN),
-                                Some(BattleResult::Loss(_)) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_RED),
-                                Some(BattleResult::Draw) => egui::RichText::new(label.as_str()).color(Color32::LIGHT_YELLOW),
+                                Some(BattleResult::Win(_)) => {
+                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_GREEN)
+                                }
+                                Some(BattleResult::Loss(_)) => {
+                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_RED)
+                                }
+                                Some(BattleResult::Draw) => {
+                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_YELLOW)
+                                }
                                 None => egui::RichText::new(label.as_str()),
                             }
                         };
 
-                        let label_response = ui.add(Label::new(label_text).selectable(false).sense(Sense::click())).on_hover_text(label.as_str());
+                        let label_response = ui
+                            .add(Label::new(label_text).selectable(false).sense(Sense::click()))
+                            .on_hover_text(label.as_str());
                         label_response.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.ctx().copy_text(path.to_string_lossy().into_owned());
@@ -2913,7 +3340,12 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_grouped_by_date(&mut self, ui: &mut egui::Ui) {
-        if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
+        if let Some(mut files) = self
+            .tab_state
+            .replay_files
+            .as_ref()
+            .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
+        {
             // Sort by filename (date) descending
             files.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -2968,7 +3400,8 @@ impl ToolkitTabViewer<'_> {
                         String::new()
                     };
 
-                    let is_open = builder.dir(egui::Id::new(("date_group", date)), format!("{} ({}){}", date, replays.len(), win_rate));
+                    let is_open = builder
+                        .dir(egui::Id::new(("date_group", date)), format!("{} ({}){}", date, replays.len(), win_rate));
                     if is_open {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
@@ -2990,16 +3423,17 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
-                            let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                if ui.button("Copy Path").clicked() {
-                                    ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
-                                    ui.close_kind(UiKind::Menu);
-                                }
-                                if ui.button("Show in File Explorer").clicked() {
-                                    util::open_file_explorer(&path_clone);
-                                    ui.close_kind(UiKind::Menu);
-                                }
-                            });
+                            let node =
+                                egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                    if ui.button("Copy Path").clicked() {
+                                        ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Show in File Explorer").clicked() {
+                                        util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                });
                             builder.node(node);
                         }
                     }
@@ -3034,7 +3468,12 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_grouped_by_ship(&mut self, ui: &mut egui::Ui) {
-        if let Some(mut files) = self.tab_state.replay_files.as_ref().map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>()) {
+        if let Some(mut files) = self
+            .tab_state
+            .replay_files
+            .as_ref()
+            .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
+        {
             // Sort by filename (date) descending first
             files.sort_by(|a, b| b.0.cmp(&a.0));
 
@@ -3054,7 +3493,8 @@ impl ToolkitTabViewer<'_> {
             }
 
             // Sort groups by most recently played (using the path which contains the date)
-            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> = ship_groups.into_iter().collect();
+            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> =
+                ship_groups.into_iter().collect();
             groups.sort_by(|a, b| {
                 let a_recent = ship_most_recent.get(&a.0).unwrap();
                 let b_recent = ship_most_recent.get(&b.0).unwrap();
@@ -3094,7 +3534,10 @@ impl ToolkitTabViewer<'_> {
                         String::new()
                     };
 
-                    let is_open = builder.dir(egui::Id::new(("ship_group", ship_name)), format!("{} ({}){}", ship_name, replays.len(), win_rate));
+                    let is_open = builder.dir(
+                        egui::Id::new(("ship_group", ship_name)),
+                        format!("{} ({}){}", ship_name, replays.len(), win_rate),
+                    );
                     if is_open {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
@@ -3114,16 +3557,17 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
-                            let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                if ui.button("Copy Path").clicked() {
-                                    ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
-                                    ui.close_kind(UiKind::Menu);
-                                }
-                                if ui.button("Show in File Explorer").clicked() {
-                                    util::open_file_explorer(&path_clone);
-                                    ui.close_kind(UiKind::Menu);
-                                }
-                            });
+                            let node =
+                                egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                    if ui.button("Copy Path").clicked() {
+                                        ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Show in File Explorer").clicked() {
+                                        util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                });
                             builder.node(node);
                         }
                     }
@@ -3181,22 +3625,39 @@ impl ToolkitTabViewer<'_> {
 
             ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
 
-            ComboBox::from_id_salt("replay_grouping").selected_text(format!("Group: {}", self.tab_state.settings.replay_settings.grouping.label())).show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::Date, "Date");
-                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::Ship, "Ship");
-                ui.selectable_value(&mut self.tab_state.settings.replay_settings.grouping, ReplayGrouping::None, "None");
-            });
+            ComboBox::from_id_salt("replay_grouping")
+                .selected_text(format!("Group: {}", self.tab_state.settings.replay_settings.grouping.label()))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.tab_state.settings.replay_settings.grouping,
+                        ReplayGrouping::Date,
+                        "Date",
+                    );
+                    ui.selectable_value(
+                        &mut self.tab_state.settings.replay_settings.grouping,
+                        ReplayGrouping::Ship,
+                        "Ship",
+                    );
+                    ui.selectable_value(
+                        &mut self.tab_state.settings.replay_settings.grouping,
+                        ReplayGrouping::None,
+                        "None",
+                    );
+                });
 
-            ComboBox::from_id_salt("column_filters").selected_text("Column Filters").close_behavior(PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
-            });
+            ComboBox::from_id_salt("column_filters")
+                .selected_text("Column Filters")
+                .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| {
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
+                });
 
             if ui.button(format!("{} Show Session Stats", icons::CHART_BAR)).clicked() {
                 self.tab_state.show_session_stats = true;
@@ -3218,7 +3679,11 @@ impl ToolkitTabViewer<'_> {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
                     let mut replay_file = replay_file.write();
-                    self.build_replay_view(&mut replay_file, ui, self.metadata_provider().expect("no metadata provider?").as_ref());
+                    self.build_replay_view(
+                        &mut replay_file,
+                        ui,
+                        self.metadata_provider().expect("no metadata provider?").as_ref(),
+                    );
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                         ui.heading("Double click or load a replay to view data");
@@ -3262,11 +3727,16 @@ impl ToolkitTabViewer<'_> {
             });
 
             // Session PR
-            if let Some(pr_result) = self.tab_state.session_stats.calculate_pr(&self.tab_state.personal_rating_data.read()) {
+            if let Some(pr_result) =
+                self.tab_state.session_stats.calculate_pr(&self.tab_state.personal_rating_data.read())
+            {
                 ui.horizontal(|ui| {
                     ui.strong("Personal Rating:");
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{:.0} ({})", pr_result.pr, pr_result.category.name())).color(pr_result.category.color()));
+                        ui.label(
+                            RichText::new(format!("{:.0} ({})", pr_result.pr, pr_result.category.name()))
+                                .color(pr_result.category.color()),
+                        );
                     });
                 });
             }
@@ -3302,12 +3772,18 @@ impl ToolkitTabViewer<'_> {
             let mut all_achievements: Vec<Achievement> = Vec::new();
             for replay in &self.tab_state.session_stats.session_replays {
                 let replay = replay.read();
-                let Some(self_report) = replay.ui_report.as_ref().and_then(|report| report.player_reports().iter().find(|report| report.is_self())) else {
+                let Some(self_report) = replay
+                    .ui_report
+                    .as_ref()
+                    .and_then(|report| report.player_reports().iter().find(|report| report.is_self()))
+                else {
                     continue;
                 };
 
                 for achievement in self_report.achievements.as_slice() {
-                    match all_achievements.iter_mut().find(|existing_achievement| existing_achievement.game_param.id() == achievement.game_param.id()) {
+                    match all_achievements.iter_mut().find(|existing_achievement| {
+                        existing_achievement.game_param.id() == achievement.game_param.id()
+                    }) {
                         Some(existing_achievement) => {
                             existing_achievement.count += achievement.count;
                         }
@@ -3316,7 +3792,8 @@ impl ToolkitTabViewer<'_> {
                 }
             }
 
-            all_achievements.sort_by(|a, b| (Reverse(a.count), &b.display_name).cmp(&(Reverse(b.count), &b.display_name)));
+            all_achievements
+                .sort_by(|a, b| (Reverse(a.count), &b.display_name).cmp(&(Reverse(b.count), &b.display_name)));
 
             if !all_achievements.is_empty() {
                 ui.strong("Achievements");
@@ -3338,8 +3815,11 @@ impl ToolkitTabViewer<'_> {
             ui.heading("Ship Stats");
 
             ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                let mut battle_results: Vec<(String, PerformanceInfo)> = self.tab_state.session_stats.ship_stats(&metadata_provider).drain().collect();
-                battle_results.sort_by(|a, b| (Reverse(a.1.wins()), a.1.losses(), &a.0).cmp(&(Reverse(b.1.wins()), b.1.losses(), &b.0)));
+                let mut battle_results: Vec<(String, PerformanceInfo)> =
+                    self.tab_state.session_stats.ship_stats(&metadata_provider).drain().collect();
+                battle_results.sort_by(|a, b| {
+                    (Reverse(a.1.wins()), a.1.losses(), &a.0).cmp(&(Reverse(b.1.wins()), b.1.losses(), &b.0))
+                });
                 for (ship_name, perf_info) in battle_results {
                     if perf_info.win_rate().is_none() {
                         continue;
@@ -3351,9 +3831,20 @@ impl ToolkitTabViewer<'_> {
                     drop(pr_data);
 
                     let header = if let Some(ref pr) = ship_pr {
-                        format!("{ship_name} {}W/{}L ({:.0}%) - PR: {:.0}", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap(), pr.pr)
+                        format!(
+                            "{ship_name} {}W/{}L ({:.0}%) - PR: {:.0}",
+                            perf_info.wins(),
+                            perf_info.losses(),
+                            perf_info.win_rate().unwrap(),
+                            pr.pr
+                        )
                     } else {
-                        format!("{ship_name} {}W/{}L ({:.0}%)", perf_info.wins(), perf_info.losses(), perf_info.win_rate().unwrap())
+                        format!(
+                            "{ship_name} {}W/{}L ({:.0}%)",
+                            perf_info.wins(),
+                            perf_info.losses(),
+                            perf_info.win_rate().unwrap()
+                        )
                     };
 
                     ui.collapsing(header, |ui| {
@@ -3362,7 +3853,10 @@ impl ToolkitTabViewer<'_> {
                             ui.horizontal(|ui| {
                                 ui.label("Personal Rating:");
                                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("{:.0} ({})", pr.pr, pr.category.name())).color(pr.category.color()));
+                                    ui.label(
+                                        RichText::new(format!("{:.0} ({})", pr.pr, pr.category.name()))
+                                            .color(pr.category.color()),
+                                    );
                                 });
                             });
                         }
@@ -3382,7 +3876,10 @@ impl ToolkitTabViewer<'_> {
                         ui.horizontal(|ui| {
                             ui.label("Avg Spotting Damage:");
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale));
+                                ui.label(separate_number(
+                                    perf_info.avg_spotting_damage().unwrap_or_default() as u64,
+                                    locale,
+                                ));
                             });
                         });
                         ui.horizontal(|ui| {
@@ -3424,7 +3921,10 @@ impl ToolkitTabViewer<'_> {
                         ui.horizontal(|ui| {
                             ui.label("Avg Base XP:");
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64, locale));
+                                ui.label(separate_number(
+                                    perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64,
+                                    locale,
+                                ));
                             });
                         });
                         ui.horizontal(|ui| {

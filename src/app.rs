@@ -12,7 +12,9 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 
 use std::time::Duration;
 use std::time::Instant;
@@ -78,7 +80,9 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
@@ -88,7 +92,9 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{self};
+use crate::ui::replay_parser::{
+    self,
+};
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
@@ -547,14 +553,25 @@ impl SessionStats {
     /// Total number of games won in the current session
     pub fn games_won(&self) -> usize {
         self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Win(_)) = replay.read().battle_result() { accum + 1 } else { accum }
+            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Win(_)) = replay.read().battle_result()
+            {
+                accum + 1
+            } else {
+                accum
+            }
         })
     }
 
     /// Total number of games lost in the current session
     pub fn games_lost(&self) -> usize {
         self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Loss(_)) = replay.read().battle_result() { accum + 1 } else { accum }
+            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Loss(_)) =
+                replay.read().battle_result()
+            {
+                accum + 1
+            } else {
+                accum
+            }
         })
     }
 
@@ -597,16 +614,19 @@ impl SessionStats {
             performance_info.max_frags = performance_info.max_frags.max(self_report.kills().unwrap_or_default());
 
             performance_info.total_damage += self_report.actual_damage().unwrap_or_default();
-            performance_info.max_damage = performance_info.max_damage.max(self_report.actual_damage().unwrap_or_default());
+            performance_info.max_damage =
+                performance_info.max_damage.max(self_report.actual_damage().unwrap_or_default());
 
             performance_info.total_spotting_damage += self_report.spotting_damage().unwrap_or_default();
-            performance_info.max_spotting_damage = performance_info.max_spotting_damage.max(self_report.spotting_damage().unwrap_or_default());
+            performance_info.max_spotting_damage =
+                performance_info.max_spotting_damage.max(self_report.spotting_damage().unwrap_or_default());
 
             performance_info.total_xp += self_report.raw_xp().unwrap_or_default() as usize;
             performance_info.max_xp = performance_info.max_xp.max(self_report.raw_xp().unwrap_or_default());
 
             performance_info.total_win_adjusted_xp += self_report.base_xp().unwrap_or_default() as usize;
-            performance_info.max_win_adjusted_xp = performance_info.max_win_adjusted_xp.max(self_report.base_xp().unwrap_or_default());
+            performance_info.max_win_adjusted_xp =
+                performance_info.max_win_adjusted_xp.max(self_report.base_xp().unwrap_or_default());
 
             performance_info.total_games += 1;
         }
@@ -650,14 +670,19 @@ impl SessionStats {
                 return accum;
             };
 
-            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else { return accum };
+            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else {
+                return accum;
+            };
 
             accum + self_report.kills().unwrap_or_default()
         })
     }
 
     /// Calculate overall Personal Rating for this session
-    pub fn calculate_pr(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> Option<crate::personal_rating::PersonalRatingResult> {
+    pub fn calculate_pr(
+        &self,
+        pr_data: &crate::personal_rating::PersonalRatingData,
+    ) -> Option<crate::personal_rating::PersonalRatingResult> {
         let stats: Vec<_> = self.session_replays.iter().filter_map(|replay| replay.read().to_battle_stats()).collect();
         pr_data.calculate_pr(&stats)
     }
@@ -665,7 +690,10 @@ impl SessionStats {
     /// Calculate Personal Rating per ship for this session
     /// Returns a map of ship_id -> PR result
     #[allow(dead_code)]
-    pub fn calculate_pr_per_ship(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> HashMap<u64, crate::personal_rating::PersonalRatingResult> {
+    pub fn calculate_pr_per_ship(
+        &self,
+        pr_data: &crate::personal_rating::PersonalRatingData,
+    ) -> HashMap<u64, crate::personal_rating::PersonalRatingResult> {
         use crate::personal_rating::ShipBattleStats;
 
         // Group stats by ship_id
@@ -673,7 +701,13 @@ impl SessionStats {
 
         for replay in &self.session_replays {
             if let Some(stats) = replay.read().to_battle_stats() {
-                let entry = ship_stats.entry(stats.ship_id).or_insert(ShipBattleStats { ship_id: stats.ship_id, battles: 0, damage: 0, wins: 0, frags: 0 });
+                let entry = ship_stats.entry(stats.ship_id).or_insert(ShipBattleStats {
+                    ship_id: stats.ship_id,
+                    battles: 0,
+                    damage: 0,
+                    wins: 0,
+                    frags: 0,
+                });
                 entry.battles += stats.battles;
                 entry.damage += stats.damage;
                 entry.wins += stats.wins;
@@ -789,7 +823,10 @@ impl PerformanceInfo {
     }
 
     /// Calculate Personal Rating for this ship's performance
-    pub fn calculate_pr(&self, pr_data: &crate::personal_rating::PersonalRatingData) -> Option<crate::personal_rating::PersonalRatingResult> {
+    pub fn calculate_pr(
+        &self,
+        pr_data: &crate::personal_rating::PersonalRatingData,
+    ) -> Option<crate::personal_rating::PersonalRatingResult> {
         let ship_id = self.ship_id?;
         let stats = crate::personal_rating::ShipBattleStats {
             ship_id,
@@ -905,7 +942,8 @@ pub struct TabState {
 
 impl Default for TabState {
     fn default() -> Self {
-        let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json")).expect("failed to parse constants JSON");
+        let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json"))
+            .expect("failed to parse constants JSON");
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
@@ -950,7 +988,9 @@ impl Default for TabState {
 
 impl TabState {
     fn send_replay_consent_changed(&self) {
-        let _ = self.background_parser_tx.as_ref().map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data)));
+        let _ = self.background_parser_tx.as_ref().map(|tx| {
+            tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data))
+        });
     }
     fn try_update_replays(&mut self) {
         // Sometimes we parse the replay too early. Let's try to parse it a couple times
@@ -1028,7 +1068,9 @@ impl TabState {
                             return;
                         }
 
-                        if let Ok(replay_file) = ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0)) {
+                        if let Ok(replay_file) =
+                            ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0))
+                        {
                             self.settings.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
                         }
                     }
@@ -1047,7 +1089,8 @@ impl TabState {
 
     fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
         let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
-            let old_replays_dir = self.settings.replays_dir.as_ref().expect("watcher was created but replay dir was not assigned?");
+            let old_replays_dir =
+                self.settings.replays_dir.as_ref().expect("watcher was created but replay dir was not assigned?");
             let _ = watcher.unwatch(old_replays_dir);
             watcher
         } else {
@@ -1088,11 +1131,14 @@ impl TabState {
                                     if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
                                         && path.file_name().expect("path has no filename") != "temp.wowsreplay"
                                     {
-                                        tx.send(NotifyFileEvent::Added(path.clone())).expect("failed to send file creation event");
+                                        tx.send(NotifyFileEvent::Added(path.clone()))
+                                            .expect("failed to send file creation event");
                                         // Send this path to the thread watching for replays in background
-                                        let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::NewReplay(path));
+                                        let _ = background_tx
+                                            .send(task::ReplayBackgroundParserThreadMessage::NewReplay(path));
                                     } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone())).expect("failed to send file creation event");
+                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
+                                            .expect("failed to send file creation event");
                                     }
                                 }
                             }
@@ -1103,11 +1149,14 @@ impl TabState {
                                     && filename == "preferences.xml"
                                 {
                                     debug!("Sending preferences changed event");
-                                    tx.send(NotifyFileEvent::PreferencesChanged).expect("failed to send file creation event");
+                                    tx.send(NotifyFileEvent::PreferencesChanged)
+                                        .expect("failed to send file creation event");
                                 }
                                 if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                    tx.send(NotifyFileEvent::Modified(path.clone())).expect("failed to send file modification event");
-                                    let _ = background_tx.send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
+                                    tx.send(NotifyFileEvent::Modified(path.clone()))
+                                        .expect("failed to send file modification event");
+                                    let _ = background_tx
+                                        .send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
                                 }
                             }
                         }
@@ -1282,7 +1331,11 @@ impl WowsToolkitApp {
             }
 
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                let task = Some(saved_state.tab_state.load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())));
+                let task = Some(
+                    saved_state
+                        .tab_state
+                        .load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())),
+                );
                 update_background_task!(saved_state.tab_state.background_tasks, task);
             }
 
@@ -1411,31 +1464,47 @@ impl WowsToolkitApp {
                                     self.tab_state.filtered_file_list = None;
                                     self.tab_state.used_filter = None;
 
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded game data", icons::CHECK_CIRCLE)));
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                        "{} Successfully loaded game data",
+                                        icons::CHECK_CIRCLE
+                                    )));
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded { replay } => {
                                     {
                                         self.tab_state.replay_parser_tab.lock().game_chat.clear();
                                     }
                                     {
-                                        self.tab_state.settings.player_tracker.write().update_from_replay(&replay.read());
+                                        self.tab_state
+                                            .settings
+                                            .player_tracker
+                                            .write()
+                                            .update_from_replay(&replay.read());
                                     }
                                     self.tab_state.session_stats.add_replay(replay.clone());
                                     self.tab_state.current_replay = Some(replay);
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Successfully loaded replay", icons::CHECK_CIRCLE)));
+                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                        "{} Successfully loaded replay",
+                                        icons::CHECK_CIRCLE
+                                    )));
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
-                                    let current_process = std::env::current_exe().expect("current process has no path?");
+                                    let current_process =
+                                        std::env::current_exe().expect("current process has no path?");
                                     let mut current_process_new_path = current_process.as_os_str().to_owned();
                                     current_process_new_path.push(".old");
                                     let current_process_new_path = PathBuf::from(current_process_new_path);
                                     // Rename this process
                                     let rename_process = move || {
-                                        std::fs::rename(current_process.clone(), &current_process_new_path).context("failed to rename current process")?;
+                                        std::fs::rename(current_process.clone(), &current_process_new_path)
+                                            .context("failed to rename current process")?;
                                         // Rename the new exe
-                                        std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
+                                        std::fs::rename(new_exe, &current_process)
+                                            .context("failed to rename new process")?;
 
-                                        Command::new(current_process).arg(current_process_new_path).spawn().context("failed to execute updated process")
+                                        Command::new(current_process)
+                                            .arg(current_process_new_path)
+                                            .spawn()
+                                            .context("failed to execute updated process")
                                     };
 
                                     match rename_process() {
@@ -1463,12 +1532,18 @@ impl WowsToolkitApp {
                                             self.tab_state.mod_manager_info.update_index("test".to_string(), index);
                                         }
                                         crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
-                                            *self.tab_state.timed_message.write() =
-                                                Some(TimedMessage::new(format!("{} Successfully installed mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
+                                            *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                                "{} Successfully installed mod: {}",
+                                                icons::CHECK_CIRCLE,
+                                                mod_info.meta.name()
+                                            )));
                                         }
                                         crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
-                                            *self.tab_state.timed_message.write() =
-                                                Some(TimedMessage::new(format!("{} Successfully uninstalled mod: {}", icons::CHECK_CIRCLE, mod_info.meta.name())));
+                                            *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                                "{} Successfully uninstalled mod: {}",
+                                                icons::CHECK_CIRCLE,
+                                                mod_info.meta.name()
+                                            )));
                                         }
                                         crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {
                                             // Do nothing when the mod is downloaded.
@@ -1476,7 +1551,9 @@ impl WowsToolkitApp {
                                     }
                                 }
                             },
-                            Err(e) if e.downcast_current_context::<ToolkitError>().is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
+                            Err(e)
+                                if e.downcast_current_context::<ToolkitError>()
+                                    .is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
                             Err(e) => {
                                 eprintln!("Background task error: {e:?}");
                                 self.show_err_window(e);
@@ -1494,8 +1571,13 @@ impl WowsToolkitApp {
             }
 
             // Remove whatever background tasks have yielded a result
-            self.tab_state.background_tasks =
-                self.tab_state.background_tasks.drain(..).enumerate().filter_map(|(i, task)| if remove_tasks.contains(&i) { None } else { Some(task) }).collect();
+            self.tab_state.background_tasks = self
+                .tab_state
+                .background_tasks
+                .drain(..)
+                .enumerate()
+                .filter_map(|(i, task)| if remove_tasks.contains(&i) { None } else { Some(task) })
+                .collect();
 
             if let Some(rx) = &self.tab_state.unpacker_progress {
                 if ui.button("Stop").clicked() {
@@ -1509,7 +1591,10 @@ impl WowsToolkitApp {
                         }
                         Err(TryRecvError::Empty) => {
                             if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
-                                ui.add(egui::ProgressBar::new(last_progress.progress).text(last_progress.file_name.as_str()));
+                                ui.add(
+                                    egui::ProgressBar::new(last_progress.progress)
+                                        .text(last_progress.file_name.as_str()),
+                                );
                             }
                             break;
                         }
@@ -1566,7 +1651,11 @@ impl WowsToolkitApp {
                 return (app_updates, None);
             }
 
-            if let Ok(constants_updates) = octocrab.repos("padtrack", "wows-constants").raw_file(Reference::Branch("main".to_string()), "data/latest.json").await {
+            if let Ok(constants_updates) = octocrab
+                .repos("padtrack", "wows-constants")
+                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
+                .await
+            {
                 let mut body = constants_updates.into_body();
                 let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
 
@@ -1596,7 +1685,8 @@ impl WowsToolkitApp {
                 self.update_window_open = true;
                 self.latest_release = Some(latest_release);
             } else {
-                *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
+                *self.tab_state.timed_message.write() =
+                    Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
             }
         }
 
@@ -1617,7 +1707,10 @@ impl WowsToolkitApp {
         if crate::personal_rating::needs_update() {
             if let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values()) {
                 if crate::personal_rating::save_expected_values(&pr_data).is_ok() {
-                    update_background_task!(self.tab_state.background_tasks, Some(task::load_personal_rating_data(pr_data)));
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(task::load_personal_rating_data(pr_data))
+                    );
                 }
             }
         }
@@ -1655,7 +1748,13 @@ impl WowsToolkitApp {
 
                 let screen_rect = ctx.content_rect();
                 painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
-                painter.text(screen_rect.center(), Align2::CENTER_CENTER, text, TextStyle::Heading.resolve(&ctx.style()), Color32::WHITE);
+                painter.text(
+                    screen_rect.center(),
+                    Align2::CENTER_CENTER,
+                    text,
+                    TextStyle::Heading.resolve(&ctx.style()),
+                    Color32::WHITE,
+                );
             }
         }
 
@@ -1692,10 +1791,13 @@ impl WowsToolkitApp {
         // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D))) {
+        if ctx
+            .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D)))
+        {
             self.tab_state.settings.debug_mode = !self.tab_state.settings.debug_mode;
             if let Some(sender) = self.tab_state.background_parser_tx.as_ref() {
-                let _ = sender.send(ReplayBackgroundParserThreadMessage::DebugStateChange(self.tab_state.settings.debug_mode));
+                let _ = sender
+                    .send(ReplayBackgroundParserThreadMessage::DebugStateChange(self.tab_state.settings.debug_mode));
             }
         }
 
@@ -1807,7 +1909,11 @@ impl WowsToolkitApp {
             }
         }
 
-        *file_viewer = file_viewer.drain(..).enumerate().filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None }).collect();
+        *file_viewer = file_viewer
+            .drain(..)
+            .enumerate()
+            .filter_map(|(idx, viewer)| if !remove_viewers.contains(&idx) { Some(viewer) } else { None })
+            .collect();
         drop(file_viewer);
 
         // Handle replay drag and drop events
@@ -1839,7 +1945,9 @@ impl WowsToolkitApp {
                             Context::copy_text(ctx, panic_info.clone());
                         }
                         if ui.button(format!("{} GitHub", icons::GITHUB_LOGO)).clicked() {
-                            ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
+                            ui.ctx().open_url(OpenUrl::new_tab(
+                                "https://github.com/landaire/wows-toolkit/issues/new/choose",
+                            ));
                         }
                         if ui.button(format!("{} Discord", icons::DISCORD_LOGO)).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
@@ -1888,7 +1996,10 @@ impl WowsToolkitApp {
             let url = latest_release.html_url.clone();
             let mut notes = latest_release.body.clone();
             let tag = latest_release.tag_name.clone();
-            let asset = latest_release.assets.iter().find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
+            let asset = latest_release
+                .assets
+                .iter()
+                .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
             // Only show the update window if we have a valid artifact to download
             if let Some(asset) = asset {
                 egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {

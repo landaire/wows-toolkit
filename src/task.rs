@@ -7,7 +7,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -31,7 +33,9 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{self};
+use wowsunpack::data::idx::{
+    self,
+};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
@@ -51,7 +55,9 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{self};
+use crate::twitch::{
+    self,
+};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -123,7 +129,10 @@ impl BackgroundTask {
                         }
 
                         if let Some(progress) = last_progress {
-                            ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text("Downloading Update"));
+                            ui.add(
+                                egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                    .text("Downloading Update"),
+                            );
                         }
                     }
                     BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
@@ -150,7 +159,10 @@ impl BackgroundTask {
                             }
 
                             if let Some(progress) = last_progress {
-                                ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Downloading {}", mod_info.meta.name())));
+                                ui.add(
+                                    egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                        .text(format!("Downloading {}", mod_info.meta.name())),
+                                );
                             }
                         }
                         crate::mod_manager::ModTaskInfo::InstallingMod { mod_info, rx, last_progress } => {
@@ -163,7 +175,10 @@ impl BackgroundTask {
                             }
 
                             if let Some(progress) = last_progress {
-                                ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Installing {}", mod_info.meta.name())));
+                                ui.add(
+                                    egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                        .text(format!("Installing {}", mod_info.meta.name())),
+                                );
                             }
                         }
                         crate::mod_manager::ModTaskInfo::UninstallingMod { mod_info, rx, last_progress } => {
@@ -174,11 +189,16 @@ impl BackgroundTask {
                             }
 
                             if let Some(progress) = last_progress {
-                                ui.add(egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32).text(format!("Uninstalling {}", mod_info.meta.name())));
+                                ui.add(
+                                    egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                        .text(format!("Uninstalling {}", mod_info.meta.name())),
+                                );
                             }
                         }
                     },
-                    BackgroundTaskKind::LoadingPersonalRatingData | BackgroundTaskKind::UpdateTimedMessage(_) | BackgroundTaskKind::OpenFileViewer(_) => {
+                    BackgroundTaskKind::LoadingPersonalRatingData
+                    | BackgroundTaskKind::UpdateTimedMessage(_)
+                    | BackgroundTaskKind::OpenFileViewer(_) => {
                         // do nothing
                     }
                 }
@@ -218,16 +238,21 @@ impl From<ModTaskCompletion> for BackgroundTaskCompletion {
 impl std::fmt::Debug for BackgroundTaskCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DataLoaded { new_dir, wows_data: _, replays: _ } => {
-                f.debug_struct("DataLoaded").field("new_dir", new_dir).field("wows_data", &"<...>").field("replays", &"<...>").finish()
-            }
+            Self::DataLoaded { new_dir, wows_data: _, replays: _ } => f
+                .debug_struct("DataLoaded")
+                .field("new_dir", new_dir)
+                .field("wows_data", &"<...>")
+                .field("replays", &"<...>")
+                .finish(),
             Self::ReplayLoaded { replay: _ } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
             Self::PersonalRatingDataLoaded(_) => f.write_str("PersonalRatingDataLoaded(_)"),
             #[cfg(feature = "mod_manager")]
-            Self::ModManager(mod_manager_completion) => f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion)),
+            Self::ModManager(mod_manager_completion) => {
+                f.write_fmt(format_args!("ModManager({:?})", mod_manager_completion))
+            }
             Self::NoReceiver => f.debug_struct("NoReceiver").finish(),
         }
     }
@@ -244,7 +269,8 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 
             let file_path = file.path();
 
-            if let Some("wowsreplay") = file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str"))
+            if let Some("wowsreplay") =
+                file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str"))
                 && file.file_name() != "temp.wowsreplay"
             {
                 files.push(file_path);
@@ -263,16 +289,25 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 
 fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<ShipIcon>> {
     // Try loading ship icons
-    let species = [Species::AirCarrier, Species::Battleship, Species::Cruiser, Species::Destroyer, Species::Submarine, Species::Auxiliary];
+    let species = [
+        Species::AirCarrier,
+        Species::Battleship,
+        Species::Cruiser,
+        Species::Destroyer,
+        Species::Submarine,
+        Species::Auxiliary,
+    ];
 
     let icons: HashMap<Species, Arc<ShipIcon>> = HashMap::from_iter(species.iter().map(|species| {
-        let path = format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
+        let path =
+            format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
         // let path = format!(
         //     "gui/battle_hud/markers/minimap/ship/ship_default_svg/{}.svg",
         //     <&'static str>::from(species).to_ascii_lowercase()
         // );
 
-        let icon_node = file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
+        let icon_node =
+            file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
@@ -316,7 +351,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
             // We want to build the version string without the patch component to get the replays dir
             // that the replay manager mod uses
-            let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
+            let friendly_build =
+                format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
 
             full_version = Some(full_build_info);
 
@@ -436,7 +472,11 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, Report> {
-    let mut body = reqwest::get(file).await.context("failed to get HTTP response for update file")?.error_for_status().context("HTTP error status for update file")?;
+    let mut body = reqwest::get(file)
+        .await
+        .context("failed to get HTTP response for update file")?
+        .error_for_status()
+        .context("HTTP error status for update file")?;
 
     let total = body.content_length().expect("body has no content-length");
     let mut downloaded = 0;
@@ -459,7 +499,9 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
     for i in 0..zip.len() {
         let mut file = zip.by_index(i).context("failed to get zip inner file by index")?;
         if file.name().ends_with(".exe") {
-            let mut out_file = std::fs::File::create(file_path).context("failed to create update tmp file").attach_with(|| format!("{file_path:?}"))?;
+            let mut out_file = std::fs::File::create(file_path)
+                .context("failed to create update tmp file")
+                .attach_with(|| format!("{file_path:?}"))?;
             std::io::copy(&mut file, &mut out_file).context("failed to decompress update file to disk")?;
             break;
         }
@@ -591,7 +633,12 @@ pub fn start_twitch_task(
     });
 }
 
-fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Client, replay_parsed_before: bool, data: &BackgroundParserThread) -> Result<(), ()> {
+fn parse_replay_data_in_background(
+    path: &Path,
+    client: &reqwest::blocking::Client,
+    replay_parsed_before: bool,
+    data: &BackgroundParserThread,
+) -> Result<(), ()> {
     // The parser lock serves to prevent file access issues when both the main
     // and background thread are attempting to parse some data. This technically
     // makes all parsers synchronous, but shouldn't be a big deal in practice.
@@ -617,7 +664,8 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             debug!("replay parsed successfully");
-                            let is_valid_game_type_for_shipbuilds = matches!(game_type.as_str(), "RandomBattle" | "RankedBattle");
+                            let is_valid_game_type_for_shipbuilds =
+                                matches!(game_type.as_str(), "RandomBattle" | "RankedBattle");
                             if !is_valid_game_type_for_shipbuilds {
                                 debug!("game type is: {}", &game_type);
                             }
@@ -660,7 +708,10 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                             replay.battle_report = Some(report);
                             build_uploaded_successfully = true;
                         }
-                        Err(e) if e.downcast_current_context::<ToolkitError>().is_some_and(|e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) => {
+                        Err(e)
+                            if e.downcast_current_context::<ToolkitError>()
+                                .is_some_and(|e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) =>
+                        {
                             return Ok(()); // We don't want to keep trying to parse this
                         }
                         Err(e) => {
@@ -681,22 +732,28 @@ fn parse_replay_data_in_background(path: &Path, client: &reqwest::blocking::Clie
                             );
 
                             if data.data_export_settings.should_auto_export {
+                                let export_path = data.data_export_settings.export_path.join(replay.better_file_name(
+                                    wows_data.game_metadata.as_ref().expect("no metadata provider?"),
+                                ));
                                 let export_path =
-                                    data.data_export_settings.export_path.join(replay.better_file_name(wows_data.game_metadata.as_ref().expect("no metadata provider?")));
-                                let export_path = export_path.with_extension(match data.data_export_settings.export_format {
-                                    ReplayExportFormat::Json => "json",
-                                    ReplayExportFormat::Cbor => "cbor",
-                                    ReplayExportFormat::Csv => "csv",
-                                });
+                                    export_path.with_extension(match data.data_export_settings.export_format {
+                                        ReplayExportFormat::Json => "json",
+                                        ReplayExportFormat::Cbor => "cbor",
+                                        ReplayExportFormat::Csv => "csv",
+                                    });
 
                                 let transformed_data = Match::new(&replay, data.is_debug);
 
-                                if let Err(e) =
-                                    File::create(&export_path).context("failed to create export file").and_then(|file| match data.data_export_settings.export_format {
-                                        ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data).context("failed to write export file"),
-                                        ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data).context("failed to write export file"),
+                                if let Err(e) = File::create(&export_path)
+                                    .context("failed to create export file")
+                                    .and_then(|file| match data.data_export_settings.export_format {
+                                        ReplayExportFormat::Json => serde_json::to_writer(file, &transformed_data)
+                                            .context("failed to write export file"),
+                                        ReplayExportFormat::Cbor => serde_cbor::to_writer(file, &transformed_data)
+                                            .context("failed to write export file"),
                                         ReplayExportFormat::Csv => {
-                                            let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+                                            let mut writer =
+                                                csv::WriterBuilder::new().has_headers(true).from_writer(file);
                                             let mut result = Ok(());
                                             for vehicle in transformed_data.vehicles {
                                                 result = writer.serialize(FlattenedVehicle::from(vehicle));
@@ -826,14 +883,19 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                 Ok(read_dir) => {
                     for file in read_dir.flatten() {
                         let path = file.path();
-                        if path.extension().map(|ext| ext != "wowsreplay").unwrap_or(false) || path.file_name().map(|name| name == "temp.wowsreplay").unwrap_or(false) {
+                        if path.extension().map(|ext| ext != "wowsreplay").unwrap_or(false)
+                            || path.file_name().map(|name| name == "temp.wowsreplay").unwrap_or(false)
+                        {
                             continue;
                         }
 
                         let path_str = path.to_string_lossy();
-                        let already_recorded_replay = { data.sent_replays.read().contains(path_str.as_ref()) } || cfg!(feature = "shipbuilds_debugging");
+                        let already_recorded_replay = { data.sent_replays.read().contains(path_str.as_ref()) }
+                            || cfg!(feature = "shipbuilds_debugging");
 
-                        if !already_recorded_replay && parse_replay_data_in_background(&path, &client, already_recorded_replay, &data).is_ok() {
+                        if !already_recorded_replay
+                            && parse_replay_data_in_background(&path, &client, already_recorded_replay, &data).is_ok()
+                        {
                             data.sent_replays.write().insert(path_str.into_owned());
                         }
                     }
@@ -889,7 +951,8 @@ pub fn start_populating_player_inspector(
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {
                     let wows_data = wows_data.read();
-                    let (metadata_provider, game_version) = { (wows_data.game_metadata.clone(), wows_data.patch_version) };
+                    let (metadata_provider, game_version) =
+                        { (wows_data.game_metadata.clone(), wows_data.patch_version) };
                     if let Some(metadata_provider) = metadata_provider {
                         let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                         match replay.parse(game_version.to_string().as_str()) {
@@ -954,8 +1017,9 @@ pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result: Result<BackgroundTaskCompletion, Report> =
-            serde_json::from_slice(&constants).map(BackgroundTaskCompletion::ConstantsLoaded).map_err(|err| Report::from(ToolkitError::from(err)));
+        let result: Result<BackgroundTaskCompletion, Report> = serde_json::from_slice(&constants)
+            .map(BackgroundTaskCompletion::ConstantsLoaded)
+            .map_err(|err| Report::from(ToolkitError::from(err)));
 
         tx.send(result).expect("tx closed");
     });
@@ -965,8 +1029,9 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
 pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result: Result<BackgroundTaskCompletion, Report> =
-            serde_json::from_slice(&data).map(BackgroundTaskCompletion::PersonalRatingDataLoaded).map_err(|err| Report::from(ToolkitError::from(err)));
+        let result: Result<BackgroundTaskCompletion, Report> = serde_json::from_slice(&data)
+            .map(BackgroundTaskCompletion::PersonalRatingDataLoaded)
+            .map_err(|err| Report::from(ToolkitError::from(err)));
 
         tx.send(result).expect("tx closed");
     });

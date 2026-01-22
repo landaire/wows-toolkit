@@ -187,7 +187,11 @@ impl ModManagerInfo {
                         .entry(macro_group.to_string())
                         .or_default()
                         .entry(micro_group.to_string())
-                        .or_insert_with(|| ModManagerCategory { name: micro_group.to_string(), enabled: category_enabled, mods: Vec::new() })
+                        .or_insert_with(|| ModManagerCategory {
+                            name: micro_group.to_string(),
+                            enabled: category_enabled,
+                            mods: Vec::new(),
+                        })
                         .mods
                         .push(Rc::new(RefCell::new(ModInfo { meta: modi, enabled, mod_paths })));
                 }
@@ -201,7 +205,9 @@ impl ModManagerInfo {
         // I want to make sure we don't have any stale data in the UI.
         let mut mapped_categories: Vec<(String, Vec<ModManagerCategory>)> = Vec::new();
         for (macro_group, mut micro_groups) in unique_categories.drain() {
-            if let Some((_macro_group, categories)) = mapped_categories.iter_mut().find(|(name, _)| name == &macro_group) {
+            if let Some((_macro_group, categories)) =
+                mapped_categories.iter_mut().find(|(name, _)| name == &macro_group)
+            {
                 let mut new_categories: Vec<ModManagerCategory> = micro_groups.drain().map(|(_k, v)| v).collect();
                 categories.append(&mut new_categories);
             } else {
@@ -241,14 +247,21 @@ impl ToolkitTabViewer<'_> {
                     ui.heading(&selected_mod.meta.name);
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut selected_mod.enabled, "Enabled").changed() {
-                            self.tab_state.mod_action_sender.send(selected_mod.clone()).expect("failed to send selected mod on mod_action_sender");
+                            self.tab_state
+                                .mod_action_sender
+                                .send(selected_mod.clone())
+                                .expect("failed to send selected mod on mod_action_sender");
                         }
                         ui.hyperlink_to(format!("{} Mod Home Page", icons::BROWSER), &selected_mod.meta.repo_url);
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
                             ui.hyperlink_to(format!("{} Discord Approval Thread", icons::DISCORD_LOGO), discord_url);
                         }
                     });
-                    CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, &selected_mod.meta.description);
+                    CommonMarkViewer::new().show(
+                        ui,
+                        &mut self.tab_state.markdown_cache,
+                        &selected_mod.meta.description,
+                    );
                     for image in selected_mod.meta.preview_images.iter() {
                         ui.add(egui::Image::new(ImageSource::Uri(image.into())).max_width(512.0).max_height(512.0));
                     }
@@ -298,8 +311,16 @@ impl ToolkitTabViewer<'_> {
                                     // Apply the filter
                                     // TODO: maybe just build a raw list of mods to show so we aren't doing work in the UI thread
                                     if !mod_manager_info.filter_text.is_empty()
-                                        && (!mod_info.meta.name.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase())
-                                            || mod_info.meta.author.to_lowercase().contains(&mod_manager_info.filter_text.to_lowercase()))
+                                        && (!mod_info
+                                            .meta
+                                            .name
+                                            .to_lowercase()
+                                            .contains(&mod_manager_info.filter_text.to_lowercase())
+                                            || mod_info
+                                                .meta
+                                                .author
+                                                .to_lowercase()
+                                                .contains(&mod_manager_info.filter_text.to_lowercase()))
                                     {
                                         continue;
                                     }
@@ -307,7 +328,10 @@ impl ToolkitTabViewer<'_> {
                                     body.row(30.0, |mut row| {
                                         row.col(|ui| {
                                             if ui.checkbox(&mut mod_info.enabled, "").changed() {
-                                                self.tab_state.mod_action_sender.send(mod_info.clone()).expect("failed to send mod info on mod_action_sender");
+                                                self.tab_state
+                                                    .mod_action_sender
+                                                    .send(mod_info.clone())
+                                                    .expect("failed to send mod info on mod_action_sender");
                                             }
                                         });
                                         row.col(|ui| {

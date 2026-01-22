@@ -30,7 +30,8 @@ pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
 }
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
-    let language: LanguageTag = locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
+    let language: LanguageTag =
+        locale.and_then(|locale| locale.parse().ok()).unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
 
     match language.primary_language() {
         "fr" => num.separate_with_spaces(),
@@ -111,10 +112,20 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
     parts[0] = ship.index().to_string();
 
     // Modules
-    parts[1] = config.units().iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect::<Vec<_>>().join(",");
+    parts[1] = config
+        .units()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Upgrades
-    parts[2] = config.modernization().iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect::<Vec<_>>().join(",");
+    parts[2] = config
+        .modernization()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
     // Captain
     parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
 
@@ -122,10 +133,20 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
     parts[4] = entity.commander_skills_raw(species).iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
 
     // Consumables
-    parts[5] = config.abilities().iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect::<Vec<_>>().join(",");
+    parts[5] = config
+        .abilities()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Signals
-    parts[6] = config.signals().iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect::<Vec<_>>().join(",");
+    parts[6] = config
+        .signals()
+        .iter()
+        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
 
     // Build Version
     parts[7] = "2".to_string();
@@ -135,7 +156,8 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
 
     debug!("{:?}", parts.join(";"));
 
-    let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
+    let url =
+        format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
 
     Some(url)
 }
@@ -183,15 +205,25 @@ pub fn colorize_captain_points(
         color = Color32::LIGHT_RED;
         let default_text = "Player is playing tower defense with their skills";
         return (
-            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::CASTLE_TURRET, points, skills)).color(color),
-            if extra_hover_text.is_empty() { Some(default_text.to_string()) } else { Some(format!("{} and has {}", default_text, extra_hover_text.join(", "))) },
+            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::CASTLE_TURRET, points, skills))
+                .color(color),
+            if extra_hover_text.is_empty() {
+                Some(default_text.to_string())
+            } else {
+                Some(format!("{} and has {}", default_text, extra_hover_text.join(", ")))
+            },
         );
     } else if highest_skill_tier <= 2 && points >= 6 {
         color = Color32::LIGHT_RED;
         let default_text = "Player has no skills above tier 2";
         return (
-            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::WARNING, points, skills)).color(color),
-            if extra_hover_text.is_empty() { Some(default_text.to_string()) } else { Some(format!("{} and has {}", default_text, extra_hover_text.join(", "))) },
+            RichText::new(format!("{}{} {}pts ({} skills)", extra_icons, crate::icons::WARNING, points, skills))
+                .color(color),
+            if extra_hover_text.is_empty() {
+                Some(default_text.to_string())
+            } else {
+                Some(format!("{} and has {}", default_text, extra_hover_text.join(", ")))
+            },
         );
     }
 

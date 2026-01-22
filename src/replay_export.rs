@@ -43,8 +43,16 @@ impl Match {
 
         let vehicles: Vec<Vehicle> = ui_report.player_reports().iter().map(Vehicle::new).collect();
 
-        let mut match_data =
-            Match { vehicles, metadata, game_chat: battle_report.game_chat().iter().filter(|message| message.sender_relation.is_some()).map(Message::from).collect() };
+        let mut match_data = Match {
+            vehicles,
+            metadata,
+            game_chat: battle_report
+                .game_chat()
+                .iter()
+                .filter(|message| message.sender_relation.is_some())
+                .map(Message::from)
+                .collect(),
+        };
 
         if is_debug_mode {
             return match_data;
@@ -248,7 +256,9 @@ impl From<Vehicle> for FlattenedVehicle {
         let (modules, abilities, captain_skills) = if let Some(translated_config) = translated_build {
             let modules = translated_config.modules.iter().filter_map(|module| module.name.clone()).collect();
             let abilities = translated_config.abilities.iter().filter_map(|ability| ability.name.clone()).collect();
-            let captain_skills = translated_config.captain_skills.map(|skills| skills.iter().filter_map(|skill| skill.name.clone()).collect());
+            let captain_skills = translated_config
+                .captain_skills
+                .map(|skills| skills.iter().filter_map(|skill| skill.name.clone()).collect());
             (Some(modules), Some(abilities), captain_skills)
         } else {
             (None, None, None)
@@ -283,19 +293,31 @@ impl From<Vehicle> for FlattenedVehicle {
             flooding: server_results.as_ref().and_then(|results| results.damage_details.flooding),
             spotting_damage: server_results.as_ref().map(|results| results.spotting_damage),
             potential_damage: server_results.as_ref().map(|results| results.potential_damage),
-            potential_damage_artillery: server_results.as_ref().map(|results| results.potential_damage_details.artillery),
-            potential_damage_torpedoes: server_results.as_ref().map(|results| results.potential_damage_details.torpedoes),
+            potential_damage_artillery: server_results
+                .as_ref()
+                .map(|results| results.potential_damage_details.artillery),
+            potential_damage_torpedoes: server_results
+                .as_ref()
+                .map(|results| results.potential_damage_details.torpedoes),
             potential_damage_planes: server_results.as_ref().map(|results| results.potential_damage_details.planes),
             received_damage: server_results.as_ref().map(|results| results.received_damage),
             received_damage_ap: server_results.as_ref().and_then(|results| results.received_damage_details.ap),
             received_damage_sap: server_results.as_ref().and_then(|results| results.received_damage_details.sap),
             received_damage_he: server_results.as_ref().and_then(|results| results.received_damage_details.he),
-            received_damage_he_secondaries: server_results.as_ref().and_then(|results| results.received_damage_details.he_secondaries),
-            received_damage_sap_secondaries: server_results.as_ref().and_then(|results| results.received_damage_details.sap_secondaries),
+            received_damage_he_secondaries: server_results
+                .as_ref()
+                .and_then(|results| results.received_damage_details.he_secondaries),
+            received_damage_sap_secondaries: server_results
+                .as_ref()
+                .and_then(|results| results.received_damage_details.sap_secondaries),
             received_damage_torps: server_results.as_ref().and_then(|results| results.received_damage_details.torps),
-            received_damage_deep_water_torps: server_results.as_ref().and_then(|results| results.received_damage_details.deep_water_torps),
+            received_damage_deep_water_torps: server_results
+                .as_ref()
+                .and_then(|results| results.received_damage_details.deep_water_torps),
             received_damage_fire: server_results.as_ref().and_then(|results| results.received_damage_details.fire),
-            received_damage_flooding: server_results.as_ref().and_then(|results| results.received_damage_details.flooding),
+            received_damage_flooding: server_results
+                .as_ref()
+                .and_then(|results| results.received_damage_details.flooding),
             fires_dealt: server_results.as_ref().map(|results| results.fires_dealt),
             floods_dealt: server_results.as_ref().map(|results| results.floods_dealt),
             citadels_dealt: server_results.as_ref().map(|results| results.citadels_dealt),
@@ -369,7 +391,11 @@ impl Vehicle {
             is_enemy: value.is_enemy(),
             raw_config: vehicle_entity.map(|v| v.props().ship_config().clone()),
             translated_build: value.translated_build().cloned(),
-            captain_id: vehicle_entity.and_then(|v| v.captain()).map(|captain| captain.index()).unwrap_or("PCW001").to_string(),
+            captain_id: vehicle_entity
+                .and_then(|v| v.captain())
+                .map(|captain| captain.index())
+                .unwrap_or("PCW001")
+                .to_string(),
             server_results: if value.actual_damage_report().is_some() {
                 Some(ServerResults {
                     xp: value.base_xp().unwrap_or_default(),
@@ -379,9 +405,15 @@ impl Vehicle {
                     hits_details: value.hits_report().cloned().expect("no hit report"),
                     spotting_damage: value.spotting_damage().unwrap_or_default(),
                     potential_damage: value.potential_damage().unwrap_or_default(),
-                    potential_damage_details: value.potential_damage_report().cloned().expect("no potential damage report"),
+                    potential_damage_details: value
+                        .potential_damage_report()
+                        .cloned()
+                        .expect("no potential damage report"),
                     received_damage: value.received_damage().unwrap_or_default(),
-                    received_damage_details: value.received_damage_report().cloned().expect("no received damage report"),
+                    received_damage_details: value
+                        .received_damage_report()
+                        .cloned()
+                        .expect("no received damage report"),
                     fires_dealt: value.fires().unwrap_or_default(),
                     floods_dealt: value.floods().unwrap_or_default(),
                     citadels_dealt: value.citadels().unwrap_or_default(),
@@ -390,7 +422,9 @@ impl Vehicle {
                     kills: value.kills().unwrap_or_default(),
                     damage_interactions: value
                         .damage_interactions()
-                        .map(|interactions| HashMap::from_iter(interactions.iter().map(|(key, value)| (*key, value.into()))))
+                        .map(|interactions| {
+                            HashMap::from_iter(interactions.iter().map(|(key, value)| (*key, value.into())))
+                        })
                         .unwrap_or_default(),
                 })
             } else {
@@ -439,7 +473,12 @@ pub struct Message {
 
 impl From<&GameMessage> for Message {
     fn from(value: &GameMessage) -> Self {
-        let message = if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
-        Self { sender_db_id: value.player.as_ref().expect("no player for message").db_id(), channel: value.channel, message }
+        let message =
+            if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
+        Self {
+            sender_db_id: value.player.as_ref().expect("no player for message").db_id(),
+            channel: value.channel,
+            message,
+        }
     }
 }

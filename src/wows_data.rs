@@ -59,7 +59,14 @@ pub fn parse_replay<P: AsRef<Path>>(
     let game_metadata = { wows_data.read().game_metadata.clone()? };
     let replay = Replay::new(replay_file, game_metadata);
 
-    load_replay(game_constants, wows_data, Arc::new(RwLock::new(replay)), replay_sort, background_task_sender, is_debug_mode)
+    load_replay(
+        game_constants,
+        wows_data,
+        Arc::new(RwLock::new(replay)),
+        replay_sort,
+        background_task_sender,
+        is_debug_mode,
+    )
 }
 
 pub fn load_replay(
@@ -102,7 +109,13 @@ pub fn load_replay(
 
                 let mut replay_guard = replay.write();
                 replay_guard.battle_report = Some(report);
-                replay_guard.build_ui_report(game_constants, wows_data, replay_sort, Some(background_task_sender), is_debug_mode);
+                replay_guard.build_ui_report(
+                    game_constants,
+                    wows_data,
+                    replay_sort,
+                    Some(background_task_sender),
+                    is_debug_mode,
+                );
             }
             BackgroundTaskCompletion::ReplayLoaded { replay }
         });

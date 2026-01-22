@@ -1,4 +1,4 @@
 imports_granularity = "Item"
 imports_layout = "Vertical"
 use_small_heuristics = "Max"
-max_width = 170
+max_width = 120

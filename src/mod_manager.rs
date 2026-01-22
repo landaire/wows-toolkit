@@ -95,7 +95,12 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
     Ok(result)
 }
 
-fn unpack_mod(tarball: &[u8], wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> anyhow::Result<()> {
+fn unpack_mod(
+    tarball: &[u8],
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    mod_info: &ModInfo,
+    tx: Sender<DownloadProgress>,
+) -> anyhow::Result<()> {
     let tar = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(tar);
 
@@ -182,13 +187,19 @@ fn unpack_mod(tarball: &[u8], wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_i
     Ok(())
 }
 
-fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
+fn install_mod(
+    runtime: Arc<Runtime>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    mod_info: ModInfo,
+    tx: mpsc::Sender<BackgroundTask>,
+) {
     eprintln!("downloading mod");
     let (download_task_tx, download_task_rx) = mpsc::channel();
     let (download_progress_tx, download_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
         receiver: download_task_rx.into(),
-        kind: ModTaskInfo::DownloadingMod { mod_info: mod_info.clone(), rx: download_progress_rx, last_progress: None }.into(),
+        kind: ModTaskInfo::DownloadingMod { mod_info: mod_info.clone(), rx: download_progress_rx, last_progress: None }
+            .into(),
     });
 
     // TODO: Download pending mods in parallel?
@@ -203,9 +214,17 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
             let _ = tx.send(BackgroundTask {
                 receiver: install_task_rx.into(),
                 kind: if mod_info.enabled {
-                    ModTaskInfo::InstallingMod { mod_info: mod_info.clone(), rx: install_progress_rx, last_progress: None }
+                    ModTaskInfo::InstallingMod {
+                        mod_info: mod_info.clone(),
+                        rx: install_progress_rx,
+                        last_progress: None,
+                    }
                 } else {
-                    ModTaskInfo::UninstallingMod { mod_info: mod_info.clone(), rx: install_progress_rx, last_progress: None }
+                    ModTaskInfo::UninstallingMod {
+                        mod_info: mod_info.clone(),
+                        rx: install_progress_rx,
+                        last_progress: None,
+                    }
                 }
                 .into(),
             });
@@ -221,13 +240,22 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: Arc<RwLock<WorldOfWarshipsData>
     }
 }
 
-fn uninstall_mod(wows_data: Arc<RwLock<WorldOfWarshipsData>>, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) -> anyhow::Result<()> {
+fn uninstall_mod(
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    mod_info: ModInfo,
+    tx: mpsc::Sender<BackgroundTask>,
+) -> anyhow::Result<()> {
     eprintln!("downloading mod");
     let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
     let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
     let _ = tx.send(BackgroundTask {
         receiver: uninstall_task_rx.into(),
-        kind: ModTaskInfo::UninstallingMod { mod_info: mod_info.clone(), rx: uninstall_progress_rx, last_progress: None }.into(),
+        kind: ModTaskInfo::UninstallingMod {
+            mod_info: mod_info.clone(),
+            rx: uninstall_progress_rx,
+            last_progress: None,
+        }
+        .into(),
     });
 
     let wows_dir = { wows_data.read().build_dir.join("res_mods") };
@@ -269,7 +297,8 @@ pub fn start_mod_manager_thread(
                 install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
             } else {
                 eprintln!("uninstalling mod: {:?}", mod_info.meta.name());
-                uninstall_mod(wows_data.clone(), mod_info.clone(), background_task_sender.clone()).expect("failed to uninstall mod");
+                uninstall_mod(wows_data.clone(), mod_info.clone(), background_task_sender.clone())
+                    .expect("failed to uninstall mod");
             }
         }
     });

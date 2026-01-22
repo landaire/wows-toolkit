@@ -67,12 +67,15 @@ impl ToolkitTabViewer<'_> {
                 if let Some(pkg_loader) = self.pkg_loader()
                     && ui.button("View Contents").clicked()
                 {
-                    let mut file_contents: Vec<u8> = Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
+                    let mut file_contents: Vec<u8> =
+                        Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
 
                     node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
 
                     let file_type = match (is_plaintext_file, is_image_file) {
-                        (Some(ext), None) => String::from_utf8(file_contents).ok().map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
+                        (Some(ext), None) => String::from_utf8(file_contents)
+                            .ok()
+                            .map(|contents| FileType::PlainTextFile { ext: ext.to_string(), contents }),
                         (None, Some(_ext)) => Some(FileType::Image { contents: file_contents }),
                         (None, None) => None,
                         _ => unreachable!("this should be impossible"),
@@ -95,19 +98,21 @@ impl ToolkitTabViewer<'_> {
     }
     /// Builds a resource tree node from a [FileNode]
     fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
-        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() }).default_open(file_tree.is_root()).show(ui, |ui| {
-            for (name, node) in file_tree.children() {
-                if node.is_file() {
-                    let file_label = ui.add(Label::new(name).sense(Sense::click()));
-                    self.add_view_file_menu(&file_label, node);
-                    if file_label.double_clicked() {
-                        self.tab_state.items_to_extract.lock().push(node.clone());
+        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() })
+            .default_open(file_tree.is_root())
+            .show(ui, |ui| {
+                for (name, node) in file_tree.children() {
+                    if node.is_file() {
+                        let file_label = ui.add(Label::new(name).sense(Sense::click()));
+                        self.add_view_file_menu(&file_label, node);
+                        if file_label.double_clicked() {
+                            self.tab_state.items_to_extract.lock().push(node.clone());
+                        }
+                    } else {
+                        self.build_resource_tree_node(ui, node);
                     }
-                } else {
-                    self.build_resource_tree_node(ui, node);
                 }
-            }
-        });
+            });
 
         if header.header_response.double_clicked() {
             self.tab_state.items_to_extract.lock().push(file_tree.clone());
@@ -122,7 +127,9 @@ impl ToolkitTabViewer<'_> {
         egui::Grid::new("filtered_files_grid").num_columns(1).striped(true).show(ui, |ui| {
             let files = files.into_iter();
             for file in files {
-                let label = ui.add(Label::new(Path::new("res").join(&*file.0).to_string_lossy().into_owned()).sense(Sense::click()));
+                let label = ui.add(
+                    Label::new(Path::new("res").join(&*file.0).to_string_lossy().into_owned()).sense(Sense::click()),
+                );
                 self.add_view_file_menu(&label, &file.1);
 
                 let text = if file.1.is_file() {
@@ -173,7 +180,11 @@ impl ToolkitTabViewer<'_> {
 
                         let path = output_dir.join(file.parent().unwrap().path().unwrap());
                         let file_path = path.join(file.filename());
-                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: (files_written as f32) / (file_count as f32) }).unwrap();
+                        tx.send(UnpackerProgress {
+                            file_name: file_path.to_string_lossy().into(),
+                            progress: (files_written as f32) / (file_count as f32),
+                        })
+                        .unwrap();
                         if !folders_created.contains(&path) {
                             fs::create_dir_all(&path).expect("failed to create folder");
                             folders_created.insert(path.clone());
@@ -209,11 +220,15 @@ impl ToolkitTabViewer<'_> {
 
                 if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
                     let _unpacker_thread = Some(std::thread::spawn(move || {
-                        let mut game_params_data: Vec<u8> = Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
+                        let mut game_params_data: Vec<u8> =
+                            Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
 
-                        game_params_file.read_file(&pkg_loader, &mut game_params_data).expect("failed to read GameParams");
+                        game_params_file
+                            .read_file(&pkg_loader, &mut game_params_data)
+                            .expect("failed to read GameParams");
 
-                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
+                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 })
+                            .unwrap();
 
                         let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
                         let params_dict = if base_params {
@@ -232,7 +247,8 @@ impl ToolkitTabViewer<'_> {
                             pickle
                         };
 
-                        let file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
+                        let file =
+                            BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
                         match format {
                             GameParamsFormat::Json => {
                                 let mut serializer = serde_json::Serializer::pretty(file);
@@ -245,17 +261,20 @@ impl ToolkitTabViewer<'_> {
                             }
                             GameParamsFormat::MinimalJson => {
                                 if let Some(metadata_provider) = metadata_provider {
-                                    serde_json::to_writer(file, &metadata_provider.params()).expect("failed to write CBOR data");
+                                    serde_json::to_writer(file, &metadata_provider.params())
+                                        .expect("failed to write CBOR data");
                                 }
                             }
                             GameParamsFormat::MinimalCbor => {
                                 if let Some(metadata_provider) = metadata_provider {
-                                    serde_cbor::to_writer(file, &metadata_provider.params()).expect("failed to write CBOR data");
+                                    serde_cbor::to_writer(file, &metadata_provider.params())
+                                        .expect("failed to write CBOR data");
                                 }
                             }
                         }
 
-                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 }).unwrap();
+                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 })
+                            .unwrap();
                     }));
                 }
             }
@@ -266,7 +285,9 @@ impl ToolkitTabViewer<'_> {
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
-                if self.tab_state.used_filter.is_none() || self.tab_state.filter.as_str() != self.tab_state.used_filter.as_ref().unwrap().as_str() {
+                if self.tab_state.used_filter.is_none()
+                    || self.tab_state.filter.as_str() != self.tab_state.used_filter.as_ref().unwrap().as_str()
+                {
                     debug!("Filtering file listing again");
                     let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                         let wows_data = wows_data.read();
@@ -276,13 +297,18 @@ impl ToolkitTabViewer<'_> {
                             if self.tab_state.filter.contains('*')
                                 && let Ok(glob) = glob
                             {
-                                let leafs: Vec<_> = files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
+                                let leafs: Vec<_> =
+                                    files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect();
 
                                 Some(leafs)
                             } else {
                                 let leafs = files
                                     .iter()
-                                    .filter(|(path, _node)| path.to_str().map(|path| path.contains(self.tab_state.filter.as_str())).unwrap_or(false))
+                                    .filter(|(path, _node)| {
+                                        path.to_str()
+                                            .map(|path| path.contains(self.tab_state.filter.as_str()))
+                                            .unwrap_or(false)
+                                    })
                                     .cloned()
                                     .collect();
 
@@ -349,7 +375,15 @@ impl ToolkitTabViewer<'_> {
                             let mut items = self.tab_state.items_to_extract.lock();
                             let mut remove_idx = None;
                             for (i, item) in items.iter().enumerate() {
-                                if ui.add(Label::new(Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned()).sense(Sense::click())).double_clicked() {
+                                if ui
+                                    .add(
+                                        Label::new(
+                                            Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned(),
+                                        )
+                                        .sense(Sense::click()),
+                                    )
+                                    .double_clicked()
+                                {
                                     remove_idx = Some(i);
                                 }
                             }
@@ -365,31 +399,38 @@ impl ToolkitTabViewer<'_> {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.menu_button(format!("{} Dump GameParams", icons::FLOPPY_DISK), |ui| {
                             if ui.small_button("Base As JSON").clicked() {
-                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file()
+                                {
                                     self.dump_game_params(path, GameParamsFormat::Json, true);
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As JSON").clicked() {
-                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file()
+                                {
                                     self.dump_game_params(path, GameParamsFormat::Json, false);
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As CBOR").clicked() {
-                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
+                                if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file()
+                                {
                                     self.dump_game_params(path, GameParamsFormat::Cbor, false);
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
-                                if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
+                                if let Some(path) =
+                                    rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file()
+                                {
                                     self.dump_game_params(path, GameParamsFormat::MinimalJson, false);
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
-                                if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
+                                if let Some(path) =
+                                    rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file()
+                                {
                                     self.dump_game_params(path, GameParamsFormat::MinimalCbor, false);
                                 }
                                 ui.close_kind(UiKind::Menu);
@@ -407,7 +448,10 @@ impl ToolkitTabViewer<'_> {
                             }
                         }
 
-                        ui.add_sized(ui.available_size(), egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"));
+                        ui.add_sized(
+                            ui.available_size(),
+                            egui::TextEdit::singleline(&mut self.tab_state.output_dir).hint_text("Output Path"),
+                        );
                     });
                 });
             });

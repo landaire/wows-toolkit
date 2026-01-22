@@ -23,10 +23,18 @@ struct CachedGameParams {
 
 pub fn game_params_bin_path() -> PathBuf {
     let old_cache_path = Path::new("game_params.bin");
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) { storage_dir.join(old_cache_path) } else { old_cache_path.to_path_buf() }
+    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        storage_dir.join(old_cache_path)
+    } else {
+        old_cache_path.to_path_buf()
+    }
 }
 
-pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
+pub fn load_game_params(
+    file_tree: &FileNode,
+    pkg_loader: &PkgFileLoader,
+    game_version: usize,
+) -> Result<GameMetadataProvider, ToolkitError> {
     debug!("loading game params");
     let old_cache_path = Path::new("game_params.bin");
 
@@ -49,7 +57,8 @@ pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_v
         .exists()
         .then(|| {
             let mut cache_data = std::fs::File::open(&cache_path).ok()?;
-            let cached_params: CachedGameParams = bincode::serde::decode_from_std_read(&mut cache_data, bincode::config::standard()).ok()?;
+            let cached_params: CachedGameParams =
+                bincode::serde::decode_from_std_read(&mut cache_data, bincode::config::standard()).ok()?;
             if cached_params.game_version == game_version { Some(cached_params.params) } else { None }
         })
         .flatten();
@@ -66,7 +75,8 @@ pub fn load_game_params(file_tree: &FileNode, pkg_loader: &PkgFileLoader, game_v
         };
 
         let mut file = std::fs::File::create(cache_path).unwrap();
-        bincode::serde::encode_into_std_write(&cached_params, &mut file, bincode::config::standard()).expect("failed to serialize cached game params");
+        bincode::serde::encode_into_std_write(&cached_params, &mut file, bincode::config::standard())
+            .expect("failed to serialize cached game params");
 
         metadata_provider
     };

@@ -51,7 +51,13 @@ fn main() -> eframe::Result<()> {
                     .with_ansi(true)
                     .with_filter(LevelFilter::DEBUG),
             )
-            .with(fmt::Layer::new().with_writer(non_blocking).with_timer(LocalTime::rfc_3339()).with_ansi(false).with_filter(LevelFilter::DEBUG));
+            .with(
+                fmt::Layer::new()
+                    .with_writer(non_blocking)
+                    .with_timer(LocalTime::rfc_3339())
+                    .with_ansi(false)
+                    .with_filter(LevelFilter::DEBUG),
+            );
         #[cfg(all(debug_assertions, feature = "logging"))]
         tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     }

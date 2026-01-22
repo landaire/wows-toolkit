@@ -35,7 +35,13 @@ fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> V
 }
 
 impl BuildTrackerPayload {
-    pub fn build_from(player: &Player, realm: String, version: Version, game_type: String, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+    pub fn build_from(
+        player: &Player,
+        realm: String,
+        version: Version,
+        game_type: String,
+        metadata_provider: &GameMetadataProvider,
+    ) -> Option<Self> {
         let entity = player.vehicle_entity()?;
         let config = entity.props().ship_config();
         let ship = player.vehicle();
