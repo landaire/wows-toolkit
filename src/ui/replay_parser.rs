@@ -24,7 +24,6 @@ use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::update_background_task;
-use crate::util::build_tomato_gg_url;
 use crate::wows_data::ShipIcon;
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
@@ -1849,14 +1848,6 @@ impl UiReport {
                                 }
 
                                 ui.separator();
-                            }
-
-                            if ui.small_button(format!("{} Open Tomato.gg Page", icons::SHARE)).clicked() {
-                                if let Some(url) = build_tomato_gg_url(&report.vehicle) {
-                                    ui.ctx().open_url(OpenUrl::new_tab(url));
-                                }
-
-                                ui.close_kind(UiKind::Menu);
                             }
 
                             if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
