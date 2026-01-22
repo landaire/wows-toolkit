@@ -2542,17 +2542,17 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_replay_player_list(&self, ui_report: &mut UiReport, ui: &mut egui::Ui) {
-        if !ui_report.sorted {
-            let replay_sort = self.tab_state.replay_sort.lock();
-            ui_report.sort_players(*replay_sort);
-        }
-
-        // Populate PR data if available
+        // Populate PR data if available (must happen before sorting so PR sort works)
         {
             let pr_data = self.tab_state.personal_rating_data.read();
             if pr_data.is_loaded() {
                 ui_report.populate_personal_ratings(&pr_data);
             }
+        }
+
+        if !ui_report.sorted {
+            let replay_sort = self.tab_state.replay_sort.lock();
+            ui_report.sort_players(*replay_sort);
         }
 
         ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
