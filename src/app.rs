@@ -1,24 +1,14 @@
-use core::f32;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
-
 use std::time::Duration;
 use std::time::Instant;
 
-use clipboard::ClipboardContext;
-use clipboard::ClipboardProvider;
 use eframe::APP_KEY;
 use egui::Color32;
 use egui::Context;
@@ -27,74 +17,40 @@ use egui::Modifiers;
 use egui::OpenUrl;
 use egui::RichText;
 use egui::ScrollArea;
-use egui::Slider;
 use egui::TextStyle;
 use egui::Ui;
 use egui::UiKind;
 use egui::WidgetText;
-use egui::mutex::Mutex;
-use egui_commonmark::CommonMarkCache;
 use egui_commonmark::CommonMarkViewer;
 use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::Style;
 use egui_dock::TabViewer;
-use gettext::Catalog;
 
 use http_body_util::BodyExt;
-use notify::EventKind;
-use notify::RecommendedWatcher;
-use notify::RecursiveMode;
-use notify::Watcher;
-use notify::event::ModifyKind;
-use notify::event::RenameMode;
 use octocrab::models::repos::Release;
 use octocrab::params::repos::Reference;
-use parking_lot::RwLock;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
-use tracing::debug;
 use tracing::trace;
 
 use serde::Deserialize;
 use serde::Serialize;
 
 use tokio::runtime::Runtime;
-use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::GameMessage;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::error::ToolkitError;
 use crate::game_params::game_params_bin_path;
 use crate::icons;
-use crate::personal_rating::PersonalRatingData;
-use crate::plaintext_viewer::PlaintextFileViewer;
-use crate::task::BackgroundParserThread;
-use crate::task::BackgroundTask;
+use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
-use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::ReplayExportFormat;
 use crate::task::{self};
-use crate::twitch::Token;
-use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
-use crate::ui::file_unpacker::UnpackerProgress;
-use crate::ui::mod_manager::ModInfo;
-use crate::ui::mod_manager::ModManagerInfo;
-use crate::ui::player_tracker::PlayerTracker;
-use crate::ui::replay_parser::Replay;
-use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{self};
-use crate::wows_data::ReplayLoader;
-use crate::wows_data::WorldOfWarshipsData;
-use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
-
-const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -132,172 +88,6 @@ pub struct ToolkitTabViewer<'a> {
     pub tab_state: &'a mut TabState,
 }
 
-impl ToolkitTabViewer<'_> {
-    fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.label("Application Settings");
-            ui.group(|ui| {
-                ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
-                if ui.checkbox(&mut self.tab_state.settings.send_replay_data, "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com").changed() {
-                    self.tab_state.send_replay_consent_changed();
-                }
-                ui.horizontal(|ui| {
-                    let mut zoom = ui.ctx().zoom_factor();
-                    if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text("Zoom Factor (Ctrl + and Ctrl - also changes this)")).changed() {
-                        ui.ctx().set_zoom_factor(zoom);
-                    }
-                    if ui.button("Reset").clicked() {
-                        ui.ctx().set_zoom_factor(DEFAULT_ZOOM_FACTOR);
-                    }
-                });
-            });
-            ui.label("World of Warships Settings");
-            ui.group(|ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose...")).clicked() {
-                                let folder = rfd::FileDialog::new().pick_folder();
-                                if let Some(folder) = folder {
-                                    self.tab_state.prevent_changing_wows_dir();
-                                    crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(folder)));
-                                }
-                            }
-
-                            let show_text_error = {
-                                let path = Path::new(&self.tab_state.settings.wows_dir);
-                                !(path.exists() && path.join("bin").exists())
-                            };
-
-                            let response = ui.add_sized(
-                                ui.available_size(),
-                                egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
-                                    .interactive(self.tab_state.can_change_wows_dir)
-                                    .hint_text("World of Warships Directory")
-                                    .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
-                            );
-
-                            // If someone pastes a path in, let's do some basic validation to see if this
-                            // can be a WoWs path. If so, reload game data.
-                            if response.changed() {
-                                let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
-                                if path.exists() && path.join("bin").exists() {
-                                    self.tab_state.prevent_changing_wows_dir();
-                                    crate::update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
-                                }
-                            }
-                        });
-                    });
-                })
-            });
-            ui.label("Replay Settings");
-            ui.group(|ui| {
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Show Game Chat");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Show Raw XP Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Show Observed Damage Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Show Fires Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Show Floods Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Show Citadels Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Show Critical Module Hits Column");
-                ui.horizontal(|ui| {
-                    let mut alert_data_export_change = false;
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Choose...").clicked() {
-                            let folder = rfd::FileDialog::new().pick_folder();
-                            if let Some(folder) = folder {
-                                self.tab_state.settings.replay_settings.auto_export_path = folder.to_string_lossy().to_string();
-                                alert_data_export_change = true;
-                            }
-                        }
-
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            if ui.checkbox(&mut self.tab_state.settings.replay_settings.auto_export_data, "Auto-Export Data").changed() {
-                                alert_data_export_change = true;
-                            }
-
-                            let selected_format = &mut self.tab_state.settings.replay_settings.auto_export_format;
-                            let previously_selected_format = *selected_format;
-                            egui::ComboBox::from_id_salt("auto_export_format_combobox").selected_text(selected_format.as_str()).show_ui(ui, |ui| {
-                                ui.selectable_value(selected_format, ReplayExportFormat::Json, "JSON");
-                                ui.selectable_value(selected_format, ReplayExportFormat::Csv, "CSV");
-                                ui.selectable_value(selected_format, ReplayExportFormat::Cbor, "CBOR");
-                            });
-                            if previously_selected_format != *selected_format {
-                                alert_data_export_change = true;
-                            }
-                            let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
-                            let path_is_valid = path.exists() && path.is_dir();
-                            let response = ui.add_sized(
-                                ui.available_size(),
-                                egui::TextEdit::singleline(&mut self.tab_state.settings.replay_settings.auto_export_path)
-                                    .hint_text("Data auto-export directory")
-                                    .text_color_opt((!path_is_valid).then_some(Color32::LIGHT_RED)),
-                            );
-
-                            if response.lost_focus() {
-                                let path = Path::new(&self.tab_state.settings.replay_settings.auto_export_path);
-                                if path.exists() && path.is_dir() {
-                                    alert_data_export_change = true;
-                                }
-                            }
-                        });
-                    });
-
-                    if alert_data_export_change {
-                        let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
-                            tx.send(ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(DataExportSettings {
-                                should_auto_export: self.tab_state.settings.replay_settings.auto_export_data,
-                                export_path: PathBuf::from(self.tab_state.settings.replay_settings.auto_export_path.clone()),
-                                export_format: self.tab_state.settings.replay_settings.auto_export_format,
-                            }))
-                        });
-                    }
-                });
-            });
-            ui.label("Twitch Settings");
-            ui.group(|ui| {
-                if ui
-                    .button(format!("{} Get Login Token", icons::BROWSER))
-                    .on_hover_text(
-                        "We use Chatterino's login page as it provides a token with the \
-                        necessary permissions (basically a moderator token with chat permissions), \
-                        and it removes the need for the WoWs Toolkit developer to host their own login page website which would have the same result.",
-                    )
-                    .clicked()
-                {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
-                }
-
-                let text = if self.tab_state.twitch_state.read().token_is_valid() {
-                    format!("{} Paste Token (Current Token is Valid {})", icons::CLIPBOARD_TEXT, icons::CHECK_CIRCLE)
-                } else {
-                    format!("{} Paste Token (No Current Token / Invalid Token {})", icons::CLIPBOARD_TEXT, icons::X_CIRCLE)
-                };
-                if ui.button(text).clicked() {
-                    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                    if let Ok(contents) = ctx.get_contents() {
-                        let token: Result<Token, _> = contents.parse();
-                        if let Ok(token) = token
-                            && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
-                        {
-                            self.tab_state.settings.twitch_token = Some(token.clone());
-                            let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
-                        }
-                    }
-                }
-                ui.label("Monitored Channel (Default to Self)");
-                let response = ui.text_edit_singleline(&mut self.tab_state.settings.twitch_monitored_channel);
-                if response.lost_focus()
-                    && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()
-                {
-                    let _ = tx.blocking_send(crate::twitch::TwitchUpdate::User(self.tab_state.settings.twitch_monitored_channel.clone()));
-                }
-            });
-        });
-    }
-}
-
 impl TabViewer for ToolkitTabViewer<'_> {
     // This associated type is used to attach some data to each tab.
     type Tab = Tab;
@@ -319,159 +109,9 @@ impl TabViewer for ToolkitTabViewer<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ReplayGrouping {
-    #[default]
-    Date,
-    Ship,
-    None,
-}
-
-impl ReplayGrouping {
-    pub fn label(&self) -> &'static str {
-        match self {
-            ReplayGrouping::Date => "Date",
-            ReplayGrouping::Ship => "Ship",
-            ReplayGrouping::None => "None",
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ReplaySettings {
-    pub show_game_chat: bool,
-    pub show_entity_id: bool,
-    pub show_observed_damage: bool,
-    #[serde(default)]
-    pub show_raw_xp: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_fires: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_floods: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_citadels: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub show_crits: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_received_damage: bool,
-    #[serde(default = "default_bool::<true>")]
-    pub show_distance_traveled: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub auto_export_data: bool,
-    #[serde(default)]
-    pub auto_export_path: String,
-    #[serde(default)]
-    pub auto_export_format: ReplayExportFormat,
-    #[serde(default)]
-    pub grouping: ReplayGrouping,
-}
-
-impl Default for ReplaySettings {
-    fn default() -> Self {
-        Self {
-            show_game_chat: true,
-            show_entity_id: false,
-            show_observed_damage: false,
-            show_raw_xp: false,
-            show_fires: true,
-            show_floods: true,
-            show_citadels: true,
-            show_crits: false,
-            show_received_damage: true,
-            show_distance_traveled: true,
-            auto_export_data: false,
-            auto_export_path: String::new(),
-            auto_export_format: ReplayExportFormat::default(),
-            grouping: ReplayGrouping::default(),
-        }
-    }
-}
-
-pub const fn default_bool<const V: bool>() -> bool {
-    V
-}
-
-pub fn default_sent_replays() -> Arc<RwLock<HashSet<String>>> {
-    Default::default()
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Settings {
-    pub current_replay_path: PathBuf,
-    pub wows_dir: String,
-    #[serde(skip)]
-    pub replays_dir: Option<PathBuf>,
-    pub locale: Option<String>,
-    #[serde(default)]
-    pub replay_settings: ReplaySettings,
-    #[serde(default = "default_bool::<true>")]
-    pub check_for_updates: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub send_replay_data: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_default_value_fix_015: bool,
-    #[serde(default = "default_sent_replays")]
-    pub sent_replays: Arc<RwLock<HashSet<String>>>,
-    #[serde(default = "default_bool::<false>")]
-    pub has_019_game_params_update: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_037_crew_skills_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_038_game_params_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_041_game_params_fix: bool,
-    #[serde(default)]
-    pub player_tracker: Arc<RwLock<PlayerTracker>>,
-    #[serde(default)]
-    pub twitch_token: Option<Token>,
-    #[serde(default)]
-    pub twitch_monitored_channel: String,
-    #[serde(default)]
-    pub constants_file_commit: Option<String>,
-    #[serde(default)]
-    pub debug_mode: bool,
-    #[serde(default)]
-    pub build_consent_window_shown: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            current_replay_path: Default::default(),
-            wows_dir: "C:\\Games\\World_of_Warships".to_string(),
-            replays_dir: Default::default(),
-            locale: Some("en".to_string()),
-            replay_settings: Default::default(),
-            check_for_updates: true,
-            send_replay_data: false,
-            has_default_value_fix_015: true,
-            sent_replays: Default::default(),
-            has_019_game_params_update: true,
-            player_tracker: Default::default(),
-            twitch_token: Default::default(),
-            twitch_monitored_channel: Default::default(),
-            constants_file_commit: None,
-            debug_mode: false,
-            build_consent_window_shown: false,
-            has_037_crew_skills_fix: true,
-            has_038_game_params_fix: true,
-            has_041_game_params_fix: true,
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
-}
-
-#[derive(Debug)]
-pub enum NotifyFileEvent {
-    Added(PathBuf),
-    Modified(PathBuf),
-    Removed(PathBuf),
-    PreferencesChanged,
-    TempArenaInfoCreated(PathBuf),
 }
 
 #[derive(Clone)]
@@ -487,761 +127,6 @@ impl TimedMessage {
 
     pub fn is_expired(&self) -> bool {
         self.expiration < Instant::now()
-    }
-}
-
-type PathFileNodePair = (Arc<PathBuf>, FileNode);
-
-#[derive(Default)]
-pub struct SessionStats {
-    pub session_replays: Vec<Arc<RwLock<Replay>>>,
-}
-
-impl SessionStats {
-    pub fn clear(&mut self) {
-        self.session_replays.clear();
-    }
-
-    pub fn add_replay(&mut self, replay: Arc<RwLock<Replay>>) {
-        let new_replay = replay.read();
-        let mut old_replay_index = None;
-        for (idx, old_replay) in self.session_replays.iter().enumerate() {
-            let old_replay = old_replay.read();
-            if new_replay.replay_file.meta.dateTime == old_replay.replay_file.meta.dateTime
-                && new_replay.replay_file.meta.playerID == old_replay.replay_file.meta.playerID
-            {
-                // Many of the stats are dependent on the UI report being
-                // available. As such, we will only overwrite the old replay
-                // when it has no UI report present.
-                if old_replay.ui_report.is_none() {
-                    old_replay_index = Some(idx);
-                    break;
-                } else {
-                    return;
-                }
-            }
-        }
-
-        drop(new_replay);
-
-        if let Some(old_index) = old_replay_index {
-            self.session_replays.remove(old_index);
-        }
-        self.session_replays.push(replay);
-    }
-
-    /// Returns the win rate precentage for this session. Will return `None`
-    /// if no games have been played.
-    pub fn win_rate(&self) -> Option<f64> {
-        if self.session_replays.is_empty() {
-            return None;
-        }
-
-        Some((self.games_won() as f64 / self.games_played() as f64) * 100.0)
-    }
-
-    /// Total number of games played in the current session
-    pub fn games_played(&self) -> usize {
-        self.session_replays.len()
-    }
-
-    /// Total number of games won in the current session
-    pub fn games_won(&self) -> usize {
-        self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Win(_)) = replay.read().battle_result()
-            {
-                accum + 1
-            } else {
-                accum
-            }
-        })
-    }
-
-    /// Total number of games lost in the current session
-    pub fn games_lost(&self) -> usize {
-        self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Loss(_)) =
-                replay.read().battle_result()
-            {
-                accum + 1
-            } else {
-                accum
-            }
-        })
-    }
-
-    pub fn ship_stats(&self, metadata_provider: &GameMetadataProvider) -> HashMap<String, PerformanceInfo> {
-        let mut results: HashMap<String, PerformanceInfo> = HashMap::new();
-
-        for replay in &self.session_replays {
-            let replay = replay.read();
-            let Some(battle_result) = replay.battle_result() else {
-                continue;
-            };
-
-            let ship_name = replay.vehicle_name(metadata_provider);
-            let ship_id = replay.player_vehicle().map(|v| v.shipId as u64);
-            let performance_info = results.entry(ship_name).or_default();
-
-            // Set ship_id if not already set
-            if performance_info.ship_id.is_none() {
-                performance_info.ship_id = ship_id;
-            }
-
-            match battle_result {
-                wows_replays::analyzer::battle_controller::BattleResult::Win(_) => {
-                    performance_info.wins += 1;
-                }
-                wows_replays::analyzer::battle_controller::BattleResult::Loss(_) => {
-                    performance_info.losses += 1;
-                }
-                wows_replays::analyzer::battle_controller::BattleResult::Draw => {
-                    // do nothing for dras at the moment
-                }
-            }
-
-            let Some(ui_report) = replay.ui_report.as_ref() else {
-                continue;
-            };
-            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else { continue };
-
-            performance_info.total_frags += self_report.kills().unwrap_or_default();
-            performance_info.max_frags = performance_info.max_frags.max(self_report.kills().unwrap_or_default());
-
-            performance_info.total_damage += self_report.actual_damage().unwrap_or_default();
-            performance_info.max_damage =
-                performance_info.max_damage.max(self_report.actual_damage().unwrap_or_default());
-
-            performance_info.total_spotting_damage += self_report.spotting_damage().unwrap_or_default();
-            performance_info.max_spotting_damage =
-                performance_info.max_spotting_damage.max(self_report.spotting_damage().unwrap_or_default());
-
-            performance_info.total_xp += self_report.raw_xp().unwrap_or_default() as usize;
-            performance_info.max_xp = performance_info.max_xp.max(self_report.raw_xp().unwrap_or_default());
-
-            performance_info.total_win_adjusted_xp += self_report.base_xp().unwrap_or_default() as usize;
-            performance_info.max_win_adjusted_xp =
-                performance_info.max_win_adjusted_xp.max(self_report.base_xp().unwrap_or_default());
-
-            performance_info.total_games += 1;
-        }
-
-        results
-    }
-
-    pub fn max_damage(&self, metadata_provider: &GameMetadataProvider) -> Option<(String, u64)> {
-        self.session_replays
-            .iter()
-            .filter_map(|replay| {
-                let replay = replay.read();
-
-                let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
-
-                Some((replay.vehicle_name(metadata_provider), self_report.actual_damage()?))
-            })
-            .max_by_key(|result| result.1)
-    }
-
-    pub fn max_frags(&self, metadata_provider: &GameMetadataProvider) -> Option<(String, i64)> {
-        self.session_replays
-            .iter()
-            .filter_map(|replay| {
-                let replay = replay.read();
-
-                let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
-
-                Some((replay.vehicle_name(metadata_provider), self_report.kills()?))
-            })
-            .max_by_key(|result| result.1)
-    }
-
-    pub fn total_frags(&self) -> i64 {
-        self.session_replays.iter().fold(0, |accum, replay| {
-            let replay = replay.read();
-
-            let Some(ui_report) = replay.ui_report.as_ref() else {
-                return accum;
-            };
-
-            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.is_self()) else {
-                return accum;
-            };
-
-            accum + self_report.kills().unwrap_or_default()
-        })
-    }
-
-    /// Calculate overall Personal Rating for this session
-    pub fn calculate_pr(
-        &self,
-        pr_data: &crate::personal_rating::PersonalRatingData,
-    ) -> Option<crate::personal_rating::PersonalRatingResult> {
-        let stats: Vec<_> = self.session_replays.iter().filter_map(|replay| replay.read().to_battle_stats()).collect();
-        pr_data.calculate_pr(&stats)
-    }
-
-    /// Calculate Personal Rating per ship for this session
-    /// Returns a map of ship_id -> PR result
-    #[allow(dead_code)]
-    pub fn calculate_pr_per_ship(
-        &self,
-        pr_data: &crate::personal_rating::PersonalRatingData,
-    ) -> HashMap<u64, crate::personal_rating::PersonalRatingResult> {
-        use crate::personal_rating::ShipBattleStats;
-
-        // Group stats by ship_id
-        let mut ship_stats: HashMap<u64, ShipBattleStats> = HashMap::new();
-
-        for replay in &self.session_replays {
-            if let Some(stats) = replay.read().to_battle_stats() {
-                let entry = ship_stats.entry(stats.ship_id).or_insert(ShipBattleStats {
-                    ship_id: stats.ship_id,
-                    battles: 0,
-                    damage: 0,
-                    wins: 0,
-                    frags: 0,
-                });
-                entry.battles += stats.battles;
-                entry.damage += stats.damage;
-                entry.wins += stats.wins;
-                entry.frags += stats.frags;
-            }
-        }
-
-        // Calculate PR for each ship
-        ship_stats
-            .into_iter()
-            .filter_map(|(ship_id, stats)| {
-                let pr = pr_data.calculate_pr(&[stats])?;
-                Some((ship_id, pr))
-            })
-            .collect()
-    }
-}
-
-#[derive(Default)]
-pub struct PerformanceInfo {
-    ship_id: Option<u64>,
-    wins: usize,
-    losses: usize,
-    /// Total frags
-    total_frags: i64,
-    /// Highest frags in a single match
-    max_frags: i64,
-    total_damage: u64,
-    max_damage: u64,
-    total_games: usize,
-    max_xp: i64,
-    max_win_adjusted_xp: i64,
-    total_xp: usize,
-    total_win_adjusted_xp: usize,
-    max_spotting_damage: u64,
-    total_spotting_damage: u64,
-}
-
-impl PerformanceInfo {
-    pub fn wins(&self) -> usize {
-        self.wins
-    }
-
-    pub fn losses(&self) -> usize {
-        self.losses
-    }
-
-    pub fn win_rate(&self) -> Option<f64> {
-        if self.wins + self.losses == 0 {
-            return None;
-        }
-
-        Some(self.wins as f64 / (self.wins + self.losses) as f64 * 100.0)
-    }
-
-    pub fn total_frags(&self) -> i64 {
-        self.total_frags
-    }
-
-    pub fn max_frags(&self) -> i64 {
-        self.max_frags
-    }
-
-    pub fn avg_frags(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_frags as f64 / self.total_games as f64)
-    }
-
-    pub fn max_damage(&self) -> u64 {
-        self.max_damage
-    }
-
-    pub fn avg_damage(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_damage as f64 / self.total_games as f64)
-    }
-
-    pub fn max_spotting_damage(&self) -> u64 {
-        self.max_spotting_damage
-    }
-
-    pub fn avg_spotting_damage(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_spotting_damage as f64 / self.total_games as f64)
-    }
-
-    pub fn max_xp(&self) -> i64 {
-        self.max_xp
-    }
-
-    pub fn avg_xp(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_xp as f64 / self.total_games as f64)
-    }
-
-    pub fn max_win_adjusted_xp(&self) -> i64 {
-        self.max_win_adjusted_xp
-    }
-
-    pub fn avg_win_adjusted_xp(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_win_adjusted_xp as f64 / self.total_games as f64)
-    }
-
-    /// Calculate Personal Rating for this ship's performance
-    pub fn calculate_pr(
-        &self,
-        pr_data: &crate::personal_rating::PersonalRatingData,
-    ) -> Option<crate::personal_rating::PersonalRatingResult> {
-        let ship_id = self.ship_id?;
-        let stats = crate::personal_rating::ShipBattleStats {
-            ship_id,
-            battles: self.total_games as u32,
-            damage: self.total_damage,
-            wins: self.wins as u32,
-            frags: self.total_frags,
-        };
-        pr_data.calculate_pr(&[stats])
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(default)]
-pub struct TabState {
-    #[serde(skip)]
-    pub world_of_warships_data: Option<Arc<RwLock<WorldOfWarshipsData>>>,
-
-    pub filter: String,
-
-    #[serde(skip)]
-    pub used_filter: Option<String>,
-    #[serde(skip)]
-    pub filtered_file_list: Option<Arc<Vec<PathFileNodePair>>>,
-
-    #[serde(skip)]
-    pub items_to_extract: Mutex<Vec<FileNode>>,
-
-    pub settings: Settings,
-
-    #[serde(skip)]
-    pub translations: Option<Catalog>,
-
-    pub output_dir: String,
-
-    #[serde(skip)]
-    pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
-
-    #[serde(skip)]
-    pub last_progress: Option<UnpackerProgress>,
-
-    #[serde(skip)]
-    pub replay_parser_tab: SharedReplayParserTabState,
-
-    #[serde(skip)]
-    pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
-
-    #[serde(skip)]
-    pub file_watcher: Option<RecommendedWatcher>,
-
-    #[serde(skip)]
-    pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
-
-    #[serde(skip)]
-    pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
-
-    #[serde(skip)]
-    pub background_tasks: Vec<BackgroundTask>,
-
-    #[serde(skip)]
-    pub timed_message: RwLock<Option<TimedMessage>>,
-
-    #[serde(skip)]
-    pub can_change_wows_dir: bool,
-
-    #[serde(skip)]
-    pub current_replay: Option<Arc<RwLock<Replay>>>,
-
-    #[serde(default = "default_bool::<true>")]
-    pub auto_load_latest_replay: bool,
-
-    #[serde(skip)]
-    pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
-
-    #[serde(skip)]
-    pub twitch_state: Arc<RwLock<TwitchState>>,
-
-    #[serde(skip)]
-    pub markdown_cache: CommonMarkCache,
-
-    #[serde(default)]
-    pub replay_sort: Arc<parking_lot::Mutex<replay_parser::SortOrder>>,
-
-    #[serde(skip)]
-    pub game_constants: Arc<RwLock<serde_json::Value>>,
-
-    #[serde(default)]
-    pub mod_manager_info: ModManagerInfo,
-
-    #[serde(skip)]
-    pub mod_action_sender: Sender<ModInfo>,
-
-    #[serde(skip)]
-    /// Used temporarily to store the mod action receiver until the mod manager thread is started
-    pub mod_action_receiver: Option<Receiver<ModInfo>>,
-
-    #[serde(skip)]
-    pub background_task_receiver: Receiver<BackgroundTask>,
-    #[serde(skip)]
-    pub background_task_sender: Sender<BackgroundTask>,
-    #[serde(skip)]
-    pub background_parser_tx: Option<Sender<ReplayBackgroundParserThreadMessage>>,
-    #[serde(skip)]
-    pub parser_lock: Arc<parking_lot::Mutex<()>>,
-
-    #[serde(skip)]
-    pub show_session_stats: bool,
-    #[serde(skip)]
-    pub session_stats: SessionStats,
-    #[serde(skip)]
-    pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
-
-    /// Replays selected for resetting session stats. When Some, they will be
-    /// processed and added to session stats, clearing the old ones first.
-    /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
-    #[serde(skip)]
-    pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
-}
-
-impl Default for TabState {
-    fn default() -> Self {
-        let default_constants = serde_json::from_str(include_str!("../embedded_resources/constants.json"))
-            .expect("failed to parse constants JSON");
-        let (mod_action_sender, mod_action_receiver) = mpsc::channel();
-        let (background_task_sender, background_task_receiver) = mpsc::channel();
-        Self {
-            world_of_warships_data: None,
-            filter: Default::default(),
-            items_to_extract: Default::default(),
-            settings: Default::default(),
-            translations: Default::default(),
-            output_dir: Default::default(),
-            unpacker_progress: Default::default(),
-            last_progress: Default::default(),
-            replay_parser_tab: Default::default(),
-            file_viewer: Default::default(),
-            file_watcher: None,
-            replay_files: None,
-            file_receiver: None,
-            background_tasks: Vec::new(),
-            can_change_wows_dir: true,
-            timed_message: RwLock::new(None),
-            current_replay: None,
-            used_filter: None,
-            filtered_file_list: None,
-            auto_load_latest_replay: true,
-            twitch_update_sender: Default::default(),
-            twitch_state: Default::default(),
-            markdown_cache: Default::default(),
-            replay_sort: Default::default(),
-            game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
-            mod_manager_info: Default::default(),
-            mod_action_sender,
-            mod_action_receiver: Some(mod_action_receiver),
-            background_task_receiver,
-            background_task_sender,
-            background_parser_tx: None,
-            parser_lock: Arc::new(parking_lot::Mutex::new(())),
-            show_session_stats: false,
-            session_stats: Default::default(),
-            personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
-            replays_for_session_reset: None,
-        }
-    }
-}
-
-impl TabState {
-    fn send_replay_consent_changed(&self) {
-        let _ = self.background_parser_tx.as_ref().map(|tx| {
-            tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data))
-        });
-    }
-    fn try_update_replays(&mut self) {
-        // Sometimes we parse the replay too early. Let's try to parse it a couple times
-        let parser_lock = self.parser_lock.try_lock();
-        if parser_lock.is_none() {
-            // don't make the UI hang
-            return;
-        }
-
-        if let Some(file) = self.file_receiver.as_ref() {
-            while let Ok(file_event) = file.try_recv() {
-                match file_event {
-                    NotifyFileEvent::Added(new_file) => {
-                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                            let wows_data = wows_data.read();
-                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
-                                for _ in 0..3 {
-                                    if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
-                                        let replay = Replay::new(replay_file, game_metadata.clone());
-                                        let replay = Arc::new(RwLock::new(replay));
-
-                                        if let Some(replay_files) = &mut self.replay_files {
-                                            replay_files.insert(new_file.clone(), Arc::clone(&replay));
-                                        }
-
-                                        if self.auto_load_latest_replay
-                                            && let Some(wows_data) = self.world_of_warships_data.as_ref()
-                                        {
-                                            update_background_task!(
-                                                self.background_tasks,
-                                                load_replay(
-                                                    Arc::clone(&self.game_constants),
-                                                    Arc::clone(wows_data),
-                                                    replay,
-                                                    Arc::clone(&self.replay_sort),
-                                                    self.background_task_sender.clone(),
-                                                    self.settings.debug_mode,
-                                                )
-                                            );
-                                        }
-
-                                        break;
-                                    } else {
-                                        // oops our framerate
-                                        std::thread::sleep(Duration::from_secs(1));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    NotifyFileEvent::Modified(modified_file) => {
-                        // Invalidate cached data when file is modified
-                        if let Some(replay_files) = &self.replay_files
-                            && let Some(replay) = replay_files.get(&modified_file)
-                        {
-                            let mut replay = replay.write();
-                            replay.battle_report = None;
-                            replay.ui_report = None;
-                        }
-                    }
-                    NotifyFileEvent::Removed(old_file) => {
-                        if let Some(replay_files) = &mut self.replay_files {
-                            replay_files.remove(&old_file);
-                        }
-                    }
-                    NotifyFileEvent::PreferencesChanged => {
-                        // debug!("Preferences file changed -- reloading game data");
-                        // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
-                    }
-                    NotifyFileEvent::TempArenaInfoCreated(path) => {
-                        // Parse the metadata
-                        let meta_data = std::fs::read(path);
-
-                        if meta_data.is_err() {
-                            return;
-                        }
-
-                        if let Ok(replay_file) =
-                            ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0))
-                        {
-                            self.settings.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn prevent_changing_wows_dir(&mut self) {
-        self.can_change_wows_dir = false;
-    }
-
-    fn allow_changing_wows_dir(&mut self) {
-        self.can_change_wows_dir = true;
-    }
-
-    /// Process replays selected for session stats reset.
-    /// Clears the current session stats and populates with the selected replays.
-    /// If any replays haven't been parsed yet, they will be queued for parsing.
-    fn process_session_stats_reset(&mut self) {
-        let Some(weak_replays) = self.replays_for_session_reset.take() else {
-            return;
-        };
-
-        // Clear current session stats
-        self.session_stats.clear();
-
-        // Upgrade weak references and add to session stats
-        for weak_replay in weak_replays {
-            if let Some(replay) = weak_replay.upgrade() {
-                // Check if the replay needs parsing (no ui_report means not parsed)
-                let needs_parsing = replay.read().ui_report.is_none();
-
-                if needs_parsing {
-                    // Queue the replay for parsing (skip UI update since this is batch loading)
-                    if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                        update_background_task!(
-                            self.background_tasks,
-                            ReplayLoader::new(
-                                Arc::clone(&self.game_constants),
-                                Arc::clone(wows_data),
-                                replay.clone(),
-                                Arc::clone(&self.replay_sort),
-                                self.background_task_sender.clone(),
-                                self.settings.debug_mode,
-                            )
-                            .skip_ui_update()
-                            .load()
-                        );
-                    }
-                }
-
-                // Add the replay to session stats (it will be updated when parsing completes)
-                self.session_stats.add_replay(replay);
-            }
-        }
-
-        // Show session stats window automatically
-        self.show_session_stats = true;
-    }
-
-    fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
-        let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
-            let old_replays_dir =
-                self.settings.replays_dir.as_ref().expect("watcher was created but replay dir was not assigned?");
-            let _ = watcher.unwatch(old_replays_dir);
-            watcher
-        } else {
-            debug!("creating filesystem watcher");
-            let (tx, rx) = mpsc::channel();
-            let (background_tx, background_rx) = mpsc::channel();
-
-            self.background_parser_tx = Some(background_tx.clone());
-
-            if let Some(wows_data) = self.world_of_warships_data.clone() {
-                let background_thread_data = BackgroundParserThread {
-                    rx: background_rx,
-                    sent_replays: Arc::clone(&self.settings.sent_replays),
-                    wows_data,
-                    should_send_replays: self.settings.send_replay_data,
-                    data_export_settings: DataExportSettings {
-                        should_auto_export: self.settings.replay_settings.auto_export_data,
-                        export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
-                        export_format: self.settings.replay_settings.auto_export_format,
-                    },
-
-                    constants_file_data: Arc::clone(&self.game_constants),
-                    player_tracker: Arc::clone(&self.settings.player_tracker),
-                    is_debug: self.settings.debug_mode,
-                    parser_lock: Arc::clone(&self.parser_lock),
-                };
-                task::start_background_parsing_thread(background_thread_data);
-            }
-
-            let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-                Ok(event) => {
-                    // TODO: maybe properly handle moves?
-                    debug!("filesytem event: {:?}", event);
-                    match event.kind {
-                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
-                            for path in event.paths {
-                                if path.is_file() {
-                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                        && path.file_name().expect("path has no filename") != "temp.wowsreplay"
-                                    {
-                                        tx.send(NotifyFileEvent::Added(path.clone()))
-                                            .expect("failed to send file creation event");
-                                        // Send this path to the thread watching for replays in background
-                                        let _ = background_tx
-                                            .send(task::ReplayBackgroundParserThreadMessage::NewReplay(path));
-                                    } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
-                                            .expect("failed to send file creation event");
-                                    }
-                                }
-                            }
-                        }
-                        EventKind::Modify(ModifyKind::Data(_)) => {
-                            for path in event.paths {
-                                if let Some(filename) = path.file_name()
-                                    && filename == "preferences.xml"
-                                {
-                                    debug!("Sending preferences changed event");
-                                    tx.send(NotifyFileEvent::PreferencesChanged)
-                                        .expect("failed to send file creation event");
-                                }
-                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                    tx.send(NotifyFileEvent::Modified(path.clone()))
-                                        .expect("failed to send file modification event");
-                                    let _ = background_tx
-                                        .send(task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
-                                }
-                            }
-                        }
-                        EventKind::Remove(_) => {
-                            for path in event.paths {
-                                tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
-                            }
-                        }
-                        _ => {
-                            // TODO: handle RenameMode::From for proper file moves
-                        }
-                    }
-                }
-                Err(e) => debug!("watch error: {:?}", e),
-            })
-            .expect("failed to create fs watcher for replays dir");
-            self.file_watcher = Some(watcher);
-            self.file_receiver = Some(rx);
-            self.file_watcher.as_mut().unwrap()
-        };
-
-        // Add a path to be watched. All files and directories at that path and
-        // below will be monitored for changes.
-        watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
-
-        self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.settings.replays_dir = Some(replay_dir.to_owned())
-    }
-
-    #[must_use]
-    pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
-        let (tx, rx) = mpsc::channel();
-        let locale = self.settings.locale.clone().unwrap();
-        let _join_handle = std::thread::spawn(move || {
-            let _ = tx.send(task::load_wows_files(wows_directory, locale.as_str()));
-        });
-
-        BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
     }
 }
 
@@ -1287,7 +172,7 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()), //, Tab::ModManager, Tab::Settings].to_vec()),
+            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
@@ -1391,6 +276,8 @@ impl WowsToolkitApp {
             Default::default()
         };
 
+        const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
+
         if !had_saved_state {
             let mut this: Self = Default::default();
             // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
@@ -1444,7 +331,6 @@ impl WowsToolkitApp {
         }
 
         ui.horizontal(|ui| {
-            // TODO: Merge these channels
             let mut remove_tasks = Vec::new();
 
             for i in 0..self.tab_state.background_tasks.len() {
@@ -1458,25 +344,13 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::LoadingData => {
                                 self.tab_state.allow_changing_wows_dir();
                             }
-                            BackgroundTaskKind::LoadingReplay => {
-                                // nothing to do
-                            }
-                            BackgroundTaskKind::Updating { rx: _rx, last_progress: _last_progress } => {
-                                // do nothing
-                            }
-                            BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
-                                // do nothing
-                            }
-                            BackgroundTaskKind::LoadingConstants => {
-                                // do nothing
-                            }
+                            BackgroundTaskKind::LoadingReplay => {}
+                            BackgroundTaskKind::Updating { rx: _rx, last_progress: _last_progress } => {}
+                            BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {}
+                            BackgroundTaskKind::LoadingConstants => {}
                             #[cfg(feature = "mod_manager")]
-                            BackgroundTaskKind::ModTask(_task_info) => {
-                                // do nothing
-                            }
-                            BackgroundTaskKind::LoadingPersonalRatingData => {
-                                // do nothing
-                            }
+                            BackgroundTaskKind::ModTask(_task_info) => {}
+                            BackgroundTaskKind::LoadingPersonalRatingData => {}
                             BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
                                 self.tab_state.timed_message.write().replace(timed_message.clone());
                             }
@@ -1487,15 +361,13 @@ impl WowsToolkitApp {
 
                         match result {
                             Ok(data) => match data {
-                                BackgroundTaskCompletion::NoReceiver => {
-                                    // do nothing
-                                }
+                                BackgroundTaskCompletion::NoReceiver => {}
                                 BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
                                     let replays_dir = wows_data.replays_dir.clone();
                                     if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
                                         *old_wows_data.write() = wows_data;
                                     } else {
-                                        let wows_data = Arc::new(RwLock::new(wows_data));
+                                        let wows_data = Arc::new(parking_lot::RwLock::new(wows_data));
                                         self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
 
                                         #[cfg(feature = "mod_manager")]
@@ -1542,15 +414,13 @@ impl WowsToolkitApp {
                                     let mut current_process_new_path = current_process.as_os_str().to_owned();
                                     current_process_new_path.push(".old");
                                     let current_process_new_path = PathBuf::from(current_process_new_path);
-                                    // Rename this process
                                     let rename_process = move || {
                                         std::fs::rename(current_process.clone(), &current_process_new_path)
                                             .context("failed to rename current process")?;
-                                        // Rename the new exe
                                         std::fs::rename(new_exe, &current_process)
                                             .context("failed to rename new process")?;
 
-                                        Command::new(current_process)
+                                        std::process::Command::new(current_process)
                                             .arg(current_process_new_path)
                                             .spawn()
                                             .context("failed to execute updated process")
@@ -1565,9 +435,7 @@ impl WowsToolkitApp {
                                         }
                                     }
                                 }
-                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
-                                    // do nothing
-                                }
+                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {}
                                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
                                     *self.tab_state.game_constants.write() = constants;
                                 }
@@ -1575,30 +443,26 @@ impl WowsToolkitApp {
                                     self.tab_state.personal_rating_data.write().load(pr_data);
                                 }
                                 #[cfg(feature = "mod_manager")]
-                                BackgroundTaskCompletion::ModManager(mod_manager_info) => {
-                                    match *mod_manager_info {
-                                        crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
-                                            self.tab_state.mod_manager_info.update_index("test".to_string(), index);
-                                        }
-                                        crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
-                                            *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                                "{} Successfully installed mod: {}",
-                                                icons::CHECK_CIRCLE,
-                                                mod_info.meta.name()
-                                            )));
-                                        }
-                                        crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
-                                            *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                                "{} Successfully uninstalled mod: {}",
-                                                icons::CHECK_CIRCLE,
-                                                mod_info.meta.name()
-                                            )));
-                                        }
-                                        crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {
-                                            // Do nothing when the mod is downloaded.
-                                        }
+                                BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
+                                    crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
+                                        self.tab_state.mod_manager_info.update_index("test".to_string(), index);
                                     }
-                                }
+                                    crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
+                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                            "{} Successfully installed mod: {}",
+                                            icons::CHECK_CIRCLE,
+                                            mod_info.meta.name()
+                                        )));
+                                    }
+                                    crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
+                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                            "{} Successfully uninstalled mod: {}",
+                                            icons::CHECK_CIRCLE,
+                                            mod_info.meta.name()
+                                        )));
+                                    }
+                                    crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {}
+                                },
                             },
                             Err(e)
                                 if e.downcast_current_context::<ToolkitError>()
@@ -1708,7 +572,6 @@ impl WowsToolkitApp {
                 let mut body = constants_updates.into_body();
                 let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
 
-                // Iterate through all data chunks in the body
                 while let Some(frame) = body.frame().await {
                     match frame {
                         Ok(frame) => {
@@ -1747,7 +610,6 @@ impl WowsToolkitApp {
 
             if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
                 self.tab_state.settings.constants_file_commit = latest_commit;
-
                 update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_updates)));
             }
         }
@@ -1809,14 +671,12 @@ impl WowsToolkitApp {
 
         let mut dropped_files = Vec::new();
 
-        // Collect dropped files:
         ctx.input(|i| {
             if !i.raw.dropped_files.is_empty() {
                 dropped_files.clone_from(&i.raw.dropped_files);
             }
         });
 
-        // Only perform operations if we have one file
         if dropped_files.len() == 1
             && let Some(path) = &dropped_files[0].path
             && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
@@ -1837,9 +697,6 @@ impl WowsToolkitApp {
     }
 
     fn update_impl(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
-
         if ctx
             .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D)))
         {
@@ -1902,10 +759,7 @@ impl WowsToolkitApp {
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            // The top panel is often a good place for a menu bar:
-
             egui::MenuBar::new().ui(ui, |ui| {
-                // NOTE: no File->Quit on web pages!
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
                     ui.menu_button("File", |ui| {
@@ -1939,7 +793,6 @@ impl WowsToolkitApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
             DockArea::new(&mut self.dock_state)
                 .style(Style::from_egui(ui.style().as_ref()))
                 .allowed_splits(egui_dock::AllowedSplits::None)
@@ -1966,10 +819,8 @@ impl WowsToolkitApp {
             .collect();
         drop(file_viewer);
 
-        // Handle replay drag and drop events
         self.ui_file_drag_and_drop(ctx);
 
-        // Ensure we update at least every second
         ctx.request_repaint_after_secs(1.0);
     }
 
@@ -2013,13 +864,13 @@ impl WowsToolkitApp {
                         ui.scope(|ui| {
                             let visuals = &mut ui.style_mut().visuals;
 
-                            visuals.widgets.inactive.bg_fill = Color32::from_rgb(200, 50, 50); // Base red
-                            visuals.widgets.hovered.bg_fill = Color32::from_rgb(220, 70, 70); // Lighter on hover
-                            visuals.widgets.active.bg_fill = Color32::from_rgb(160, 30, 30); // Darker on click
+                            visuals.widgets.inactive.bg_fill = Color32::from_rgb(200, 50, 50);
+                            visuals.widgets.hovered.bg_fill = Color32::from_rgb(220, 70, 70);
+                            visuals.widgets.active.bg_fill = Color32::from_rgb(160, 30, 30);
 
-                            visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(200, 50, 50); // Base red
-                            visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(220, 70, 70); // Lighter on hover
-                            visuals.widgets.active.weak_bg_fill = Color32::from_rgb(160, 30, 30); // Darker on click
+                            visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(200, 50, 50);
+                            visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(220, 70, 70);
+                            visuals.widgets.active.weak_bg_fill = Color32::from_rgb(160, 30, 30);
 
                             visuals.widgets.inactive.fg_stroke.color = Color32::WHITE;
                             visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
@@ -2035,7 +886,6 @@ impl WowsToolkitApp {
         }
 
         if !self.panic_window_open {
-            // Remove the panic log so we don't show it again
             let _ = std::fs::remove_file(Self::panic_log_path());
             self.panic_info = None;
         }
@@ -2050,7 +900,6 @@ impl WowsToolkitApp {
                 .assets
                 .iter()
                 .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
-            // Only show the update window if we have a valid artifact to download
             if let Some(asset) = asset {
                 egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
                     ui.vertical(|ui| {
@@ -2101,12 +950,10 @@ impl WowsToolkitApp {
 }
 
 impl eframe::App for WowsToolkitApp {
-    /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.update_impl(ctx, frame);
     }

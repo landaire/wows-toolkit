@@ -1,3 +1,14 @@
+mod damage_types;
+mod models;
+mod sorting;
+
+pub use models::{
+    Achievement, Damage, DamageInteraction, Hits, PlayerReport, PotentialDamage, SkillInfo, TranslatedBuild,
+    ship_class_icon_from_species,
+};
+use sorting::SortKey;
+pub use sorting::{ReplayColumn, SortColumn, SortOrder};
+
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -12,24 +23,24 @@ use std::sync::mpsc::Sender;
 use egui::Layout;
 use egui::ScrollArea;
 use rootcause::Report;
-use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::ParamData;
 
-use crate::app::PerformanceInfo;
-use crate::app::ReplayGrouping;
-use crate::app::ReplaySettings;
 use crate::app::TimedMessage;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
+use crate::session_stats::PerformanceInfo;
+use crate::settings::ReplayGrouping;
+use crate::settings::ReplaySettings;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::update_background_task;
-use crate::wows_data::ShipIcon;
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
+
+use damage_types::*;
 use egui::Color32;
 use egui::ComboBox;
 use egui::Context;
@@ -55,8 +66,6 @@ use escaper::decode_html;
 use jiff::Timestamp;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
-use serde::Deserialize;
-use serde::Serialize;
 use tracing::debug;
 
 use tracing::error;
@@ -69,12 +78,10 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
-use wows_replays::analyzer::battle_controller::VehicleEntity;
 
 use itertools::Itertools;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
 
@@ -94,632 +101,9 @@ const CHAT_VIEW_WIDTH: f32 = 500.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
-const DAMAGE_MAIN_AP: &str = "damage_main_ap";
-const DAMAGE_MAIN_CS: &str = "damage_main_cs";
-const DAMAGE_MAIN_HE: &str = "damage_main_he";
-const DAMAGE_ATBA_AP: &str = "damage_atba_ap";
-const DAMAGE_ATBA_CS: &str = "damage_atba_cs";
-const DAMAGE_ATBA_HE: &str = "damage_atba_he";
-const DAMAGE_TPD_NORMAL: &str = "damage_tpd_normal";
-const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
-const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
-const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
-const DAMAGE_BOMB: &str = "damage_bomb";
-const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
-const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
-// const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
-const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
-const DAMAGE_TBOMB: &str = "damage_tbomb";
-const DAMAGE_TBOMB_ALT: &str = "damage_tbomb_alt";
-const DAMAGE_TBOMB_AIRSUPPORT: &str = "damage_tbomb_airsupport";
-const DAMAGE_FIRE: &str = "damage_fire";
-const DAMAGE_RAM: &str = "damage_ram";
-const DAMAGE_FLOOD: &str = "damage_flood";
-const DAMAGE_DBOMB_DIRECT: &str = "damage_dbomb_direct";
-const DAMAGE_DBOMB_SPLASH: &str = "damage_dbomb_splash";
-const DAMAGE_SEA_MINE: &str = "damage_sea_mine";
-const DAMAGE_ROCKET: &str = "damage_rocket";
-const DAMAGE_ROCKET_AIRSUPPORT: &str = "damage_rocket_airsupport";
-const DAMAGE_SKIP: &str = "damage_skip";
-const DAMAGE_SKIP_ALT: &str = "damage_skip_alt";
-const DAMAGE_SKIP_AIRSUPPORT: &str = "damage_skip_airsupport";
-const DAMAGE_WAVE: &str = "damage_wave";
-const DAMAGE_CHARGE_LASER: &str = "damage_charge_laser";
-const DAMAGE_PULSE_LASER: &str = "damage_pulse_laser";
-const DAMAGE_AXIS_LASER: &str = "damage_axis_laser";
-const DAMAGE_PHASER_LASER: &str = "damage_phaser_laser";
-
-const HITS_MAIN_AP: &str = "hits_main_ap";
-const HITS_MAIN_CS: &str = "hits_main_cs";
-const HITS_MAIN_HE: &str = "hits_main_he";
-const HITS_ATBA_AP: &str = "hits_atba_ap";
-const HITS_ATBA_CS: &str = "hits_atba_cs";
-const HITS_ATBA_HE: &str = "hits_atba_he";
-const HITS_TPD_NORMAL: &str = "hits_tpd";
-const HITS_BOMB: &str = "hits_bomb";
-const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
-const HITS_BOMB_ALT: &str = "hits_bomb_alt";
-const HITS_BOMB_AIRSUPPORT: &str = "hits_bomb_airsupport";
-const HITS_DBOMB_AIRSUPPORT: &str = "hits_dbomb_airsupport";
-const HITS_TBOMB: &str = "hits_tbomb";
-const HITS_TBOMB_ALT: &str = "hits_tbomb_alt";
-const HITS_TBOMB_AIRSUPPORT: &str = "hits_tbomb_airsupport";
-const HITS_RAM: &str = "hits_ram";
-const HITS_DBOMB_DIRECT: &str = "hits_dbomb_direct";
-const HITS_DBOMB_SPLASH: &str = "hits_dbomb_splash";
-const HITS_SEA_MINE: &str = "hits_sea_mine";
-const HITS_ROCKET: &str = "hits_rocket";
-const HITS_ROCKET_AIRSUPPORT: &str = "hits_rocket_airsupport";
-const HITS_SKIP: &str = "hits_skip";
-const HITS_SKIP_ALT: &str = "hits_skip_alt";
-const HITS_SKIP_AIRSUPPORT: &str = "hits_skip_airsupport";
-const HITS_WAVE: &str = "hits_wave";
-const HITS_CHARGE_LASER: &str = "hits_charge_laser";
-const HITS_PULSE_LASER: &str = "hits_pulse_laser";
-const HITS_AXIS_LASER: &str = "hits_axis_laser";
-const HITS_PHASER_LASER: &str = "hits_phaser_laser";
-
-static DAMAGE_DESCRIPTIONS: [(&str, &str); 33] = [
-    (DAMAGE_MAIN_AP, "AP"),
-    (DAMAGE_MAIN_CS, "SAP"),
-    (DAMAGE_MAIN_HE, "HE"),
-    (DAMAGE_ATBA_AP, "AP Sec"),
-    (DAMAGE_ATBA_CS, "SAP Sec"),
-    (DAMAGE_ATBA_HE, "HE Sec"),
-    (DAMAGE_TPD_NORMAL, "Torps"),
-    (DAMAGE_TPD_DEEP, "Deep Water Torps"),
-    (DAMAGE_TPD_ALTER, "Alt Torps"),
-    (DAMAGE_TPD_PHOTON, "Photon Torps"),
-    (DAMAGE_BOMB, "HE Bomb"),
-    (DAMAGE_BOMB_AVIA, "Bomb"),
-    (DAMAGE_BOMB_ALT, "Alt Bomb"),
-    // (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
-    (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
-    (DAMAGE_TBOMB, "Torpedo Bomber"),
-    (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
-    (DAMAGE_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
-    (DAMAGE_FIRE, "Fire"),
-    (DAMAGE_RAM, "Ram"),
-    (DAMAGE_FLOOD, "Flood"),
-    (DAMAGE_DBOMB_DIRECT, "Depth Charge (Direct)"),
-    (DAMAGE_DBOMB_SPLASH, "Depth Charge (Splash)"),
-    (DAMAGE_SEA_MINE, "Sea Mine"),
-    (DAMAGE_ROCKET, "Rocket"),
-    (DAMAGE_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
-    (DAMAGE_SKIP, "Skip Bomb"),
-    (DAMAGE_SKIP_ALT, "Alt Skip Bomb"),
-    (DAMAGE_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
-    (DAMAGE_WAVE, "Wave"),
-    (DAMAGE_CHARGE_LASER, "Charge Laser"),
-    (DAMAGE_PULSE_LASER, "Pulse Laser"),
-    (DAMAGE_AXIS_LASER, "Axis Laser"),
-    (DAMAGE_PHASER_LASER, "Phaser Laser"),
-];
-
-static HITS_DESCRIPTIONS: [(&str, &str); 29] = [
-    (HITS_MAIN_AP, "AP"),
-    (HITS_MAIN_CS, "SAP"),
-    (HITS_MAIN_HE, "HE"),
-    (HITS_ATBA_AP, "AP Sec"),
-    (HITS_ATBA_CS, "SAP Sec"),
-    (HITS_ATBA_HE, "HE Sec"),
-    (HITS_TPD_NORMAL, "Torps"),
-    (HITS_BOMB, "HE Bomb"),
-    (HITS_BOMB_AVIA, "Bomb"),
-    (HITS_BOMB_ALT, "Alt Bomb"),
-    (HITS_BOMB_AIRSUPPORT, "Air Support Bomb"),
-    (HITS_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
-    (HITS_TBOMB, "Torpedo Bomber"),
-    (HITS_TBOMB_ALT, "Torpedo Bomber (Alt)"),
-    (HITS_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
-    (HITS_RAM, "Ram"),
-    (HITS_DBOMB_DIRECT, "Depth Charge (Direct)"),
-    (HITS_DBOMB_SPLASH, "Depth Charge (Splash)"),
-    (HITS_SEA_MINE, "Sea Mine"),
-    (HITS_ROCKET, "Rocket"),
-    (HITS_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
-    (HITS_SKIP, "Skip Bomb"),
-    (HITS_SKIP_ALT, "Alt Skip Bomb"),
-    (HITS_SKIP_AIRSUPPORT, "Air Supp Skip Bomb"),
-    (HITS_WAVE, "Wave"),
-    (HITS_CHARGE_LASER, "Charge Laser"),
-    (HITS_PULSE_LASER, "Pulse Laser"),
-    (HITS_AXIS_LASER, "Axis Laser"),
-    (HITS_PHASER_LASER, "Phaser Laser"),
-];
-
-static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] =
-    [("agro_art", "Artillery"), ("agro_tpd", "Torpedo"), ("agro_air", "Planes"), ("agro_dbomb", "Depth Charge")];
-
-fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
-    wows_data.ship_icons.get(&species).cloned()
-}
-
-#[derive(Clone, Serialize)]
-pub struct SkillInfo {
-    pub skill_points: usize,
-    pub num_skills: usize,
-    pub highest_tier: usize,
-    pub num_tier_1_skills: usize,
-    #[serde(skip)]
-    hover_text: Option<String>,
-    #[serde(skip)]
-    label_text: RichText,
-}
-
-#[derive(Clone, Serialize)]
-pub struct Damage {
-    pub ap: Option<u64>,
-    pub sap: Option<u64>,
-    pub he: Option<u64>,
-    pub he_secondaries: Option<u64>,
-    pub sap_secondaries: Option<u64>,
-    pub torps: Option<u64>,
-    pub deep_water_torps: Option<u64>,
-    pub fire: Option<u64>,
-    pub flooding: Option<u64>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct Hits {
-    pub ap: Option<u64>,
-    pub sap: Option<u64>,
-    pub he: Option<u64>,
-    pub he_secondaries: Option<u64>,
-    pub sap_secondaries: Option<u64>,
-    pub torps: Option<u64>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct PotentialDamage {
-    pub artillery: u64,
-    pub torpedoes: u64,
-    pub planes: u64,
-}
-
-#[derive(Clone, Serialize)]
-pub struct TranslatedAbility {
-    pub name: Option<String>,
-    pub game_params_name: String,
-}
-
-#[derive(Clone, Serialize)]
-pub struct TranslatedModule {
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub game_params_name: String,
-}
-
-#[derive(Clone, Serialize)]
-pub struct TranslatedBuild {
-    pub modules: Vec<TranslatedModule>,
-    pub abilities: Vec<TranslatedAbility>,
-    pub captain_skills: Option<Vec<TranslatedCrewSkill>>,
-}
-
-impl TranslatedBuild {
-    pub fn new(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<Self> {
-        let vehicle_entity = player.vehicle_entity()?;
-        let config = vehicle_entity.props().ship_config();
-        let species = player.vehicle().species()?;
-        let result = Self {
-            modules: config
-                .modernization()
-                .iter()
-                .filter_map(|id| {
-                    let game_params_name =
-                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
-                            .name()
-                            .to_string();
-                    let translation_id = format!("IDS_TITLE_{}", game_params_name.to_uppercase());
-                    let name = metadata_provider.localized_name_from_id(&translation_id);
-
-                    let translation_id = format!("IDS_DESC_{}", game_params_name.to_uppercase());
-                    let description = metadata_provider
-                        .localized_name_from_id(&translation_id)
-                        .and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
-
-                    Some(TranslatedModule { name, description, game_params_name })
-                })
-                .collect(),
-            abilities: config
-                .abilities()
-                .iter()
-                .filter_map(|id| {
-                    let game_params_name =
-                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
-                            .name()
-                            .to_string();
-
-                    let translation_id = format!("IDS_DOCK_CONSUME_TITLE_{}", game_params_name.to_uppercase());
-                    let name = metadata_provider.localized_name_from_id(&translation_id);
-
-                    Some(TranslatedAbility { name, game_params_name })
-                })
-                .collect(),
-            captain_skills: vehicle_entity.commander_skills(species.clone()).map(|skills| {
-                let mut skills: Vec<TranslatedCrewSkill> = skills
-                    .iter()
-                    .filter_map(|skill| Some(TranslatedCrewSkill::new(skill, species.clone(), metadata_provider)))
-                    .collect();
-
-                skills.sort_by_key(|skill| skill.tier);
-
-                skills
-            }),
-        };
-
-        Some(result)
-    }
-}
-
-#[derive(Clone, Serialize)]
-pub struct TranslatedCrewSkill {
-    pub tier: usize,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub internal_name: String,
-}
-
-impl TranslatedCrewSkill {
-    fn new(skill: &CrewSkill, species: Species, metadata_provider: &GameMetadataProvider) -> Self {
-        Self {
-            tier: skill.tier().get_for_species(species),
-            name: skill.translated_name(metadata_provider),
-            description: skill.translated_description(metadata_provider),
-            internal_name: skill.internal_name().to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct DamageInteraction {
-    damage_dealt: u64,
-    damage_dealt_text: String,
-    damage_dealt_percentage: f64,
-    damage_dealt_percentage_text: String,
-    damage_received: u64,
-    damage_received_text: String,
-    damage_received_percentage: f64,
-    damage_received_percentage_text: String,
-}
-
-impl DamageInteraction {
-    pub fn damage_dealt(&self) -> u64 {
-        self.damage_dealt
-    }
-
-    pub fn damage_dealt_percentage(&self) -> f64 {
-        self.damage_dealt_percentage
-    }
-
-    pub fn damage_received(&self) -> u64 {
-        self.damage_received
-    }
-
-    pub fn damage_received_percentage(&self) -> f64 {
-        self.damage_received_percentage
-    }
-}
-
-#[derive(Clone)]
-struct Achievement {
-    game_param: Arc<Param>,
-    display_name: String,
-    description: String,
-    count: usize,
-}
-
-pub struct PlayerReport {
-    player: Arc<Player>,
-    color: Color32,
-    name_text: RichText,
-    clan_text: Option<RichText>,
-    ship_species_text: String,
-    icon: Option<Arc<ShipIcon>>,
-    division_label: Option<String>,
-    base_xp: Option<i64>,
-    base_xp_text: Option<RichText>,
-    raw_xp: Option<i64>,
-    raw_xp_text: Option<String>,
-    observed_damage: u64,
-    observed_damage_text: String,
-    actual_damage: Option<u64>,
-    actual_damage_report: Option<Damage>,
-    actual_damage_text: Option<RichText>,
-    /// RichText to support monospace font
-    actual_damage_hover_text: Option<RichText>,
-    hits: Option<u64>,
-    hits_report: Option<Hits>,
-    hits_text: Option<RichText>,
-    /// RichText to support monospace font
-    hits_hover_text: Option<RichText>,
-    ship_name: String,
-    spotting_damage: Option<u64>,
-    spotting_damage_text: Option<String>,
-    potential_damage: Option<u64>,
-    potential_damage_text: Option<String>,
-    potential_damage_hover_text: Option<RichText>,
-    potential_damage_report: Option<PotentialDamage>,
-    time_lived_secs: Option<u64>,
-    time_lived_text: Option<String>,
-    skill_info: SkillInfo,
-    received_damage: Option<u64>,
-    received_damage_text: Option<RichText>,
-    received_damage_hover_text: Option<RichText>,
-    received_damage_report: Option<Damage>,
-    damage_interactions: Option<HashMap<i64, DamageInteraction>>,
-    fires: Option<u64>,
-    floods: Option<u64>,
-    citadels: Option<u64>,
-    crits: Option<u64>,
-    distance_traveled: Option<f64>,
-    is_test_ship: bool,
-    is_enemy: bool,
-    is_self: bool,
-    manual_stat_hide_toggle: bool,
-    // TODO: Maybe in the future refactor this to be a HashMap<Rc<Player>, DeathInfo> ?
-    kills: Option<i64>,
-    observed_kills: i64,
-    translated_build: Option<TranslatedBuild>,
-    achievements: Vec<Achievement>,
-    personal_rating: Option<crate::personal_rating::PersonalRatingResult>,
-}
-
-#[allow(dead_code)]
-impl PlayerReport {
-    fn remove_nda_info(&mut self) {
-        self.observed_damage = 0;
-        self.observed_damage_text = "NDA".to_string();
-        self.actual_damage = Some(0);
-        self.actual_damage_text = Some("NDA".into());
-        self.actual_damage_hover_text = None;
-        self.potential_damage = Some(0);
-        self.potential_damage_text = Some("NDA".into());
-        self.potential_damage_hover_text = None;
-        self.received_damage = Some(0);
-        self.received_damage_text = Some("NDA".into());
-        self.received_damage_hover_text = None;
-        self.fires = Some(0);
-        self.floods = Some(0);
-        self.citadels = Some(0);
-        self.crits = Some(0);
-    }
-
-    pub fn player(&self) -> &Player {
-        &self.player
-    }
-
-    pub fn vehicle(&self) -> Option<&VehicleEntity> {
-        self.player.vehicle_entity()
-    }
-
-    pub fn color(&self) -> Color32 {
-        self.color
-    }
-
-    pub fn name_text(&self) -> &RichText {
-        &self.name_text
-    }
-
-    pub fn clan_text(&self) -> Option<&RichText> {
-        self.clan_text.as_ref()
-    }
-
-    pub fn ship_species_text(&self) -> &str {
-        &self.ship_species_text
-    }
-
-    pub fn icon(&self) -> Option<Arc<ShipIcon>> {
-        self.icon.clone()
-    }
-
-    pub fn division_label(&self) -> Option<&String> {
-        self.division_label.as_ref()
-    }
-
-    pub fn base_xp(&self) -> Option<i64> {
-        self.base_xp
-    }
-
-    pub fn base_xp_text(&self) -> Option<&RichText> {
-        self.base_xp_text.as_ref()
-    }
-
-    pub fn raw_xp(&self) -> Option<i64> {
-        self.raw_xp
-    }
-
-    pub fn raw_xp_text(&self) -> Option<&String> {
-        self.raw_xp_text.as_ref()
-    }
-
-    pub fn observed_damage(&self) -> u64 {
-        self.observed_damage
-    }
-
-    pub fn observed_damage_text(&self) -> &str {
-        &self.observed_damage_text
-    }
-
-    pub fn actual_damage(&self) -> Option<u64> {
-        self.actual_damage
-    }
-
-    pub fn actual_damage_report(&self) -> Option<&Damage> {
-        self.actual_damage_report.as_ref()
-    }
-
-    pub fn actual_damage_text(&self) -> Option<&RichText> {
-        self.actual_damage_text.as_ref()
-    }
-
-    pub fn actual_damage_hover_text(&self) -> Option<&RichText> {
-        self.actual_damage_hover_text.as_ref()
-    }
-
-    pub fn ship_name(&self) -> &str {
-        &self.ship_name
-    }
-
-    pub fn spotting_damage(&self) -> Option<u64> {
-        self.spotting_damage
-    }
-
-    pub fn spotting_damage_text(&self) -> Option<&String> {
-        self.spotting_damage_text.as_ref()
-    }
-
-    pub fn potential_damage(&self) -> Option<u64> {
-        self.potential_damage
-    }
-
-    pub fn potential_damage_text(&self) -> Option<&String> {
-        self.potential_damage_text.as_ref()
-    }
-
-    pub fn potential_damage_hover_text(&self) -> Option<&RichText> {
-        self.potential_damage_hover_text.as_ref()
-    }
-
-    pub fn potential_damage_report(&self) -> Option<&PotentialDamage> {
-        self.potential_damage_report.as_ref()
-    }
-
-    pub fn time_lived_secs(&self) -> Option<u64> {
-        self.time_lived_secs
-    }
-
-    pub fn time_lived_text(&self) -> Option<&String> {
-        self.time_lived_text.as_ref()
-    }
-
-    pub fn skill_info(&self) -> &SkillInfo {
-        &self.skill_info
-    }
-
-    pub fn received_damage(&self) -> Option<u64> {
-        self.received_damage
-    }
-
-    pub fn received_damage_text(&self) -> Option<&RichText> {
-        self.received_damage_text.as_ref()
-    }
-
-    pub fn received_damage_hover_text(&self) -> Option<&RichText> {
-        self.received_damage_hover_text.as_ref()
-    }
-
-    pub fn received_damage_report(&self) -> Option<&Damage> {
-        self.received_damage_report.as_ref()
-    }
-
-    pub fn fires(&self) -> Option<u64> {
-        self.fires
-    }
-
-    pub fn floods(&self) -> Option<u64> {
-        self.floods
-    }
-
-    pub fn citadels(&self) -> Option<u64> {
-        self.citadels
-    }
-
-    pub fn crits(&self) -> Option<u64> {
-        self.crits
-    }
-
-    pub fn distance_traveled(&self) -> Option<f64> {
-        self.distance_traveled
-    }
-
-    pub fn is_test_ship(&self) -> bool {
-        self.is_test_ship
-    }
-
-    pub fn is_enemy(&self) -> bool {
-        self.is_enemy
-    }
-
-    pub fn observed_kills(&self) -> i64 {
-        self.observed_kills
-    }
-
-    pub fn kills(&self) -> Option<i64> {
-        self.kills
-    }
-
-    pub fn translated_build(&self) -> Option<&TranslatedBuild> {
-        self.translated_build.as_ref()
-    }
-
-    pub fn should_hide_stats(&self) -> bool {
-        self.manual_stat_hide_toggle || (!self.is_self && self.is_test_ship)
-    }
-
-    pub fn is_self(&self) -> bool {
-        self.is_self
-    }
-
-    pub fn hits_report(&self) -> Option<&Hits> {
-        self.hits_report.as_ref()
-    }
-
-    pub fn damage_interactions(&self) -> Option<&HashMap<i64, DamageInteraction>> {
-        self.damage_interactions.as_ref()
-    }
-
-    pub fn personal_rating(&self) -> Option<&crate::personal_rating::PersonalRatingResult> {
-        self.personal_rating.as_ref()
-    }
-}
-
 use std::cmp::Reverse;
 
 #[allow(non_camel_case_types)]
-enum SortKey {
-    String(String),
-    i64(Option<i64>),
-    u64(Option<u64>),
-    f64(Option<f64>),
-    Species(Species),
-}
-
-impl PartialEq for SortKey {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (SortKey::String(a), SortKey::String(b)) => a == b,
-            (SortKey::i64(a), SortKey::i64(b)) => a == b,
-            (SortKey::u64(a), SortKey::u64(b)) => a == b,
-            (SortKey::f64(a), SortKey::f64(b)) => a == b,
-            (SortKey::Species(a), SortKey::Species(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for SortKey {}
-
-impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (SortKey::String(a), SortKey::String(b)) => a.cmp(b),
-            (SortKey::i64(a), SortKey::i64(b)) => a.cmp(b),
-            (SortKey::u64(a), SortKey::u64(b)) => a.cmp(b),
-            (SortKey::f64(a), SortKey::f64(b)) => a.partial_cmp(b).expect("could not compare f64  keys?"),
-            (SortKey::Species(a), SortKey::Species(b)) => a.cmp(b),
-            _ => std::cmp::Ordering::Equal,
-        }
-    }
-}
-
 pub struct UiReport {
     match_timestamp: Timestamp,
     self_player: Option<Arc<Player>>,
@@ -1522,50 +906,50 @@ impl UiReport {
 
             let key = match column {
                 SortColumn::Name => SortKey::String(player.name().to_string()),
-                SortColumn::BaseXp => SortKey::i64(report.base_xp),
-                SortColumn::RawXp => SortKey::i64(report.raw_xp),
+                SortColumn::BaseXp => SortKey::I64(report.base_xp),
+                SortColumn::RawXp => SortKey::I64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
                 SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
-                SortColumn::ObservedDamage => SortKey::u64(Some(if report.should_hide_stats() && !self.debug_mode {
+                SortColumn::ObservedDamage => SortKey::U64(Some(if report.should_hide_stats() && !self.debug_mode {
                     0
                 } else {
                     report.observed_damage
                 })),
-                SortColumn::ActualDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                SortColumn::ActualDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
                     None
                 } else {
                     report.actual_damage
                 }),
-                SortColumn::SpottingDamage => SortKey::u64(report.spotting_damage),
-                SortColumn::PotentialDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                SortColumn::SpottingDamage => SortKey::U64(report.spotting_damage),
+                SortColumn::PotentialDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
                     None
                 } else {
                     report.potential_damage
                 }),
-                SortColumn::TimeLived => SortKey::u64(report.time_lived_secs),
+                SortColumn::TimeLived => SortKey::U64(report.time_lived_secs),
                 SortColumn::Fires => {
-                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires })
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.fires })
                 }
                 SortColumn::Floods => {
-                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods })
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.floods })
                 }
                 SortColumn::Citadels => {
-                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels })
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.citadels })
                 }
                 SortColumn::Crits => {
-                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits })
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.crits })
                 }
-                SortColumn::ReceivedDamage => SortKey::u64(if report.should_hide_stats() && !self.debug_mode {
+                SortColumn::ReceivedDamage => SortKey::U64(if report.should_hide_stats() && !self.debug_mode {
                     None
                 } else {
                     report.received_damage
                 }),
-                SortColumn::DistanceTraveled => SortKey::f64(report.distance_traveled),
-                SortColumn::Kills => SortKey::i64(report.kills.or(Some(report.observed_kills))),
+                SortColumn::DistanceTraveled => SortKey::F64(report.distance_traveled),
+                SortColumn::Kills => SortKey::I64(report.kills.or(Some(report.observed_kills))),
                 SortColumn::Hits => {
-                    SortKey::u64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits })
+                    SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits })
                 }
-                SortColumn::PersonalRating => SortKey::f64(report.personal_rating.as_ref().map(|pr| pr.pr)),
+                SortColumn::PersonalRating => SortKey::F64(report.personal_rating.as_ref().map(|pr| pr.pr)),
             };
 
             (team_id, key, db_id)
@@ -2617,101 +2001,6 @@ impl egui_table::TableDelegate for UiReport {
 }
 
 const ROW_HEIGHT: f32 = 28.0;
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SortOrder {
-    Asc(SortColumn),
-    Desc(SortColumn),
-}
-
-impl Default for SortOrder {
-    fn default() -> Self {
-        SortOrder::Asc(SortColumn::ShipClass)
-    }
-}
-
-impl SortOrder {
-    fn icon(&self) -> &'static str {
-        match self {
-            SortOrder::Asc(_) => icons::SORT_ASCENDING,
-            SortOrder::Desc(_) => icons::SORT_DESCENDING,
-        }
-    }
-
-    fn toggle(&mut self) {
-        match self {
-            // By default everything should be Descending. Descending transitions to ascending. Ascending transitions back to default state.
-            SortOrder::Asc(_) => *self = Default::default(),
-            SortOrder::Desc(column) => *self = SortOrder::Asc(*column),
-        }
-    }
-
-    fn update_column(&mut self, new_column: SortColumn) -> SortOrder {
-        match self {
-            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) if *sort_column == new_column => {
-                self.toggle();
-            }
-            _ => *self = SortOrder::Desc(new_column),
-        }
-
-        *self
-    }
-
-    fn column(&self) -> SortColumn {
-        match self {
-            SortOrder::Asc(sort_column) | SortOrder::Desc(sort_column) => *sort_column,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// All columns
-pub enum ReplayColumn {
-    Actions,
-    Name,
-    ShipName,
-    Skills,
-    PersonalRating,
-    BaseXp,
-    RawXp,
-    Kills,
-    ObservedDamage,
-    ActualDamage,
-    ReceivedDamage,
-    SpottingDamage,
-    PotentialDamage,
-    Hits,
-    Fires,
-    Floods,
-    Citadels,
-    Crits,
-    DistanceTraveled,
-    TimeLived,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-/// Columns which are sortable
-pub enum SortColumn {
-    Name,
-    BaseXp,
-    RawXp,
-    ShipName,
-    ShipClass,
-    Kills,
-    ObservedDamage,
-    ActualDamage,
-    SpottingDamage,
-    PotentialDamage,
-    Hits,
-    TimeLived,
-    Fires,
-    Floods,
-    Citadels,
-    Crits,
-    ReceivedDamage,
-    DistanceTraveled,
-    PersonalRating,
-}
 
 pub struct Replay {
     pub replay_file: ReplayFile,
