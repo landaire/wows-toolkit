@@ -4,7 +4,9 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
-use crate::personal_rating::{PersonalRatingData, PersonalRatingResult, ShipBattleStats};
+use crate::personal_rating::PersonalRatingData;
+use crate::personal_rating::PersonalRatingResult;
+use crate::personal_rating::ShipBattleStats;
 use crate::ui::replay_parser::Replay;
 
 /// Performance statistics for a single ship across multiple games

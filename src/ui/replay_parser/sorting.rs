@@ -1,6 +1,7 @@
 //! Sorting infrastructure for replay player lists.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use wowsunpack::game_params::types::Species;
 
 use crate::icons;

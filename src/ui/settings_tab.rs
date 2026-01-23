@@ -1,11 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use clipboard::{ClipboardContext, ClipboardProvider};
-use egui::{Color32, OpenUrl, Slider};
+use clipboard::ClipboardContext;
+use clipboard::ClipboardProvider;
+use egui::Color32;
+use egui::OpenUrl;
+use egui::Slider;
 
 use crate::app::ToolkitTabViewer;
 use crate::icons;
-use crate::task::{DataExportSettings, ReplayBackgroundParserThreadMessage, ReplayExportFormat};
+use crate::task::DataExportSettings;
+use crate::task::ReplayBackgroundParserThreadMessage;
+use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::update_background_task;
 

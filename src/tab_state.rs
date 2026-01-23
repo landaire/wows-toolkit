@@ -1,14 +1,24 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{
+    self,
+};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
-use notify::event::{ModifyKind, RenameMode};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::EventKind;
+use notify::RecommendedWatcher;
+use notify::RecursiveMode;
+use notify::Watcher;
+use notify::event::ModifyKind;
+use notify::event::RenameMode;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::debug;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
@@ -16,17 +26,24 @@ use wowsunpack::data::idx::FileNode;
 use crate::personal_rating::PersonalRatingData;
 use crate::plaintext_viewer::PlaintextFileViewer;
 use crate::session_stats::SessionStats;
-use crate::settings::{Settings, default_bool};
-use crate::task::{
-    BackgroundParserThread, BackgroundTask, BackgroundTaskKind, DataExportSettings, ReplayBackgroundParserThreadMessage,
-};
+use crate::settings::Settings;
+use crate::settings::default_bool;
+use crate::task::BackgroundParserThread;
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskKind;
+use crate::task::DataExportSettings;
+use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UnpackerProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
-use crate::ui::replay_parser::{Replay, SharedReplayParserTabState, SortOrder};
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SharedReplayParserTabState;
+use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
-use crate::wows_data::{ReplayLoader, WorldOfWarshipsData, load_replay};
+use crate::wows_data::ReplayLoader;
+use crate::wows_data::WorldOfWarshipsData;
+use crate::wows_data::load_replay;
 
 /// File system events for replay monitoring
 #[derive(Debug)]
@@ -226,9 +243,7 @@ impl TabState {
                                             replay_files.insert(new_file.clone(), Arc::clone(&replay));
                                         }
 
-                                        if self.auto_load_latest_replay
-                                            && let Some(wows_data) = self.world_of_warships_data.as_ref()
-                                        {
+                                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
                                             update_background_task!(
                                                 self.background_tasks,
                                                 load_replay(
@@ -238,6 +253,7 @@ impl TabState {
                                                     Arc::clone(&self.replay_sort),
                                                     self.background_task_sender.clone(),
                                                     self.settings.debug_mode,
+                                                    self.auto_load_latest_replay,
                                                 )
                                             );
                                         }
@@ -256,9 +272,25 @@ impl TabState {
                         if let Some(replay_files) = &self.replay_files
                             && let Some(replay) = replay_files.get(&modified_file)
                         {
-                            let mut replay = replay.write();
-                            replay.battle_report = None;
-                            replay.ui_report = None;
+                            let mut replay_inner = replay.write();
+                            replay_inner.battle_report = None;
+                            replay_inner.ui_report = None;
+                            drop(replay_inner);
+
+                            if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                                update_background_task!(
+                                    self.background_tasks,
+                                    load_replay(
+                                        Arc::clone(&self.game_constants),
+                                        Arc::clone(wows_data),
+                                        Arc::clone(replay),
+                                        Arc::clone(&self.replay_sort),
+                                        self.background_task_sender.clone(),
+                                        self.settings.debug_mode,
+                                        self.auto_load_latest_replay,
+                                    )
+                                );
+                            }
                         }
                     }
                     NotifyFileEvent::Removed(old_file) => {

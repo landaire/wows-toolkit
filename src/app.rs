@@ -48,9 +48,11 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::ui::file_unpacker::UNPACKER_STOP;
-use crate::wows_data::parse_replay;
+use crate::wows_data::parse_replay_from_path;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -684,13 +686,14 @@ impl WowsToolkitApp {
             self.tab_state.settings.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                parse_replay(
+                parse_replay_from_path(
                     Arc::clone(&self.tab_state.game_constants),
                     Arc::clone(wows_data),
                     self.tab_state.settings.current_replay_path.clone(),
                     Arc::clone(&self.tab_state.replay_sort),
                     self.tab_state.background_task_sender.clone(),
-                    self.tab_state.settings.debug_mode
+                    self.tab_state.settings.debug_mode,
+                    true,
                 )
             );
         }

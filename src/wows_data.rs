@@ -45,13 +45,14 @@ pub struct WorldOfWarshipsData {
     pub build_dir: PathBuf,
 }
 
-pub fn parse_replay<P: AsRef<Path>>(
+pub fn parse_replay_from_path<P: AsRef<Path>>(
     game_constants: Arc<RwLock<serde_json::Value>>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     replay_path: P,
     replay_sort: Arc<Mutex<SortOrder>>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
     is_debug_mode: bool,
+    update_ui: bool,
 ) -> Option<BackgroundTask> {
     let path = replay_path.as_ref();
 
@@ -66,6 +67,7 @@ pub fn parse_replay<P: AsRef<Path>>(
         replay_sort,
         background_task_sender,
         is_debug_mode,
+        update_ui,
     )
 }
 
@@ -174,6 +176,10 @@ pub fn load_replay(
     replay_sort: Arc<Mutex<SortOrder>>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
     is_debug_mode: bool,
+    update_ui: bool,
 ) -> Option<BackgroundTask> {
-    ReplayLoader::new(game_constants, wows_data, replay, replay_sort, background_task_sender, is_debug_mode).load()
+    let mut loader =
+        ReplayLoader::new(game_constants, wows_data, replay, replay_sort, background_task_sender, is_debug_mode);
+
+    if update_ui { loader.load() } else { loader.skip_ui_update().load() }
 }

@@ -2,12 +2,19 @@ mod damage_types;
 mod models;
 mod sorting;
 
-pub use models::{
-    Achievement, Damage, DamageInteraction, Hits, PlayerReport, PotentialDamage, SkillInfo, TranslatedBuild,
-    ship_class_icon_from_species,
-};
+pub use models::Achievement;
+pub use models::Damage;
+pub use models::DamageInteraction;
+pub use models::Hits;
+pub use models::PlayerReport;
+pub use models::PotentialDamage;
+pub use models::SkillInfo;
+pub use models::TranslatedBuild;
+pub use models::ship_class_icon_from_species;
+pub use sorting::ReplayColumn;
+pub use sorting::SortColumn;
 use sorting::SortKey;
-pub use sorting::{ReplayColumn, SortColumn, SortOrder};
+pub use sorting::SortOrder;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -38,7 +45,7 @@ use crate::task::ReplayExportFormat;
 use crate::update_background_task;
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
-use crate::wows_data::parse_replay;
+use crate::wows_data::parse_replay_from_path;
 
 use damage_types::*;
 use egui::Color32;
@@ -2642,7 +2649,8 @@ impl ToolkitTabViewer<'_> {
                     replay,
                     Arc::clone(&self.tab_state.replay_sort),
                     self.tab_state.background_task_sender.clone(),
-                    self.tab_state.settings.debug_mode
+                    self.tab_state.settings.debug_mode,
+                    true,
                 )
             );
         }
@@ -2882,7 +2890,8 @@ impl ToolkitTabViewer<'_> {
                                             replay.clone(),
                                             Arc::clone(&self.tab_state.replay_sort),
                                             self.tab_state.background_task_sender.clone(),
-                                            self.tab_state.settings.debug_mode
+                                            self.tab_state.settings.debug_mode,
+                                            true,
                                         )
                                     );
                                 }
@@ -3134,7 +3143,8 @@ impl ToolkitTabViewer<'_> {
                                             replay.clone(),
                                             Arc::clone(&self.tab_state.replay_sort),
                                             self.tab_state.background_task_sender.clone(),
-                                            self.tab_state.settings.debug_mode
+                                            self.tab_state.settings.debug_mode,
+                                            true,
                                         )
                                     );
                                 }
@@ -3158,13 +3168,14 @@ impl ToolkitTabViewer<'_> {
                 if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        parse_replay(
+                        parse_replay_from_path(
                             Arc::clone(&self.tab_state.game_constants),
                             Arc::clone(wows_data),
                             self.tab_state.settings.current_replay_path.clone(),
                             Arc::clone(&self.tab_state.replay_sort),
                             self.tab_state.background_task_sender.clone(),
-                            self.tab_state.settings.debug_mode
+                            self.tab_state.settings.debug_mode,
+                            true,
                         )
                     );
                 }
