@@ -69,6 +69,104 @@ pub fn parse_replay<P: AsRef<Path>>(
     )
 }
 
+/// Builder for loading replays in the background with configurable options
+pub struct ReplayLoader {
+    game_constants: Arc<RwLock<serde_json::Value>>,
+    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    replay: Arc<RwLock<Replay>>,
+    replay_sort: Arc<Mutex<SortOrder>>,
+    background_task_sender: mpsc::Sender<BackgroundTask>,
+    is_debug_mode: bool,
+    skip_ui_update: bool,
+}
+
+impl ReplayLoader {
+    pub fn new(
+        game_constants: Arc<RwLock<serde_json::Value>>,
+        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+        replay: Arc<RwLock<Replay>>,
+        replay_sort: Arc<Mutex<SortOrder>>,
+        background_task_sender: mpsc::Sender<BackgroundTask>,
+        is_debug_mode: bool,
+    ) -> Self {
+        Self {
+            game_constants,
+            wows_data,
+            replay,
+            replay_sort,
+            background_task_sender,
+            is_debug_mode,
+            skip_ui_update: false,
+        }
+    }
+
+    /// Skip updating the UI when the replay finishes loading.
+    /// Useful for batch loading like session stats.
+    pub fn skip_ui_update(mut self) -> Self {
+        self.skip_ui_update = true;
+        self
+    }
+
+    /// Start loading the replay in the background
+    pub fn load(self) -> Option<BackgroundTask> {
+        let game_version = { self.wows_data.read().patch_version };
+        let skip_ui_update = self.skip_ui_update;
+
+        let (tx, rx) = mpsc::channel();
+
+        let game_constants = self.game_constants;
+        let wows_data = self.wows_data;
+        let replay = self.replay;
+        let replay_sort = self.replay_sort;
+        let background_task_sender = self.background_task_sender;
+        let is_debug_mode = self.is_debug_mode;
+
+        let _join_handle = std::thread::spawn(move || {
+            let res = { replay.read().parse(game_version.to_string().as_str()) };
+            let res = res.map(move |report| {
+                {
+                    #[cfg(feature = "shipbuilds_debugging")]
+                    {
+                        let wows_data_inner = wows_data.read();
+                        let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
+                        // Send the replay builds to the remote server
+                        for player in report.player_entities() {
+                            let client = reqwest::blocking::Client::new();
+                            client
+                                .post("http://shipbuilds.com/api/ship_builds")
+                                .json(&crate::build_tracker::BuildTrackerPayload::build_from(
+                                    player,
+                                    player.player().unwrap().realm().to_owned(),
+                                    report.version(),
+                                    report.game_type().to_owned(),
+                                    metadata_provider,
+                                ))
+                                .send()
+                                .expect("failed to POST build data");
+                        }
+                        drop(wows_data_inner);
+                    }
+
+                    let mut replay_guard = replay.write();
+                    replay_guard.battle_report = Some(report);
+                    replay_guard.build_ui_report(
+                        game_constants,
+                        wows_data,
+                        replay_sort,
+                        Some(background_task_sender),
+                        is_debug_mode,
+                    );
+                }
+                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update }
+            });
+
+            let _ = tx.send(res);
+        });
+
+        Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
+    }
+}
+
 pub fn load_replay(
     game_constants: Arc<RwLock<serde_json::Value>>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
@@ -77,51 +175,5 @@ pub fn load_replay(
     background_task_sender: mpsc::Sender<BackgroundTask>,
     is_debug_mode: bool,
 ) -> Option<BackgroundTask> {
-    let game_version = { wows_data.read().patch_version };
-
-    let (tx, rx) = mpsc::channel();
-
-    let _join_handle = std::thread::spawn(move || {
-        let res = { replay.read().parse(game_version.to_string().as_str()) };
-        let res = res.map(move |report| {
-            {
-                #[cfg(feature = "shipbuilds_debugging")]
-                {
-                    let wows_data_inner = wows_data.read();
-                    let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
-                    // Send the replay builds to the remote server
-                    for player in report.player_entities() {
-                        let client = reqwest::blocking::Client::new();
-                        client
-                            .post("http://shipbuilds.com/api/ship_builds")
-                            .json(&crate::build_tracker::BuildTrackerPayload::build_from(
-                                player,
-                                player.player().unwrap().realm().to_owned(),
-                                report.version(),
-                                report.game_type().to_owned(),
-                                metadata_provider,
-                            ))
-                            .send()
-                            .expect("failed to POST build data");
-                    }
-                    drop(wows_data_inner);
-                }
-
-                let mut replay_guard = replay.write();
-                replay_guard.battle_report = Some(report);
-                replay_guard.build_ui_report(
-                    game_constants,
-                    wows_data,
-                    replay_sort,
-                    Some(background_task_sender),
-                    is_debug_mode,
-                );
-            }
-            BackgroundTaskCompletion::ReplayLoaded { replay }
-        });
-
-        let _ = tx.send(res);
-    });
-
-    Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
+    ReplayLoader::new(game_constants, wows_data, replay, replay_sort, background_task_sender, is_debug_mode).load()
 }

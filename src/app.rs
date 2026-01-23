@@ -12,9 +12,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 
 use std::time::Duration;
 use std::time::Instant;
@@ -80,9 +78,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UNPACKER_STOP;
@@ -92,9 +88,8 @@ use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
-use crate::ui::replay_parser::{
-    self,
-};
+use crate::ui::replay_parser::{self};
+use crate::wows_data::ReplayLoader;
 use crate::wows_data::WorldOfWarshipsData;
 use crate::wows_data::load_replay;
 use crate::wows_data::parse_replay;
@@ -938,6 +933,12 @@ pub struct TabState {
     pub session_stats: SessionStats,
     #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
+
+    /// Replays selected for resetting session stats. When Some, they will be
+    /// processed and added to session stats, clearing the old ones first.
+    /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
+    #[serde(skip)]
+    pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
 }
 
 impl Default for TabState {
@@ -982,6 +983,7 @@ impl Default for TabState {
             show_session_stats: false,
             session_stats: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
+            replays_for_session_reset: None,
         }
     }
 }
@@ -1085,6 +1087,51 @@ impl TabState {
 
     fn allow_changing_wows_dir(&mut self) {
         self.can_change_wows_dir = true;
+    }
+
+    /// Process replays selected for session stats reset.
+    /// Clears the current session stats and populates with the selected replays.
+    /// If any replays haven't been parsed yet, they will be queued for parsing.
+    fn process_session_stats_reset(&mut self) {
+        let Some(weak_replays) = self.replays_for_session_reset.take() else {
+            return;
+        };
+
+        // Clear current session stats
+        self.session_stats.clear();
+
+        // Upgrade weak references and add to session stats
+        for weak_replay in weak_replays {
+            if let Some(replay) = weak_replay.upgrade() {
+                // Check if the replay needs parsing (no ui_report means not parsed)
+                let needs_parsing = replay.read().ui_report.is_none();
+
+                if needs_parsing {
+                    // Queue the replay for parsing (skip UI update since this is batch loading)
+                    if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                        update_background_task!(
+                            self.background_tasks,
+                            ReplayLoader::new(
+                                Arc::clone(&self.game_constants),
+                                Arc::clone(wows_data),
+                                replay.clone(),
+                                Arc::clone(&self.replay_sort),
+                                self.background_task_sender.clone(),
+                                self.settings.debug_mode,
+                            )
+                            .skip_ui_update()
+                            .load()
+                        );
+                    }
+                }
+
+                // Add the replay to session stats (it will be updated when parsing completes)
+                self.session_stats.add_replay(replay);
+            }
+        }
+
+        // Show session stats window automatically
+        self.show_session_stats = true;
     }
 
     fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
@@ -1469,23 +1516,25 @@ impl WowsToolkitApp {
                                         icons::CHECK_CIRCLE
                                     )));
                                 }
-                                BackgroundTaskCompletion::ReplayLoaded { replay } => {
-                                    {
-                                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update } => {
+                                    if !skip_ui_update {
+                                        {
+                                            self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                                        }
+                                        {
+                                            self.tab_state
+                                                .settings
+                                                .player_tracker
+                                                .write()
+                                                .update_from_replay(&replay.read());
+                                        }
+                                        self.tab_state.session_stats.add_replay(replay.clone());
+                                        self.tab_state.current_replay = Some(replay);
+                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
+                                            "{} Successfully loaded replay",
+                                            icons::CHECK_CIRCLE
+                                        )));
                                     }
-                                    {
-                                        self.tab_state
-                                            .settings
-                                            .player_tracker
-                                            .write()
-                                            .update_from_replay(&replay.read());
-                                    }
-                                    self.tab_state.session_stats.add_replay(replay.clone());
-                                    self.tab_state.current_replay = Some(replay);
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                        "{} Successfully loaded replay",
-                                        icons::CHECK_CIRCLE
-                                    )));
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
                                     let current_process =
@@ -1802,6 +1851,7 @@ impl WowsToolkitApp {
         }
 
         self.tab_state.try_update_replays();
+        self.tab_state.process_session_stats_reset();
 
         if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
             self.check_for_updates();

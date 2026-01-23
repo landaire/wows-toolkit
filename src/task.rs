@@ -7,9 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
@@ -33,9 +31,7 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{
-    self,
-};
+use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
@@ -55,9 +51,7 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{
-    self,
-};
+use crate::twitch::{self};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -217,6 +211,8 @@ pub enum BackgroundTaskCompletion {
     },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
+        /// If true, don't update the current replay in the UI (used for batch session stats loading)
+        skip_ui_update: bool,
     },
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateDownloaded(PathBuf),
@@ -244,7 +240,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("wows_data", &"<...>")
                 .field("replays", &"<...>")
                 .finish(),
-            Self::ReplayLoaded { replay: _ } => f.debug_struct("ReplayLoaded").field("replay", &"<...>").finish(),
+            Self::ReplayLoaded { replay: _, skip_ui_update } => f
+                .debug_struct("ReplayLoaded")
+                .field("replay", &"<...>")
+                .field("skip_ui_update", skip_ui_update)
+                .finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),

@@ -5,6 +5,7 @@ use std::io::BufWriter;
 use std::io::Write;
 
 use std::sync::Arc;
+use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
@@ -3298,16 +3299,28 @@ impl ToolkitTabViewer<'_> {
                             }
                         };
 
+                        let replay_weak = Arc::downgrade(&replay);
+                        let path_clone = path.clone();
                         let label_response = ui
                             .add(Label::new(label_text).selectable(false).sense(Sense::click()))
                             .on_hover_text(label.as_str());
                         label_response.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
-                                ui.ctx().copy_text(path.to_string_lossy().into_owned());
+                                ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.button("Show in File Explorer").clicked() {
-                                util::open_file_explorer(&path);
+                                util::open_file_explorer(&path_clone);
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            ui.separator();
+                            if ui.button("Set as Session Stats (1 replay)").clicked() {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new("session_stats_reset_replays"),
+                                        vec![replay_weak.clone()],
+                                    );
+                                });
                                 ui.close_kind(UiKind::Menu);
                             }
                         });
@@ -3320,6 +3333,13 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
+
+        // Check for session stats reset request from context menu
+        let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
+            ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
+        if let Some(replays) = reset_replays {
+            self.tab_state.replays_for_session_reset = Some(replays);
+        }
 
         // Load replay outside of the closure to avoid borrow issues
         if let Some(replay) = replay_to_load
@@ -3370,17 +3390,67 @@ impl ToolkitTabViewer<'_> {
             // Build maps from Id to replay and path for activation and context menu handling
             let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
             let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
+            // Map group IDs to their child replays (weak refs) for multi-selection
+            let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
+            // Map group IDs to their child node IDs (for expanding directory selection)
+            let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
 
             // Pre-populate the maps before building the tree
-            for (_date, replays) in &groups {
+            for (date, replays) in &groups {
+                let group_id = egui::Id::new(("date_group", date));
+                let mut group_replays = Vec::new();
+                let mut child_ids = Vec::new();
                 for (path, replay) in replays {
                     let id = egui::Id::new(path);
                     id_to_replay.insert(id, replay.clone());
                     id_to_path.insert(id, path.clone());
+                    group_replays.push(Arc::downgrade(replay));
+                    child_ids.push(id);
                 }
+                group_id_to_replays.insert(group_id, group_replays);
+                group_id_to_child_ids.insert(group_id, child_ids);
             }
 
-            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"));
+            // Clone maps for use in context menu closures (using weak refs)
+            let id_to_replay_weak: HashMap<egui::Id, Weak<RwLock<Replay>>> =
+                id_to_replay.iter().map(|(k, v)| (*k, Arc::downgrade(v))).collect();
+            let group_id_to_replays_for_menu = group_id_to_replays.clone();
+
+            // For fallback context menu (multi-selection)
+            let id_to_replay_weak_fallback = id_to_replay_weak.clone();
+            let group_id_to_replays_fallback = group_id_to_replays.clone();
+
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"))
+                .allow_multi_selection(true)
+                .fallback_context_menu(move |ui, selected_ids| {
+                    // Collect all replays from selected nodes (both leaf and group nodes)
+                    let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
+                    for id in selected_ids {
+                        // Check if it's a group node
+                        if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
+                            selected_replays.extend(group_replays.iter().cloned());
+                        }
+                        // Check if it's a leaf node
+                        if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
+                            selected_replays.push(replay_weak.clone());
+                        }
+                    }
+
+                    if !selected_replays.is_empty() {
+                        let count = selected_replays.len();
+                        let label = if count == 1 {
+                            "Set as Session Stats (1 replay)".to_string()
+                        } else {
+                            format!("Set as Session Stats ({} replays)", count)
+                        };
+                        if ui.button(label).clicked() {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("session_stats_reset_replays"), selected_replays);
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                    }
+                });
             let (_response, actions) = tree.show(ui, |builder| {
                 for (date, replays) in &groups {
                     // Calculate win/loss stats for this group
@@ -3400,12 +3470,33 @@ impl ToolkitTabViewer<'_> {
                         String::new()
                     };
 
-                    let is_open = builder
-                        .dir(egui::Id::new(("date_group", date)), format!("{} ({}){}", date, replays.len(), win_rate));
+                    let group_id = egui::Id::new(("date_group", date));
+                    let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
+                    let group_count = group_replays.len();
+                    let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
+                        .label(format!("{} ({}){}", date, replays.len(), win_rate))
+                        .context_menu(move |ui| {
+                            let label = if group_count == 1 {
+                                "Set as Session Stats (1 replay)".to_string()
+                            } else {
+                                format!("Set as Session Stats ({} replays)", group_count)
+                            };
+                            if ui.button(label).clicked() {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new("session_stats_reset_replays"),
+                                        group_replays.clone(),
+                                    );
+                                });
+                                ui.close_kind(UiKind::Menu);
+                            }
+                        });
+                    let is_open = builder.node(dir_node);
                     if is_open {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
                             let path_clone = path.clone();
+                            let replay_weak = id_to_replay_weak.get(&id).cloned();
 
                             let replay_guard = id_to_replay.get(&id).unwrap().read();
                             let ship_name = replay_guard.vehicle_name(&metadata_provider);
@@ -3433,6 +3524,18 @@ impl ToolkitTabViewer<'_> {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
+                                    ui.separator();
+                                    if ui.button("Set as Session Stats (1 replay)").clicked() {
+                                        if let Some(replay_weak) = replay_weak.as_ref() {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(
+                                                    egui::Id::new("session_stats_reset_replays"),
+                                                    vec![replay_weak.clone()],
+                                                );
+                                            });
+                                        }
+                                        ui.close_kind(UiKind::Menu);
+                                    }
                                 });
                             builder.node(node);
                         }
@@ -3441,27 +3544,64 @@ impl ToolkitTabViewer<'_> {
                 }
             });
 
-            // Handle activation (double-click/enter) from tree
+            // Check for session stats reset request from context menu
+            let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
+                ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
+            if let Some(replays) = reset_replays {
+                self.tab_state.replays_for_session_reset = Some(replays);
+            }
+
+            // Handle actions from tree
             for action in actions {
-                if let egui_ltreeview::Action::Activate(activate) = action {
-                    for id in activate.selected {
-                        if let Some(replay) = id_to_replay.get(&id) {
-                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                update_background_task!(
-                                    self.tab_state.background_tasks,
-                                    load_replay(
-                                        Arc::clone(&self.tab_state.game_constants),
-                                        Arc::clone(wows_data),
-                                        replay.clone(),
-                                        Arc::clone(&self.tab_state.replay_sort),
-                                        self.tab_state.background_task_sender.clone(),
-                                        self.tab_state.settings.debug_mode
-                                    )
-                                );
+                match action {
+                    egui_ltreeview::Action::SetSelected(selected_ids) => {
+                        // Expand directory selections to include all children (keeping the directory selected too)
+                        let mut expanded_selection: Vec<egui::Id> = Vec::new();
+                        let mut needs_expansion = false;
+                        for id in &selected_ids {
+                            expanded_selection.push(*id);
+                            if let Some(child_ids) = group_id_to_child_ids.get(id) {
+                                // It's a directory - check if children are already selected
+                                for child_id in child_ids {
+                                    if !selected_ids.contains(child_id) {
+                                        needs_expansion = true;
+                                        expanded_selection.push(*child_id);
+                                    }
+                                }
                             }
-                            break;
+                        }
+                        // Only update if we actually need to expand
+                        if needs_expansion {
+                            let tree_id = ui.make_persistent_id("replay_date_tree");
+                            ui.ctx().data_mut(|data| {
+                                let state =
+                                    data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                                state.set_selected(expanded_selection);
+                            });
                         }
                     }
+                    egui_ltreeview::Action::Activate(activate) => {
+                        // Handle activation (double-click/enter)
+                        for id in activate.selected {
+                            if let Some(replay) = id_to_replay.get(&id) {
+                                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                    update_background_task!(
+                                        self.tab_state.background_tasks,
+                                        load_replay(
+                                            Arc::clone(&self.tab_state.game_constants),
+                                            Arc::clone(wows_data),
+                                            replay.clone(),
+                                            Arc::clone(&self.tab_state.replay_sort),
+                                            self.tab_state.background_task_sender.clone(),
+                                            self.tab_state.settings.debug_mode
+                                        )
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -3504,17 +3644,67 @@ impl ToolkitTabViewer<'_> {
             // Build maps from Id to replay and path for activation and context menu handling
             let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
             let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
+            // Map group IDs to their child replays (weak refs) for multi-selection
+            let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
+            // Map group IDs to their child node IDs (for expanding directory selection)
+            let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
 
             // Pre-populate the maps before building the tree
-            for (_ship_name, replays) in &groups {
+            for (ship_name, replays) in &groups {
+                let group_id = egui::Id::new(("ship_group", ship_name));
+                let mut group_replays = Vec::new();
+                let mut child_ids = Vec::new();
                 for (path, replay) in replays {
                     let id = egui::Id::new(path);
                     id_to_replay.insert(id, replay.clone());
                     id_to_path.insert(id, path.clone());
+                    group_replays.push(Arc::downgrade(replay));
+                    child_ids.push(id);
                 }
+                group_id_to_replays.insert(group_id, group_replays);
+                group_id_to_child_ids.insert(group_id, child_ids);
             }
 
-            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"));
+            // Clone maps for use in context menu closures (using weak refs)
+            let id_to_replay_weak: HashMap<egui::Id, Weak<RwLock<Replay>>> =
+                id_to_replay.iter().map(|(k, v)| (*k, Arc::downgrade(v))).collect();
+            let group_id_to_replays_for_menu = group_id_to_replays.clone();
+
+            // For fallback context menu (multi-selection)
+            let id_to_replay_weak_fallback = id_to_replay_weak.clone();
+            let group_id_to_replays_fallback = group_id_to_replays.clone();
+
+            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"))
+                .allow_multi_selection(true)
+                .fallback_context_menu(move |ui, selected_ids| {
+                    // Collect all replays from selected nodes (both leaf and group nodes)
+                    let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
+                    for id in selected_ids {
+                        // Check if it's a group node
+                        if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
+                            selected_replays.extend(group_replays.iter().cloned());
+                        }
+                        // Check if it's a leaf node
+                        if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
+                            selected_replays.push(replay_weak.clone());
+                        }
+                    }
+
+                    if !selected_replays.is_empty() {
+                        let count = selected_replays.len();
+                        let label = if count == 1 {
+                            "Set as Session Stats (1 replay)".to_string()
+                        } else {
+                            format!("Set as Session Stats ({} replays)", count)
+                        };
+                        if ui.button(label).clicked() {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("session_stats_reset_replays"), selected_replays);
+                            });
+                            ui.close_kind(UiKind::Menu);
+                        }
+                    }
+                });
             let (_response, actions) = tree.show(ui, |builder| {
                 for (ship_name, replays) in &groups {
                     // Calculate win/loss stats for this ship
@@ -3534,14 +3724,33 @@ impl ToolkitTabViewer<'_> {
                         String::new()
                     };
 
-                    let is_open = builder.dir(
-                        egui::Id::new(("ship_group", ship_name)),
-                        format!("{} ({}){}", ship_name, replays.len(), win_rate),
-                    );
+                    let group_id = egui::Id::new(("ship_group", ship_name));
+                    let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
+                    let group_replay_count = group_replays.len();
+                    let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
+                        .label(format!("{} ({}){}", ship_name, replays.len(), win_rate))
+                        .context_menu(move |ui| {
+                            let label = if group_replay_count == 1 {
+                                "Set as Session Stats (1 replay)".to_string()
+                            } else {
+                                format!("Set as Session Stats ({} replays)", group_replay_count)
+                            };
+                            if ui.button(label).clicked() {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new("session_stats_reset_replays"),
+                                        group_replays.clone(),
+                                    );
+                                });
+                                ui.close_kind(UiKind::Menu);
+                            }
+                        });
+                    let is_open = builder.node(dir_node);
                     if is_open {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
                             let path_clone = path.clone();
+                            let replay_weak = id_to_replay_weak.get(&id).cloned();
 
                             let replay_guard = id_to_replay.get(&id).unwrap().read();
                             let map_name = replay_guard.map_name(&metadata_provider);
@@ -3567,6 +3776,18 @@ impl ToolkitTabViewer<'_> {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
+                                    ui.separator();
+                                    if ui.button("Set as Session Stats (1 replay)").clicked() {
+                                        if let Some(replay_weak) = replay_weak.as_ref() {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(
+                                                    egui::Id::new("session_stats_reset_replays"),
+                                                    vec![replay_weak.clone()],
+                                                );
+                                            });
+                                        }
+                                        ui.close_kind(UiKind::Menu);
+                                    }
                                 });
                             builder.node(node);
                         }
@@ -3575,27 +3796,64 @@ impl ToolkitTabViewer<'_> {
                 }
             });
 
-            // Handle activation (double-click/enter) from tree
+            // Check for session stats reset request from context menu
+            let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
+                ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
+            if let Some(replays) = reset_replays {
+                self.tab_state.replays_for_session_reset = Some(replays);
+            }
+
+            // Handle actions from tree
             for action in actions {
-                if let egui_ltreeview::Action::Activate(activate) = action {
-                    for id in activate.selected {
-                        if let Some(replay) = id_to_replay.get(&id) {
-                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                                update_background_task!(
-                                    self.tab_state.background_tasks,
-                                    load_replay(
-                                        Arc::clone(&self.tab_state.game_constants),
-                                        Arc::clone(wows_data),
-                                        replay.clone(),
-                                        Arc::clone(&self.tab_state.replay_sort),
-                                        self.tab_state.background_task_sender.clone(),
-                                        self.tab_state.settings.debug_mode
-                                    )
-                                );
+                match action {
+                    egui_ltreeview::Action::SetSelected(selected_ids) => {
+                        // Expand directory selections to include all children (keeping the directory selected too)
+                        let mut expanded_selection: Vec<egui::Id> = Vec::new();
+                        let mut needs_expansion = false;
+                        for id in &selected_ids {
+                            expanded_selection.push(*id);
+                            if let Some(child_ids) = group_id_to_child_ids.get(id) {
+                                // It's a directory - check if children are already selected
+                                for child_id in child_ids {
+                                    if !selected_ids.contains(child_id) {
+                                        needs_expansion = true;
+                                        expanded_selection.push(*child_id);
+                                    }
+                                }
                             }
-                            break;
+                        }
+                        // Only update if we actually need to expand
+                        if needs_expansion {
+                            let tree_id = ui.make_persistent_id("replay_ship_tree");
+                            ui.ctx().data_mut(|data| {
+                                let state =
+                                    data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                                state.set_selected(expanded_selection);
+                            });
                         }
                     }
+                    egui_ltreeview::Action::Activate(activate) => {
+                        // Handle activation (double-click/enter)
+                        for id in activate.selected {
+                            if let Some(replay) = id_to_replay.get(&id) {
+                                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                    update_background_task!(
+                                        self.tab_state.background_tasks,
+                                        load_replay(
+                                            Arc::clone(&self.tab_state.game_constants),
+                                            Arc::clone(wows_data),
+                                            replay.clone(),
+                                            Arc::clone(&self.tab_state.replay_sort),
+                                            self.tab_state.background_task_sender.clone(),
+                                            self.tab_state.settings.debug_mode
+                                        )
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
