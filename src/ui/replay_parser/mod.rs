@@ -2191,6 +2191,16 @@ impl Replay {
         }
     }
 
+    /// Returns a boolean indicating if the replay has incomplete battle results.
+    pub fn battle_results_are_pending(&self) -> bool {
+        // If we don't yet have a battle result, that implies that we never got the end
+        // of battle packet.
+        //
+        // If we don't have a UI report, that implies that the battle result packet from the
+        // server was never received
+        self.battle_result().is_none() && self.ui_report.is_none()
+    }
+
     pub fn battle_result(&self) -> Option<BattleResult> {
         self.battle_report()
             .and_then(|report| report.battle_result().cloned())
@@ -2362,6 +2372,13 @@ impl ToolkitTabViewer<'_> {
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
                 ui.label(report.map_name());
+
+                if replay_file.battle_results_are_pending() {
+                    let text = RichText::new(format!("{} Incomplete Match Results", icons::INFO)).color(Color32::ORANGE);
+                    let hover_text = "The replay does not yet have end-of-match results. Data will be automatically re-loaded when the match ends and end-of-match results are added to the replay.";
+                    ui.strong(text).on_hover_text(hover_text);
+                }
+
                 if let Some(battle_result) = replay_file.battle_result() {
                     let text = match battle_result {
                         BattleResult::Win(_) => RichText::new(format!("{} Victory", icons::TROPHY)).color(Color32::LIGHT_GREEN),
