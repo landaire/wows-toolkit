@@ -33,6 +33,7 @@ use octocrab::params::repos::Reference;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
+use rootcause::report;
 use tracing::trace;
 
 use serde::Deserialize;
@@ -48,9 +49,7 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 use crate::wows_data::parse_replay_from_path;
 
@@ -563,31 +562,32 @@ impl WowsToolkitApp {
                 .map(|commit| commit.sha);
 
             if current_constants_commit == &latest_commit || latest_commit.is_none() {
-                return (app_updates, None);
+                return (app_updates, Ok(None));
             }
 
-            if let Ok(constants_updates) = octocrab
+            match octocrab
                 .repos("padtrack", "wows-constants")
                 .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
                 .await
             {
-                let mut body = constants_updates.into_body();
-                let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
+                Ok(constants_updates) => {
+                    let mut body = constants_updates.into_body();
+                    let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
 
-                while let Some(frame) = body.frame().await {
-                    match frame {
-                        Ok(frame) => {
-                            if let Some(data) = frame.data_ref() {
-                                result.extend_from_slice(data);
+                    while let Some(frame) = body.frame().await {
+                        match frame {
+                            Ok(frame) => {
+                                if let Some(data) = frame.data_ref() {
+                                    result.extend_from_slice(data);
+                                }
                             }
+                            Err(e) => return (app_updates, Err(e)),
                         }
-                        Err(_) => return (app_updates, None),
                     }
-                }
 
-                (app_updates, Some((result, latest_commit)))
-            } else {
-                (app_updates, None)
+                    (app_updates, Ok(Some((result, latest_commit))))
+                }
+                Err(e) => (app_updates, Err(e)),
             }
         });
 
@@ -602,17 +602,34 @@ impl WowsToolkitApp {
                 *self.tab_state.timed_message.write() =
                     Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
             }
+        } else {
+            *self.tab_state.timed_message.write() =
+                Some(TimedMessage::new(format!("{} Failed to check for app updates", icons::X_CIRCLE)));
         }
 
-        if let Some((constants_updates, latest_commit)) = constants_updates {
-            let mut constants_path = PathBuf::from("constants.json");
-            if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-                constants_path = storage_dir.join(constants_path)
-            }
+        match constants_updates {
+            Ok(Some((constants_updates, latest_commit))) => {
+                let mut constants_path = PathBuf::from("constants.json");
+                if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+                    constants_path = storage_dir.join(constants_path)
+                }
 
-            if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
-                self.tab_state.settings.constants_file_commit = latest_commit;
-                update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_updates)));
+                if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
+                    self.tab_state.settings.constants_file_commit = latest_commit;
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(task::load_constants(constants_updates))
+                    );
+                }
+            }
+            // Nothing to update
+            Ok(None) => {}
+            Err(err) => {
+                let context_text = format!(
+                    "{} Failed to update replay config file. Replay data may be inaccurate. Check that WoWs Toolkit can access the internet.",
+                    icons::X_CIRCLE
+                );
+                self.show_err_window(Report::new(err).context(context_text).into());
             }
         }
 
