@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.43] - 2026-01-28
+
+### 🚀 Features
+
+- Add ability to update session stats from multiple selected items in replay list
+- Show players who disconnect early from battle
+- Show warning when replay has incomplete results
+- Add error text when the toolkit fails to check for updates
+
+### 🐛 Bug Fixes
+
+- Tomato.gg no longer supports WoWs
+- Newly parsed replays did not correctly sort by PR
+- Bump wows_replays version to hopefully fix never-spotted players not being listed in score
+- Re-parse replay on modification
+- PR colors match WoWs-Numbers (thanks janatan)
+
+### 📚 Documentation
+
+- Update screenshot of the replay tab
+
 ## [0.1.42] - 2026-01-21
 
 ### 🚀 Features
