@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -249,6 +247,7 @@ impl TabState {
                                                 load_replay(
                                                     Arc::clone(&self.game_constants),
                                                     Arc::clone(wows_data),
+                                                    Arc::clone(&self.twitch_state),
                                                     replay,
                                                     Arc::clone(&self.replay_sort),
                                                     self.background_task_sender.clone(),
@@ -283,6 +282,7 @@ impl TabState {
                                     load_replay(
                                         Arc::clone(&self.game_constants),
                                         Arc::clone(wows_data),
+                                        Arc::clone(&self.twitch_state),
                                         Arc::clone(replay),
                                         Arc::clone(&self.replay_sort),
                                         self.background_task_sender.clone(),
@@ -354,6 +354,7 @@ impl TabState {
                             ReplayLoader::new(
                                 Arc::clone(&self.game_constants),
                                 Arc::clone(wows_data),
+                                Arc::clone(&self.twitch_state),
                                 replay.clone(),
                                 Arc::clone(&self.replay_sort),
                                 self.background_task_sender.clone(),
@@ -392,6 +393,7 @@ impl TabState {
                     rx: background_rx,
                     sent_replays: Arc::clone(&self.settings.sent_replays),
                     wows_data,
+                    twitch_state: Arc::clone(&self.twitch_state),
                     should_send_replays: self.settings.send_replay_data,
                     data_export_settings: DataExportSettings {
                         should_auto_export: self.settings.replay_settings.auto_export_data,

@@ -119,6 +119,7 @@ pub struct UiReport {
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
     row_heights: BTreeMap<u64, f32>,
@@ -134,6 +135,7 @@ impl UiReport {
         report: &BattleReport,
         constants: Arc<RwLock<serde_json::Value>>,
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+        twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
         replay_sort: Arc<Mutex<SortOrder>>,
         background_task_sender: Option<Sender<BackgroundTask>>,
         is_debug_mode: bool,
@@ -876,6 +878,7 @@ impl UiReport {
             self_player,
             replay_sort,
             wows_data,
+            twitch_state,
             battle_result,
             is_row_expanded: Default::default(),
             sorted: false,
@@ -1205,26 +1208,29 @@ impl UiReport {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
 
-                            // // Stream sniper icon
-                            // if let Some(timestamps) = twitch_state.player_is_potential_stream_sniper(player.name(), match_timestamp) {
-                            //     let hover_text = timestamps
-                            //         .iter()
-                            //         .map(|(name, timestamps)| {
-                            //             format!(
-                            //                 "Possible stream name: {}\nSeen: {} minutes after match start",
-                            //                 name,
-                            //                 timestamps
-                            //                     .iter()
-                            //                     .map(|ts| {
-                            //                         let delta = ts.signed_duration_since(match_timestamp);
-                            //                         delta.num_minutes()
-                            //                     })
-                            //                     .join(", ")
-                            //             )
-                            //         })
-                            //         .join("\n\n");
-                            //     ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
-                            // }
+                            // Stream sniper icon
+                            if let Some(timestamps) = self.twitch_state.read().player_is_potential_stream_sniper(
+                                player.initial_state().username(),
+                                self.match_timestamp,
+                            ) {
+                                let hover_text = timestamps
+                                    .iter()
+                                    .map(|(name, timestamps)| {
+                                        format!(
+                                            "Possible stream name: {}\nSeen: {} minutes after match start",
+                                            name,
+                                            timestamps
+                                                .iter()
+                                                .map(|ts| {
+                                                    let delta = *ts - self.match_timestamp;
+                                                    delta.get_minutes()
+                                                })
+                                                .join(", ")
+                                        )
+                                    })
+                                    .join("\n\n");
+                                ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
+                            }
 
                             let disconnect_hover_text = if player.connection_change_info().is_empty() {
                                 Some("Player never connected to match".to_string())
@@ -2174,6 +2180,7 @@ impl Replay {
         &mut self,
         game_constants: Arc<RwLock<serde_json::Value>>,
         wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+        twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
         replay_sort: Arc<Mutex<SortOrder>>,
         background_task_sender: Option<Sender<BackgroundTask>>,
         is_debug_mode: bool,
@@ -2184,6 +2191,7 @@ impl Replay {
                 battle_report,
                 game_constants,
                 wows_data,
+                twitch_state,
                 replay_sort,
                 background_task_sender,
                 is_debug_mode,
@@ -2698,6 +2706,7 @@ impl ToolkitTabViewer<'_> {
                 load_replay(
                     Arc::clone(&self.tab_state.game_constants),
                     Arc::clone(wows_data),
+                    Arc::clone(&self.tab_state.twitch_state),
                     replay,
                     Arc::clone(&self.tab_state.replay_sort),
                     self.tab_state.background_task_sender.clone(),
@@ -2939,6 +2948,7 @@ impl ToolkitTabViewer<'_> {
                                         load_replay(
                                             Arc::clone(&self.tab_state.game_constants),
                                             Arc::clone(wows_data),
+                                            Arc::clone(&self.tab_state.twitch_state),
                                             replay.clone(),
                                             Arc::clone(&self.tab_state.replay_sort),
                                             self.tab_state.background_task_sender.clone(),
@@ -3192,6 +3202,7 @@ impl ToolkitTabViewer<'_> {
                                         load_replay(
                                             Arc::clone(&self.tab_state.game_constants),
                                             Arc::clone(wows_data),
+                                            Arc::clone(&self.tab_state.twitch_state),
                                             replay.clone(),
                                             Arc::clone(&self.tab_state.replay_sort),
                                             self.tab_state.background_task_sender.clone(),
@@ -3223,6 +3234,7 @@ impl ToolkitTabViewer<'_> {
                         parse_replay_from_path(
                             Arc::clone(&self.tab_state.game_constants),
                             Arc::clone(wows_data),
+                            Arc::clone(&self.tab_state.twitch_state),
                             self.tab_state.settings.current_replay_path.clone(),
                             Arc::clone(&self.tab_state.replay_sort),
                             self.tab_state.background_task_sender.clone(),

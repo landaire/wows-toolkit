@@ -48,9 +48,7 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 use crate::wows_data::parse_replay_from_path;
 
@@ -707,6 +705,7 @@ impl WowsToolkitApp {
                 parse_replay_from_path(
                     Arc::clone(&self.tab_state.game_constants),
                     Arc::clone(wows_data),
+                    Arc::clone(&self.tab_state.twitch_state),
                     self.tab_state.settings.current_replay_path.clone(),
                     Arc::clone(&self.tab_state.replay_sort),
                     self.tab_state.background_task_sender.clone(),
