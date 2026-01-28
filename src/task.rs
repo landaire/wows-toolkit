@@ -480,7 +480,12 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
 
     let total = body.content_length().expect("body has no content-length");
     let mut downloaded = 0;
-    let file_path = Path::new("wows_toolkit.tmp.exe");
+
+    const NEW_FILE_NAME: &str = "wows_toolkit.tmp.exe";
+    let new_exe_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| Some(p.parent()?.join(NEW_FILE_NAME)))
+        .unwrap_or_else(|| PathBuf::from(NEW_FILE_NAME));
 
     // We're going to be blocking here on I/O but it shouldn't matter since this
     // application doesn't really use async
@@ -499,15 +504,15 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
     for i in 0..zip.len() {
         let mut file = zip.by_index(i).context("failed to get zip inner file by index")?;
         if file.name().ends_with(".exe") {
-            let mut out_file = std::fs::File::create(file_path)
+            let mut out_file = std::fs::File::create(&new_exe_path)
                 .context("failed to create update tmp file")
-                .attach_with(|| format!("{file_path:?}"))?;
+                .attach_with(|| format!("{new_exe_path:?}"))?;
             std::io::copy(&mut file, &mut out_file).context("failed to decompress update file to disk")?;
             break;
         }
     }
 
-    Ok(file_path.to_path_buf())
+    Ok(new_exe_path)
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
