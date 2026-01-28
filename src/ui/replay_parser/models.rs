@@ -136,7 +136,7 @@ impl TranslatedBuild {
             captain_skills: vehicle_entity.commander_skills(species.clone()).map(|skills| {
                 let mut skills: Vec<TranslatedCrewSkill> = skills
                     .iter()
-                    .filter_map(|skill| Some(TranslatedCrewSkill::new(skill, species.clone(), metadata_provider)))
+                    .map(|skill| TranslatedCrewSkill::new(skill, species.clone(), metadata_provider))
                     .collect();
 
                 skills.sort_by_key(|skill| skill.tier);

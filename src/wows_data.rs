@@ -45,66 +45,48 @@ pub struct WorldOfWarshipsData {
     pub build_dir: PathBuf,
 }
 
-pub fn parse_replay_from_path<P: AsRef<Path>>(
-    game_constants: Arc<RwLock<serde_json::Value>>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
-    replay_path: P,
-    replay_sort: Arc<Mutex<SortOrder>>,
-    background_task_sender: mpsc::Sender<BackgroundTask>,
-    is_debug_mode: bool,
-    update_ui: bool,
-) -> Option<BackgroundTask> {
-    let path = replay_path.as_ref();
+/// Shared dependencies needed for loading and parsing replays.
+/// This bundles together all the Arc-wrapped state that replay loading requires.
+#[derive(Clone)]
+pub struct ReplayDependencies {
+    pub game_constants: Arc<RwLock<serde_json::Value>>,
+    pub wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
+    pub replay_sort: Arc<Mutex<SortOrder>>,
+    pub background_task_sender: mpsc::Sender<BackgroundTask>,
+    pub is_debug_mode: bool,
+}
 
-    let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-    let game_metadata = { wows_data.read().game_metadata.clone()? };
-    let replay = Replay::new(replay_file, game_metadata);
+impl ReplayDependencies {
+    /// Parse a replay file from disk and start loading it in the background.
+    pub fn parse_replay_from_path<P: AsRef<Path>>(&self, replay_path: P, update_ui: bool) -> Option<BackgroundTask> {
+        let path = replay_path.as_ref();
 
-    load_replay(
-        game_constants,
-        wows_data,
-        twitch_state,
-        Arc::new(RwLock::new(replay)),
-        replay_sort,
-        background_task_sender,
-        is_debug_mode,
-        update_ui,
-    )
+        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
+        let game_metadata = { self.wows_data.read().game_metadata.clone()? };
+        let replay = Replay::new(replay_file, game_metadata);
+
+        self.load_replay(Arc::new(RwLock::new(replay)), update_ui)
+    }
+
+    /// Load an already-parsed replay in the background.
+    pub fn load_replay(&self, replay: Arc<RwLock<Replay>>, update_ui: bool) -> Option<BackgroundTask> {
+        let loader = ReplayLoader::new(self.clone(), replay);
+
+        if update_ui { loader.load() } else { loader.skip_ui_update().load() }
+    }
 }
 
 /// Builder for loading replays in the background with configurable options
 pub struct ReplayLoader {
-    game_constants: Arc<RwLock<serde_json::Value>>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
+    deps: ReplayDependencies,
     replay: Arc<RwLock<Replay>>,
-    replay_sort: Arc<Mutex<SortOrder>>,
-    background_task_sender: mpsc::Sender<BackgroundTask>,
-    is_debug_mode: bool,
     skip_ui_update: bool,
 }
 
 impl ReplayLoader {
-    pub fn new(
-        game_constants: Arc<RwLock<serde_json::Value>>,
-        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-        twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
-        replay: Arc<RwLock<Replay>>,
-        replay_sort: Arc<Mutex<SortOrder>>,
-        background_task_sender: mpsc::Sender<BackgroundTask>,
-        is_debug_mode: bool,
-    ) -> Self {
-        Self {
-            game_constants,
-            wows_data,
-            twitch_state,
-            replay,
-            replay_sort,
-            background_task_sender,
-            is_debug_mode,
-            skip_ui_update: false,
-        }
+    pub fn new(deps: ReplayDependencies, replay: Arc<RwLock<Replay>>) -> Self {
+        Self { deps, replay, skip_ui_update: false }
     }
 
     /// Skip updating the UI when the replay finishes loading.
@@ -116,26 +98,21 @@ impl ReplayLoader {
 
     /// Start loading the replay in the background
     pub fn load(self) -> Option<BackgroundTask> {
-        let game_version = { self.wows_data.read().patch_version };
+        let game_version = { self.deps.wows_data.read().patch_version };
         let skip_ui_update = self.skip_ui_update;
 
         let (tx, rx) = mpsc::channel();
 
-        let game_constants = self.game_constants;
-        let wows_data = self.wows_data;
-        let twitch_state = self.twitch_state;
+        let deps = self.deps;
         let replay = self.replay;
-        let replay_sort = self.replay_sort;
-        let background_task_sender = self.background_task_sender;
-        let is_debug_mode = self.is_debug_mode;
 
         let _join_handle = std::thread::spawn(move || {
             let res = { replay.read().parse(game_version.to_string().as_str()) };
-            let res = res.map(move |report| {
+            let res = res.map(|report| {
                 {
                     #[cfg(feature = "shipbuilds_debugging")]
                     {
-                        let wows_data_inner = wows_data.read();
+                        let wows_data_inner = deps.wows_data.read();
                         let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
                         // Send the replay builds to the remote server
                         for player in report.players() {
@@ -157,14 +134,7 @@ impl ReplayLoader {
 
                     let mut replay_guard = replay.write();
                     replay_guard.battle_report = Some(report);
-                    replay_guard.build_ui_report(
-                        game_constants,
-                        wows_data,
-                        twitch_state,
-                        replay_sort,
-                        Some(background_task_sender),
-                        is_debug_mode,
-                    );
+                    replay_guard.build_ui_report(&deps);
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update }
             });
@@ -174,27 +144,4 @@ impl ReplayLoader {
 
         Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
     }
-}
-
-pub fn load_replay(
-    game_constants: Arc<RwLock<serde_json::Value>>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
-    replay: Arc<RwLock<Replay>>,
-    replay_sort: Arc<Mutex<SortOrder>>,
-    background_task_sender: mpsc::Sender<BackgroundTask>,
-    is_debug_mode: bool,
-    update_ui: bool,
-) -> Option<BackgroundTask> {
-    let loader = ReplayLoader::new(
-        game_constants,
-        wows_data,
-        twitch_state,
-        replay,
-        replay_sort,
-        background_task_sender,
-        is_debug_mode,
-    );
-
-    if update_ui { loader.load() } else { loader.skip_ui_update().load() }
 }

@@ -723,14 +723,17 @@ fn parse_replay_data_in_background(
                         // We should only really be exporting data when the server-provided battle results
                         // are available. Otherwise the data isn't very reliable or interesting.
                         if battle_report.battle_results().is_some() {
-                            replay.build_ui_report(
-                                Arc::clone(&data.constants_file_data),
-                                Arc::clone(&data.wows_data),
-                                Arc::clone(&data.twitch_state),
-                                Arc::new(Mutex::new(SortOrder::default())),
-                                None,
-                                data.is_debug,
-                            );
+                            // Create a dummy sender since we don't need to send background tasks from here
+                            let (dummy_sender, _) = mpsc::channel();
+                            let deps = crate::wows_data::ReplayDependencies {
+                                game_constants: Arc::clone(&data.constants_file_data),
+                                wows_data: Arc::clone(&data.wows_data),
+                                twitch_state: Arc::clone(&data.twitch_state),
+                                replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+                                background_task_sender: dummy_sender,
+                                is_debug_mode: data.is_debug,
+                            };
+                            replay.build_ui_report(&deps);
 
                             if data.data_export_settings.should_auto_export {
                                 let export_path = data.data_export_settings.export_path.join(replay.better_file_name(

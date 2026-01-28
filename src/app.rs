@@ -50,7 +50,6 @@ use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
-use crate::wows_data::parse_replay_from_path;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -635,12 +634,10 @@ impl WowsToolkitApp {
         // Check and update PR expected values
         if crate::personal_rating::needs_update()
             && let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values())
-                && crate::personal_rating::save_expected_values(&pr_data).is_ok() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        Some(task::load_personal_rating_data(pr_data))
-                    );
-                }
+            && crate::personal_rating::save_expected_values(&pr_data).is_ok()
+        {
+            update_background_task!(self.tab_state.background_tasks, Some(task::load_personal_rating_data(pr_data)));
+        }
 
         self.checked_for_updates = true;
     }
@@ -695,21 +692,12 @@ impl WowsToolkitApp {
 
         if dropped_files.len() == 1
             && let Some(path) = &dropped_files[0].path
-            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+            && let Some(deps) = self.tab_state.replay_dependencies()
         {
             self.tab_state.settings.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                parse_replay_from_path(
-                    Arc::clone(&self.tab_state.game_constants),
-                    Arc::clone(wows_data),
-                    Arc::clone(&self.tab_state.twitch_state),
-                    self.tab_state.settings.current_replay_path.clone(),
-                    Arc::clone(&self.tab_state.replay_sort),
-                    self.tab_state.background_task_sender.clone(),
-                    self.tab_state.settings.debug_mode,
-                    true,
-                )
+                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true,)
             );
         }
     }

@@ -39,9 +39,9 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SharedReplayParserTabState;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
+use crate::wows_data::ReplayDependencies;
 use crate::wows_data::ReplayLoader;
 use crate::wows_data::WorldOfWarshipsData;
-use crate::wows_data::load_replay;
 
 /// File system events for replay monitoring
 #[derive(Debug)]
@@ -211,6 +211,19 @@ impl Default for TabState {
 }
 
 impl TabState {
+    /// Returns the shared dependencies needed for loading replays, if wows_data is available.
+    pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
+        let wows_data = self.world_of_warships_data.as_ref()?;
+        Some(ReplayDependencies {
+            game_constants: Arc::clone(&self.game_constants),
+            wows_data: Arc::clone(wows_data),
+            twitch_state: Arc::clone(&self.twitch_state),
+            replay_sort: Arc::clone(&self.replay_sort),
+            background_task_sender: self.background_task_sender.clone(),
+            is_debug_mode: self.settings.debug_mode,
+        })
+    }
+
     pub(crate) fn send_replay_consent_changed(&self) {
         let _ = self.background_parser_tx.as_ref().map(|tx| {
             tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data))
@@ -241,19 +254,10 @@ impl TabState {
                                             replay_files.insert(new_file.clone(), Arc::clone(&replay));
                                         }
 
-                                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                                        if let Some(deps) = self.replay_dependencies() {
                                             update_background_task!(
                                                 self.background_tasks,
-                                                load_replay(
-                                                    Arc::clone(&self.game_constants),
-                                                    Arc::clone(wows_data),
-                                                    Arc::clone(&self.twitch_state),
-                                                    replay,
-                                                    Arc::clone(&self.replay_sort),
-                                                    self.background_task_sender.clone(),
-                                                    self.settings.debug_mode,
-                                                    self.auto_load_latest_replay,
-                                                )
+                                                deps.load_replay(replay, self.auto_load_latest_replay)
                                             );
                                         }
 
@@ -276,19 +280,10 @@ impl TabState {
                             replay_inner.ui_report = None;
                             drop(replay_inner);
 
-                            if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                            if let Some(deps) = self.replay_dependencies() {
                                 update_background_task!(
                                     self.background_tasks,
-                                    load_replay(
-                                        Arc::clone(&self.game_constants),
-                                        Arc::clone(wows_data),
-                                        Arc::clone(&self.twitch_state),
-                                        Arc::clone(replay),
-                                        Arc::clone(&self.replay_sort),
-                                        self.background_task_sender.clone(),
-                                        self.settings.debug_mode,
-                                        self.auto_load_latest_replay,
-                                    )
+                                    deps.load_replay(Arc::clone(replay), self.auto_load_latest_replay)
                                 );
                             }
                         }
@@ -348,20 +343,10 @@ impl TabState {
 
                 if needs_parsing {
                     // Queue the replay for parsing (skip UI update since this is batch loading)
-                    if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                    if let Some(deps) = self.replay_dependencies() {
                         update_background_task!(
                             self.background_tasks,
-                            ReplayLoader::new(
-                                Arc::clone(&self.game_constants),
-                                Arc::clone(wows_data),
-                                Arc::clone(&self.twitch_state),
-                                replay.clone(),
-                                Arc::clone(&self.replay_sort),
-                                self.background_task_sender.clone(),
-                                self.settings.debug_mode,
-                            )
-                            .skip_ui_update()
-                            .load()
+                            ReplayLoader::new(deps, replay.clone()).skip_ui_update().load()
                         );
                     }
                 }

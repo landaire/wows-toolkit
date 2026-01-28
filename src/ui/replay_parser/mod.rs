@@ -45,8 +45,6 @@ use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::update_background_task;
 use crate::wows_data::WorldOfWarshipsData;
-use crate::wows_data::load_replay;
-use crate::wows_data::parse_replay_from_path;
 
 use damage_types::*;
 use egui::Color32;
@@ -109,6 +107,11 @@ const CHAT_VIEW_WIDTH: f32 = 500.0;
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
+/// A replay file path paired with its parsed replay data.
+type ReplayEntry = (std::path::PathBuf, Arc<RwLock<Replay>>);
+/// A named group of replay entries (e.g., grouped by date or ship name).
+type ReplayGroup = (String, Vec<ReplayEntry>);
+
 use std::cmp::Reverse;
 
 #[allow(non_camel_case_types)]
@@ -130,19 +133,10 @@ pub struct UiReport {
 }
 
 impl UiReport {
-    pub fn new(
-        replay_file: &ReplayFile,
-        report: &BattleReport,
-        constants: Arc<RwLock<serde_json::Value>>,
-        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-        twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
-        replay_sort: Arc<Mutex<SortOrder>>,
-        background_task_sender: Option<Sender<BackgroundTask>>,
-        is_debug_mode: bool,
-    ) -> Self {
-        let wows_data_inner = wows_data.read();
+    pub fn new(replay_file: &ReplayFile, report: &BattleReport, deps: &crate::wows_data::ReplayDependencies) -> Self {
+        let wows_data_inner = deps.wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
-        let constants_inner = constants.read();
+        let constants_inner = deps.game_constants.read();
 
         let match_timestamp = util::replay_timestamp(&replay_file.meta);
 
@@ -721,18 +715,13 @@ impl UiReport {
                                 return None;
                             };
 
-                            let Some(achievement_name) = metadata_provider
-                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name()))
-                            else {
-                                return None;
-                            };
+                            let achievement_name = metadata_provider
+                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name()))?;
 
-                            let Some(achievement_description) = metadata_provider.localized_name_from_id(&format!(
+                            let achievement_description = metadata_provider.localized_name_from_id(&format!(
                                 "IDS_ACHIEVEMENT_DESCRIPTION_{}",
                                 achievement_data.ui_name()
-                            )) else {
-                                return None;
-                            };
+                            ))?;
 
                             Some(Achievement {
                                 game_param,
@@ -876,9 +865,9 @@ impl UiReport {
             match_timestamp,
             player_reports,
             self_player,
-            replay_sort,
-            wows_data,
-            twitch_state,
+            replay_sort: Arc::clone(&deps.replay_sort),
+            wows_data: Arc::clone(&deps.wows_data),
+            twitch_state: Arc::clone(&deps.twitch_state),
             battle_result,
             is_row_expanded: Default::default(),
             sorted: false,
@@ -905,9 +894,9 @@ impl UiReport {
                 ReplayColumn::Skills,
             ],
             row_heights: Default::default(),
-            background_task_sender,
+            background_task_sender: Some(deps.background_task_sender.clone()),
             selected_row: None,
-            debug_mode: is_debug_mode,
+            debug_mode: deps.is_debug_mode,
         }
     }
 
@@ -2176,26 +2165,9 @@ impl Replay {
         Ok(report)
     }
 
-    pub fn build_ui_report(
-        &mut self,
-        game_constants: Arc<RwLock<serde_json::Value>>,
-        wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-        twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
-        replay_sort: Arc<Mutex<SortOrder>>,
-        background_task_sender: Option<Sender<BackgroundTask>>,
-        is_debug_mode: bool,
-    ) {
+    pub fn build_ui_report(&mut self, deps: &crate::wows_data::ReplayDependencies) {
         if let Some(battle_report) = &self.battle_report {
-            self.ui_report = Some(UiReport::new(
-                &self.replay_file,
-                battle_report,
-                game_constants,
-                wows_data,
-                twitch_state,
-                replay_sort,
-                background_task_sender,
-                is_debug_mode,
-            ))
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, deps))
         }
     }
 
@@ -2699,21 +2671,9 @@ impl ToolkitTabViewer<'_> {
 
         // Load replay outside of the closure to avoid borrow issues
         if let Some(replay) = replay_to_load
-            && let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref()
+            && let Some(deps) = self.tab_state.replay_dependencies()
         {
-            update_background_task!(
-                self.tab_state.background_tasks,
-                load_replay(
-                    Arc::clone(&self.tab_state.game_constants),
-                    Arc::clone(wows_data),
-                    Arc::clone(&self.tab_state.twitch_state),
-                    replay,
-                    Arc::clone(&self.tab_state.replay_sort),
-                    self.tab_state.background_task_sender.clone(),
-                    self.tab_state.settings.debug_mode,
-                    true,
-                )
-            );
+            update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, true));
         }
     }
 
@@ -2730,7 +2690,7 @@ impl ToolkitTabViewer<'_> {
             let metadata_provider = self.metadata_provider().unwrap();
 
             // Group by date (extract date part from game_time which is "DD.MM.YYYY HH:MM:SS")
-            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> = Vec::new();
+            let mut groups: Vec<ReplayGroup> = Vec::new();
             for (path, replay) in files {
                 let game_time = replay.read().game_time().to_string();
                 // Extract just the date part (DD.MM.YYYY)
@@ -2942,19 +2902,10 @@ impl ToolkitTabViewer<'_> {
                         // Handle activation (double-click/enter)
                         for id in activate.selected {
                             if let Some(replay) = id_to_replay.get(&id) {
-                                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                if let Some(deps) = self.tab_state.replay_dependencies() {
                                     update_background_task!(
                                         self.tab_state.background_tasks,
-                                        load_replay(
-                                            Arc::clone(&self.tab_state.game_constants),
-                                            Arc::clone(wows_data),
-                                            Arc::clone(&self.tab_state.twitch_state),
-                                            replay.clone(),
-                                            Arc::clone(&self.tab_state.replay_sort),
-                                            self.tab_state.background_task_sender.clone(),
-                                            self.tab_state.settings.debug_mode,
-                                            true,
-                                        )
+                                        deps.load_replay(replay.clone(), true)
                                     );
                                 }
                                 break;
@@ -2980,7 +2931,7 @@ impl ToolkitTabViewer<'_> {
             let metadata_provider = self.metadata_provider().unwrap();
 
             // Group by ship name
-            let mut ship_groups: HashMap<String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>> = HashMap::new();
+            let mut ship_groups: HashMap<String, Vec<ReplayEntry>> = HashMap::new();
             let mut ship_most_recent: HashMap<String, std::path::PathBuf> = HashMap::new();
 
             for (path, replay) in files {
@@ -2993,8 +2944,7 @@ impl ToolkitTabViewer<'_> {
             }
 
             // Sort groups by most recently played (using the path which contains the date)
-            let mut groups: Vec<(String, Vec<(std::path::PathBuf, Arc<RwLock<Replay>>)>)> =
-                ship_groups.into_iter().collect();
+            let mut groups: Vec<ReplayGroup> = ship_groups.into_iter().collect();
             groups.sort_by(|a, b| {
                 let a_recent = ship_most_recent.get(&a.0).unwrap();
                 let b_recent = ship_most_recent.get(&b.0).unwrap();
@@ -3196,19 +3146,10 @@ impl ToolkitTabViewer<'_> {
                         // Handle activation (double-click/enter)
                         for id in activate.selected {
                             if let Some(replay) = id_to_replay.get(&id) {
-                                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                                if let Some(deps) = self.tab_state.replay_dependencies() {
                                     update_background_task!(
                                         self.tab_state.background_tasks,
-                                        load_replay(
-                                            Arc::clone(&self.tab_state.game_constants),
-                                            Arc::clone(wows_data),
-                                            Arc::clone(&self.tab_state.twitch_state),
-                                            replay.clone(),
-                                            Arc::clone(&self.tab_state.replay_sort),
-                                            self.tab_state.background_task_sender.clone(),
-                                            self.tab_state.settings.debug_mode,
-                                            true,
-                                        )
+                                        deps.load_replay(replay.clone(), true)
                                     );
                                 }
                                 break;
@@ -3228,19 +3169,10 @@ impl ToolkitTabViewer<'_> {
             {
                 self.tab_state.settings.current_replay_path = file;
 
-                if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                if let Some(deps) = self.tab_state.replay_dependencies() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        parse_replay_from_path(
-                            Arc::clone(&self.tab_state.game_constants),
-                            Arc::clone(wows_data),
-                            Arc::clone(&self.tab_state.twitch_state),
-                            self.tab_state.settings.current_replay_path.clone(),
-                            Arc::clone(&self.tab_state.replay_sort),
-                            self.tab_state.background_task_sender.clone(),
-                            self.tab_state.settings.debug_mode,
-                            true,
-                        )
+                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true,)
                     );
                 }
             }
