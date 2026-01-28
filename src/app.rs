@@ -633,16 +633,14 @@ impl WowsToolkitApp {
         }
 
         // Check and update PR expected values
-        if crate::personal_rating::needs_update() {
-            if let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values()) {
-                if crate::personal_rating::save_expected_values(&pr_data).is_ok() {
+        if crate::personal_rating::needs_update()
+            && let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values())
+                && crate::personal_rating::save_expected_values(&pr_data).is_ok() {
                     update_background_task!(
                         self.tab_state.background_tasks,
                         Some(task::load_personal_rating_data(pr_data))
                     );
                 }
-            }
-        }
 
         self.checked_for_updates = true;
     }

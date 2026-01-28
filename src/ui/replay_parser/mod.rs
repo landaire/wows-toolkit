@@ -164,7 +164,7 @@ impl UiReport {
             let common_list = battle_results.pointer("/commonList")?.as_array()?;
             let winning_team_id = common_list.get(winner_team_id_idx)?.as_i64()?;
 
-            if winning_team_id == self_team_id as i64 {
+            if winning_team_id == self_team_id {
                 Some(BattleResult::Win(self_team_id as i8))
             } else if winning_team_id >= 0 {
                 Some(BattleResult::Loss(winning_team_id as i8))
@@ -2225,7 +2225,7 @@ impl Replay {
         let is_win = matches!(battle_result, BattleResult::Win(_));
 
         Some(crate::personal_rating::ShipBattleStats {
-            ship_id: vehicle.shipId as u64,
+            ship_id: vehicle.shipId,
             battles: 1,
             damage: self_report.actual_damage().unwrap_or_default(),
             wins: if is_win { 1 } else { 0 },

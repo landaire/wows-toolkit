@@ -11,7 +11,7 @@ pub const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
 pub const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
 pub const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
 pub const DAMAGE_BOMB: &str = "damage_bomb";
-pub const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
+// pub const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
 pub const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
 // pub const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
 pub const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
@@ -43,7 +43,7 @@ pub const HITS_ATBA_CS: &str = "hits_atba_cs";
 pub const HITS_ATBA_HE: &str = "hits_atba_he";
 pub const HITS_TPD_NORMAL: &str = "hits_tpd";
 pub const HITS_BOMB: &str = "hits_bomb";
-pub const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
+// pub const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
 pub const HITS_BOMB_ALT: &str = "hits_bomb_alt";
 pub const HITS_BOMB_AIRSUPPORT: &str = "hits_bomb_airsupport";
 pub const HITS_DBOMB_AIRSUPPORT: &str = "hits_dbomb_airsupport";
@@ -65,7 +65,7 @@ pub const HITS_PULSE_LASER: &str = "hits_pulse_laser";
 pub const HITS_AXIS_LASER: &str = "hits_axis_laser";
 pub const HITS_PHASER_LASER: &str = "hits_phaser_laser";
 
-pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 33] = [
+pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 32] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
@@ -77,7 +77,7 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 33] = [
     (DAMAGE_TPD_ALTER, "Alt Torps"),
     (DAMAGE_TPD_PHOTON, "Photon Torps"),
     (DAMAGE_BOMB, "HE Bomb"),
-    (DAMAGE_BOMB_AVIA, "Bomb"),
+    // (DAMAGE_BOMB_AVIA, "Bomb"),
     (DAMAGE_BOMB_ALT, "Alt Bomb"),
     // (DAMAGE_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
@@ -102,7 +102,7 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 33] = [
     (DAMAGE_PHASER_LASER, "Phaser Laser"),
 ];
 
-pub static HITS_DESCRIPTIONS: [(&str, &str); 29] = [
+pub static HITS_DESCRIPTIONS: [(&str, &str); 28] = [
     (HITS_MAIN_AP, "AP"),
     (HITS_MAIN_CS, "SAP"),
     (HITS_MAIN_HE, "HE"),
@@ -111,7 +111,7 @@ pub static HITS_DESCRIPTIONS: [(&str, &str); 29] = [
     (HITS_ATBA_HE, "HE Sec"),
     (HITS_TPD_NORMAL, "Torps"),
     (HITS_BOMB, "HE Bomb"),
-    (HITS_BOMB_AVIA, "Bomb"),
+    // (HITS_BOMB_AVIA, "Bomb"),
     (HITS_BOMB_ALT, "Alt Bomb"),
     (HITS_BOMB_AIRSUPPORT, "Air Support Bomb"),
     (HITS_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),

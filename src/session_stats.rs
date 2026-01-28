@@ -209,7 +209,7 @@ impl SessionStats {
             };
 
             let ship_name = replay.vehicle_name(metadata_provider);
-            let ship_id = replay.player_vehicle().map(|v| v.shipId as u64);
+            let ship_id = replay.player_vehicle().map(|v| v.shipId);
             let performance_info = results.entry(ship_name).or_default();
 
             // Set ship_id if not already set
