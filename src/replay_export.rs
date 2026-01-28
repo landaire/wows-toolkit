@@ -110,17 +110,18 @@ pub struct Player {
 
 impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
     fn from(value: &wows_replays::analyzer::battle_controller::Player) -> Self {
-        let clan_color = value.raw_props_with_name().get("clanColor").expect("no clan color?");
+        let state = value.initial_state();
+        let clan_color = state.raw_with_names().get("clanColor").expect("no clan color?");
         let clan_color = clan_color.as_i64().expect("clan color is not an i64") & 0xFFFFFF;
         Self {
-            db_id: value.db_id(),
-            realm: value.realm().to_string(),
-            name: value.name().to_string(),
-            clan: value.clan().to_string(),
+            db_id: state.db_id(),
+            realm: state.realm().to_string(),
+            name: state.username().to_string(),
+            clan: state.clan().to_string(),
             clan_color_rgb: clan_color as u32,
-            division_id: if value.division_id() > 0 { Some(value.division_id()) } else { None },
-            team_id: value.team_id(),
-            is_replay_perspective: value.relation() == 0,
+            division_id: if state.division_id() > 0 { Some(state.division_id() as u32) } else { None },
+            team_id: state.team_id() as u32,
+            is_replay_perspective: value.relation().is_self(),
         }
     }
 }
@@ -388,7 +389,7 @@ impl Vehicle {
             class: player_data.vehicle().species().expect("no species"),
             tier: player_data.vehicle().data().vehicle_ref().expect("no vehicle ref").level(),
             is_test_ship: value.is_test_ship(),
-            is_enemy: value.is_enemy(),
+            is_enemy: value.relation().is_enemy(),
             raw_config: vehicle_entity.map(|v| v.props().ship_config().clone()),
             translated_build: value.translated_build().cloned(),
             captain_id: vehicle_entity
@@ -476,7 +477,7 @@ impl From<&GameMessage> for Message {
         let message =
             if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
         Self {
-            sender_db_id: value.player.as_ref().expect("no player for message").db_id(),
+            sender_db_id: value.player.as_ref().expect("no player for message").initial_state().db_id(),
             channel: value.channel,
             message,
         }

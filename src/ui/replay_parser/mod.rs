@@ -15,6 +15,7 @@ pub use sorting::ReplayColumn;
 pub use sorting::SortColumn;
 use sorting::SortKey;
 pub use sorting::SortOrder;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -148,7 +149,7 @@ impl UiReport {
         let mut divisions: HashMap<u32, char> = Default::default();
         let mut remaining_div_identifiers: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().rev().collect();
 
-        let self_player = players.iter().find(|player| player.relation() == 0).cloned();
+        let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
 
         let battle_result = constants_inner.pointer("/COMMON_RESULTS").and_then(|common_results_names| {
             let winner_team_id_idx = common_results_names.as_array().and_then(|names| {
@@ -156,7 +157,7 @@ impl UiReport {
             })?;
             let battle_results: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
 
-            let self_team_id = self_player.as_ref().map(|player| player.team_id())?;
+            let self_team_id = self_player.as_ref().map(|player| player.initial_state().team_id())?;
 
             let common_list = battle_results.pointer("/commonList")?.as_array()?;
             let winning_team_id = common_list.get(winner_team_id_idx)?.as_i64()?;
@@ -175,15 +176,17 @@ impl UiReport {
         let player_reports = players.iter().filter_map(|player| {
             // Get the VehicleEntity for this player
             let vehicle = player.vehicle_entity()?;
-            let is_enemy = player.relation() > 1;
+            let player_state = player.initial_state();
             let mut player_color = player_color_for_team_relation(player.relation());
 
-            if let Some(self_player) = self_player.as_ref()
-                && self_player.db_id() != player.db_id()
-                && self_player.division_id() > 0
-                && player.division_id() == self_player.division_id()
-            {
-                player_color = Color32::GOLD;
+            if let Some(self_player) = self_player.as_ref() {
+                let self_state = self_player.initial_state();
+                if self_state.db_id() != player_state.db_id()
+                    && self_state.division_id() > 0
+                    && player_state.division_id() == self_state.division_id()
+                {
+                    player_color = Color32::GOLD;
+                }
             }
 
             let vehicle_param = player.vehicle();
@@ -200,14 +203,14 @@ impl UiReport {
             let icon =
                 ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), &wows_data_inner);
 
-            let name_color = if player.is_abuser() {
+            let name_color = if player_state.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
             } else {
                 player_color
             };
 
             // Assign division
-            let div = player.division_id();
+            let div = player_state.division_id() as u32;
             let division_char = if div > 0 {
                 Some(*divisions.entry(div).or_insert_with(|| remaining_div_identifiers.pop().unwrap_or('?')))
             } else {
@@ -216,12 +219,12 @@ impl UiReport {
 
             let div_text = division_char.map(|div| format!("({div})"));
 
-            let clan_text = if !player.clan().is_empty() {
-                Some(RichText::new(format!("[{}]", player.clan())).color(clan_color_for_player(player).unwrap()))
+            let clan_text = if !player_state.clan().is_empty() {
+                Some(RichText::new(format!("[{}]", player_state.clan())).color(clan_color_for_player(player).unwrap()))
             } else {
                 None
             };
-            let name_text = RichText::new(player.name()).color(name_color);
+            let name_text = RichText::new(player_state.username()).color(name_color);
 
             let (base_xp, base_xp_text) = if let Some(base_xp) = vehicle.results_info().and_then(|info| {
                 let index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/exp")?.as_u64()? as usize;
@@ -779,8 +782,7 @@ impl UiReport {
                 crits,
                 distance_traveled,
                 is_test_ship,
-                is_enemy,
-                is_self: player.relation() == 0,
+                relation: player.relation(),
                 manual_stat_hide_toggle: false,
                 received_damage_report,
                 kills,
@@ -810,15 +812,17 @@ impl UiReport {
             };
 
             let this_player = report.player();
+            let this_player_state = this_player.initial_state();
 
             for player_id in damage_interactions.keys() {
-                let Some(other_player) = player_reports.iter().find(|report| report.player().db_id() == *player_id)
+                let Some(other_player) =
+                    player_reports.iter().find(|report| report.player().initial_state().db_id() == *player_id)
                 else {
                     continue;
                 };
 
                 if let Some(interactions) = other_player.damage_interactions.as_ref() {
-                    let Some(interaction_with_this_player) = interactions.get(&this_player.db_id()) else {
+                    let Some(interaction_with_this_player) = interactions.get(&this_player_state.db_id()) else {
                         continue;
                     };
 
@@ -832,14 +836,15 @@ impl UiReport {
                 }
             }
 
-            all_received_damages.insert(this_player.db_id(), received_damages);
+            all_received_damages.insert(this_player_state.db_id(), received_damages);
         }
 
         for report in &mut player_reports {
             let total_received_damage = report.received_damage().unwrap_or_default();
             let this_player = report.player();
+            let this_player_state = this_player.initial_state();
 
-            let Some(this_player_received_damages) = all_received_damages.remove(&this_player.db_id()) else {
+            let Some(this_player_received_damages) = all_received_damages.remove(&this_player_state.db_id()) else {
                 continue;
             };
 
@@ -904,15 +909,16 @@ impl UiReport {
     }
 
     fn sort_players(&mut self, sort_order: SortOrder) {
-        let self_player_team_id = self.self_player.as_ref().expect("no self player?").team_id();
+        let self_player_team_id = self.self_player.as_ref().expect("no self player?").initial_state().team_id();
 
         let sort_key = |report: &PlayerReport, column: &SortColumn| {
             let player = report.player();
-            let team_id = player.team_id() != self_player_team_id;
-            let db_id = player.db_id();
+            let player_state = player.initial_state();
+            let team_id = player_state.team_id() != self_player_team_id;
+            let db_id = player_state.db_id();
 
             let key = match column {
-                SortColumn::Name => SortKey::String(player.name().to_string()),
+                SortColumn::Name => SortKey::String(player_state.username().to_string()),
                 SortColumn::BaseXp => SortKey::I64(report.base_xp),
                 SortColumn::RawXp => SortKey::I64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
@@ -1040,8 +1046,10 @@ impl UiReport {
                         continue;
                     }
 
-                    let Some(interaction_player) =
-                        self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0)
+                    let Some(interaction_player) = self
+                        .player_reports()
+                        .iter()
+                        .find(|report| report.player().initial_state().db_id() == *interaction.0)
                     else {
                         // TODO: Handle bots?
                         continue;
@@ -1097,8 +1105,10 @@ impl UiReport {
                         continue;
                     }
 
-                    let Some(interaction_player) =
-                        self.player_reports().iter().find(|report| report.player().db_id() == *interaction.0)
+                    let Some(interaction_player) = self
+                        .player_reports()
+                        .iter()
+                        .find(|report| report.player().initial_state().db_id() == *interaction.0)
                     else {
                         // In co-op, you may not have an interaction
                         continue;
@@ -1191,7 +1201,7 @@ impl UiReport {
                         {
                             let player = report.player();
                             // Hidden profile icon
-                            if player.is_hidden() {
+                            if player.initial_state().is_hidden() {
                                 ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
                             }
 
@@ -1216,8 +1226,30 @@ impl UiReport {
                             //     ui.label(icons::TWITCH_LOGO).on_hover_text(hover_text);
                             // }
 
-                            let disconnect_hover_text =
-                                if player.did_disconnect() { Some("Player disconnected from the match") } else { None };
+                            let disconnect_hover_text = if player.connection_change_info().is_empty() {
+                                Some("Player never connected to match".to_string())
+                            } else if player.connection_change_info().iter().any(|connection_info| {
+                                ConnectionChangeKind::Disconnected == connection_info.event_kind()
+                                    && !connection_info.had_death_event()
+                            }) {
+                                let mut event_descriptions = Vec::new();
+                                // Skip the first connect event
+                                for connection_change in player.connection_change_info().iter().skip(1) {
+                                    let secs = connection_change.at_game_duration().as_secs();
+                                    let timestamp = format!("{}:{:02}", secs / 60, secs % 60);
+                                    match connection_change.event_kind() {
+                                        ConnectionChangeKind::Connected => {
+                                            event_descriptions.push(format!("connected @ {timestamp}"))
+                                        }
+                                        ConnectionChangeKind::Disconnected => {
+                                            event_descriptions.push(format!("disconnected @ {timestamp}"))
+                                        }
+                                    }
+                                }
+                                Some(format!("Player {}", event_descriptions.join(", ")))
+                            } else {
+                                None
+                            };
                             if let Some(disconnect_text) = disconnect_hover_text {
                                 ui.label(icons::PLUGS).on_hover_text(disconnect_text);
                             }
@@ -1369,7 +1401,7 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::Skills => {
-                        if report.is_enemy && !self.debug_mode {
+                        if report.relation().is_enemy() && !self.debug_mode {
                             ui.label("-");
                         } else {
                             let response = ui.label(report.skill_info.label_text.clone());
@@ -1388,7 +1420,7 @@ impl UiReport {
                     }
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
-                            if !report.is_enemy || self.debug_mode {
+                            if !report.relation().is_enemy() || self.debug_mode {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
@@ -1543,7 +1575,7 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::Skills => {
-                        if !report.is_enemy || self.debug_mode {
+                        if !report.relation().is_enemy() || self.debug_mode {
                             ui.vertical(|ui| {
                                 if let Some(hover_text) = &report.skill_info.hover_text {
                                     ui.label(hover_text);
@@ -2019,10 +2051,11 @@ pub struct Replay {
 }
 
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
-    if player.clan().is_empty() {
+    let state = player.initial_state();
+    if state.clan().is_empty() {
         None
     } else {
-        let clan_color = player.raw_props_with_name().get("clanColor").expect("no clan color?");
+        let clan_color = state.raw_with_names().get("clanColor").expect("no clan color?");
         let clan_color = clan_color.as_i64().expect("clan color is not an i64");
         Some(Color32::from_rgb(
             ((clan_color & 0xFF0000) >> 16) as u8,
@@ -2169,7 +2202,7 @@ impl Replay {
         let vehicle = self.player_vehicle()?;
         let battle_result = self.battle_result()?;
         let ui_report = self.ui_report.as_ref()?;
-        let self_report = ui_report.player_reports().iter().find(|report| report.is_self())?;
+        let self_report = ui_report.player_reports().iter().find(|report| report.relation().is_self())?;
 
         let is_win = matches!(battle_result, BattleResult::Win(_));
 
@@ -2261,10 +2294,10 @@ impl ToolkitTabViewer<'_> {
             };
 
             let text = match player {
-                Some(player) if !player.clan().is_empty() => {
+                Some(player) if !player.initial_state().clan().is_empty() => {
                     format!(
                         "[{}] {sender_name} ({channel:?}): {}",
-                        player.clan(),
+                        player.initial_state().clan(),
                         translated_text.as_ref().unwrap_or(&message)
                     )
                 }
@@ -2281,10 +2314,10 @@ impl ToolkitTabViewer<'_> {
 
             let mut job = LayoutJob::default();
             if let Some(player) = player
-                && !player.clan().is_empty()
+                && !player.initial_state().clan().is_empty()
             {
                 job.append(
-                    &format!("[{}] ", player.clan()),
+                    &format!("[{}] ", player.initial_state().clan()),
                     0.0,
                     TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() },
                 );
@@ -2319,11 +2352,12 @@ impl ToolkitTabViewer<'_> {
         let mut hide_my_stats_changed = false;
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_player = report.self_player();
+            let self_state = self_player.initial_state();
             ui.horizontal(|ui| {
-                if !self_player.clan().is_empty() {
-                    ui.label(format!("[{}]", self_player.clan()));
+                if !self_state.clan().is_empty() {
+                    ui.label(format!("[{}]", self_state.clan()));
                 }
-                ui.label(self_player.name());
+                ui.label(self_state.username());
                 ui.label(report.game_type());
                 ui.label(report.version().to_path());
                 ui.label(report.game_mode());
@@ -2352,13 +2386,13 @@ impl ToolkitTabViewer<'_> {
                     let mut red_team_damage = 0;
 
                     for vehicle_report in &ui_report.player_reports {
-                        if vehicle_report.is_enemy {
+                        if vehicle_report.relation().is_enemy() {
                             red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
                         } else {
                             team_damage += vehicle_report.actual_damage.unwrap_or(0);
                         }
 
-                        if vehicle_report.is_self {
+                        if vehicle_report.relation().is_self() {
                             self_report = Some(vehicle_report);
                             hide_my_stats = vehicle_report.manual_stat_hide_toggle;
                         }
@@ -2397,8 +2431,8 @@ impl ToolkitTabViewer<'_> {
                                 let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
 
                                 match player {
-                                    Some(player) if !player.clan().is_empty() => {
-                                        let _ = writeln!(file, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
+                                    Some(player) if !player.initial_state().clan().is_empty() => {
+                                        let _ = writeln!(file, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
                                     }
                                     _ => {
                                         let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
@@ -2415,8 +2449,8 @@ impl ToolkitTabViewer<'_> {
                         for message in report.game_chat() {
                             let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
                             match player {
-                                Some(player) if !player.clan().is_empty() => {
-                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.clan(), sender_name, channel, message);
+                                Some(player) if !player.initial_state().clan().is_empty() => {
+                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
                                 }
                                 _ => {
                                     let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
@@ -2511,7 +2545,8 @@ impl ToolkitTabViewer<'_> {
             // Synchronize the hide_my_stats value
             if hide_my_stats_changed
                 && let Some(ui_report) = replay_file.ui_report.as_mut()
-                && let Some(self_report) = ui_report.player_reports.iter_mut().find(|report| report.is_self)
+                && let Some(self_report) =
+                    ui_report.player_reports.iter_mut().find(|report| report.relation().is_self())
             {
                 self_report.manual_stat_hide_toggle = hide_my_stats;
             }
@@ -3333,7 +3368,7 @@ impl ToolkitTabViewer<'_> {
                 let Some(self_report) = replay
                     .ui_report
                     .as_ref()
-                    .and_then(|report| report.player_reports().iter().find(|report| report.is_self()))
+                    .and_then(|report| report.player_reports().iter().find(|report| report.relation().is_self()))
                 else {
                     continue;
                 };

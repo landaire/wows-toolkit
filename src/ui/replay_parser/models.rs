@@ -7,6 +7,7 @@ use egui::Color32;
 use egui::RichText;
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::analyzer::battle_controller::Relation;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -254,8 +255,7 @@ pub struct PlayerReport {
     pub crits: Option<u64>,
     pub distance_traveled: Option<f64>,
     pub is_test_ship: bool,
-    pub is_enemy: bool,
-    pub is_self: bool,
+    pub relation: Relation,
     pub manual_stat_hide_toggle: bool,
     // TODO: Maybe in the future refactor this to be a HashMap<Rc<Player>, DeathInfo> ?
     pub kills: Option<i64>,
@@ -437,10 +437,6 @@ impl PlayerReport {
         self.is_test_ship
     }
 
-    pub fn is_enemy(&self) -> bool {
-        self.is_enemy
-    }
-
     pub fn observed_kills(&self) -> i64 {
         self.observed_kills
     }
@@ -454,11 +450,7 @@ impl PlayerReport {
     }
 
     pub fn should_hide_stats(&self) -> bool {
-        self.manual_stat_hide_toggle || (!self.is_self && self.is_test_ship)
-    }
-
-    pub fn is_self(&self) -> bool {
-        self.is_self
+        self.manual_stat_hide_toggle || (!self.relation.is_self() && self.is_test_ship)
     }
 
     pub fn hits_report(&self) -> Option<&Hits> {
@@ -471,5 +463,9 @@ impl PlayerReport {
 
     pub fn personal_rating(&self) -> Option<&crate::personal_rating::PersonalRatingResult> {
         self.personal_rating.as_ref()
+    }
+
+    pub fn relation(&self) -> Relation {
+        self.relation
     }
 }

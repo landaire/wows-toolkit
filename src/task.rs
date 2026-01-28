@@ -7,9 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
@@ -33,9 +31,7 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{
-    self,
-};
+use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
@@ -55,9 +51,7 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{
-    self,
-};
+use crate::twitch::{self};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -687,7 +681,7 @@ fn parse_replay_data_in_background(
 
                                         if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
                                             player,
-                                            player.realm().to_string(),
+                                            player.initial_state().realm().to_string(),
                                             report.version(),
                                             game_type.clone(),
                                             &metadata_provider,

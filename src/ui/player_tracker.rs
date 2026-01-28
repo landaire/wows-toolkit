@@ -64,7 +64,7 @@ impl PlayerTracker {
                     .meta
                     .vehicles
                     .iter()
-                    .find(|metadata_player| metadata_player.name == player.name())
+                    .find(|metadata_player| metadata_player.name == player.initial_state().username())
                 {
                     meta_player.relation == 0
                 } else {
@@ -73,16 +73,18 @@ impl PlayerTracker {
             });
 
             for player in report.players() {
+                let player_state = player.initial_state();
                 if let Some(self_player) = self_player {
+                    let self_state = self_player.initial_state();
                     // Ignore ourselves and people in our division
                     if Arc::ptr_eq(self_player, player)
-                        || (self_player.division_id() > 0 && player.division_id() == self_player.division_id())
+                        || (self_state.division_id() > 0 && player_state.division_id() == self_state.division_id())
                     {
                         continue;
                     }
                 }
 
-                let tracked_player = tracked_players.entry(player.db_id()).or_default();
+                let tracked_player = tracked_players.entry(player_state.db_id()).or_default();
                 if tracked_player.arena_ids.contains(&report.arena_id()) {
                     continue;
                 }
@@ -98,24 +100,24 @@ impl PlayerTracker {
                 if update_metadata || tracked_player.timestamps.is_empty() {
                     if update_metadata
                         && !tracked_player.names.contains(&tracked_player.last_name)
-                        && tracked_player.last_name != player.name()
+                        && tracked_player.last_name != player_state.username()
                         && !tracked_player.last_name.is_empty()
                     {
                         // If we need to update the name, let's add the name to the alias list
                         tracked_player.names.insert(tracked_player.last_name.clone());
                     }
 
-                    tracked_player.last_name = player.name().to_string();
+                    tracked_player.last_name = player_state.username().to_string();
 
-                    tracked_player.clan = player.clan().to_string();
+                    tracked_player.clan = player_state.clan().to_string();
                 }
 
-                tracked_player.db_id = player.db_id();
-                tracked_player.clan_id = player.clan_id();
+                tracked_player.db_id = player_state.db_id();
+                tracked_player.clan_id = player_state.clan_id();
                 tracked_player.timestamps.insert(timestamp);
                 tracked_player.arena_ids.insert(report.arena_id());
 
-                tracked_players_by_ts.entry(timestamp).or_default().push(player.db_id());
+                tracked_players_by_ts.entry(timestamp).or_default().push(player_state.db_id());
             }
         }
     }

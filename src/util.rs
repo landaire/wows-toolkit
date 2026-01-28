@@ -15,6 +15,7 @@ use thousands::Separable;
 use tracing::debug;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::analyzer::battle_controller::Relation;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -39,16 +40,19 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     }
 }
 
-pub fn player_color_for_team_relation(relation: u32) -> Color32 {
-    match relation {
-        0 => Color32::WHITE,
-        1 => Color32::LIGHT_GREEN,
-        _ => Color32::LIGHT_RED,
+pub fn player_color_for_team_relation(relation: Relation) -> Color32 {
+    if relation.is_self() {
+        Color32::WHITE
+    } else if relation.is_ally() {
+        Color32::LIGHT_GREEN
+    } else {
+        Color32::LIGHT_RED
     }
 }
 
 pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
-    Some(format!("https://{}.wows-numbers.com/player/{},{}", player.realm(), player.db_id(), player.name()))
+    let state = player.initial_state();
+    Some(format!("https://{}.wows-numbers.com/player/{},{}", state.realm(), state.db_id(), state.username()))
 }
 
 pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
@@ -58,7 +62,7 @@ pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataPr
     let species = ship.species()?;
 
     let json = json!({
-        "BuildName": format!("replay_{}", player.name()),
+        "BuildName": format!("replay_{}", player.initial_state().username()),
 
         "ShipIndex": ship.index(),
 
@@ -152,7 +156,7 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
     parts[7] = "2".to_string();
 
     // Build Name
-    parts[8] = format!("replay_{}", player.name());
+    parts[8] = format!("replay_{}", player.initial_state().username());
 
     debug!("{:?}", parts.join(";"));
 

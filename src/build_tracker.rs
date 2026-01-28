@@ -49,7 +49,7 @@ impl BuildTrackerPayload {
         Some(Self {
             game_version: version,
             realm,
-            player_id: player.db_id(),
+            player_id: player.initial_state().db_id(),
             ship_id: ship.index().to_string(),
             ship_kind: ship.species(),
             modules: indicies_to_index(config.units(), metadata_provider),
