@@ -99,14 +99,14 @@ impl PersonalRatingCategory {
     /// Get the color for this category (placeholder - to be filled in later)
     pub fn color(&self) -> egui::Color32 {
         match self {
-            Self::Bad => egui::Color32::from_rgb(0xE0, 0x3C, 0x3C),
-            Self::BelowAverage => egui::Color32::from_rgb(0xCD, 0x33, 0x33),
-            Self::Average => egui::Color32::from_rgb(0xCC, 0x79, 0x00),
-            Self::Good => egui::Color32::from_rgb(0xCC, 0xB8, 0x00),
-            Self::VeryGood => egui::Color32::from_rgb(0x4D, 0x7C, 0x00),
-            Self::Great => egui::Color32::from_rgb(0x4D, 0x92, 0x00),
-            Self::Unicum => egui::Color32::from_rgb(0xD0, 0x42, 0xF5),
-            Self::SuperUnicum => egui::Color32::from_rgb(0xA0, 0x5D, 0xC7),
+            Self::Bad => egui::Color32::from_rgb(0xFF, 0x00, 0x00),
+            Self::BelowAverage => egui::Color32::from_rgb(0xFE, 0x79, 0x03),
+            Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
+            Self::Good => egui::Color32::from_rgb(0x44, 0xB3, 0x00),
+            Self::VeryGood => egui::Color32::from_rgb(0x31, 0x80, 0x00),
+            Self::Great => egui::Color32::from_rgb(0x02, 0xC9, 0xB3),
+            Self::Unicum => egui::Color32::from_rgb(0xD0, 0x42, 0xF3),
+            Self::SuperUnicum => egui::Color32::from_rgb(0xA0, 0x0D, 0xC5),
         }
     }
 }
