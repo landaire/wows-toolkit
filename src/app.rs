@@ -33,7 +33,6 @@ use octocrab::params::repos::Reference;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
-use rootcause::report;
 use tracing::trace;
 
 use serde::Deserialize;

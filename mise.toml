@@ -1,3 +1,15 @@
 [tasks.fmt]
 description = "Runs rust-nightly fmt"
 run = "cargo +nightly fmt"
+
+[tasks.check]
+description = "Runs cargo-check against all features"
+run = "cargo check --all-features"
+
+[tasks.fix]
+description = "Runs cargo-fix against all features"
+run = "cargo fix --all-features --allow-dirty"
+
+[tasks.clippy-fix]
+description = "Runs cargo-clippy-fix against all features"
+run = "cargo fix --all-features --allow-dirty"

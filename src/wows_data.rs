@@ -132,13 +132,13 @@ impl ReplayLoader {
                         let wows_data_inner = wows_data.read();
                         let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
                         // Send the replay builds to the remote server
-                        for player in report.player_entities() {
+                        for player in report.players() {
                             let client = reqwest::blocking::Client::new();
                             client
                                 .post("http://shipbuilds.com/api/ship_builds")
                                 .json(&crate::build_tracker::BuildTrackerPayload::build_from(
                                     player,
-                                    player.player().unwrap().realm().to_owned(),
+                                    player.initial_state().realm().to_owned(),
                                     report.version(),
                                     report.game_type().to_owned(),
                                     metadata_provider,
@@ -178,7 +178,7 @@ pub fn load_replay(
     is_debug_mode: bool,
     update_ui: bool,
 ) -> Option<BackgroundTask> {
-    let mut loader =
+    let loader =
         ReplayLoader::new(game_constants, wows_data, replay, replay_sort, background_task_sender, is_debug_mode);
 
     if update_ui { loader.load() } else { loader.skip_ui_update().load() }

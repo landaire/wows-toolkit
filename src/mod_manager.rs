@@ -6,6 +6,9 @@ use std::sync::mpsc::Sender;
 use http_body_util::BodyExt;
 use parking_lot::RwLock;
 use reqwest::Url;
+use rootcause::Report;
+use rootcause::prelude::ResultExt;
+use rootcause::report;
 use tokio::runtime::Runtime;
 use tracing::error;
 
@@ -59,11 +62,11 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
     let mut repo_parts = url_parse.path().split('/').filter(|s| !s.is_empty());
     let Some(owner) = repo_parts.next() else {
         eprintln!("failed to get owner from repo URL: {}", mod_info.meta.repo_url());
-        return Err(anyhow!("Failed to download mod tarball"));
+        return Err(report!("Failed to download mod tarball"));
     };
     let Some(repo) = repo_parts.next() else {
         eprintln!("failed to get repo from repo URL: {}", mod_info.meta.repo_url());
-        return Err(anyhow!("Failed to download mod tarball"));
+        return Err(report!("Failed to download mod tarball"));
     };
     let octocrab = octocrab::instance();
     eprintln!("downloading tarball from {}/{}", owner, repo);
@@ -72,7 +75,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
     let mut response = repo.download_tarball(mod_info.meta.commit().to_string()).await?;
 
     if !response.status().is_success() {
-        return Err(anyhow!("Failed to download mod tarball - server error"));
+        return Err(report!("Failed to download mod tarball - server error"));
     }
 
     let body = response.body_mut();
@@ -88,7 +91,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
                     let _ = tx.send(DownloadProgress { downloaded: result.len() as u64, total: total as u64 });
                 }
             }
-            Err(_) => Err(anyhow!("Error while downloading mod tarball"))?,
+            Err(_) => Err(report!("Error while downloading mod tarball"))?,
         }
     }
 
@@ -100,7 +103,7 @@ fn unpack_mod(
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     mod_info: &ModInfo,
     tx: Sender<DownloadProgress>,
-) -> anyhow::Result<()> {
+) -> rootcause::Result<()> {
     let tar = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(tar);
 
@@ -160,7 +163,7 @@ fn unpack_mod(
 
         // Ensure that a mod didn't try to write to elsewhere on the filesystem
         if !std::path::absolute(&target_path).context("absolute path")?.starts_with(&wows_dir) {
-            return Err(anyhow!("Mod tried to write to an invalid path: {}", target_path.display()));
+            return Err(report!("Mod tried to write to an invalid path: {}", target_path.display()));
         }
 
         println!("unpacking to {}", target_path.display());
@@ -244,7 +247,7 @@ fn uninstall_mod(
     wows_data: Arc<RwLock<WorldOfWarshipsData>>,
     mod_info: ModInfo,
     tx: mpsc::Sender<BackgroundTask>,
-) -> anyhow::Result<()> {
+) -> rootcause::Result<()> {
     eprintln!("downloading mod");
     let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
     let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
