@@ -2178,7 +2178,7 @@ impl Replay {
         //
         // If we don't have a UI report, that implies that the battle result packet from the
         // server was never received
-        self.battle_result().is_none() && self.ui_report.is_none()
+        self.battle_result().is_none()
     }
 
     pub fn battle_result(&self) -> Option<BattleResult> {
