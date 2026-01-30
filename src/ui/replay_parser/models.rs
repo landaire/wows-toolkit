@@ -59,6 +59,9 @@ pub struct Hits {
     pub he: Option<u64>,
     pub he_secondaries: Option<u64>,
     pub sap_secondaries: Option<u64>,
+    pub ap_secondaries_manual: Option<u64>,
+    pub he_secondaries_manual: Option<u64>,
+    pub sap_secondaries_manual: Option<u64>,
     pub torps: Option<u64>,
 }
 

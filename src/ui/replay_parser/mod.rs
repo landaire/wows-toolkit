@@ -394,6 +394,9 @@ impl UiReport {
                             he: all_hits.get(HITS_MAIN_HE).copied(),
                             he_secondaries: all_hits.get(HITS_ATBA_HE).copied(),
                             sap_secondaries: all_hits.get(HITS_ATBA_CS).copied(),
+                            ap_secondaries_manual: all_hits.get(HITS_ATBA_AP_MANUAL).copied(),
+                            he_secondaries_manual: all_hits.get(HITS_ATBA_HE_MANUAL).copied(),
+                            sap_secondaries_manual: all_hits.get(HITS_ATBA_CS_MANUAL).copied(),
                             torps: all_hits.get(HITS_TPD_NORMAL).copied(),
                         }),
                     )

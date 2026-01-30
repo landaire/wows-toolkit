@@ -6,6 +6,9 @@ pub const DAMAGE_MAIN_HE: &str = "damage_main_he";
 pub const DAMAGE_ATBA_AP: &str = "damage_atba_ap";
 pub const DAMAGE_ATBA_CS: &str = "damage_atba_cs";
 pub const DAMAGE_ATBA_HE: &str = "damage_atba_he";
+pub const DAMAGE_ATBA_AP_MANUAL: &str = "damage_atba_ap_manual";
+pub const DAMAGE_ATBA_CS_MANUAL: &str = "damage_atba_cs_manual";
+pub const DAMAGE_ATBA_HE_MANUAL: &str = "damage_atba_he_manual";
 pub const DAMAGE_TPD_NORMAL: &str = "damage_tpd_normal";
 pub const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
 pub const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
@@ -41,6 +44,9 @@ pub const HITS_MAIN_HE: &str = "hits_main_he";
 pub const HITS_ATBA_AP: &str = "hits_atba_ap";
 pub const HITS_ATBA_CS: &str = "hits_atba_cs";
 pub const HITS_ATBA_HE: &str = "hits_atba_he";
+pub const HITS_ATBA_AP_MANUAL: &str = "hits_atba_ap_manual";
+pub const HITS_ATBA_CS_MANUAL: &str = "hits_atba_cs_manual";
+pub const HITS_ATBA_HE_MANUAL: &str = "hits_atba_he_manual";
 pub const HITS_TPD_NORMAL: &str = "hits_tpd";
 pub const HITS_BOMB: &str = "hits_bomb";
 // pub const HITS_BOMB_AVIA: &str = "hits_bomb_avia";
@@ -65,13 +71,16 @@ pub const HITS_PULSE_LASER: &str = "hits_pulse_laser";
 pub const HITS_AXIS_LASER: &str = "hits_axis_laser";
 pub const HITS_PHASER_LASER: &str = "hits_phaser_laser";
 
-pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 32] = [
+pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 35] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
     (DAMAGE_ATBA_AP, "AP Sec"),
+    (DAMAGE_ATBA_AP_MANUAL, "AP Sec (Manual)"),
     (DAMAGE_ATBA_CS, "SAP Sec"),
+    (DAMAGE_ATBA_CS_MANUAL, "SAP Sec (Manual)"),
     (DAMAGE_ATBA_HE, "HE Sec"),
+    (DAMAGE_ATBA_HE_MANUAL, "HE Sec (Manual)"),
     (DAMAGE_TPD_NORMAL, "Torps"),
     (DAMAGE_TPD_DEEP, "Deep Water Torps"),
     (DAMAGE_TPD_ALTER, "Alt Torps"),
@@ -102,13 +111,16 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 32] = [
     (DAMAGE_PHASER_LASER, "Phaser Laser"),
 ];
 
-pub static HITS_DESCRIPTIONS: [(&str, &str); 28] = [
+pub static HITS_DESCRIPTIONS: [(&str, &str); 31] = [
     (HITS_MAIN_AP, "AP"),
     (HITS_MAIN_CS, "SAP"),
     (HITS_MAIN_HE, "HE"),
     (HITS_ATBA_AP, "AP Sec"),
+    (HITS_ATBA_AP_MANUAL, "AP Sec (Manual)"),
     (HITS_ATBA_CS, "SAP Sec"),
+    (HITS_ATBA_CS_MANUAL, "SAP Sec (Manual)"),
     (HITS_ATBA_HE, "HE Sec"),
+    (HITS_ATBA_HE_MANUAL, "HE Sec (Manual)"),
     (HITS_TPD_NORMAL, "Torps"),
     (HITS_BOMB, "HE Bomb"),
     // (HITS_BOMB_AVIA, "Bomb"),

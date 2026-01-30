@@ -203,6 +203,9 @@ pub struct FlattenedVehicle {
     hits_he: Option<u64>,
     hits_he_secondaries: Option<u64>,
     hits_sap_secondaries: Option<u64>,
+    hits_ap_secondaries_manual: Option<u64>,
+    hits_he_secondaries_manual: Option<u64>,
+    hits_sap_secondaries_manual: Option<u64>,
     hits_torps: Option<u64>,
     spotting_damage: Option<u64>,
     potential_damage: Option<u64>,
@@ -337,6 +340,15 @@ impl From<Vehicle> for FlattenedVehicle {
             hits_he: server_results.as_ref().and_then(|results| results.hits_details.he),
             hits_he_secondaries: server_results.as_ref().and_then(|results| results.hits_details.he_secondaries),
             hits_sap_secondaries: server_results.as_ref().and_then(|results| results.hits_details.sap_secondaries),
+            hits_ap_secondaries_manual: server_results
+                .as_ref()
+                .and_then(|results| results.hits_details.ap_secondaries_manual),
+            hits_he_secondaries_manual: server_results
+                .as_ref()
+                .and_then(|results| results.hits_details.he_secondaries_manual),
+            hits_sap_secondaries_manual: server_results
+                .as_ref()
+                .and_then(|results| results.hits_details.sap_secondaries_manual),
             hits_torps: server_results.as_ref().and_then(|results| results.hits_details.torps),
         }
     }

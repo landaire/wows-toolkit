@@ -251,9 +251,10 @@ pub fn needs_update() -> bool {
     // Check file modification time
     if let Ok(metadata) = fs::metadata(&path)
         && let Ok(modified) = metadata.modified()
-            && let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                return elapsed > UPDATE_INTERVAL;
-            }
+        && let Ok(elapsed) = SystemTime::now().duration_since(modified)
+    {
+        return elapsed > UPDATE_INTERVAL;
+    }
 
     // If we can't determine the age, assume it needs updating
     true
