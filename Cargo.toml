@@ -13,7 +13,7 @@ egui = "0.33.3"
 eframe = { version = "0.33.3", default-features = false, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
-    "wgpu",
+    "glow",
     "persistence",   # Enable restoring app state when restarting the app.
     "wayland",       # To support Linux (and CI)
 ] }
@@ -23,7 +23,7 @@ egui-phosphor = "0.11"
 egui_table = "0.6.0"
 egui_commonmark = "0.22"
 # Necessary to avoid immediate runtime panic
-wgpu = { version = "*", default-features = true }
+# wgpu = { version = "*", default-features = true }
 
 tracing = "0.1"
 wows_replays = { version = "0.12.0", features = ["arc"] }
