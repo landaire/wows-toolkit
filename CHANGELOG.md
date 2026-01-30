@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.44] - 2026-01-30
+
+### 🚀 Features
+
+- Switch graphics renderer from glow to wgpu
+- Add manual secondaries
+
+### 🐛 Bug Fixes
+
+- Restore the stream sniper tech
+- Remove plain bomb from damage to prevent double-counting
+- Refactoring to fix clippy lints
+- Auto-updater should write the new exe in same directory as old exe
+- Incomplete match results warning was broken
+- Some session stats weren't been shown. hopefully finally fixed?
+
 ## [0.1.43] - 2026-01-28
 
 ### 🚀 Features
