@@ -142,12 +142,7 @@ impl SessionStats {
                 // Many of the stats are dependent on the UI report being
                 // available. As such, we will only overwrite the old replay
                 // when it has no UI report present.
-                if old_replay.ui_report.is_none() {
-                    old_replay_index = Some(idx);
-                    break;
-                } else {
-                    return;
-                }
+                old_replay_index = Some(idx);
             }
         }
 
@@ -156,6 +151,7 @@ impl SessionStats {
         if let Some(old_index) = old_replay_index {
             self.session_replays.remove(old_index);
         }
+
         self.session_replays.push(replay);
     }
 
