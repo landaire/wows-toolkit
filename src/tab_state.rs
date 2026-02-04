@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -44,6 +42,69 @@ use crate::update_background_task;
 use crate::wows_data::ReplayDependencies;
 use crate::wows_data::ReplayLoader;
 use crate::wows_data::WorldOfWarshipsData;
+
+/// Available statistics for charting
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartableStat {
+    #[default]
+    Damage,
+    SpottingDamage,
+    Frags,
+    RawXp,
+    BaseXp,
+    WinRate,
+    PersonalRating,
+}
+
+impl ChartableStat {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ChartableStat::Damage => "Damage",
+            ChartableStat::SpottingDamage => "Spotting Damage",
+            ChartableStat::Frags => "Frags",
+            ChartableStat::RawXp => "Raw XP",
+            ChartableStat::BaseXp => "Base XP",
+            ChartableStat::WinRate => "Win Rate",
+            ChartableStat::PersonalRating => "Personal Rating",
+        }
+    }
+
+    pub fn all() -> &'static [ChartableStat] {
+        &[
+            ChartableStat::BaseXp,
+            ChartableStat::Damage,
+            ChartableStat::Frags,
+            ChartableStat::PersonalRating,
+            ChartableStat::RawXp,
+            ChartableStat::SpottingDamage,
+            ChartableStat::WinRate,
+        ]
+    }
+}
+
+/// Chart display mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartMode {
+    /// Line chart showing stat over each game played
+    #[default]
+    Line,
+    /// Bar chart showing cumulative stat comparison between ships
+    Bar,
+}
+
+/// Configuration for the session stats chart
+#[derive(Default)]
+pub struct SessionStatsChartConfig {
+    /// Selected stat to display
+    pub selected_stat: ChartableStat,
+    /// Chart display mode (line or bar)
+    pub mode: ChartMode,
+    /// Selected ships to show (empty = all ships)
+    pub selected_ships: Vec<String>,
+    pub selected_ships_manually_changed: bool,
+    /// Whether to show rolling average instead of per-game values (line chart only)
+    pub rolling_average: bool,
+}
 
 /// File system events for replay monitoring
 #[derive(Debug)]
@@ -154,7 +215,11 @@ pub struct TabState {
     #[serde(skip)]
     pub show_session_stats: bool,
     #[serde(skip)]
+    pub show_session_stats_chart: bool,
+    #[serde(skip)]
     pub session_stats: SessionStats,
+    #[serde(skip)]
+    pub session_stats_chart_config: SessionStatsChartConfig,
     #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
 
@@ -205,7 +270,9 @@ impl Default for TabState {
             background_parser_tx: None,
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
             show_session_stats: false,
+            show_session_stats_chart: false,
             session_stats: Default::default(),
+            session_stats_chart_config: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
         }

@@ -2,35 +2,138 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use wows_replays::analyzer::battle_controller::BattleResult;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::personal_rating::PersonalRatingResult;
 use crate::personal_rating::ShipBattleStats;
+use crate::tab_state::ChartableStat;
 use crate::ui::replay_parser::Replay;
 
-/// Performance statistics for a single ship across multiple games
+/// Per-game statistics extracted from a single replay
+#[derive(Clone)]
+pub struct PerGameStat {
+    pub ship_name: String,
+    pub ship_id: u64,
+    #[allow(dead_code)]
+    pub game_time: String,
+    pub damage: u64,
+    pub spotting_damage: u64,
+    pub frags: i64,
+    pub raw_xp: i64,
+    pub base_xp: i64,
+    pub is_win: bool,
+    pub is_loss: bool,
+}
+
+impl PerGameStat {
+    /// Create a PerGameStat from a replay
+    pub fn from_replay(replay: &Replay, metadata_provider: &GameMetadataProvider) -> Option<Self> {
+        let ui_report = replay.ui_report.as_ref()?;
+        let self_report = ui_report.player_reports().iter().find(|r| r.relation().is_self())?;
+        let ship_name = replay.vehicle_name(metadata_provider);
+        let ship_id = replay.player_vehicle()?.shipId;
+        let game_time = replay.game_time().to_string();
+        let battle_result = replay.battle_result();
+
+        Some(PerGameStat {
+            ship_name,
+            ship_id,
+            game_time,
+            damage: self_report.actual_damage().unwrap_or_default(),
+            spotting_damage: self_report.spotting_damage().unwrap_or_default(),
+            frags: self_report.kills().unwrap_or_default(),
+            raw_xp: self_report.raw_xp().unwrap_or_default(),
+            base_xp: self_report.base_xp().unwrap_or_default(),
+            is_win: matches!(battle_result, Some(BattleResult::Win(_))),
+            is_loss: matches!(battle_result, Some(BattleResult::Loss(_))),
+        })
+    }
+
+    /// Get the value of a specific stat for charting
+    pub fn get_stat(&self, stat: ChartableStat, pr_data: Option<&PersonalRatingData>) -> f64 {
+        match stat {
+            ChartableStat::Damage => self.damage as f64,
+            ChartableStat::SpottingDamage => self.spotting_damage as f64,
+            ChartableStat::Frags => self.frags as f64,
+            ChartableStat::RawXp => self.raw_xp as f64,
+            ChartableStat::BaseXp => self.base_xp as f64,
+            ChartableStat::WinRate => 0.0, // Win rate doesn't make sense per-game
+            ChartableStat::PersonalRating => self.calculate_pr(pr_data).unwrap_or(0.0),
+        }
+    }
+
+    /// Calculate Personal Rating for this single game
+    pub fn calculate_pr(&self, pr_data: Option<&PersonalRatingData>) -> Option<f64> {
+        let pr_data = pr_data?;
+        let stats = ShipBattleStats {
+            ship_id: self.ship_id,
+            battles: 1,
+            damage: self.damage,
+            wins: if self.is_win { 1 } else { 0 },
+            frags: self.frags,
+        };
+        pr_data.calculate_pr(&[stats]).map(|r| r.pr)
+    }
+}
+
+/// Performance statistics for a single ship aggregated from multiple games
 #[derive(Default)]
 pub struct PerformanceInfo {
     ship_id: Option<u64>,
     wins: usize,
     losses: usize,
-    /// Total frags
     total_frags: i64,
-    /// Highest frags in a single match
     max_frags: i64,
     total_damage: u64,
     max_damage: u64,
     total_games: usize,
     max_xp: i64,
     max_win_adjusted_xp: i64,
-    total_xp: usize,
-    total_win_adjusted_xp: usize,
+    total_xp: i64,
+    total_win_adjusted_xp: i64,
     max_spotting_damage: u64,
     total_spotting_damage: u64,
 }
 
 impl PerformanceInfo {
+    /// Create a PerformanceInfo by aggregating multiple PerGameStat instances
+    pub fn from_games(games: &[&PerGameStat]) -> Self {
+        let mut info = PerformanceInfo::default();
+
+        for game in games {
+            if info.ship_id.is_none() {
+                info.ship_id = Some(game.ship_id);
+            }
+
+            if game.is_win {
+                info.wins += 1;
+            } else if game.is_loss {
+                info.losses += 1;
+            }
+
+            info.total_frags += game.frags;
+            info.max_frags = info.max_frags.max(game.frags);
+
+            info.total_damage += game.damage;
+            info.max_damage = info.max_damage.max(game.damage);
+
+            info.total_spotting_damage += game.spotting_damage;
+            info.max_spotting_damage = info.max_spotting_damage.max(game.spotting_damage);
+
+            info.total_xp += game.raw_xp;
+            info.max_xp = info.max_xp.max(game.raw_xp);
+
+            info.total_win_adjusted_xp += game.base_xp;
+            info.max_win_adjusted_xp = info.max_win_adjusted_xp.max(game.base_xp);
+
+            info.total_games += 1;
+        }
+
+        info
+    }
+
     pub fn wins(&self) -> usize {
         self.wins
     }
@@ -153,6 +256,32 @@ impl SessionStats {
         }
 
         self.session_replays.push(replay);
+        self.session_replays.sort_by(|a, b| a.read().game_time().cmp(b.read().game_time()));
+    }
+
+    /// Get per-game statistics for all replays in the session
+    pub fn per_game_stats(&self, metadata_provider: &GameMetadataProvider) -> Vec<PerGameStat> {
+        self.session_replays
+            .iter()
+            .filter_map(|replay| {
+                let replay = replay.read();
+                PerGameStat::from_replay(&replay, metadata_provider)
+            })
+            .collect()
+    }
+
+    /// Get aggregated ship statistics derived from per-game stats
+    pub fn ship_stats(&self, metadata_provider: &GameMetadataProvider) -> HashMap<String, PerformanceInfo> {
+        let per_game = self.per_game_stats(metadata_provider);
+
+        // Group by ship name
+        let mut by_ship: HashMap<String, Vec<&PerGameStat>> = HashMap::new();
+        for game in &per_game {
+            by_ship.entry(game.ship_name.clone()).or_default().push(game);
+        }
+
+        // Convert to PerformanceInfo
+        by_ship.into_iter().map(|(name, games)| (name, PerformanceInfo::from_games(&games))).collect()
     }
 
     /// Returns the win rate percentage for this session. Will return `None`
@@ -173,131 +302,27 @@ impl SessionStats {
     /// Total number of games won in the current session
     pub fn games_won(&self) -> usize {
         self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Win(_)) = replay.read().battle_result()
-            {
-                accum + 1
-            } else {
-                accum
-            }
+            if let Some(BattleResult::Win(_)) = replay.read().battle_result() { accum + 1 } else { accum }
         })
     }
 
     /// Total number of games lost in the current session
     pub fn games_lost(&self) -> usize {
         self.session_replays.iter().fold(0, |accum, replay| {
-            if let Some(wows_replays::analyzer::battle_controller::BattleResult::Loss(_)) =
-                replay.read().battle_result()
-            {
-                accum + 1
-            } else {
-                accum
-            }
+            if let Some(BattleResult::Loss(_)) = replay.read().battle_result() { accum + 1 } else { accum }
         })
-    }
-
-    pub fn ship_stats(&self, metadata_provider: &GameMetadataProvider) -> HashMap<String, PerformanceInfo> {
-        let mut results: HashMap<String, PerformanceInfo> = HashMap::new();
-
-        for replay in &self.session_replays {
-            let replay = replay.read();
-            let Some(battle_result) = replay.battle_result() else {
-                continue;
-            };
-
-            let ship_name = replay.vehicle_name(metadata_provider);
-            let ship_id = replay.player_vehicle().map(|v| v.shipId);
-            let performance_info = results.entry(ship_name).or_default();
-
-            // Set ship_id if not already set
-            if performance_info.ship_id.is_none() {
-                performance_info.ship_id = ship_id;
-            }
-
-            match battle_result {
-                wows_replays::analyzer::battle_controller::BattleResult::Win(_) => {
-                    performance_info.wins += 1;
-                }
-                wows_replays::analyzer::battle_controller::BattleResult::Loss(_) => {
-                    performance_info.losses += 1;
-                }
-                wows_replays::analyzer::battle_controller::BattleResult::Draw => {
-                    // do nothing for draws at the moment
-                }
-            }
-
-            let Some(ui_report) = replay.ui_report.as_ref() else {
-                continue;
-            };
-            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.relation().is_self()) else {
-                continue;
-            };
-
-            performance_info.total_frags += self_report.kills().unwrap_or_default();
-            performance_info.max_frags = performance_info.max_frags.max(self_report.kills().unwrap_or_default());
-
-            performance_info.total_damage += self_report.actual_damage().unwrap_or_default();
-            performance_info.max_damage =
-                performance_info.max_damage.max(self_report.actual_damage().unwrap_or_default());
-
-            performance_info.total_spotting_damage += self_report.spotting_damage().unwrap_or_default();
-            performance_info.max_spotting_damage =
-                performance_info.max_spotting_damage.max(self_report.spotting_damage().unwrap_or_default());
-
-            performance_info.total_xp += self_report.raw_xp().unwrap_or_default() as usize;
-            performance_info.max_xp = performance_info.max_xp.max(self_report.raw_xp().unwrap_or_default());
-
-            performance_info.total_win_adjusted_xp += self_report.base_xp().unwrap_or_default() as usize;
-            performance_info.max_win_adjusted_xp =
-                performance_info.max_win_adjusted_xp.max(self_report.base_xp().unwrap_or_default());
-
-            performance_info.total_games += 1;
-        }
-
-        results
     }
 
     pub fn max_damage(&self, metadata_provider: &GameMetadataProvider) -> Option<(String, u64)> {
-        self.session_replays
-            .iter()
-            .filter_map(|replay| {
-                let replay = replay.read();
-
-                let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.player_reports().iter().find(|report| report.relation().is_self())?;
-
-                Some((replay.vehicle_name(metadata_provider), self_report.actual_damage()?))
-            })
-            .max_by_key(|result| result.1)
+        self.per_game_stats(metadata_provider).into_iter().map(|g| (g.ship_name, g.damage)).max_by_key(|r| r.1)
     }
 
     pub fn max_frags(&self, metadata_provider: &GameMetadataProvider) -> Option<(String, i64)> {
-        self.session_replays
-            .iter()
-            .filter_map(|replay| {
-                let replay = replay.read();
-
-                let ui_report = replay.ui_report.as_ref()?;
-                let self_report = ui_report.player_reports().iter().find(|report| report.relation().is_self())?;
-
-                Some((replay.vehicle_name(metadata_provider), self_report.kills()?))
-            })
-            .max_by_key(|result| result.1)
+        self.per_game_stats(metadata_provider).into_iter().map(|g| (g.ship_name, g.frags)).max_by_key(|r| r.1)
     }
 
-    pub fn total_frags(&self) -> i64 {
-        self.session_replays.iter().fold(0, |accum, replay| {
-            let replay = replay.read();
-
-            let Some(ui_report) = replay.ui_report.as_ref() else {
-                return accum;
-            };
-
-            let Some(self_report) = ui_report.player_reports().iter().find(|report| report.relation().is_self()) else {
-                return accum;
-            };
-
-            accum + self_report.kills().unwrap_or_default()
-        })
+    pub fn total_frags(&self, metadata_provider: &GameMetadataProvider) -> i64 {
+        self.per_game_stats(metadata_provider).iter().map(|g| g.frags).sum()
     }
 
     /// Calculate overall Personal Rating for this session

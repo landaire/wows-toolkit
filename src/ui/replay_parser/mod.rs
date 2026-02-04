@@ -37,12 +37,16 @@ use crate::app::TimedMessage;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
+use crate::session_stats::PerGameStat;
 use crate::session_stats::PerformanceInfo;
 use crate::settings::ReplayGrouping;
 use crate::settings::ReplaySettings;
+use crate::tab_state::ChartMode;
+use crate::tab_state::ChartableStat;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
+use crate::ui::session_stats_chart::{render_bar_chart, render_line_chart};
 use crate::update_background_task;
 use crate::wows_data::WorldOfWarshipsData;
 
@@ -3250,6 +3254,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.show_session_stats_window(ui);
+        self.show_session_stats_chart_window(ui);
     }
 
     pub fn show_session_stats_window(&mut self, ui: &mut egui::Ui) {
@@ -3269,6 +3274,9 @@ impl ToolkitTabViewer<'_> {
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(format!("{} Clear", icons::ERASER)).clicked() {
                         self.tab_state.session_stats.clear();
+                    }
+                    if ui.button(format!("{} Chart", icons::CHART_LINE)).clicked() {
+                        self.tab_state.show_session_stats_chart = true;
                     }
                 });
             });
@@ -3298,7 +3306,7 @@ impl ToolkitTabViewer<'_> {
                 });
             }
 
-            let total_frags = self.tab_state.session_stats.total_frags();
+            let total_frags = self.tab_state.session_stats.total_frags(&metadata_provider);
             ui.horizontal(|ui| {
                 ui.strong("Total Frags:");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3494,5 +3502,157 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
+    }
+
+    pub fn show_session_stats_chart_window(&mut self, ui: &mut egui::Ui) {
+        if !self.tab_state.show_session_stats_chart {
+            return;
+        }
+
+        let Some(metadata_provider) = self.metadata_provider() else {
+            return;
+        };
+
+        // Get ship stats for bar chart (cumulative data)
+        let ship_stats: Vec<(String, PerformanceInfo)> = self
+            .tab_state
+            .session_stats
+            .ship_stats(&metadata_provider)
+            .into_iter()
+            .filter(|(_, perf)| perf.win_rate().is_some())
+            .collect();
+
+        // Get per-game data for line chart
+        let per_game_data = self.tab_state.session_stats.per_game_stats(&metadata_provider);
+
+        // Get PR data for calculations
+        let pr_data = self.tab_state.personal_rating_data.read();
+
+        let ctx = ui.ctx().clone();
+
+        egui::Window::new("Session Stats Chart")
+            .open(&mut self.tab_state.show_session_stats_chart)
+            .default_width(600.0)
+            .default_height(450.0)
+            .resizable(true)
+            .show(&ctx, |ui| {
+                if ship_stats.is_empty() {
+                    ui.label("No session stats available. Play some games first!");
+                    return;
+                }
+
+                // Get list of ship names for selection
+                let mut ship_names: Vec<String> = ship_stats.iter().map(|(name, _)| name.clone()).collect();
+                ship_names.sort();
+
+                // Stat selection
+                ui.horizontal(|ui| {
+                    ui.label("Stat:");
+                    ComboBox::from_id_salt("chart_stat_select")
+                        .selected_text(self.tab_state.session_stats_chart_config.selected_stat.name())
+                        .show_ui(ui, |ui| {
+                            for stat in ChartableStat::all() {
+                                let is_selected = self.tab_state.session_stats_chart_config.selected_stat == *stat;
+                                if ui.selectable_label(is_selected, stat.name()).clicked() {
+                                    self.tab_state.session_stats_chart_config.selected_stat = *stat;
+                                }
+                            }
+                        });
+                });
+
+                // Chart type selection
+                ui.horizontal(|ui| {
+                    ui.label("Chart Type:");
+                    ui.selectable_value(
+                        &mut self.tab_state.session_stats_chart_config.mode,
+                        ChartMode::Line,
+                        "Line (per game)",
+                    );
+                    ui.selectable_value(
+                        &mut self.tab_state.session_stats_chart_config.mode,
+                        ChartMode::Bar,
+                        "Bar (cumulative)",
+                    );
+                    // Rolling average checkbox (only for line charts)
+                    if self.tab_state.session_stats_chart_config.mode == ChartMode::Line {
+                        ui.checkbox(&mut self.tab_state.session_stats_chart_config.rolling_average, "Rolling Average");
+                    }
+                });
+
+                // Ship multi-selection
+                ui.horizontal(|ui| {
+                    ui.label("Ships:");
+                    if ui.button("All").clicked() {
+                        self.tab_state.session_stats_chart_config.selected_ships = ship_names.clone();
+                        self.tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+                    }
+                    if ui.button("None").clicked() {
+                        self.tab_state.session_stats_chart_config.selected_ships.clear();
+                        self.tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+                    }
+                });
+
+                // If no ships selected, select all by default
+                if !self.tab_state.session_stats_chart_config.selected_ships_manually_changed {
+                    self.tab_state.session_stats_chart_config.selected_ships = ship_names.clone();
+                }
+
+                ScrollArea::horizontal().max_height(60.0).show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for ship_name in &ship_names {
+                            let mut is_selected =
+                                self.tab_state.session_stats_chart_config.selected_ships.contains(ship_name);
+                            if ui.checkbox(&mut is_selected, ship_name).changed() {
+                                if is_selected {
+                                    self.tab_state.session_stats_chart_config.selected_ships.push(ship_name.clone());
+                                } else {
+                                    self.tab_state.session_stats_chart_config.selected_ships.retain(|s| s != ship_name);
+                                }
+
+                                self.tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+                            }
+                        }
+                    });
+                });
+
+                ui.separator();
+
+                let selected_stat = self.tab_state.session_stats_chart_config.selected_stat;
+                let selected_ships = &self.tab_state.session_stats_chart_config.selected_ships;
+
+                match self.tab_state.session_stats_chart_config.mode {
+                    ChartMode::Line => {
+                        // Filter per-game data to selected ships
+                        let filtered_data: Vec<&PerGameStat> =
+                            per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
+
+                        if !filtered_data.is_empty() {
+                            let rolling_average = self.tab_state.session_stats_chart_config.rolling_average;
+                            render_line_chart(
+                                ui,
+                                &filtered_data,
+                                selected_stat,
+                                selected_ships,
+                                &pr_data,
+                                rolling_average,
+                            );
+                        }
+                    }
+                    ChartMode::Bar => {
+                        // Filter cumulative stats to selected ships
+                        let mut selected_stats: Vec<(&String, &PerformanceInfo)> = ship_stats
+                            .iter()
+                            .filter(|(name, _)| selected_ships.contains(name))
+                            .map(|(name, perf)| (name, perf))
+                            .collect();
+
+                        selected_stats.sort_by_key(|a| a.0);
+
+                        if !selected_stats.is_empty() {
+                            render_bar_chart(ui, &selected_stats, selected_stat, &pr_data);
+                        }
+                    }
+                }
+            });
     }
 }
