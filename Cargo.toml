@@ -1,6 +1,6 @@
 [package]
 name = "wows_toolkit"
-version = "0.1.44"
+version = "0.1.45"
 authors = ["landaire"]
 edition = "2024"
 rust-version = "1.89"
@@ -60,7 +60,6 @@ twitch_api = { version = "0.7.0-rc.8", features = [
     "client",
     "reqwest",
 ] }
-arboard = "3"
 levenshtein = "1.0.5"
 escaper = "0.1.1"
 http-body = "1.0.1"
@@ -73,6 +72,7 @@ jiff = { version = "0.2.4", features = ["serde"] }
 rootcause = "0.11.1"
 egui_ltreeview = { version = "0.6.1", features = ["persistence"] }
 egui_plot = "0.34.0"
+arboard = "3.6.1"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1.20"
