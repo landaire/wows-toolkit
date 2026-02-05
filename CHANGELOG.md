@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.45] - 2026-02-05
+
+### 🚀 Features
+
+- Add charts to session stats
+- Allow taking screenshots of charts
+
 ## [0.1.44] - 2026-01-30
 
 ### 🚀 Features
