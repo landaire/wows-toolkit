@@ -200,7 +200,7 @@ pub fn render_line_chart(
     Some(group_response.response.rect)
 }
 
-/// Render a bar chart showing cumulative/average statistics per ship.
+/// Render a bar chart showing average statistics per ship.
 /// Returns the plot rectangle for screenshot cropping.
 pub fn render_bar_chart(
     ui: &mut egui::Ui,

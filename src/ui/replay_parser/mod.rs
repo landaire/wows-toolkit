@@ -3514,7 +3514,7 @@ impl ToolkitTabViewer<'_> {
             return;
         };
 
-        // Get ship stats for bar chart (cumulative data)
+        // Get ship stats for bar chart (average data)
         let ship_stats: Vec<(String, PerformanceInfo)> = self
             .tab_state
             .session_stats
@@ -3603,7 +3603,7 @@ impl ToolkitTabViewer<'_> {
                     ui.selectable_value(
                         &mut self.tab_state.session_stats_chart_config.mode,
                         ChartMode::Bar,
-                        "Bar (cumulative)",
+                        "Bar (average)",
                     );
                     // Rolling average checkbox (only for line charts)
                     if self.tab_state.session_stats_chart_config.mode == ChartMode::Line {
@@ -3678,7 +3678,7 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                     ChartMode::Bar => {
-                        // Filter cumulative stats to selected ships
+                        // Filter average stats to selected ships
                         let mut selected_stats: Vec<(&String, &PerformanceInfo)> = ship_stats
                             .iter()
                             .filter(|(name, _)| selected_ships.contains(name))

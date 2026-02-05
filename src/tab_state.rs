@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -90,7 +88,7 @@ pub enum ChartMode {
     /// Line chart showing stat over each game played
     #[default]
     Line,
-    /// Bar chart showing cumulative stat comparison between ships
+    /// Bar chart showing average stat comparison between ships
     Bar,
 }
 
