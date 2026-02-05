@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -104,6 +106,12 @@ pub struct SessionStatsChartConfig {
     pub selected_ships_manually_changed: bool,
     /// Whether to show rolling average instead of per-game values (line chart only)
     pub rolling_average: bool,
+    /// Whether to show value labels on data points
+    pub show_labels: bool,
+    /// Whether a screenshot has been requested (waiting for the event)
+    pub screenshot_requested: bool,
+    /// The plot rectangle from the last frame (used to crop the screenshot)
+    pub plot_rect: Option<egui::Rect>,
 }
 
 /// File system events for replay monitoring

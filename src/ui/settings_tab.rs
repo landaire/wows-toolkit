@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use clipboard::ClipboardContext;
-use clipboard::ClipboardProvider;
 use egui::Color32;
 use egui::OpenUrl;
 use egui::Slider;
@@ -203,8 +201,9 @@ impl ToolkitTabViewer<'_> {
                     )
                 };
                 if ui.button(text).clicked() {
-                    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                    if let Ok(contents) = ctx.get_contents() {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new()
+                        && let Ok(contents) = clipboard.get_text()
+                    {
                         let token: Result<Token, _> = contents.parse();
                         if let Ok(token) = token
                             && let Some(tx) = self.tab_state.twitch_update_sender.as_ref()

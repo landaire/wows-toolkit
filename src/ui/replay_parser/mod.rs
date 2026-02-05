@@ -46,7 +46,8 @@ use crate::tab_state::ChartableStat;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
-use crate::ui::session_stats_chart::{render_bar_chart, render_line_chart};
+use crate::ui::session_stats_chart::render_bar_chart;
+use crate::ui::session_stats_chart::render_line_chart;
 use crate::update_background_task;
 use crate::wows_data::WorldOfWarshipsData;
 
@@ -3530,6 +3531,37 @@ impl ToolkitTabViewer<'_> {
 
         let ctx = ui.ctx().clone();
 
+        // Handle screenshot capture if one was requested
+        if self.tab_state.session_stats_chart_config.screenshot_requested {
+            let screenshot = ctx.input(|i| {
+                for event in &i.raw.events {
+                    if let egui::Event::Screenshot { image, .. } = event {
+                        return Some(image.clone());
+                    }
+                }
+                None
+            });
+
+            if let Some(screenshot) = screenshot {
+                self.tab_state.session_stats_chart_config.screenshot_requested = false;
+
+                if let Some(plot_rect) = self.tab_state.session_stats_chart_config.plot_rect {
+                    let pixels_per_point = ctx.pixels_per_point();
+                    let plot_image = screenshot.region(&plot_rect, Some(pixels_per_point));
+
+                    // Copy to clipboard using arboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let image_data = arboard::ImageData {
+                            width: plot_image.width(),
+                            height: plot_image.height(),
+                            bytes: std::borrow::Cow::from(plot_image.as_raw().to_vec()),
+                        };
+                        let _ = clipboard.set_image(image_data);
+                    }
+                }
+            }
+        }
+
         egui::Window::new("Session Stats Chart")
             .open(&mut self.tab_state.show_session_stats_chart)
             .default_width(600.0)
@@ -3577,6 +3609,7 @@ impl ToolkitTabViewer<'_> {
                     if self.tab_state.session_stats_chart_config.mode == ChartMode::Line {
                         ui.checkbox(&mut self.tab_state.session_stats_chart_config.rolling_average, "Rolling Average");
                     }
+                    ui.checkbox(&mut self.tab_state.session_stats_chart_config.show_labels, "Show Labels");
                 });
 
                 // Ship multi-selection
@@ -3620,6 +3653,11 @@ impl ToolkitTabViewer<'_> {
                 let selected_stat = self.tab_state.session_stats_chart_config.selected_stat;
                 let selected_ships = &self.tab_state.session_stats_chart_config.selected_ships;
 
+                // Track the plot rect for screenshot cropping
+                let mut plot_rect: Option<egui::Rect> = None;
+
+                let show_labels = self.tab_state.session_stats_chart_config.show_labels;
+
                 match self.tab_state.session_stats_chart_config.mode {
                     ChartMode::Line => {
                         // Filter per-game data to selected ships
@@ -3628,13 +3666,14 @@ impl ToolkitTabViewer<'_> {
 
                         if !filtered_data.is_empty() {
                             let rolling_average = self.tab_state.session_stats_chart_config.rolling_average;
-                            render_line_chart(
+                            plot_rect = render_line_chart(
                                 ui,
                                 &filtered_data,
                                 selected_stat,
                                 selected_ships,
                                 &pr_data,
                                 rolling_average,
+                                show_labels,
                             );
                         }
                     }
@@ -3649,8 +3688,21 @@ impl ToolkitTabViewer<'_> {
                         selected_stats.sort_by_key(|a| a.0);
 
                         if !selected_stats.is_empty() {
-                            render_bar_chart(ui, &selected_stats, selected_stat, &pr_data);
+                            plot_rect =
+                                Some(render_bar_chart(ui, &selected_stats, selected_stat, &pr_data, show_labels));
                         }
+                    }
+                }
+
+                // Store the plot rect for screenshot cropping
+                self.tab_state.session_stats_chart_config.plot_rect = plot_rect;
+
+                // Copy as Image button
+                if plot_rect.is_some() {
+                    ui.separator();
+                    if ui.button(format!("{} Copy as Image", icons::CAMERA)).clicked() {
+                        self.tab_state.session_stats_chart_config.screenshot_requested = true;
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
                     }
                 }
             });

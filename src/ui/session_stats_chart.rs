@@ -1,14 +1,17 @@
 //! Session statistics chart window and rendering functions
 
 use egui::Color32;
+use egui::RichText;
 use egui_plot::Bar;
 use egui_plot::BarChart;
 use egui_plot::Legend;
 use egui_plot::Line;
 use egui_plot::MarkerShape;
 use egui_plot::Plot;
+use egui_plot::PlotPoint;
 use egui_plot::PlotPoints;
 use egui_plot::Points;
+use egui_plot::Text;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::session_stats::PerGameStat;
@@ -18,7 +21,8 @@ use crate::tab_state::ChartableStat;
 /// Generate a consistent color from a ship name using its hash.
 /// Uses HSV with fixed saturation and value for good contrast.
 pub fn color_from_name(name: &str) -> Color32 {
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hash;
+    use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     name.hash(&mut hasher);
     let hash = hasher.finish();
@@ -46,7 +50,8 @@ pub fn color_from_name(name: &str) -> Color32 {
     Color32::from_rgb(((r + m) * 255.0) as u8, ((g + m) * 255.0) as u8, ((b + m) * 255.0) as u8)
 }
 
-/// Render a line chart showing per-game statistics over time
+/// Render a line chart showing per-game statistics over time.
+/// Returns the plot rectangle if rendered, for screenshot cropping.
 pub fn render_line_chart(
     ui: &mut egui::Ui,
     per_game_data: &[&PerGameStat],
@@ -54,11 +59,12 @@ pub fn render_line_chart(
     selected_ships: &[String],
     pr_data: &PersonalRatingData,
     rolling_average: bool,
-) {
+    show_labels: bool,
+) -> Option<egui::Rect> {
     // Win rate doesn't make sense per-game (but rolling average win rate does)
     if stat == ChartableStat::WinRate && !rolling_average {
         ui.label("Win Rate is not available for per-game line charts (enable Rolling Average or use Bar chart)");
-        return;
+        return None;
     }
 
     // Get unique ships from the data that are in selected_ships, preserving order
@@ -133,7 +139,7 @@ pub fn render_line_chart(
 
     if ship_data.is_empty() {
         ui.label("No data available for selected ships");
-        return;
+        return None;
     }
 
     let y_label = if rolling_average {
@@ -145,35 +151,66 @@ pub fn render_line_chart(
         stat.name()
     };
 
-    Plot::new("line_chart")
-        .legend(Legend::default())
-        .x_axis_label("Game #")
-        .y_axis_label(y_label)
-        .auto_bounds([true, true])
-        .show(ui, |plot_ui| {
-            for (name, points, color) in &ship_data {
-                // Draw the line
-                plot_ui.line(Line::new(name.clone(), PlotPoints::from(points.clone())).color(*color));
-                // Draw points/markers so single data points are visible
-                plot_ui.points(
-                    Points::new(name.clone(), PlotPoints::from(points.clone()))
-                        .color(*color)
-                        .radius(4.0)
-                        .shape(MarkerShape::Circle)
-                        .filled(true),
-                );
-            }
-        });
+    // Wrap in a group to get the full rect including axis labels
+    let group_response = ui.group(|ui| {
+        // Chart title (centered)
+        let title =
+            if rolling_average { format!("{} (Rolling Average)", stat.name()) } else { stat.name().to_string() };
+        ui.vertical_centered(|ui| ui.heading(&title));
+
+        Plot::new("line_chart")
+            .legend(Legend::default())
+            .x_axis_label("Game #")
+            .y_axis_label(y_label)
+            .auto_bounds([true, true])
+            .view_aspect(2.0)
+            .show(ui, |plot_ui| {
+                for (name, points, color) in &ship_data {
+                    // Draw the line
+                    plot_ui.line(Line::new(name.clone(), PlotPoints::from(points.clone())).color(*color));
+                    // Draw points/markers so single data points are visible
+                    plot_ui.points(
+                        Points::new(name.clone(), PlotPoints::from(points.clone()))
+                            .color(*color)
+                            .radius(4.0)
+                            .shape(MarkerShape::Circle)
+                            .filled(true),
+                    );
+                    // Add value labels at each point (if enabled)
+                    if show_labels {
+                        for point in points {
+                            let label = if point[1] >= 1000.0 {
+                                format!("{:.0}", point[1])
+                            } else if point[1] >= 10.0 {
+                                format!("{:.1}", point[1])
+                            } else {
+                                format!("{:.2}", point[1])
+                            };
+                            plot_ui.text(
+                                Text::new("", PlotPoint::new(point[0], point[1]), RichText::new(label).size(14.0))
+                                    .color(*color)
+                                    .anchor(egui::Align2::CENTER_BOTTOM),
+                            );
+                        }
+                    }
+                }
+            });
+    });
+
+    Some(group_response.response.rect)
 }
 
-/// Render a bar chart showing cumulative/average statistics per ship
+/// Render a bar chart showing cumulative/average statistics per ship.
+/// Returns the plot rectangle for screenshot cropping.
 pub fn render_bar_chart(
     ui: &mut egui::Ui,
     ship_stats: &[(&String, &PerformanceInfo)],
     stat: ChartableStat,
     pr_data: &PersonalRatingData,
-) {
-    let mut bar_charts: Vec<BarChart> = Vec::new();
+    show_labels: bool,
+) -> egui::Rect {
+    // Collect bar data with values for later text labels
+    let mut bar_data: Vec<(usize, String, f64, Color32)> = Vec::new();
 
     for (i, (ship_name, perf_info)) in ship_stats.iter().enumerate() {
         let value = match stat {
@@ -186,10 +223,7 @@ pub fn render_bar_chart(
             ChartableStat::PersonalRating => perf_info.calculate_pr(pr_data).map(|r| r.pr).unwrap_or_default(),
         };
 
-        let bar = Bar::new(i as f64, value).width(0.7);
-        let chart = BarChart::new(ship_name.as_str(), vec![bar]).color(color_from_name(ship_name));
-
-        bar_charts.push(chart);
+        bar_data.push((i, ship_name.to_string(), value, color_from_name(ship_name)));
     }
 
     let y_label = match stat {
@@ -202,17 +236,47 @@ pub fn render_bar_chart(
         ChartableStat::PersonalRating => "Avg PR",
     };
 
-    Plot::new("bar_chart")
-        .legend(Legend::default())
-        .y_axis_label(y_label)
-        .show_axes([false, true])
-        .allow_zoom(false)
-        .allow_drag(false)
-        .allow_scroll(false)
-        .view_aspect(2.0)
-        .show(ui, |plot_ui| {
-            for chart in bar_charts {
-                plot_ui.bar_chart(chart);
-            }
-        });
+    // Wrap in a group to get the full rect including axis labels
+    let group_response = ui.group(|ui| {
+        // Chart title (centered) - show "Avg" prefix for everything except Win Rate
+        let title = match stat {
+            ChartableStat::WinRate => stat.name().to_string(),
+            _ => format!("Avg {}", stat.name()),
+        };
+        ui.vertical_centered(|ui| ui.heading(&title));
+
+        Plot::new("bar_chart")
+            .legend(Legend::default())
+            .y_axis_label(y_label)
+            .show_axes([false, true])
+            .allow_zoom(false)
+            .allow_drag(false)
+            .allow_scroll(false)
+            .view_aspect(2.0)
+            .show(ui, |plot_ui| {
+                for (i, ship_name, value, color) in &bar_data {
+                    let bar = Bar::new(*i as f64, *value).width(0.7);
+                    let chart = BarChart::new(ship_name.as_str(), vec![bar]).color(*color);
+                    plot_ui.bar_chart(chart);
+
+                    // Add value label above the bar (if enabled)
+                    if show_labels {
+                        let label = if *value >= 1000.0 {
+                            format!("{:.0}", value)
+                        } else if *value >= 10.0 {
+                            format!("{:.1}", value)
+                        } else {
+                            format!("{:.2}", value)
+                        };
+                        plot_ui.text(
+                            Text::new("", PlotPoint::new(*i as f64, *value), RichText::new(label).size(14.0))
+                                .color(*color)
+                                .anchor(egui::Align2::CENTER_BOTTOM),
+                        );
+                    }
+                }
+            });
+    });
+
+    group_response.response.rect
 }
