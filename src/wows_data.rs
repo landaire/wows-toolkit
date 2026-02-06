@@ -18,9 +18,15 @@ use crate::task::BackgroundTaskKind;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 
-pub struct ShipIcon {
+pub struct GameAsset {
     pub path: String,
     pub data: Vec<u8>,
+}
+
+impl std::fmt::Debug for GameAsset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameAsset").field("path", &self.path).field("data", &"...").finish()
+    }
 }
 
 pub struct WorldOfWarshipsData {
@@ -33,7 +39,13 @@ pub struct WorldOfWarshipsData {
     /// We may fail to load game params
     pub game_metadata: Option<Arc<GameMetadataProvider>>,
 
-    pub ship_icons: HashMap<Species, Arc<ShipIcon>>,
+    pub ship_icons: HashMap<Species, Arc<GameAsset>>,
+
+    /// Ribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
+    pub ribbon_icons: HashMap<String, Arc<GameAsset>>,
+
+    /// Subribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
+    pub subribbon_icons: HashMap<String, Arc<GameAsset>>,
 
     #[allow(dead_code)]
     pub full_version: Option<wowsunpack::data::Version>,

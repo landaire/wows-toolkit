@@ -8,6 +8,7 @@ pub use models::DamageInteraction;
 pub use models::Hits;
 pub use models::PlayerReport;
 pub use models::PotentialDamage;
+pub use models::Ribbon;
 pub use models::SkillInfo;
 pub use models::TranslatedBuild;
 pub use models::ship_class_icon_from_species;
@@ -744,6 +745,80 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
+            // Extract ribbons from results_info
+            // Ribbon indices are stored as RIBBON_<NAME> in CLIENT_PUBLIC_RESULTS_INDICES
+            let ribbons = constants_inner
+                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES")
+                .and_then(|indices| {
+                    let indices_obj = indices.as_object()?;
+                    let mut ribbons = HashMap::new();
+
+                    for (key, value) in indices_obj {
+                        if !key.starts_with("RIBBON_") {
+                            continue;
+                        }
+
+                        let idx = value.as_u64()? as usize;
+                        let count = results_info?.get(idx)?.as_u64().unwrap_or(0);
+
+                        if count == 0 {
+                            continue;
+                        }
+
+                        // Look up the display name: try IDS_RIBBON_<RIBBON_NAME> first, then IDS_RIBBON_SUB<RIBBON_NAME>
+                        let primary_id = format!("IDS_RIBBON_{}", key);
+                        let (display_name, is_subribbon) = metadata_provider
+                            .localized_name_from_id(&primary_id)
+                            .filter(|name| name != &primary_id)
+                            .map(|name| (name, false))
+                            .or_else(|| {
+                                let fallback_id = format!("IDS_RIBBON_SUB{}", key);
+                                metadata_provider
+                                    .localized_name_from_id(&fallback_id)
+                                    .filter(|name| name != &fallback_id)
+                                    .map(|name| (name, true))
+                            })
+                            .unzip();
+
+                        // Skip ribbons without translations
+                        let Some(display_name) = display_name else {
+                            continue;
+                        };
+                        let is_subribbon = is_subribbon.unwrap_or(false);
+
+                        // Look up the description: try IDS_RIBBON_<RIBBON_NAME>_DESCRIPTION first, then IDS_RIBBON_DESCRIPTION_SUB<RIBBON_NAME>
+                        let primary_desc_id = format!("IDS_RIBBON_DESCRIPTION_{}", key);
+                        let description = metadata_provider
+                            .localized_name_from_id(&primary_desc_id)
+                            .filter(|desc| desc != &primary_desc_id)
+                            .or_else(|| {
+                                let fallback_desc_id = format!("IDS_RIBBON_DESCRIPTION_SUB{}", key);
+                                metadata_provider
+                                    .localized_name_from_id(&fallback_desc_id)
+                                    .filter(|desc| desc != &fallback_desc_id)
+                            })
+                            .unwrap_or_default();
+
+                        // Icon key is the lowercase ribbon name for lookup
+                        let icon_key = key.to_lowercase();
+
+                        ribbons.insert(
+                            key.to_string(),
+                            models::Ribbon {
+                                name: key.to_string(),
+                                display_name,
+                                description,
+                                icon_key,
+                                is_subribbon,
+                                count,
+                            },
+                        );
+                    }
+
+                    Some(ribbons)
+                })
+                .unwrap_or_default();
+
             let report = PlayerReport {
                 player: Arc::clone(player),
                 color: player_color,
@@ -793,6 +868,7 @@ impl UiReport {
                 hits_hover_text,
                 damage_interactions,
                 achievements,
+                ribbons,
                 personal_rating: None,
             };
 
@@ -1544,15 +1620,69 @@ impl UiReport {
                         ui.vertical(|ui| {
                             if !report.achievements.is_empty() {
                                 ui.strong("Achievements");
+
+                                for achievement in &report.achievements {
+                                    let response = if achievement.count > 1 {
+                                        ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
+                                    } else {
+                                        ui.label(&achievement.display_name)
+                                    };
+                                    response.on_hover_text(&achievement.description);
+                                }
                             }
 
-                            for achievement in &report.achievements {
-                                let response = if achievement.count > 1 {
-                                    ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
-                                } else {
-                                    ui.label(&achievement.display_name)
-                                };
-                                response.on_hover_text(&achievement.description);
+                            // Display ribbons
+                            if !report.ribbons.is_empty() {
+                                if !report.achievements.is_empty() {
+                                    ui.separator();
+                                }
+                                ui.strong("Ribbons");
+
+                                // Sort ribbons by count descending for display
+                                let mut ribbons: Vec<_> = report.ribbons.values().collect();
+                                ribbons.sort_by(|a, b| a.name.cmp(&b.name));
+
+                                // One-off fix: insert RIBBON_BULGE (torp protection) immediately after RIBBON_MAIN_CALIBER
+                                if let Some(main_caliber_idx) =
+                                    ribbons.iter().position(|r| r.name == "RIBBON_MAIN_CALIBER")
+                                {
+                                    if let Some(bulge_idx) = ribbons.iter().position(|r| r.name == "RIBBON_BULGE") {
+                                        let bulge = ribbons.remove(bulge_idx);
+                                        // Adjust index if bulge was before main_caliber
+                                        let insert_idx = if bulge_idx < main_caliber_idx {
+                                            main_caliber_idx
+                                        } else {
+                                            main_caliber_idx + 1
+                                        };
+                                        ribbons.insert(insert_idx, bulge);
+                                    }
+                                }
+
+                                let wows_data = self.wows_data.read();
+                                for ribbon in ribbons {
+                                    ui.horizontal(|ui| {
+                                        // Try to find the icon - check subribbons first, then ribbons
+                                        let icon = if ribbon.is_subribbon {
+                                            wows_data.subribbon_icons.get(&format!("sub{}", ribbon.icon_key))
+                                        } else {
+                                            wows_data.ribbon_icons.get(&ribbon.icon_key)
+                                        };
+
+                                        let size = if ribbon.is_subribbon { (32.0, 32.0) } else { (64.0, 64.0) };
+
+                                        if let Some(icon) = icon {
+                                            let image = Image::new(ImageSource::Bytes {
+                                                uri: icon.path.clone().into(),
+                                                bytes: icon.data.clone().into(),
+                                            })
+                                            .fit_to_exact_size(size.into());
+                                            ui.add(image).on_hover_text(&ribbon.description);
+                                        }
+
+                                        ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
+                                            .on_hover_text(&ribbon.description);
+                                    });
+                                }
                             }
                         });
                     }

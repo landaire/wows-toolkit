@@ -16,11 +16,11 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
-use crate::wows_data::ShipIcon;
+use crate::wows_data::GameAsset;
 use crate::wows_data::WorldOfWarshipsData;
 
 /// Returns the ship class icon for a given species.
-pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<ShipIcon>> {
+pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<GameAsset>> {
     wows_data.ship_icons.get(&species).cloned()
 }
 
@@ -212,6 +212,17 @@ pub struct Achievement {
     pub count: usize,
 }
 
+/// A ribbon earned in battle.
+#[derive(Clone)]
+pub struct Ribbon {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub icon_key: String,
+    pub is_subribbon: bool,
+    pub count: u64,
+}
+
 /// Report for a single player in a battle.
 pub struct PlayerReport {
     pub player: Arc<Player>,
@@ -219,7 +230,7 @@ pub struct PlayerReport {
     pub name_text: RichText,
     pub clan_text: Option<RichText>,
     pub ship_species_text: String,
-    pub icon: Option<Arc<ShipIcon>>,
+    pub icon: Option<Arc<GameAsset>>,
     pub division_label: Option<String>,
     pub base_xp: Option<i64>,
     pub base_xp_text: Option<RichText>,
@@ -265,6 +276,7 @@ pub struct PlayerReport {
     pub observed_kills: i64,
     pub translated_build: Option<TranslatedBuild>,
     pub achievements: Vec<Achievement>,
+    pub ribbons: HashMap<String, Ribbon>,
     pub personal_rating: Option<crate::personal_rating::PersonalRatingResult>,
 }
 
@@ -312,7 +324,7 @@ impl PlayerReport {
         &self.ship_species_text
     }
 
-    pub fn icon(&self) -> Option<Arc<ShipIcon>> {
+    pub fn icon(&self) -> Option<Arc<GameAsset>> {
         self.icon.clone()
     }
 

@@ -7,9 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
@@ -33,9 +31,7 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{
-    self,
-};
+use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
@@ -55,14 +51,12 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{
-    self,
-};
+use crate::twitch::{self};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
-use crate::wows_data::ShipIcon;
+use crate::wows_data::GameAsset;
 use crate::wows_data::WorldOfWarshipsData;
 
 pub struct DownloadProgress {
@@ -293,7 +287,44 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     }
 }
 
-fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<ShipIcon>> {
+fn load_ribbon_icons(
+    file_tree: &FileNode,
+    pkg_loader: &PkgFileLoader,
+    dir_path: &str,
+) -> HashMap<String, Arc<GameAsset>> {
+    let mut icons = HashMap::new();
+
+    for (path, _) in file_tree.paths() {
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        if !path_str.starts_with(dir_path) {
+            continue;
+        }
+
+        // Extract the filename without extension as the key
+        let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+
+        let Ok(icon_node) = file_tree.find(&*path_str) else {
+            continue;
+        };
+
+        let Some(file_info) = icon_node.file_info() else {
+            continue;
+        };
+
+        let mut icon_data = Vec::with_capacity(file_info.unpacked_size as usize);
+        if icon_node.read_file(pkg_loader, &mut icon_data).is_err() {
+            continue;
+        }
+
+        icons.insert(file_name.to_string(), Arc::new(GameAsset { path: path_str.to_string(), data: icon_data }));
+    }
+
+    icons
+}
+
+fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<GameAsset>> {
     // Try loading ship icons
     let species = [
         Species::AirCarrier,
@@ -304,7 +335,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
         Species::Auxiliary,
     ];
 
-    let icons: HashMap<Species, Arc<ShipIcon>> = HashMap::from_iter(species.iter().map(|species| {
+    let icons: HashMap<Species, Arc<GameAsset>> = HashMap::from_iter(species.iter().map(|species| {
         let path =
             format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
         // let path = format!(
@@ -318,7 +349,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
-        (species.clone(), Arc::new(ShipIcon { path, data: icon_data }))
+        (species.clone(), Arc::new(GameAsset { path, data: icon_data }))
     }));
 
     icons
@@ -445,6 +476,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     debug!("Loading icons");
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
+    let ribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/");
+    let subribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/subribbons/");
 
     let data = WorldOfWarshipsData {
         game_metadata: metadata_provider.clone(),
@@ -454,6 +487,8 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         patch_version: game_patch,
         full_version,
         ship_icons: icons,
+        ribbon_icons,
+        subribbon_icons,
         replays_dir: replays_dir.clone(),
         build_dir,
     };
