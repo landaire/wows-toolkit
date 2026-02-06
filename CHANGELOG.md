@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.46] - 2026-02-06
+
+### 🚀 Features
+
+- Show player ribbons when row is expanded
+
+### 🐛 Bug Fixes
+
+- Cumulative -> average
+- Maybe fix icon not working in CI builds?
+
 ## [0.1.45] - 2026-02-05
 
 ### 🚀 Features
