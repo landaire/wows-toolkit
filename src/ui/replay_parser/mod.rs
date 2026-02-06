@@ -8,7 +8,6 @@ pub use models::DamageInteraction;
 pub use models::Hits;
 pub use models::PlayerReport;
 pub use models::PotentialDamage;
-pub use models::Ribbon;
 pub use models::SkillInfo;
 pub use models::TranslatedBuild;
 pub use models::ship_class_icon_from_species;
@@ -50,7 +49,7 @@ use crate::task::ReplayExportFormat;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::update_background_task;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::wows_data::SharedWoWsData;
 
 use damage_types::*;
 use egui::Color32;
@@ -127,7 +126,7 @@ pub struct UiReport {
     player_reports: Vec<PlayerReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    wows_data: SharedWoWsData,
     twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
@@ -1645,17 +1644,16 @@ impl UiReport {
                                 // One-off fix: insert RIBBON_BULGE (torp protection) immediately after RIBBON_MAIN_CALIBER
                                 if let Some(main_caliber_idx) =
                                     ribbons.iter().position(|r| r.name == "RIBBON_MAIN_CALIBER")
+                                    && let Some(bulge_idx) = ribbons.iter().position(|r| r.name == "RIBBON_BULGE")
                                 {
-                                    if let Some(bulge_idx) = ribbons.iter().position(|r| r.name == "RIBBON_BULGE") {
-                                        let bulge = ribbons.remove(bulge_idx);
-                                        // Adjust index if bulge was before main_caliber
-                                        let insert_idx = if bulge_idx < main_caliber_idx {
-                                            main_caliber_idx
-                                        } else {
-                                            main_caliber_idx + 1
-                                        };
-                                        ribbons.insert(insert_idx, bulge);
-                                    }
+                                    let bulge = ribbons.remove(bulge_idx);
+                                    // Adjust index if bulge was before main_caliber
+                                    let insert_idx = if bulge_idx < main_caliber_idx {
+                                        main_caliber_idx
+                                    } else {
+                                        main_caliber_idx + 1
+                                    };
+                                    ribbons.insert(insert_idx, bulge);
                                 }
 
                                 let wows_data = self.wows_data.read();

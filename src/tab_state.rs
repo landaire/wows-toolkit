@@ -41,7 +41,7 @@ use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
 use crate::wows_data::ReplayDependencies;
 use crate::wows_data::ReplayLoader;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::wows_data::SharedWoWsData;
 
 /// Available statistics for charting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -129,7 +129,7 @@ pub type PathFileNodePair = (Arc<PathBuf>, FileNode);
 #[serde(default)]
 pub struct TabState {
     #[serde(skip)]
-    pub world_of_warships_data: Option<Arc<RwLock<WorldOfWarshipsData>>>,
+    pub world_of_warships_data: Option<SharedWoWsData>,
 
     pub filter: String,
 

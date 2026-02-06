@@ -4,7 +4,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 use http_body_util::BodyExt;
-use parking_lot::RwLock;
 use reqwest::Url;
 use rootcause::Report;
 use rootcause::prelude::ResultExt;
@@ -17,7 +16,7 @@ use crate::task::BackgroundTaskCompletion;
 use crate::task::DownloadProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerIndex;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::wows_data::SharedWoWsData;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -100,7 +99,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
 
 fn unpack_mod(
     tarball: &[u8],
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    wows_data: SharedWoWsData,
     mod_info: &ModInfo,
     tx: Sender<DownloadProgress>,
 ) -> rootcause::Result<()> {
@@ -190,12 +189,7 @@ fn unpack_mod(
     Ok(())
 }
 
-fn install_mod(
-    runtime: Arc<Runtime>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
-    mod_info: ModInfo,
-    tx: mpsc::Sender<BackgroundTask>,
-) {
+fn install_mod(runtime: Arc<Runtime>, wows_data: SharedWoWsData, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
     eprintln!("downloading mod");
     let (download_task_tx, download_task_rx) = mpsc::channel();
     let (download_progress_tx, download_progress_rx) = mpsc::channel();
@@ -244,7 +238,7 @@ fn install_mod(
 }
 
 fn uninstall_mod(
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    wows_data: SharedWoWsData,
     mod_info: ModInfo,
     tx: mpsc::Sender<BackgroundTask>,
 ) -> rootcause::Result<()> {
@@ -287,7 +281,7 @@ fn uninstall_mod(
 
 pub fn start_mod_manager_thread(
     runtime: Arc<Runtime>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    wows_data: SharedWoWsData,
     receiver: mpsc::Receiver<ModInfo>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
 ) {

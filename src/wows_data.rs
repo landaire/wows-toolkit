@@ -29,6 +29,8 @@ impl std::fmt::Debug for GameAsset {
     }
 }
 
+pub type SharedWoWsData = Arc<RwLock<Box<WorldOfWarshipsData>>>;
+
 pub struct WorldOfWarshipsData {
     pub file_tree: FileNode,
 
@@ -62,7 +64,7 @@ pub struct WorldOfWarshipsData {
 #[derive(Clone)]
 pub struct ReplayDependencies {
     pub game_constants: Arc<RwLock<serde_json::Value>>,
-    pub wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    pub wows_data: SharedWoWsData,
     pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
     pub background_task_sender: mpsc::Sender<BackgroundTask>,

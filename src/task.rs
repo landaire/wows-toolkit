@@ -57,6 +57,7 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
 use crate::wows_data::GameAsset;
+use crate::wows_data::SharedWoWsData;
 use crate::wows_data::WorldOfWarshipsData;
 
 pub struct DownloadProgress {
@@ -206,7 +207,7 @@ impl BackgroundTask {
 pub enum BackgroundTaskCompletion {
     DataLoaded {
         new_dir: PathBuf,
-        wows_data: WorldOfWarshipsData,
+        wows_data: Box<WorldOfWarshipsData>,
         replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
     },
     ReplayLoaded {
@@ -508,7 +509,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
 
     debug!("Sending background task completion");
 
-    Ok(BackgroundTaskCompletion::DataLoaded { new_dir: wows_directory, wows_data: data, replays })
+    Ok(BackgroundTaskCompletion::DataLoaded { new_dir: wows_directory, wows_data: Box::new(data), replays })
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -892,7 +893,7 @@ pub enum ReplayBackgroundParserThreadMessage {
 pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
-    pub wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    pub wows_data: SharedWoWsData,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub should_send_replays: bool,
     pub data_export_settings: DataExportSettings,
@@ -993,7 +994,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
 
 pub fn start_populating_player_inspector(
     replays: Vec<PathBuf>,
-    wows_data: Arc<RwLock<WorldOfWarshipsData>>,
+    wows_data: SharedWoWsData,
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();

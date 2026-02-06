@@ -12,4 +12,4 @@ run = "cargo fix --all-features --allow-dirty"
 
 [tasks.clippy-fix]
 description = "Runs cargo-clippy-fix against all features"
-run = "cargo fix --all-features --allow-dirty"
+run = "cargo clippy --fix --all-features --allow-dirty"

@@ -48,9 +48,7 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]

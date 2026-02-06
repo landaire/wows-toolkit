@@ -200,8 +200,8 @@ impl ToolkitTabViewer<'_> {
                         icons::X_CIRCLE
                     )
                 };
-                if ui.button(text).clicked() {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new()
+                if ui.button(text).clicked()
+                    && let Ok(mut clipboard) = arboard::Clipboard::new()
                         && let Ok(contents) = clipboard.get_text()
                     {
                         let token: Result<Token, _> = contents.parse();
@@ -212,7 +212,6 @@ impl ToolkitTabViewer<'_> {
                             let _ = tx.blocking_send(crate::twitch::TwitchUpdate::Token(token));
                         }
                     }
-                }
                 ui.label("Monitored Channel (Default to Self)");
                 let response = ui.text_edit_singleline(&mut self.tab_state.settings.twitch_monitored_channel);
                 if response.lost_focus()
