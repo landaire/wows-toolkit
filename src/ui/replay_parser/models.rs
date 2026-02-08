@@ -209,6 +209,7 @@ pub struct Achievement {
     pub game_param: Arc<Param>,
     pub display_name: String,
     pub description: String,
+    pub icon_key: String,
     pub count: usize,
 }
 

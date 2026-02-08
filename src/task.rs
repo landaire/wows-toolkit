@@ -490,6 +490,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         ship_icons: icons,
         ribbon_icons,
         subribbon_icons,
+        achievement_icons: HashMap::new(),
         replays_dir: replays_dir.clone(),
         build_dir,
     };

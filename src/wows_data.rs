@@ -49,6 +49,9 @@ pub struct WorldOfWarshipsData {
     /// Subribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
     pub subribbon_icons: HashMap<String, Arc<GameAsset>>,
 
+    /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
+    pub achievement_icons: HashMap<String, Arc<GameAsset>>,
+
     #[allow(dead_code)]
     pub full_version: Option<wowsunpack::data::Version>,
     pub patch_version: usize,
@@ -57,6 +60,27 @@ pub struct WorldOfWarshipsData {
 
     #[allow(dead_code)]
     pub build_dir: PathBuf,
+}
+
+impl WorldOfWarshipsData {
+    /// Get an achievement icon by name, lazy-loading and caching it from the game files.
+    /// The icon_key should be the lowercase achievement name (e.g., "pve_honorsstar").
+    pub fn achievement_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
+        if let Some(icon) = self.achievement_icons.get(icon_key) {
+            return Some(icon.clone());
+        }
+
+        let path = format!("gui/achievements/icon_achievement_{icon_key}.png");
+        let icon_node = self.file_tree.find(&path).ok()?;
+        let file_info = icon_node.file_info()?;
+
+        let mut icon_data = Vec::with_capacity(file_info.unpacked_size as usize);
+        icon_node.read_file(&self.pkg_loader, &mut icon_data).ok()?;
+
+        let asset = Arc::new(GameAsset { path, data: icon_data });
+        self.achievement_icons.insert(icon_key.to_string(), asset.clone());
+        Some(asset)
+    }
 }
 
 /// Shared dependencies needed for loading and parsing replays.

@@ -723,18 +723,18 @@ impl UiReport {
                                 return None;
                             };
 
-                            let achievement_name = metadata_provider
-                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_{}", achievement_data.ui_name()))?;
+                            let ui_name = achievement_data.ui_name().to_string();
+                            let achievement_name =
+                                metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_{ui_name}"))?;
 
-                            let achievement_description = metadata_provider.localized_name_from_id(&format!(
-                                "IDS_ACHIEVEMENT_DESCRIPTION_{}",
-                                achievement_data.ui_name()
-                            ))?;
+                            let achievement_description = metadata_provider
+                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_DESCRIPTION_{ui_name}"))?;
 
                             Some(Achievement {
                                 game_param,
                                 display_name: achievement_name,
                                 description: achievement_description,
+                                icon_key: ui_name,
                                 count: achievement_count as usize,
                             })
                         })
@@ -1620,14 +1620,27 @@ impl UiReport {
                             if !report.achievements.is_empty() {
                                 ui.strong("Achievements");
 
+                                let mut wows_data = self.wows_data.write();
                                 for achievement in &report.achievements {
-                                    let response = if achievement.count > 1 {
-                                        ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
-                                    } else {
-                                        ui.label(&achievement.display_name)
-                                    };
-                                    response.on_hover_text(&achievement.description);
+                                    ui.horizontal(|ui| {
+                                        if let Some(icon) = wows_data.achievement_icon(&achievement.icon_key) {
+                                            let image = Image::new(ImageSource::Bytes {
+                                                uri: icon.path.clone().into(),
+                                                bytes: icon.data.clone().into(),
+                                            })
+                                            .fit_to_exact_size((32.0, 32.0).into());
+                                            ui.add(image).on_hover_text(&achievement.description);
+                                        }
+
+                                        let response = if achievement.count > 1 {
+                                            ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
+                                        } else {
+                                            ui.label(&achievement.display_name)
+                                        };
+                                        response.on_hover_text(&achievement.description);
+                                    });
                                 }
+                                drop(wows_data);
                             }
 
                             // Display ribbons
@@ -3492,8 +3505,18 @@ impl ToolkitTabViewer<'_> {
             if !all_achievements.is_empty() {
                 ui.strong("Achievements");
 
+                let mut wows_data = self.tab_state.world_of_warships_data.as_ref().unwrap().write();
                 for achievement in all_achievements {
                     ui.horizontal(|ui| {
+                        if let Some(icon) = wows_data.achievement_icon(&achievement.icon_key) {
+                            let image = Image::new(ImageSource::Bytes {
+                                uri: icon.path.clone().into(),
+                                bytes: icon.data.clone().into(),
+                            })
+                            .fit_to_exact_size((32.0, 32.0).into());
+                            ui.add(image).on_hover_text(&achievement.description);
+                        }
+
                         let response = ui.label(achievement.display_name);
                         response.on_hover_text(&achievement.description);
 
@@ -3502,6 +3525,7 @@ impl ToolkitTabViewer<'_> {
                         });
                     });
                 }
+                drop(wows_data);
             }
 
             ui.separator();
