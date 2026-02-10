@@ -2422,7 +2422,8 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
         for message in battle_report.game_chat() {
-            let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+            let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } =
+                message;
 
             let translated_text = if sender_relation.is_none() {
                 self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned))
@@ -2682,6 +2683,30 @@ impl ToolkitTabViewer<'_> {
                     };
 
                     self.tab_state.file_viewer.lock().push(viewer);
+                }
+
+                if self.tab_state.world_of_warships_data.is_some()
+                    && ui.button(format!("{} Render Replay", icons::PLAY)).clicked()
+                {
+                    let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
+                    let pkt_data = replay_file.replay_file.packet_data.clone();
+                    let map_name = replay_file.replay_file.meta.mapName.clone();
+                    let game_duration = replay_file.replay_file.meta.duration as f32;
+                    let wows_data = self.tab_state.world_of_warships_data.clone().unwrap();
+                    let asset_cache = self.tab_state.renderer_asset_cache.clone();
+                    let initial_options = crate::replay_renderer::render_options_from_saved(
+                        &self.tab_state.settings.renderer_options,
+                    );
+                    let viewer = crate::replay_renderer::launch_replay_renderer(
+                        raw_meta,
+                        pkt_data,
+                        map_name,
+                        game_duration,
+                        wows_data,
+                        asset_cache,
+                        initial_options,
+                    );
+                    self.tab_state.replay_renderers.lock().push(viewer);
                 }
 
                 if let Some(self_report) = self_report

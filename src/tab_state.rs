@@ -161,6 +161,12 @@ pub struct TabState {
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
 
     #[serde(skip)]
+    pub replay_renderers: Mutex<Vec<crate::replay_renderer::ReplayRendererViewer>>,
+
+    #[serde(skip)]
+    pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay_renderer::RendererAssetCache>>,
+
+    #[serde(skip)]
     pub file_watcher: Option<RecommendedWatcher>,
 
     #[serde(skip)]
@@ -253,6 +259,8 @@ impl Default for TabState {
             last_progress: Default::default(),
             replay_parser_tab: Default::default(),
             file_viewer: Default::default(),
+            replay_renderers: Default::default(),
+            renderer_asset_cache: Default::default(),
             file_watcher: None,
             replay_files: None,
             file_receiver: None,

@@ -825,6 +825,28 @@ impl WowsToolkitApp {
             .collect();
         drop(file_viewer);
 
+        // Draw replay renderer viewports
+        {
+            let mut replay_renderers = self.tab_state.replay_renderers.lock();
+            let mut remove_renderers = Vec::new();
+            for (idx, renderer) in replay_renderers.iter().enumerate() {
+                renderer.draw(ctx);
+                if !renderer.open.load(Ordering::Relaxed) {
+                    remove_renderers.push(idx);
+                }
+                // Check if renderer wants to save default options
+                if let Some(saved) = renderer.pending_defaults_save.lock().take() {
+                    self.tab_state.settings.renderer_options = saved;
+                }
+            }
+
+            *replay_renderers = replay_renderers
+                .drain(..)
+                .enumerate()
+                .filter_map(|(idx, r)| if !remove_renderers.contains(&idx) { Some(r) } else { None })
+                .collect();
+        }
+
         self.ui_file_drag_and_drop(ctx);
 
         ctx.request_repaint_after_secs(1.0);

@@ -1,6 +1,6 @@
 [package]
 name = "wows_toolkit"
-version = "0.1.46"
+version = "0.1.47-alpha1"
 authors = ["landaire"]
 edition = "2024"
 rust-version = "1.89"
@@ -73,6 +73,9 @@ rootcause = "0.11.1"
 egui_ltreeview = { version = "0.6.1", features = ["persistence"] }
 egui_plot = "0.34.0"
 arboard = "3.6.1"
+minimap_renderer = "0.1.0"
+anyhow = "1.0"
+ouroboros = "0.18"
 
 [build-dependencies]
 winresource = "0.1.20"
@@ -111,6 +114,7 @@ debug = true
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
 wows_replays = { path = "../wows-replays/parser" }
 wowsunpack = { path = "../wowsunpack" }
+minimap_renderer = { path = "../wows-replays/minimap-renderer" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }

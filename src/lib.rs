@@ -10,6 +10,7 @@ mod mod_manager;
 mod personal_rating;
 mod plaintext_viewer;
 mod replay_export;
+pub mod replay_renderer;
 mod session_stats;
 mod settings;
 mod tab_state;

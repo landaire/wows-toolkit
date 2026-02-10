@@ -88,6 +88,54 @@ pub fn default_sent_replays() -> Arc<RwLock<HashSet<String>>> {
     Default::default()
 }
 
+/// Serializable mirror of minimap_renderer's RenderOptions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedRenderOptions {
+    #[serde(default = "default_bool::<true>")]
+    pub show_hp_bars: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_tracers: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_torpedoes: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_planes: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_smoke: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_score: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_timer: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_kill_feed: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_player_names: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_ship_names: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_capture_points: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_buildings: bool,
+}
+
+impl Default for SavedRenderOptions {
+    fn default() -> Self {
+        Self {
+            show_hp_bars: true,
+            show_tracers: true,
+            show_torpedoes: true,
+            show_planes: true,
+            show_smoke: true,
+            show_score: true,
+            show_timer: true,
+            show_kill_feed: true,
+            show_player_names: true,
+            show_ship_names: true,
+            show_capture_points: true,
+            show_buildings: true,
+        }
+    }
+}
+
 /// Global application settings
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
@@ -126,6 +174,8 @@ pub struct Settings {
     pub debug_mode: bool,
     #[serde(default)]
     pub build_consent_window_shown: bool,
+    #[serde(default)]
+    pub renderer_options: SavedRenderOptions,
 }
 
 impl Default for Settings {
@@ -150,6 +200,7 @@ impl Default for Settings {
             has_037_crew_skills_fix: true,
             has_038_game_params_fix: true,
             has_041_game_params_fix: true,
+            renderer_options: Default::default(),
         }
     }
 }
