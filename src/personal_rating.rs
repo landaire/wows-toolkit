@@ -12,6 +12,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::info;
+use wows_replays::types::GameParamId;
 
 /// URL to fetch expected values from wows-numbers.com
 const EXPECTED_VALUES_URL: &str = "https://api.wows-numbers.com/personal/rating/expected/json/";
@@ -127,7 +128,7 @@ impl PersonalRatingResult {
 /// Statistics for a single ship used in PR calculation
 #[derive(Debug, Clone, Default)]
 pub struct ShipBattleStats {
-    pub ship_id: u64,
+    pub ship_id: GameParamId,
     pub battles: u32,
     pub damage: u64,
     pub wins: u32,
@@ -164,8 +165,8 @@ impl PersonalRatingData {
     }
 
     /// Get expected values for a ship by its ID
-    pub fn get_ship_expected(&self, ship_id: u64) -> Option<&ShipExpectedValues> {
-        self.data.as_ref()?.data.get(&ship_id.to_string())?.as_values()
+    pub fn get_ship_expected(&self, ship_id: GameParamId) -> Option<&ShipExpectedValues> {
+        self.data.as_ref()?.data.get(&ship_id.raw().to_string())?.as_values()
     }
 
     /// Calculate PR for a collection of ship battle stats

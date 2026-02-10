@@ -20,14 +20,15 @@ use jiff::tz::TimeZone;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
+use wows_replays::types::AccountId;
 
 use crate::app::ToolkitTabViewer;
 use crate::ui::replay_parser::Replay;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
-    tracked_players_by_time: BTreeMap<Timestamp, Vec<i64>>,
-    tracked_players: HashMap<i64, TrackedPlayer>,
+    tracked_players_by_time: BTreeMap<Timestamp, Vec<AccountId>>,
+    tracked_players: HashMap<AccountId, TrackedPlayer>,
     filter_time_period: TimePeriod,
     sort_order: SortedBy,
     player_filter: String,
@@ -126,7 +127,7 @@ impl PlayerTracker {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TrackedPlayer {
     last_name: String,
-    db_id: i64,
+    db_id: AccountId,
     names: HashSet<String>,
     clan_id: i64,
     clan: String,
@@ -438,7 +439,7 @@ impl ToolkitTabViewer<'_> {
                         .body(|mut body| {
                             let tracked_players_by_ts = &player_tracker_settings.tracked_players_by_time;
                             // Filter by the date range
-                            let player_range: BTreeSet<_> =
+                            let player_range: HashSet<_> =
                                 if let Some(filter_range) = player_tracker_settings.filter_time_period.to_date() {
                                     tracked_players_by_ts
                                         .iter()

@@ -15,7 +15,7 @@ use thousands::Separable;
 use tracing::debug;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::Player;
-use wows_replays::analyzer::battle_controller::Relation;
+use wows_replays::types::Relation;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;

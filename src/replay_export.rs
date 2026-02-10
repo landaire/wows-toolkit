@@ -8,6 +8,7 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::ShipConfig;
+use wows_replays::types::AccountId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
@@ -92,7 +93,7 @@ pub struct Metadata {
 #[derive(Serialize)]
 pub struct Player {
     /// WG database ID
-    db_id: i64,
+    db_id: AccountId,
     /// Which server this player is on
     realm: String,
     /// Player name
@@ -162,7 +163,7 @@ impl From<&crate::ui::replay_parser::DamageInteraction> for DamageInteraction {
 pub struct FlattenedVehicle {
     player_name: String,
     player_clan: String,
-    player_id: i64,
+    player_id: AccountId,
     player_realm: String,
     /// Ship index that can be mapped to a GameParam
     index: String,
@@ -462,7 +463,7 @@ pub struct ServerResults {
     raw_xp: i64,
     damage: u64,
     damage_details: Damage,
-    damage_interactions: HashMap<i64, DamageInteraction>,
+    damage_interactions: HashMap<AccountId, DamageInteraction>,
     hits_details: Hits,
     spotting_damage: u64,
     potential_damage: u64,
@@ -479,7 +480,7 @@ pub struct ServerResults {
 
 #[derive(Serialize)]
 pub struct Message {
-    sender_db_id: i64,
+    sender_db_id: AccountId,
     channel: ChatChannel,
     message: String,
 }

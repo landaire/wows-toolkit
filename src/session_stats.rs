@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::types::GameParamId;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::personal_rating::PersonalRatingData;
@@ -15,7 +16,7 @@ use crate::ui::replay_parser::Replay;
 #[derive(Clone)]
 pub struct PerGameStat {
     pub ship_name: String,
-    pub ship_id: u64,
+    pub ship_id: GameParamId,
     #[allow(dead_code)]
     pub game_time: String,
     pub damage: u64,
@@ -81,7 +82,7 @@ impl PerGameStat {
 /// Performance statistics for a single ship aggregated from multiple games
 #[derive(Default)]
 pub struct PerformanceInfo {
-    ship_id: Option<u64>,
+    ship_id: Option<GameParamId>,
     wins: usize,
     losses: usize,
     total_frags: i64,
@@ -334,9 +335,9 @@ impl SessionStats {
     /// Calculate Personal Rating per ship for this session
     /// Returns a map of ship_id -> PR result
     #[allow(dead_code)]
-    pub fn calculate_pr_per_ship(&self, pr_data: &PersonalRatingData) -> HashMap<u64, PersonalRatingResult> {
+    pub fn calculate_pr_per_ship(&self, pr_data: &PersonalRatingData) -> HashMap<GameParamId, PersonalRatingResult> {
         // Group stats by ship_id
-        let mut ship_stats: HashMap<u64, ShipBattleStats> = HashMap::new();
+        let mut ship_stats: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
 
         for replay in &self.session_replays {
             if let Some(stats) = replay.read().to_battle_stats() {

@@ -1,5 +1,6 @@
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::types::AccountId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -9,7 +10,7 @@ use wowsunpack::game_params::types::Species;
 pub(crate) struct BuildTrackerPayload {
     game_version: Version,
     // Player's WG DB ID
-    player_id: i64,
+    player_id: AccountId,
     // Which realm this game was played on
     realm: String,
     /// Ship's GameParams index

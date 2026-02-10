@@ -7,8 +7,9 @@ use egui::Color32;
 use egui::RichText;
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::Player;
-use wows_replays::analyzer::battle_controller::Relation;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
+use wows_replays::types::AccountId;
+use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
@@ -263,7 +264,7 @@ pub struct PlayerReport {
     pub received_damage_text: Option<RichText>,
     pub received_damage_hover_text: Option<RichText>,
     pub received_damage_report: Option<Damage>,
-    pub damage_interactions: Option<HashMap<i64, DamageInteraction>>,
+    pub damage_interactions: Option<HashMap<AccountId, DamageInteraction>>,
     pub fires: Option<u64>,
     pub floods: Option<u64>,
     pub citadels: Option<u64>,
@@ -473,7 +474,7 @@ impl PlayerReport {
         self.hits_report.as_ref()
     }
 
-    pub fn damage_interactions(&self) -> Option<&HashMap<i64, DamageInteraction>> {
+    pub fn damage_interactions(&self) -> Option<&HashMap<AccountId, DamageInteraction>> {
         self.damage_interactions.as_ref()
     }
 

@@ -82,13 +82,14 @@ use tracing::debug;
 use tracing::error;
 use wows_replays::ReplayFile;
 use wows_replays::VehicleInfoMeta;
-use wows_replays::analyzer::AnalyzerMut;
+use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::BattleReport;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::types::AccountId;
 
 use itertools::Itertools;
 use wowsunpack::data::ResourceLoader;
@@ -604,7 +605,7 @@ impl UiReport {
                     for (victim, victim_interactions) in dict {
                         // Not sure if this can ever fail, but we can report wrong info to a "nobody" player
                         // or something
-                        let victim_id: i64 = victim.parse().unwrap_or_default();
+                        let victim_id: AccountId = AccountId(victim.parse::<u64>().unwrap_or_default());
                         let vehicle_interaction_details_idx =
                             constants_inner.pointer("/CLIENT_VEH_INTERACTION_DETAILS")?.as_array();
 
@@ -990,7 +991,7 @@ impl UiReport {
             let player = report.player();
             let player_state = player.initial_state();
             let team_id = player_state.team_id() != self_player_team_id;
-            let db_id = player_state.db_id();
+            let db_id = player_state.db_id().raw();
 
             let key = match column {
                 SortColumn::Name => SortKey::String(player_state.username().to_string()),
@@ -1873,7 +1874,7 @@ impl UiReport {
             let frags = report.kills.unwrap_or(0);
 
             let stats = crate::personal_rating::ShipBattleStats {
-                ship_id: ship_id as u64,
+                ship_id: ship_id.into(),
                 battles: 1,
                 damage: actual_damage,
                 wins: if is_win { 1 } else { 0 },
@@ -2221,7 +2222,7 @@ impl Replay {
 
     pub fn vehicle_name(&self, metadata_provider: &GameMetadataProvider) -> String {
         self.player_vehicle()
-            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId as u32))
+            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw()))
             .and_then(|id| metadata_provider.localized_name_from_id(id))
             .unwrap_or_else(|| "Spectator".to_string())
     }
@@ -2294,24 +2295,27 @@ impl Replay {
             .into());
         }
 
-        // Parse packets
+        // Parse packets one at a time
         let packet_data = &self.replay_file.packet_data;
         let mut controller = BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
         let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
 
-        let report = match p.parse_packets_mut(packet_data, &mut controller) {
-            Ok(()) => {
-                controller.finish();
-                controller.build_report()
+        let mut remaining = &packet_data[..];
+        while !remaining.is_empty() {
+            match p.parse_packet(remaining) {
+                Ok((rest, packet)) => {
+                    controller.process(&packet);
+                    remaining = rest;
+                }
+                Err(e) => {
+                    debug!("Packet parse error: {:?}", e);
+                    break;
+                }
             }
-            Err(e) => {
-                debug!("{:?}", e);
-                controller.finish();
-                controller.build_report()
-            }
-        };
+        }
+        controller.finish();
 
-        Ok(report)
+        Ok(controller.build_report())
     }
 
     pub fn build_ui_report(&mut self, deps: &crate::wows_data::ReplayDependencies) {
@@ -2418,7 +2422,7 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
         for message in battle_report.game_chat() {
-            let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player } = message;
+            let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
 
             let translated_text = if sender_relation.is_none() {
                 self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned))
@@ -2574,7 +2578,7 @@ impl ToolkitTabViewer<'_> {
                             && let Ok(mut file) = std::fs::File::create(path)
                         {
                             for message in report.game_chat() {
-                                let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
+                                let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
 
                                 match player {
                                     Some(player) if !player.initial_state().clan().is_empty() => {
@@ -2593,7 +2597,7 @@ impl ToolkitTabViewer<'_> {
                     if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
-                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player } = message;
+                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
                             match player {
                                 Some(player) if !player.initial_state().clan().is_empty() => {
                                     let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
