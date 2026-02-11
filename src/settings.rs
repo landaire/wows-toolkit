@@ -115,6 +115,8 @@ pub struct SavedRenderOptions {
     pub show_capture_points: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_buildings: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_turret_direction: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -132,6 +134,7 @@ impl Default for SavedRenderOptions {
             show_ship_names: true,
             show_capture_points: true,
             show_buildings: true,
+            show_turret_direction: true,
         }
     }
 }

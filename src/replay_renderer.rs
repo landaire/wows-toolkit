@@ -306,6 +306,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_ship_names: saved.show_ship_names,
         show_capture_points: saved.show_capture_points,
         show_buildings: saved.show_buildings,
+        show_turret_direction: saved.show_turret_direction,
     }
 }
 
@@ -323,6 +324,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_ship_names: opts.show_ship_names,
         show_capture_points: opts.show_capture_points,
         show_buildings: opts.show_buildings,
+        show_turret_direction: opts.show_turret_direction,
     }
 }
 
@@ -1063,6 +1065,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
         DrawCommand::KillFeed { .. } => opts.show_kill_feed,
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
+        DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
     }
 }
 
@@ -1758,6 +1761,18 @@ fn draw_command_to_shapes(
             let center = transform.minimap_to_screen(pos);
             let r = if *is_alive { transform.scale_distance(2.0) } else { transform.scale_distance(1.5) };
             shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
+        }
+
+        DrawCommand::TurretDirection { pos, yaw, color, length } => {
+            let start = transform.minimap_to_screen(pos);
+            // yaw is screen-space: 0 = east, PI/2 = north
+            let dx = *length as f32 * yaw.cos();
+            let dy = -*length as f32 * yaw.sin();
+            let end = Pos2::new(start.x + transform.scale_distance(dx), start.y + transform.scale_distance(dy));
+            let stroke_width = transform.scale_stroke(1.5);
+            let c = color_from_rgb(*color);
+            let line_color = Color32::from_rgba_premultiplied(c.r(), c.g(), c.b(), 180);
+            shapes.push(Shape::line_segment([start, end], Stroke::new(stroke_width, line_color)));
         }
     }
 
@@ -3162,6 +3177,9 @@ impl ReplayRendererViewer {
                                             changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
                                             changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
                                             changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
+                                            changed |= ui
+                                                .checkbox(&mut opts.show_turret_direction, "Turret Direction")
+                                                .changed();
 
                                             if changed {
                                                 shared_state.lock().options = opts.clone();
