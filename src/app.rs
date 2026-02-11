@@ -217,11 +217,23 @@ impl WowsToolkitApp {
         let mut had_saved_state = false;
         let mut state = if let Some(storage) = cc.storage {
             let mut saved_state: Self = if storage.get_string(APP_KEY).is_some() {
-                had_saved_state = true;
                 // if the app key is present and we get no result back, that means deserialization
                 // failed and we should panic because this is an app bug -- likely caused by
                 // not setting a default value for a persisted field
-                eframe::get_value(storage, eframe::APP_KEY).expect("could not deserialize app state")
+                match eframe::get_value(storage, eframe::APP_KEY) {
+                    Some(app) => {
+                        had_saved_state = true;
+                        app
+                    }
+                    None => {
+                        if cfg!(debug_assertions) {
+                            panic!("could not deserialize app state")
+                        } else {
+                            eprintln!("could not deserialize app state -- using default");
+                            Default::default()
+                        }
+                    }
+                }
             } else {
                 Default::default()
             };
