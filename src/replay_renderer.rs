@@ -2645,12 +2645,14 @@ impl ReplayRendererViewer {
                                     });
                                 });
 
-                            // Close menu on click outside
+                            // Close menu on click outside (but not if a sub-popup like color picker is open)
                             let menu_rect = menu_resp.response.rect;
-                            let clicked_outside = ctx.input(|i| {
-                                i.pointer.any_click()
-                                    && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))
-                            });
+                            let any_popup = ctx.is_popup_open();
+                            let clicked_outside = !any_popup
+                                && ctx.input(|i| {
+                                    i.pointer.any_click()
+                                        && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))
+                                });
                             if clicked_outside {
                                 annotation_arc.lock().show_context_menu = false;
                             }
