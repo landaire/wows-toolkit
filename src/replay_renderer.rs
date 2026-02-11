@@ -21,6 +21,11 @@ use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use egui_taffy::AsTuiBuilder as _;
+use egui_taffy::TuiBuilderLogic as _;
+use egui_taffy::taffy;
+use egui_taffy::taffy::prelude::{auto, length};
+
 use crate::settings::SavedRenderOptions;
 use crate::wows_data::SharedWoWsData;
 
@@ -31,6 +36,18 @@ const FPS: f64 = 30.0;
 const ICON_SIZE: f32 = 24.0;
 
 // ─── Zoom/Pan State ─────────────────────────────────────────────────────────
+
+/// Overlay controls visibility state. Persists across frames.
+struct OverlayState {
+    /// Last time the mouse moved or a control was interacted with (ctx.input time).
+    last_activity: f64,
+}
+
+impl Default for OverlayState {
+    fn default() -> Self {
+        Self { last_activity: 0.0 }
+    }
+}
 
 /// Zoom and pan state for the replay viewport. Persists across frames.
 struct ViewportZoomPan {
@@ -296,6 +313,8 @@ pub struct ReplayRendererViewer {
     video_export_data: Arc<VideoExportData>,
     /// Zoom and pan state for the viewport. Persists across frames.
     zoom_pan: Arc<Mutex<ViewportZoomPan>>,
+    /// Overlay controls visibility state.
+    overlay_state: Arc<Mutex<OverlayState>>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -356,6 +375,7 @@ pub fn launch_replay_renderer(
         video_exporting: Arc::new(AtomicBool::new(false)),
         video_export_data,
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
+        overlay_state: Arc::new(Mutex::new(OverlayState::default())),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -1296,6 +1316,7 @@ impl ReplayRendererViewer {
         let video_exporting = self.video_exporting.clone();
         let video_export_data = self.video_export_data.clone();
         let zoom_pan_arc = self.zoom_pan.clone();
+        let overlay_state_arc = self.overlay_state.clone();
 
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
@@ -1344,155 +1365,21 @@ impl ReplayRendererViewer {
                         return;
                     }
 
-                    // Controls bar
-                    let controls_resp = ui.horizontal(|ui| {
-                        if playing {
-                            if ui.button("\u{23F8} Pause").clicked() {
-                                let _ = command_tx.send(PlaybackCommand::Pause);
-                                shared_state.lock().playing = false;
-                            }
-                        } else {
-                            if ui.button("\u{25B6} Play").clicked() {
-                                let _ = command_tx.send(PlaybackCommand::Play);
-                                shared_state.lock().playing = true;
-                            }
-                        }
-
-                        if let Some((frame_idx, total_frames, clock_secs, _game_dur)) = frame_data {
-                            let mut seek_frame = frame_idx as f32;
-                            let slider =
-                                egui::Slider::new(&mut seek_frame, 0.0..=(total_frames.saturating_sub(1)) as f32)
-                                    .show_value(false);
-                            if ui.add(slider).changed() {
-                                let _ = command_tx.send(PlaybackCommand::Seek(seek_frame as usize));
-                            }
-
-                            let total_secs = clock_secs as u32;
-                            let mins = total_secs / 60;
-                            let secs = total_secs % 60;
-                            ui.label(format!("{:02}:{:02}", mins, secs));
-                        }
-
-                        let mut current_speed = speed;
-                        egui::ComboBox::from_id_salt("speed")
-                            .selected_text(format!("{:.1}x", current_speed))
-                            .width(60.0)
-                            .show_ui(ui, |ui| {
-                                for s in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0] {
-                                    if ui.selectable_value(&mut current_speed, s, format!("{:.1}x", s)).changed() {
-                                        let _ = command_tx.send(PlaybackCommand::SetSpeed(s));
-                                        shared_state.lock().speed = s;
-                                    }
-                                }
-                            });
-
-                        ui.separator();
-
-                        // Settings popup button (response returned from closure)
-                        let settings_btn_resp = ui.button("\u{2699} Settings");
-
-                        // Save as Video button
-                        {
-                            let is_exporting = video_exporting.load(Ordering::Relaxed);
-                            if ui.add_enabled(!is_exporting, egui::Button::new("Save as Video")).clicked() {
-                                let opts = options.clone();
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .set_file_name("replay.mp4")
-                                    .add_filter("MP4 Video", &["mp4"])
-                                    .save_file()
-                                {
-                                    save_as_video(
-                                        path.to_string_lossy().to_string(),
-                                        video_export_data.raw_meta.clone(),
-                                        video_export_data.packet_data.clone(),
-                                        video_export_data.map_name.clone(),
-                                        video_export_data.game_duration,
-                                        opts,
-                                        video_export_data.wows_data.clone(),
-                                        Arc::clone(&video_export_data.asset_cache),
-                                        Arc::clone(&status_message),
-                                        Arc::clone(&video_exporting),
-                                    );
-                                }
-                            }
-                        }
-
-                        ui.separator();
-
-                        // Zoom slider
-                        {
-                            let mut zp = zoom_pan_arc.lock();
-                            let mut zoom_val = zp.zoom;
-                            ui.label("Zoom:");
-                            let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
-                                .logarithmic(true)
-                                .max_decimals(1)
-                                .suffix("x");
-                            if ui.add(slider).changed() {
-                                // Zoom toward center of visible area
-                                let old_zoom = zp.zoom;
-                                let center_x = zp.pan.x + MINIMAP_SIZE as f32 / 2.0;
-                                let center_y = zp.pan.y + MINIMAP_SIZE as f32 / 2.0;
-                                let minimap_cx = center_x / old_zoom;
-                                let minimap_cy = center_y / old_zoom;
-                                zp.pan.x = minimap_cx * zoom_val - MINIMAP_SIZE as f32 / 2.0;
-                                zp.pan.y = minimap_cy * zoom_val - MINIMAP_SIZE as f32 / 2.0;
-                                zp.zoom = zoom_val;
-                                // Rough clamp; authoritative clamp happens below after available_size is known
-                                zp.pan.x = zp.pan.x.max(0.0);
-                                zp.pan.y = zp.pan.y.max(0.0);
-                            }
-                            if ui.button("Reset").clicked() {
-                                zp.zoom = 1.0;
-                                zp.pan = Vec2::ZERO;
-                            }
-                        }
-
-                        settings_btn_resp
-                    });
-                    let settings_btn_resp = controls_resp.inner;
-
-                    // Settings popup (rendered outside the horizontal bar)
-                    egui::Popup::from_toggle_button_response(&settings_btn_resp)
-                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                        .show(|ui| {
-                            ui.set_min_width(180.0);
-                            let mut opts = options.clone();
-                            let mut changed = false;
-
-                            // Alphabetical order
-                            changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
-                            changed |= ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
-                            changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
-                            changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
-                            changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
-                            changed |= ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
-                            changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
-                            changed |= ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
-                            changed |= ui.checkbox(&mut opts.show_smoke, "Smoke").changed();
-                            changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
-                            changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
-                            changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
-
-                            if changed {
-                                shared_state.lock().options = opts.clone();
-                            }
-
-                            ui.separator();
-                            if ui.button("Save Defaults").clicked() {
-                                *pending_save.lock() = Some(saved_from_render_options(&opts));
-                            }
-                        });
-
                     // Canvas area — fill all available space.
                     // window_scale maps logical canvas pixels to screen pixels.
                     // We use the full available rect so the viewport expands when
                     // the window is resized (showing more map area when zoomed).
                     let logical_canvas = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
                     let available = ui.available_size();
-                    let window_scale = (available.x / logical_canvas.x).min(available.y / logical_canvas.y).max(0.1);
+                    // Scale to fit, but never shrink below 1:1 — use pan mode instead
+                    let fit_scale = (available.x / logical_canvas.x).min(available.y / logical_canvas.y);
+                    let window_scale = fit_scale.max(1.0);
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    let origin = response.rect.min;
+                    // Center the scaled canvas within the available rect (only offsets when available > scaled)
+                    let scaled_canvas = logical_canvas * window_scale;
+                    let offset_x = ((available.x - scaled_canvas.x) / 2.0).max(0.0);
+                    let offset_y = ((available.y - scaled_canvas.y) / 2.0).max(0.0);
+                    let origin = response.rect.min + Vec2::new(offset_x, offset_y);
 
                     // Zoom/pan input handling
                     let mut zp = zoom_pan_arc.lock();
@@ -1539,9 +1426,11 @@ impl ReplayRendererViewer {
                     }
 
                     // Clamp pan so the map can't scroll past its edges.
-                    // Visible area in zoomed-minimap-pixel space:
-                    let visible_w = available.x / window_scale;
-                    let visible_h = (available.y - HUD_HEIGHT as f32 * window_scale) / window_scale;
+                    // Visible area in logical space: use the smaller of available vs scaled_canvas
+                    // (when window < canvas, available constrains; when window > canvas, scaled_canvas constrains)
+                    let visible_w = available.x.min(scaled_canvas.x) / window_scale;
+                    let visible_h =
+                        (available.y.min(scaled_canvas.y) - HUD_HEIGHT as f32 * window_scale) / window_scale;
                     let map_zoomed = MINIMAP_SIZE as f32 * zp.zoom;
                     let max_pan_x = (map_zoomed - visible_w).max(0.0);
                     let max_pan_y = (map_zoomed - visible_h).max(0.0);
@@ -1577,11 +1466,11 @@ impl ReplayRendererViewer {
                     // Draw dark background
                     painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
 
-                    // Clipped painter for map-region content (below HUD, full painter width/height)
+                    // Clipped painter for map-region content (below HUD)
                     let hud_screen_height = HUD_HEIGHT as f32 * window_scale;
                     let map_clip = Rect::from_min_max(
-                        Pos2::new(response.rect.min.x, response.rect.min.y + hud_screen_height),
-                        response.rect.max,
+                        Pos2::new(origin.x, origin.y + hud_screen_height),
+                        Pos2::new(origin.x + scaled_canvas.x, origin.y + scaled_canvas.y),
                     );
                     let map_painter = painter.with_clip_rect(map_clip);
 
@@ -1675,13 +1564,290 @@ impl ReplayRendererViewer {
                     }
                     drop(tex_guard);
 
-                    // Status toast (bottom-left)
+                    // ─── Overlay controls (video-player style) ───────────────────
+
+                    // Track mouse activity for fade
+                    let now = ctx.input(|i| i.time);
+                    let any_mouse_activity =
+                        ctx.input(|i| i.pointer.velocity().length() > 0.5 || i.pointer.any_click());
+                    {
+                        let mut ov = overlay_state_arc.lock();
+                        if any_mouse_activity {
+                            ov.last_activity = now;
+                        }
+                    }
+
+                    // Check if any popup is open (keeps overlay visible, e.g. settings or speed)
+                    let any_popup_open = egui::Popup::is_any_open(ctx);
+
+                    // Compute overlay opacity
+                    let elapsed = now - overlay_state_arc.lock().last_activity;
+                    let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.id().with("controls_overlay")));
+                    let hover_pos = ctx.input(|i| i.pointer.hover_pos());
+                    let overlay_hovered = overlay_rect.is_some_and(|r| hover_pos.is_some_and(|p| r.contains(p)));
+                    let opacity = if overlay_hovered || any_popup_open {
+                        1.0_f32
+                    } else if elapsed < 2.0 {
+                        1.0
+                    } else if elapsed < 2.5 {
+                        (1.0 - ((elapsed - 2.0) / 0.5) as f32).max(0.0)
+                    } else {
+                        0.0
+                    };
+
+                    // Request repaint during fade animation
+                    if opacity > 0.0 && opacity < 1.0 {
+                        ctx.request_repaint();
+                    }
+
+                    // Only render overlay when visible (so it doesn't block canvas input when hidden)
+                    if opacity > 0.0 {
+                        let bg_alpha = (180.0 * opacity) as u8;
+                        let text_alpha = (255.0 * opacity) as u8;
+
+                        egui::Area::new(ui.id().with("controls_overlay"))
+                            .order(egui::Order::Foreground)
+                            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+                            .interactable(true)
+                            .show(ctx, |ui| {
+                                // Apply faded text color
+                                ui.visuals_mut().override_text_color =
+                                    Some(Color32::from_rgba_unmultiplied(255, 255, 255, text_alpha));
+                                ui.visuals_mut().widgets.inactive.bg_fill =
+                                    Color32::from_rgba_unmultiplied(60, 60, 60, bg_alpha);
+                                ui.visuals_mut().widgets.hovered.bg_fill =
+                                    Color32::from_rgba_unmultiplied(80, 80, 80, bg_alpha);
+
+                                let frame = egui::Frame::NONE
+                                    .fill(Color32::from_black_alpha(bg_alpha))
+                                    .corner_radius(CornerRadius::same(6))
+                                    .inner_margin(egui::Margin::same(8));
+                                frame.show(ui, |ui| {
+                                    let overlay_width = (response.rect.width() - 32.0).max(200.0);
+                                    ui.set_width(overlay_width);
+
+                                    // Prevent egui text layout from wrapping to minimal width
+                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+                                    let row_style = taffy::Style {
+                                        display: taffy::Display::Flex,
+                                        flex_direction: taffy::FlexDirection::Row,
+                                        align_items: Some(taffy::AlignItems::Center),
+                                        gap: length(4.0),
+                                        size: taffy::Size { width: taffy::prelude::percent(1.0), height: auto() },
+                                        ..Default::default()
+                                    };
+                                    let grow_style = taffy::Style {
+                                        flex_grow: 1.0,
+                                        flex_shrink: 1.0,
+                                        min_size: taffy::Size { width: length(60.0), height: auto() },
+                                        ..Default::default()
+                                    };
+                                    let fixed_style = taffy::Style { flex_shrink: 0.0, ..Default::default() };
+
+                                    let mut settings_btn_opt: Option<egui::Response> = None;
+
+                                    egui_taffy::tui(ui, ui.id().with("overlay_tui"))
+                                        .reserve_available_width()
+                                        .style(row_style)
+                                        .show(|tui| {
+                                            // Play/Pause
+                                            if playing {
+                                                if tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new("\u{23F8}"))
+                                                    .clicked()
+                                                {
+                                                    let _ = command_tx.send(PlaybackCommand::Pause);
+                                                    shared_state.lock().playing = false;
+                                                }
+                                            } else {
+                                                if tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new("\u{25B6}"))
+                                                    .clicked()
+                                                {
+                                                    let _ = command_tx.send(PlaybackCommand::Play);
+                                                    shared_state.lock().playing = true;
+                                                }
+                                            }
+
+                                            // Seek slider (flex_grow: 1.0 — fills remaining space)
+                                            if let Some((frame_idx, total_frames, clock_secs, _game_dur)) = frame_data {
+                                                let mut seek_frame = frame_idx as f32;
+                                                let mut seek_changed = false;
+                                                tui.tui().style(grow_style.clone()).ui(|ui| {
+                                                    ui.spacing_mut().slider_width = ui.available_width();
+                                                    let slider = egui::Slider::new(
+                                                        &mut seek_frame,
+                                                        0.0..=(total_frames.saturating_sub(1)) as f32,
+                                                    )
+                                                    .show_value(false);
+                                                    seek_changed = ui.add(slider).changed();
+                                                });
+                                                if seek_changed {
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_frame as usize));
+                                                }
+
+                                                let total_secs = clock_secs as u32;
+                                                let mins = total_secs / 60;
+                                                let secs = total_secs % 60;
+                                                tui.tui()
+                                                    .style(fixed_style.clone())
+                                                    .label(format!("{:02}:{:02}", mins, secs));
+                                            }
+
+                                            // Speed selector
+                                            let mut current_speed = speed;
+                                            tui.tui().style(fixed_style.clone()).ui(|ui| {
+                                                egui::ComboBox::from_id_salt("overlay_speed")
+                                                    .selected_text(format!("{:.1}x", current_speed))
+                                                    .width(60.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for s in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0] {
+                                                            if ui
+                                                                .selectable_value(
+                                                                    &mut current_speed,
+                                                                    s,
+                                                                    format!("{:.1}x", s),
+                                                                )
+                                                                .changed()
+                                                            {
+                                                                let _ = command_tx.send(PlaybackCommand::SetSpeed(s));
+                                                                shared_state.lock().speed = s;
+                                                            }
+                                                        }
+                                                    });
+                                            });
+
+                                            tui.tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui_taffy::widgets::TaffySeparator::default());
+
+                                            // Settings button
+                                            let btn = tui
+                                                .tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui::Button::new("\u{2699}"));
+                                            settings_btn_opt = Some(btn);
+
+                                            // Save as Video button
+                                            {
+                                                let is_exporting = video_exporting.load(Ordering::Relaxed);
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .enabled_ui(!is_exporting)
+                                                    .ui_add(egui::Button::new("\u{1F4BE}"));
+                                                if btn.on_hover_text("Save as Video").clicked() {
+                                                    let opts = options.clone();
+                                                    if let Some(path) = rfd::FileDialog::new()
+                                                        .set_file_name("replay.mp4")
+                                                        .add_filter("MP4 Video", &["mp4"])
+                                                        .save_file()
+                                                    {
+                                                        save_as_video(
+                                                            path.to_string_lossy().to_string(),
+                                                            video_export_data.raw_meta.clone(),
+                                                            video_export_data.packet_data.clone(),
+                                                            video_export_data.map_name.clone(),
+                                                            video_export_data.game_duration,
+                                                            opts,
+                                                            video_export_data.wows_data.clone(),
+                                                            Arc::clone(&video_export_data.asset_cache),
+                                                            Arc::clone(&status_message),
+                                                            Arc::clone(&video_exporting),
+                                                        );
+                                                    }
+                                                }
+                                            }
+
+                                            tui.tui()
+                                                .style(fixed_style.clone())
+                                                .ui_add(egui_taffy::widgets::TaffySeparator::default());
+
+                                            // Zoom slider
+                                            {
+                                                let mut zp = zoom_pan_arc.lock();
+                                                let mut zoom_val = zp.zoom;
+                                                let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
+                                                    .logarithmic(true)
+                                                    .max_decimals(1)
+                                                    .suffix("x");
+                                                if tui.tui().style(fixed_style.clone()).ui_add(slider).changed() {
+                                                    let old_zoom = zp.zoom;
+                                                    let center_x = zp.pan.x + MINIMAP_SIZE as f32 / 2.0;
+                                                    let center_y = zp.pan.y + MINIMAP_SIZE as f32 / 2.0;
+                                                    let minimap_cx = center_x / old_zoom;
+                                                    let minimap_cy = center_y / old_zoom;
+                                                    zp.pan.x = minimap_cx * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                                    zp.pan.y = minimap_cy * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                                    zp.zoom = zoom_val;
+                                                    zp.pan.x = zp.pan.x.max(0.0);
+                                                    zp.pan.y = zp.pan.y.max(0.0);
+                                                }
+                                                if tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new("Reset"))
+                                                    .clicked()
+                                                {
+                                                    zp.zoom = 1.0;
+                                                    zp.pan = Vec2::ZERO;
+                                                }
+                                            }
+                                        });
+
+                                    let settings_btn = settings_btn_opt.unwrap();
+
+                                    // Settings popup (inside frame, outside horizontal)
+                                    egui::Popup::from_toggle_button_response(&settings_btn)
+                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                        .show(|ui| {
+                                            ui.set_min_width(180.0);
+                                            let mut opts = options.clone();
+                                            let mut changed = false;
+
+                                            changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
+                                            changed |=
+                                                ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
+                                            changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
+                                            changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
+                                            changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
+                                            changed |=
+                                                ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
+                                            changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
+                                            changed |= ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
+                                            changed |= ui.checkbox(&mut opts.show_smoke, "Smoke").changed();
+                                            changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
+                                            changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
+                                            changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
+
+                                            if changed {
+                                                shared_state.lock().options = opts.clone();
+                                            }
+
+                                            ui.separator();
+                                            if ui.button("Save Defaults").clicked() {
+                                                *pending_save.lock() = Some(saved_from_render_options(&opts));
+                                            }
+                                        });
+                                });
+                            });
+                    }
+
+                    // Status toast (painted on canvas)
                     {
                         let mut msg_guard = status_message.lock();
                         if let Some((ref text, expiry)) = *msg_guard {
                             if std::time::Instant::now() < expiry {
-                                ui.separator();
-                                ui.label(text.as_str());
+                                let toast_pos = Pos2::new(response.rect.min.x + 8.0, response.rect.max.y - 24.0);
+                                let galley = ctx.fonts_mut(|f| {
+                                    f.layout_no_wrap(text.clone(), FontId::proportional(12.0), Color32::WHITE)
+                                });
+                                painter.add(Shape::galley(toast_pos, galley, Color32::WHITE));
                                 ctx.request_repaint_after_secs(1.0);
                             } else {
                                 *msg_guard = None;

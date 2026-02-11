@@ -76,6 +76,7 @@ arboard = "3.6.1"
 minimap_renderer = "0.1.0"
 anyhow = "1.0"
 ouroboros = "0.18"
+egui_taffy = "0.10.0"
 
 [build-dependencies]
 winresource = "0.1.20"
