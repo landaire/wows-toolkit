@@ -26,6 +26,7 @@ use egui_taffy::TuiBuilderLogic as _;
 use egui_taffy::taffy;
 use egui_taffy::taffy::prelude::{auto, length};
 
+use crate::icons;
 use crate::settings::SavedRenderOptions;
 use crate::wows_data::SharedWoWsData;
 
@@ -1371,11 +1372,17 @@ impl ReplayRendererViewer {
                     // the window is resized (showing more map area when zoomed).
                     let logical_canvas = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
                     let available = ui.available_size();
-                    // Scale to fit, but never shrink below 1:1 — use pan mode instead
-                    let fit_scale = (available.x / logical_canvas.x).min(available.y / logical_canvas.y);
-                    let window_scale = fit_scale.max(1.0);
+                    let scale_x = available.x / logical_canvas.x;
+                    let scale_y = available.y / logical_canvas.y;
+                    let fit_scale = scale_x.min(scale_y);
+                    let fill_scale = scale_x.max(scale_y);
+                    // Smoothly blend from fit (full canvas visible, centered) at zoom 1.0
+                    // to fill (no empty borders) by zoom 2.0.
+                    let current_zoom = zoom_pan_arc.lock().zoom;
+                    let t = ((current_zoom - 1.0) / 1.0).clamp(0.0, 1.0);
+                    let window_scale = (fit_scale + t * (fill_scale - fit_scale)).max(0.1);
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    // Center the scaled canvas within the available rect (only offsets when available > scaled)
+                    // Center the scaled canvas within the available rect
                     let scaled_canvas = logical_canvas * window_scale;
                     let offset_x = ((available.x - scaled_canvas.x) / 2.0).max(0.0);
                     let offset_y = ((available.y - scaled_canvas.y) / 2.0).max(0.0);
@@ -1656,7 +1663,7 @@ impl ReplayRendererViewer {
                                                 if tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new("\u{23F8}"))
+                                                    .ui_add(egui::Button::new(icons::PAUSE))
                                                     .clicked()
                                                 {
                                                     let _ = command_tx.send(PlaybackCommand::Pause);
@@ -1666,7 +1673,7 @@ impl ReplayRendererViewer {
                                                 if tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new("\u{25B6}"))
+                                                    .ui_add(egui::Button::new(icons::PLAY))
                                                     .clicked()
                                                 {
                                                     let _ = command_tx.send(PlaybackCommand::Play);
@@ -1727,10 +1734,9 @@ impl ReplayRendererViewer {
                                                 .ui_add(egui_taffy::widgets::TaffySeparator::default());
 
                                             // Settings button
-                                            let btn = tui
-                                                .tui()
-                                                .style(fixed_style.clone())
-                                                .ui_add(egui::Button::new("\u{2699}"));
+                                            let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
+                                                egui::RichText::new(icons::GEAR_FINE).size(18.0),
+                                            ));
                                             settings_btn_opt = Some(btn);
 
                                             // Save as Video button
@@ -1740,7 +1746,9 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .enabled_ui(!is_exporting)
-                                                    .ui_add(egui::Button::new("\u{1F4BE}"));
+                                                    .ui_add(egui::Button::new(
+                                                        egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
+                                                    ));
                                                 if btn.on_hover_text("Save as Video").clicked() {
                                                     let opts = options.clone();
                                                     if let Some(path) = rfd::FileDialog::new()
