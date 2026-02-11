@@ -165,6 +165,8 @@ pub struct Settings {
     pub has_038_game_params_fix: bool,
     #[serde(default = "default_bool::<false>")]
     pub has_041_game_params_fix: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_047_game_params_fix: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -203,6 +205,7 @@ impl Default for Settings {
             has_037_crew_skills_fix: true,
             has_038_game_params_fix: true,
             has_041_game_params_fix: true,
+            has_047_game_params_fix: true,
             renderer_options: Default::default(),
         }
     }

@@ -261,6 +261,14 @@ impl WowsToolkitApp {
                 let _ = std::fs::remove_file(game_params_bin_path());
             }
 
+            // Added Aircraft to GameParams
+            if !saved_state.tab_state.settings.has_047_game_params_fix {
+                saved_state.tab_state.settings.has_047_game_params_fix = true;
+
+                // Remove the old game params
+                let _ = std::fs::remove_file(game_params_bin_path());
+            }
+
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(
                     saved_state
