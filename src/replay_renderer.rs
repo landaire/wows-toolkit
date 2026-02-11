@@ -116,6 +116,89 @@ impl MapTransform {
     fn screen_canvas_width(&self) -> f32 {
         self.canvas_width * self.window_scale
     }
+
+    /// Convert a screen Pos2 to minimap logical coords (inverse of minimap_to_screen).
+    fn screen_to_minimap(&self, screen_pos: Pos2) -> Vec2 {
+        let sx = (screen_pos.x - self.origin.x) / self.window_scale;
+        let sy = (screen_pos.y - self.origin.y) / self.window_scale - self.hud_height;
+        Vec2::new((sx + self.pan.x) / self.zoom, (sy + self.pan.y) / self.zoom)
+    }
+}
+
+// ─── Annotation / Painting State ─────────────────────────────────────────────
+
+const SHIP_SPECIES: [&str; 5] = ["Destroyer", "Cruiser", "Battleship", "AirCarrier", "Submarine"];
+const FRIENDLY_COLOR: Color32 = Color32::from_rgb(76, 232, 170);
+const ENEMY_COLOR: Color32 = Color32::from_rgb(254, 77, 42);
+
+/// A single annotation placed on the map.
+#[derive(Clone)]
+enum Annotation {
+    Ship { pos: Vec2, yaw: f32, species: String, friendly: bool },
+    FreehandStroke { points: Vec<Vec2>, color: Color32, width: f32 },
+    Line { start: Vec2, end: Vec2, color: Color32, width: f32 },
+    Circle { center: Vec2, radius: f32, color: Color32, width: f32, filled: bool },
+    Rectangle { center: Vec2, half_size: Vec2, rotation: f32, color: Color32, width: f32, filled: bool },
+    Triangle { center: Vec2, radius: f32, rotation: f32, color: Color32, width: f32, filled: bool },
+}
+
+/// Active drawing/placement tool.
+#[derive(Clone)]
+enum PaintTool {
+    None,
+    PlacingShip { species: String, friendly: bool, yaw: f32 },
+    Freehand { current_stroke: Option<Vec<Vec2>> },
+    Eraser,
+    DrawingLine { start: Option<Vec2> },
+    DrawingCircle { filled: bool, center: Option<Vec2> },
+    DrawingRect { filled: bool, center: Option<Vec2> },
+    DrawingTriangle { filled: bool, center: Option<Vec2> },
+}
+
+/// Persistent annotation layer state.
+struct AnnotationState {
+    annotations: Vec<Annotation>,
+    undo_stack: Vec<Vec<Annotation>>,
+    active_tool: PaintTool,
+    paint_color: Color32,
+    stroke_width: f32,
+    selected_index: Option<usize>,
+    show_context_menu: bool,
+    context_menu_pos: Pos2,
+}
+
+impl Default for AnnotationState {
+    fn default() -> Self {
+        Self {
+            annotations: Vec::new(),
+            undo_stack: Vec::new(),
+            active_tool: PaintTool::None,
+            paint_color: Color32::YELLOW,
+            stroke_width: 2.0,
+            selected_index: None,
+            show_context_menu: false,
+            context_menu_pos: Pos2::ZERO,
+        }
+    }
+}
+
+impl AnnotationState {
+    /// Save current annotations as an undo snapshot.
+    fn save_undo(&mut self) {
+        self.undo_stack.push(self.annotations.clone());
+        // Cap stack size
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Pop the last undo snapshot, restoring annotations.
+    fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.annotations = prev;
+            self.selected_index = None;
+        }
+    }
 }
 
 // ─── Asset Cache ─────────────────────────────────────────────────────────────
@@ -316,6 +399,8 @@ pub struct ReplayRendererViewer {
     zoom_pan: Arc<Mutex<ViewportZoomPan>>,
     /// Overlay controls visibility state.
     overlay_state: Arc<Mutex<OverlayState>>,
+    /// Annotation/painting layer state.
+    annotation_state: Arc<Mutex<AnnotationState>>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -377,6 +462,7 @@ pub fn launch_replay_renderer(
         video_export_data,
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
         overlay_state: Arc::new(Mutex::new(OverlayState::default())),
+        annotation_state: Arc::new(Mutex::new(AnnotationState::default())),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -978,6 +1064,343 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
     }
 }
 
+/// Distance from a point to the nearest part of an annotation (in minimap logical coords).
+fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
+    match ann {
+        Annotation::Ship { pos, .. } => (*pos - point).length(),
+        Annotation::FreehandStroke { points, .. } => {
+            points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
+        }
+        Annotation::Line { start, end, .. } => point_to_segment_dist(point, *start, *end),
+        Annotation::Circle { center, radius, .. } => ((point - *center).length() - *radius).abs(),
+        Annotation::Rectangle { center, .. } => (*center - point).length(),
+        Annotation::Triangle { center, .. } => (*center - point).length(),
+    }
+}
+
+/// Distance from a point to a line segment.
+fn point_to_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let len_sq = ab.length_sq();
+    if len_sq < 0.001 {
+        return ap.length();
+    }
+    let t = (ap.x * ab.x + ap.y * ab.y) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+    let closest = a + ab * t;
+    (p - closest).length()
+}
+
+/// Short display name for ship species (used in context menu buttons).
+fn ship_short_name(species: &str) -> &str {
+    match species {
+        "Destroyer" => "DD",
+        "Cruiser" => "CA",
+        "Battleship" => "BB",
+        "AirCarrier" => "CV",
+        "Submarine" => "SS",
+        _ => species,
+    }
+}
+
+/// Helper to convert a minimap Vec2 position to screen Pos2 via MapTransform.
+fn minimap_vec2_to_screen(pos: Vec2, transform: &MapTransform) -> Pos2 {
+    transform.minimap_to_screen(&MinimapPos { x: pos.x as i32, y: pos.y as i32 })
+}
+
+/// Render a single annotation onto the map painter.
+fn render_annotation(ann: &Annotation, transform: &MapTransform, textures: &RendererTextures, painter: &egui::Painter) {
+    match ann {
+        Annotation::Ship { pos, yaw, species, friendly } => {
+            let screen_pos = minimap_vec2_to_screen(*pos, transform);
+            let icon_size = transform.scale_distance(ICON_SIZE);
+            let tint = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
+            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
+            } else {
+                painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
+            }
+        }
+        Annotation::FreehandStroke { points, color, width } => {
+            let stroke_w = transform.scale_stroke(*width);
+            for pair in points.windows(2) {
+                let a = minimap_vec2_to_screen(pair[0], transform);
+                let b = minimap_vec2_to_screen(pair[1], transform);
+                painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(stroke_w, *color) });
+            }
+        }
+        Annotation::Line { start, end, color, width } => {
+            let a = minimap_vec2_to_screen(*start, transform);
+            let b = minimap_vec2_to_screen(*end, transform);
+            painter.add(Shape::LineSegment {
+                points: [a, b],
+                stroke: Stroke::new(transform.scale_stroke(*width), *color),
+            });
+        }
+        Annotation::Circle { center, radius, color, width, filled } => {
+            let c = minimap_vec2_to_screen(*center, transform);
+            let r = transform.scale_distance(*radius);
+            if *filled {
+                painter.add(Shape::circle_filled(c, r, *color));
+            } else {
+                painter.add(Shape::circle_stroke(c, r, Stroke::new(transform.scale_stroke(*width), *color)));
+            }
+        }
+        Annotation::Rectangle { center, half_size, rotation, color, width, filled } => {
+            let cos_r = rotation.cos();
+            let sin_r = rotation.sin();
+            let corners_local = [
+                Vec2::new(-half_size.x, -half_size.y),
+                Vec2::new(half_size.x, -half_size.y),
+                Vec2::new(half_size.x, half_size.y),
+                Vec2::new(-half_size.x, half_size.y),
+            ];
+            let screen_corners: Vec<Pos2> = corners_local
+                .iter()
+                .map(|c| {
+                    let rotated = Vec2::new(c.x * cos_r - c.y * sin_r, c.x * sin_r + c.y * cos_r);
+                    minimap_vec2_to_screen(*center + rotated, transform)
+                })
+                .collect();
+            if *filled {
+                painter.add(Shape::convex_polygon(screen_corners, *color, Stroke::NONE));
+            } else {
+                let stroke = Stroke::new(transform.scale_stroke(*width), *color);
+                for i in 0..4 {
+                    painter
+                        .add(Shape::LineSegment { points: [screen_corners[i], screen_corners[(i + 1) % 4]], stroke });
+                }
+            }
+        }
+        Annotation::Triangle { center, radius, rotation, color, width, filled } => {
+            let screen_verts: Vec<Pos2> = (0..3)
+                .map(|i| {
+                    let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
+                    let dx = radius * angle.cos();
+                    let dy = radius * angle.sin();
+                    minimap_vec2_to_screen(*center + Vec2::new(dx, dy), transform)
+                })
+                .collect();
+            if *filled {
+                painter.add(Shape::convex_polygon(screen_verts, *color, Stroke::NONE));
+            } else {
+                let stroke = Stroke::new(transform.scale_stroke(*width), *color);
+                for i in 0..3 {
+                    painter.add(Shape::LineSegment { points: [screen_verts[i], screen_verts[(i + 1) % 3]], stroke });
+                }
+            }
+        }
+    }
+}
+
+/// Render a preview of the active tool at the cursor position.
+fn render_tool_preview(
+    tool: &PaintTool,
+    minimap_pos: Vec2,
+    color: Color32,
+    stroke_width: f32,
+    transform: &MapTransform,
+    textures: &RendererTextures,
+    painter: &egui::Painter,
+) {
+    let ghost_alpha = 128u8;
+    match tool {
+        PaintTool::PlacingShip { species, friendly, yaw } => {
+            let screen_pos = minimap_vec2_to_screen(minimap_pos, transform);
+            let icon_size = transform.scale_distance(ICON_SIZE);
+            let base = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
+            let tint = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), ghost_alpha);
+            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
+            } else {
+                painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
+            }
+        }
+        PaintTool::Freehand { current_stroke } => {
+            if let Some(points) = current_stroke {
+                let sw = transform.scale_stroke(stroke_width);
+                for pair in points.windows(2) {
+                    let a = minimap_vec2_to_screen(pair[0], transform);
+                    let b = minimap_vec2_to_screen(pair[1], transform);
+                    painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(sw, color) });
+                }
+            }
+            // Draw crosshair at cursor
+            let c = minimap_vec2_to_screen(minimap_pos, transform);
+            let r = 6.0;
+            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.0, color)));
+        }
+        PaintTool::Eraser => {
+            let c = minimap_vec2_to_screen(minimap_pos, transform);
+            let r = transform.scale_distance(15.0);
+            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.5, Color32::from_rgb(255, 100, 100))));
+        }
+        PaintTool::DrawingLine { start, .. } => {
+            if let Some(s) = start {
+                let a = minimap_vec2_to_screen(*s, transform);
+                let b = minimap_vec2_to_screen(minimap_pos, transform);
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+                painter.add(Shape::LineSegment {
+                    points: [a, b],
+                    stroke: Stroke::new(transform.scale_stroke(stroke_width), ghost_color),
+                });
+            }
+        }
+        PaintTool::DrawingCircle { center, filled, .. } => {
+            if let Some(ctr) = center {
+                let dist = (minimap_pos - *ctr).length();
+                let c = minimap_vec2_to_screen(*ctr, transform);
+                let r = transform.scale_distance(dist);
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+                if *filled {
+                    painter.add(Shape::circle_filled(c, r, ghost_color));
+                } else {
+                    painter.add(Shape::circle_stroke(
+                        c,
+                        r,
+                        Stroke::new(transform.scale_stroke(stroke_width), ghost_color),
+                    ));
+                }
+            }
+        }
+        PaintTool::DrawingRect { center, filled, .. } => {
+            if let Some(ctr) = center {
+                let half = (minimap_pos - *ctr).abs();
+                let corners: Vec<Pos2> = [
+                    *ctr + Vec2::new(-half.x, -half.y),
+                    *ctr + Vec2::new(half.x, -half.y),
+                    *ctr + Vec2::new(half.x, half.y),
+                    *ctr + Vec2::new(-half.x, half.y),
+                ]
+                .iter()
+                .map(|p| minimap_vec2_to_screen(*p, transform))
+                .collect();
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+                if *filled {
+                    painter.add(Shape::convex_polygon(corners, ghost_color, Stroke::NONE));
+                } else {
+                    let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
+                    for i in 0..4 {
+                        painter.add(Shape::LineSegment { points: [corners[i], corners[(i + 1) % 4]], stroke });
+                    }
+                }
+            }
+        }
+        PaintTool::DrawingTriangle { center, filled, .. } => {
+            if let Some(ctr) = center {
+                let radius = (minimap_pos - *ctr).length();
+                let verts: Vec<Pos2> = (0..3)
+                    .map(|i| {
+                        let angle = i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
+                        let dx = radius * angle.cos();
+                        let dy = radius * angle.sin();
+                        minimap_vec2_to_screen(*ctr + Vec2::new(dx, dy), transform)
+                    })
+                    .collect();
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+                if *filled {
+                    painter.add(Shape::convex_polygon(verts, ghost_color, Stroke::NONE));
+                } else {
+                    let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
+                    for i in 0..3 {
+                        painter.add(Shape::LineSegment { points: [verts[i], verts[(i + 1) % 3]], stroke });
+                    }
+                }
+            }
+        }
+        PaintTool::None => {}
+    }
+}
+
+/// Render a selection highlight around an annotation (dashed bounding box).
+fn render_selection_highlight(ann: &Annotation, transform: &MapTransform, painter: &egui::Painter) {
+    let highlight_stroke = Stroke::new(1.5, Color32::from_rgb(255, 255, 100));
+    let margin = 8.0; // extra pixels around the bounding box
+
+    let screen_rect = annotation_screen_bounds(ann, transform);
+    let expanded = screen_rect.expand(margin);
+
+    // Draw corner brackets instead of full rectangle for a cleaner look
+    let corners = [expanded.left_top(), expanded.right_top(), expanded.right_bottom(), expanded.left_bottom()];
+    let bracket_len = 8.0f32.min(expanded.width() / 3.0).min(expanded.height() / 3.0);
+    for i in 0..4 {
+        let c = corners[i];
+        let next = corners[(i + 1) % 4];
+        let prev = corners[(i + 3) % 4];
+        let to_next = (next - c).normalized() * bracket_len;
+        let to_prev = (prev - c).normalized() * bracket_len;
+        painter.add(Shape::LineSegment { points: [c, c + to_next], stroke: highlight_stroke });
+        painter.add(Shape::LineSegment { points: [c, c + to_prev], stroke: highlight_stroke });
+    }
+}
+
+/// Compute the screen-space bounding rect for an annotation.
+fn annotation_screen_bounds(ann: &Annotation, transform: &MapTransform) -> Rect {
+    match ann {
+        Annotation::Ship { pos, .. } => {
+            let c = minimap_vec2_to_screen(*pos, transform);
+            let half = transform.scale_distance(ICON_SIZE) / 2.0;
+            Rect::from_center_size(c, egui::vec2(half * 2.0, half * 2.0))
+        }
+        Annotation::FreehandStroke { points, .. } => {
+            let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
+            let mut rect = Rect::from_min_max(screen_pts[0], screen_pts[0]);
+            for p in &screen_pts[1..] {
+                rect = rect.union(Rect::from_min_max(*p, *p));
+            }
+            rect
+        }
+        Annotation::Line { start, end, .. } => {
+            let a = minimap_vec2_to_screen(*start, transform);
+            let b = minimap_vec2_to_screen(*end, transform);
+            Rect::from_two_pos(a, b)
+        }
+        Annotation::Circle { center, radius, .. } => {
+            let c = minimap_vec2_to_screen(*center, transform);
+            let r = transform.scale_distance(*radius);
+            Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0))
+        }
+        Annotation::Rectangle { center, half_size, rotation, .. } => {
+            let cos_r = rotation.cos();
+            let sin_r = rotation.sin();
+            let corners_local = [
+                Vec2::new(-half_size.x, -half_size.y),
+                Vec2::new(half_size.x, -half_size.y),
+                Vec2::new(half_size.x, half_size.y),
+                Vec2::new(-half_size.x, half_size.y),
+            ];
+            let screen_corners: Vec<Pos2> = corners_local
+                .iter()
+                .map(|c| {
+                    let rotated = Vec2::new(c.x * cos_r - c.y * sin_r, c.x * sin_r + c.y * cos_r);
+                    minimap_vec2_to_screen(*center + rotated, transform)
+                })
+                .collect();
+            let mut rect = Rect::from_min_max(screen_corners[0], screen_corners[0]);
+            for p in &screen_corners[1..] {
+                rect = rect.union(Rect::from_min_max(*p, *p));
+            }
+            rect
+        }
+        Annotation::Triangle { center, radius, rotation, .. } => {
+            let screen_verts: Vec<Pos2> = (0..3)
+                .map(|i| {
+                    let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
+                    let dx = radius * angle.cos();
+                    let dy = radius * angle.sin();
+                    minimap_vec2_to_screen(*center + Vec2::new(dx, dy), transform)
+                })
+                .collect();
+            let mut rect = Rect::from_min_max(screen_verts[0], screen_verts[0]);
+            for p in &screen_verts[1..] {
+                rect = rect.union(Rect::from_min_max(*p, *p));
+            }
+            rect
+        }
+    }
+}
+
 /// Convert a single DrawCommand into epaint shapes.
 /// Uses `MapTransform` for all coordinate mapping. `opts` filters name labels.
 fn draw_command_to_shapes(
@@ -1318,6 +1741,7 @@ impl ReplayRendererViewer {
         let video_export_data = self.video_export_data.clone();
         let zoom_pan_arc = self.zoom_pan.clone();
         let overlay_state_arc = self.overlay_state.clone();
+        let annotation_arc = self.annotation_state.clone();
 
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
@@ -1391,33 +1815,51 @@ impl ReplayRendererViewer {
                     // Zoom/pan input handling
                     let mut zp = zoom_pan_arc.lock();
                     let mut zoom_changed = false;
+                    let tool_active = !matches!(annotation_arc.lock().active_tool, PaintTool::None);
 
-                    // Scroll-wheel zoom (cursor-centered)
+                    // Scroll-wheel: zoom (normal) or rotate (when placing ship/rect/tri)
                     if response.hovered() {
                         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
                         if scroll_delta != 0.0 {
-                            let zoom_speed = 0.002;
-                            let old_zoom = zp.zoom;
-                            let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
-
-                            if new_zoom != old_zoom {
-                                if let Some(cursor) = response.hover_pos() {
-                                    let local_x = (cursor.x - origin.x) / window_scale;
-                                    let local_y = (cursor.y - origin.y) / window_scale - HUD_HEIGHT as f32;
-                                    let minimap_x = (local_x + zp.pan.x) / old_zoom;
-                                    let minimap_y = (local_y + zp.pan.y) / old_zoom;
-                                    zp.pan.x = minimap_x * new_zoom - local_x;
-                                    zp.pan.y = minimap_y * new_zoom - local_y;
+                            let mut ann = annotation_arc.lock();
+                            let scroll_used_by_tool = match &mut ann.active_tool {
+                                PaintTool::PlacingShip { yaw, .. } => {
+                                    *yaw += scroll_delta * 0.005;
+                                    true
                                 }
-                                zp.zoom = new_zoom;
-                                zoom_changed = true;
+                                PaintTool::DrawingRect { .. } | PaintTool::DrawingTriangle { .. } => {
+                                    // Rotation handled during placement in Phase 4
+                                    false
+                                }
+                                _ => false,
+                            };
+                            drop(ann);
+
+                            if !scroll_used_by_tool {
+                                let zoom_speed = 0.002;
+                                let old_zoom = zp.zoom;
+                                let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
+
+                                if new_zoom != old_zoom {
+                                    if let Some(cursor) = response.hover_pos() {
+                                        let local_x = (cursor.x - origin.x) / window_scale;
+                                        let local_y = (cursor.y - origin.y) / window_scale - HUD_HEIGHT as f32;
+                                        let minimap_x = (local_x + zp.pan.x) / old_zoom;
+                                        let minimap_y = (local_y + zp.pan.y) / old_zoom;
+                                        zp.pan.x = minimap_x * new_zoom - local_x;
+                                        zp.pan.y = minimap_y * new_zoom - local_y;
+                                    }
+                                    zp.zoom = new_zoom;
+                                    zoom_changed = true;
+                                }
                             }
                         }
                     }
 
-                    // Drag-to-pan
-                    if response.dragged_by(egui::PointerButton::Primary)
-                        || response.dragged_by(egui::PointerButton::Middle)
+                    // Drag-to-pan: middle always pans, left only when no tool and no selection
+                    let has_selection = annotation_arc.lock().selected_index.is_some();
+                    if response.dragged_by(egui::PointerButton::Middle)
+                        || (!tool_active && !has_selection && response.dragged_by(egui::PointerButton::Primary))
                     {
                         let drag = response.drag_delta();
                         zp.pan.x -= drag.x / window_scale;
@@ -1456,12 +1898,39 @@ impl ReplayRendererViewer {
                     let current_zoom = zp.zoom;
                     drop(zp);
 
-                    // Grab cursor when zoomed in
-                    if current_zoom > 1.01 {
-                        if response.dragged() {
-                            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                        } else if response.hovered() {
-                            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                    // Cursor icon based on tool / zoom state
+                    if response.hovered() {
+                        let cursor = {
+                            let ann = annotation_arc.lock();
+                            match &ann.active_tool {
+                                PaintTool::PlacingShip { .. } => Some(egui::CursorIcon::Cell),
+                                PaintTool::Freehand { .. } => Some(egui::CursorIcon::Crosshair),
+                                PaintTool::Eraser => Some(egui::CursorIcon::NotAllowed),
+                                PaintTool::DrawingLine { .. }
+                                | PaintTool::DrawingCircle { .. }
+                                | PaintTool::DrawingRect { .. }
+                                | PaintTool::DrawingTriangle { .. } => Some(egui::CursorIcon::Crosshair),
+                                PaintTool::None => {
+                                    if ann.selected_index.is_some() {
+                                        Some(egui::CursorIcon::Grab)
+                                    } else {
+                                        None // fall through to zoom cursor
+                                    }
+                                }
+                            }
+                        };
+                        if let Some(c) = cursor {
+                            if response.dragged() && c == egui::CursorIcon::Grab {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else {
+                                ctx.set_cursor_icon(c);
+                            }
+                        } else if current_zoom > 1.01 {
+                            if response.dragged() {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                            }
                         }
                     }
 
@@ -1568,8 +2037,613 @@ impl ReplayRendererViewer {
                             }
                         }
                         drop(state);
+
+                        // ─── Render annotations on map ───────────────────────────
+                        {
+                            let ann_state = annotation_arc.lock();
+                            for ann in &ann_state.annotations {
+                                render_annotation(ann, &transform, textures, &map_painter);
+                            }
+                            // Draw selection highlight
+                            if let Some(sel) = ann_state.selected_index {
+                                if sel < ann_state.annotations.len() {
+                                    render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+                                }
+                            }
+                            // Render tool preview (ghost shape at cursor)
+                            if let Some(cursor_pos) = response.hover_pos() {
+                                let minimap_pos = transform.screen_to_minimap(cursor_pos);
+                                render_tool_preview(
+                                    &ann_state.active_tool,
+                                    minimap_pos,
+                                    ann_state.paint_color,
+                                    ann_state.stroke_width,
+                                    &transform,
+                                    textures,
+                                    &map_painter,
+                                );
+                            }
+                        }
                     }
                     drop(tex_guard);
+
+                    // ─── Active tool indicator ───────────────────────────────────
+                    {
+                        let ann = annotation_arc.lock();
+                        let tool_label = match &ann.active_tool {
+                            PaintTool::None => None,
+                            PaintTool::PlacingShip { species, friendly, .. } => {
+                                let team = if *friendly { "Friendly" } else { "Enemy" };
+                                Some(format!("Placing {} {}", team, ship_short_name(species)))
+                            }
+                            PaintTool::Freehand { .. } => Some("Freehand".into()),
+                            PaintTool::Eraser => Some("Eraser".into()),
+                            PaintTool::DrawingLine { .. } => Some("Line".into()),
+                            PaintTool::DrawingCircle { .. } => Some("Circle".into()),
+                            PaintTool::DrawingRect { .. } => Some("Rectangle".into()),
+                            PaintTool::DrawingTriangle { .. } => Some("Triangle".into()),
+                        };
+                        if let Some(label) = tool_label {
+                            let text_pos = Pos2::new(response.rect.left() + 8.0, response.rect.top() + 8.0);
+                            painter.text(
+                                text_pos,
+                                egui::Align2::LEFT_TOP,
+                                format!("{} (right-click to cancel)", label),
+                                FontId::proportional(13.0),
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+                            );
+                        }
+                    }
+
+                    // ─── Annotation input handling ────────────────────────────────
+                    {
+                        let mut ann = annotation_arc.lock();
+                        let tool_active = !matches!(ann.active_tool, PaintTool::None);
+
+                        // When a tool is active, clear any selection
+                        if tool_active {
+                            ann.selected_index = None;
+                        }
+
+                        // Right-click: open context menu or cancel tool
+                        if response.secondary_clicked() {
+                            if tool_active {
+                                ann.active_tool = PaintTool::None;
+                            } else {
+                                ann.show_context_menu = true;
+                                ann.context_menu_pos =
+                                    response.interact_pointer_pos().unwrap_or(response.rect.center());
+                            }
+                        }
+
+                        // Escape key: cancel tool or deselect
+                        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            if tool_active {
+                                ann.active_tool = PaintTool::None;
+                            } else {
+                                ann.selected_index = None;
+                            }
+                        }
+
+                        // Left-click/drag tool actions
+                        let cursor_minimap = response.hover_pos().map(|p| transform.screen_to_minimap(p));
+
+                        // Copy these before the match to avoid borrowing ann while matching on active_tool
+                        let paint_color = ann.paint_color;
+                        let stroke_width = ann.stroke_width;
+                        let mut new_annotation: Option<Annotation> = None;
+                        let mut erase_idx: Option<usize> = None;
+
+                        match &mut ann.active_tool {
+                            PaintTool::None => {
+                                // Click to select/deselect annotations
+                                if response.clicked() {
+                                    if let Some(click_pos) = cursor_minimap {
+                                        let threshold = 15.0;
+                                        let mut closest_idx = None;
+                                        let mut closest_dist = f32::MAX;
+                                        for (i, a) in ann.annotations.iter().enumerate() {
+                                            let d = annotation_distance(a, click_pos);
+                                            if d < closest_dist {
+                                                closest_dist = d;
+                                                closest_idx = Some(i);
+                                            }
+                                        }
+                                        if closest_dist < threshold {
+                                            ann.selected_index = closest_idx;
+                                        } else {
+                                            ann.selected_index = None;
+                                        }
+                                    }
+                                }
+                                // Drag to move selected annotation
+                                if response.dragged_by(egui::PointerButton::Primary) {
+                                    if let Some(sel) = ann.selected_index {
+                                        if sel < ann.annotations.len() {
+                                            let delta = response.drag_delta();
+                                            // Convert screen delta to minimap delta
+                                            let minimap_delta = Vec2::new(
+                                                delta.x / (transform.window_scale * transform.zoom),
+                                                delta.y / (transform.window_scale * transform.zoom),
+                                            );
+                                            match &mut ann.annotations[sel] {
+                                                Annotation::Ship { pos, .. } => *pos += minimap_delta,
+                                                Annotation::FreehandStroke { points, .. } => {
+                                                    for p in points.iter_mut() {
+                                                        *p += minimap_delta;
+                                                    }
+                                                }
+                                                Annotation::Line { start, end, .. } => {
+                                                    *start += minimap_delta;
+                                                    *end += minimap_delta;
+                                                }
+                                                Annotation::Circle { center, .. } => *center += minimap_delta,
+                                                Annotation::Rectangle { center, .. } => *center += minimap_delta,
+                                                Annotation::Triangle { center, .. } => *center += minimap_delta,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            PaintTool::PlacingShip { species, friendly, yaw } => {
+                                if response.clicked() {
+                                    if let Some(pos) = cursor_minimap {
+                                        new_annotation = Some(Annotation::Ship {
+                                            pos,
+                                            yaw: *yaw,
+                                            species: species.clone(),
+                                            friendly: *friendly,
+                                        });
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::Freehand { current_stroke } => {
+                                if response.dragged_by(egui::PointerButton::Primary) {
+                                    if let Some(pos) = cursor_minimap {
+                                        current_stroke.get_or_insert_with(Vec::new).push(pos);
+                                    }
+                                }
+                                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                                    if let Some(points) = current_stroke.take() {
+                                        if points.len() >= 2 {
+                                            new_annotation = Some(Annotation::FreehandStroke {
+                                                points,
+                                                color: paint_color,
+                                                width: stroke_width,
+                                            });
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::Eraser => {
+                                if response.clicked() {
+                                    if let Some(click_pos) = cursor_minimap {
+                                        let threshold = 15.0;
+                                        let mut closest_idx = None;
+                                        let mut closest_dist = f32::MAX;
+                                        for (i, a) in ann.annotations.iter().enumerate() {
+                                            let d = annotation_distance(a, click_pos);
+                                            if d < closest_dist {
+                                                closest_dist = d;
+                                                closest_idx = Some(i);
+                                            }
+                                        }
+                                        if closest_dist < threshold {
+                                            erase_idx = closest_idx;
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::DrawingLine { start } => {
+                                if response.clicked() {
+                                    if let Some(pos) = cursor_minimap {
+                                        if let Some(s) = *start {
+                                            new_annotation = Some(Annotation::Line {
+                                                start: s,
+                                                end: pos,
+                                                color: paint_color,
+                                                width: stroke_width,
+                                            });
+                                            *start = None;
+                                        } else {
+                                            *start = Some(pos);
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::DrawingCircle { filled, center } => {
+                                if response.clicked() {
+                                    if let Some(pos) = cursor_minimap {
+                                        if let Some(ctr) = *center {
+                                            let radius = (pos - ctr).length();
+                                            new_annotation = Some(Annotation::Circle {
+                                                center: ctr,
+                                                radius,
+                                                color: paint_color,
+                                                width: stroke_width,
+                                                filled: *filled,
+                                            });
+                                            *center = None;
+                                        } else {
+                                            *center = Some(pos);
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::DrawingRect { filled, center } => {
+                                if response.clicked() {
+                                    if let Some(pos) = cursor_minimap {
+                                        if let Some(ctr) = *center {
+                                            let half = (pos - ctr).abs();
+                                            new_annotation = Some(Annotation::Rectangle {
+                                                center: ctr,
+                                                half_size: half,
+                                                rotation: 0.0,
+                                                color: paint_color,
+                                                width: stroke_width,
+                                                filled: *filled,
+                                            });
+                                            *center = None;
+                                        } else {
+                                            *center = Some(pos);
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+
+                            PaintTool::DrawingTriangle { filled, center } => {
+                                if response.clicked() {
+                                    if let Some(pos) = cursor_minimap {
+                                        if let Some(ctr) = *center {
+                                            let radius = (pos - ctr).length();
+                                            new_annotation = Some(Annotation::Triangle {
+                                                center: ctr,
+                                                radius,
+                                                rotation: 0.0,
+                                                color: paint_color,
+                                                width: stroke_width,
+                                                filled: *filled,
+                                            });
+                                            *center = None;
+                                        } else {
+                                            *center = Some(pos);
+                                        }
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+                        }
+
+                        // Apply deferred mutations after the match (borrow of active_tool is released)
+                        if new_annotation.is_some() || erase_idx.is_some() {
+                            ann.save_undo();
+                        }
+                        if let Some(a) = new_annotation {
+                            ann.annotations.push(a);
+                        }
+                        if let Some(idx) = erase_idx {
+                            ann.annotations.remove(idx);
+                        }
+
+                        // Ctrl+Z to undo
+                        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
+                            ann.undo();
+                        }
+                    }
+
+                    // ─── Context menu (egui::Area at cursor) ─────────────────────
+                    {
+                        let show_menu = annotation_arc.lock().show_context_menu;
+                        if show_menu {
+                            let menu_pos = annotation_arc.lock().context_menu_pos;
+                            let menu_resp = egui::Area::new(ui.id().with("paint_context_menu"))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(menu_pos)
+                                .interactable(true)
+                                .show(ctx, |ui| {
+                                    let frame = egui::Frame::NONE
+                                        .fill(Color32::from_gray(30))
+                                        .corner_radius(CornerRadius::same(6))
+                                        .inner_margin(egui::Margin::same(8))
+                                        .stroke(Stroke::new(1.0, Color32::from_gray(80)));
+                                    frame.show(ui, |ui| {
+                                        ui.set_min_width(200.0);
+                                        let mut ann = annotation_arc.lock();
+
+                                        // ── Friendly ships row ──
+                                        ui.label(egui::RichText::new("Friendly Ships").color(FRIENDLY_COLOR).small());
+                                        ui.horizontal(|ui| {
+                                            for species in &SHIP_SPECIES {
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new(ship_short_name(species))
+                                                            .color(FRIENDLY_COLOR),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    ann.active_tool = PaintTool::PlacingShip {
+                                                        species: species.to_string(),
+                                                        friendly: true,
+                                                        yaw: 0.0,
+                                                    };
+                                                    ann.show_context_menu = false;
+                                                }
+                                            }
+                                        });
+
+                                        // ── Enemy ships row ──
+                                        ui.label(egui::RichText::new("Enemy Ships").color(ENEMY_COLOR).small());
+                                        ui.horizontal(|ui| {
+                                            for species in &SHIP_SPECIES {
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new(ship_short_name(species))
+                                                            .color(ENEMY_COLOR),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    ann.active_tool = PaintTool::PlacingShip {
+                                                        species: species.to_string(),
+                                                        friendly: false,
+                                                        yaw: 0.0,
+                                                    };
+                                                    ann.show_context_menu = false;
+                                                }
+                                            }
+                                        });
+
+                                        ui.separator();
+
+                                        // ── Drawing tools row ──
+                                        ui.label(egui::RichText::new("Drawing Tools").small());
+                                        ui.horizontal(|ui| {
+                                            if ui.button(icons::PAINT_BRUSH).on_hover_text("Freehand").clicked() {
+                                                ann.active_tool = PaintTool::Freehand { current_stroke: None };
+                                                ann.show_context_menu = false;
+                                            }
+                                            if ui.button(icons::ERASER).on_hover_text("Eraser").clicked() {
+                                                ann.active_tool = PaintTool::Eraser;
+                                                ann.show_context_menu = false;
+                                            }
+                                            if ui.button(icons::LINE_SEGMENT).on_hover_text("Line").clicked() {
+                                                ann.active_tool = PaintTool::DrawingLine { start: None };
+                                                ann.show_context_menu = false;
+                                            }
+                                            if ui.button(icons::CIRCLE).on_hover_text("Circle").clicked() {
+                                                ann.active_tool =
+                                                    PaintTool::DrawingCircle { filled: false, center: None };
+                                                ann.show_context_menu = false;
+                                            }
+                                            if ui.button(icons::SQUARE).on_hover_text("Rectangle").clicked() {
+                                                ann.active_tool =
+                                                    PaintTool::DrawingRect { filled: false, center: None };
+                                                ann.show_context_menu = false;
+                                            }
+                                            if ui.button(icons::TRIANGLE).on_hover_text("Triangle").clicked() {
+                                                ann.active_tool =
+                                                    PaintTool::DrawingTriangle { filled: false, center: None };
+                                                ann.show_context_menu = false;
+                                            }
+                                        });
+
+                                        ui.separator();
+
+                                        // ── Color picker + stroke width ──
+                                        ui.horizontal(|ui| {
+                                            ui.label("Color:");
+                                            egui::color_picker::color_edit_button_srgba(
+                                                ui,
+                                                &mut ann.paint_color,
+                                                egui::color_picker::Alpha::Opaque,
+                                            );
+                                            ui.label("Width:");
+                                            ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1));
+                                        });
+
+                                        // ── Clear all ──
+                                        if !ann.annotations.is_empty() {
+                                            ui.separator();
+                                            if ui
+                                                .button(
+                                                    egui::RichText::new(format!("{} Clear All", icons::TRASH))
+                                                        .color(Color32::from_rgb(255, 100, 100)),
+                                                )
+                                                .clicked()
+                                            {
+                                                ann.save_undo();
+                                                ann.annotations.clear();
+                                                ann.show_context_menu = false;
+                                            }
+                                        }
+                                    });
+                                });
+
+                            // Close menu on click outside
+                            let menu_rect = menu_resp.response.rect;
+                            let clicked_outside = ctx.input(|i| {
+                                i.pointer.any_click()
+                                    && i.pointer.interact_pos().is_some_and(|p| !menu_rect.contains(p))
+                            });
+                            if clicked_outside {
+                                annotation_arc.lock().show_context_menu = false;
+                            }
+                        }
+                    }
+
+                    // ─── Selection edit popup ─────────────────────────────────────
+                    {
+                        let ann = annotation_arc.lock();
+                        let sel_info = ann.selected_index.and_then(|idx| {
+                            if idx < ann.annotations.len() {
+                                let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
+                                Some((idx, bounds))
+                            } else {
+                                None
+                            }
+                        });
+                        drop(ann);
+
+                        if let Some((sel_idx, bounds)) = sel_info {
+                            // Position popup to the right of the annotation, or below if near edge
+                            let popup_pos = Pos2::new(bounds.right() + 8.0, bounds.center().y);
+                            egui::Area::new(ui.id().with("annotation_edit_popup"))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(popup_pos)
+                                .interactable(true)
+                                .show(ctx, |ui| {
+                                    let frame = egui::Frame::NONE
+                                        .fill(Color32::from_gray(30))
+                                        .corner_radius(CornerRadius::same(6))
+                                        .inner_margin(egui::Margin::same(6))
+                                        .stroke(Stroke::new(1.0, Color32::from_gray(80)));
+                                    frame.show(ui, |ui| {
+                                        let mut ann = annotation_arc.lock();
+                                        if sel_idx >= ann.annotations.len() {
+                                            return;
+                                        }
+
+                                        // Rotate slider (for ship, rect, triangle)
+                                        let has_rotation = matches!(
+                                            ann.annotations[sel_idx],
+                                            Annotation::Ship { .. }
+                                                | Annotation::Rectangle { .. }
+                                                | Annotation::Triangle { .. }
+                                        );
+                                        if has_rotation {
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Rot").small());
+                                                let mut angle = match &ann.annotations[sel_idx] {
+                                                    Annotation::Ship { yaw, .. } => *yaw,
+                                                    Annotation::Rectangle { rotation, .. } => *rotation,
+                                                    Annotation::Triangle { rotation, .. } => *rotation,
+                                                    _ => 0.0,
+                                                };
+                                                let old = angle;
+                                                ui.add(egui::DragValue::new(&mut angle).speed(0.02).suffix(" rad"));
+                                                if angle != old {
+                                                    match &mut ann.annotations[sel_idx] {
+                                                        Annotation::Ship { yaw, .. } => *yaw = angle,
+                                                        Annotation::Rectangle { rotation, .. } => *rotation = angle,
+                                                        Annotation::Triangle { rotation, .. } => *rotation = angle,
+                                                        _ => {}
+                                                    }
+                                                }
+                                            });
+                                        }
+
+                                        // Size slider (for circle, rect, triangle)
+                                        let has_size = matches!(
+                                            ann.annotations[sel_idx],
+                                            Annotation::Circle { .. }
+                                                | Annotation::Rectangle { .. }
+                                                | Annotation::Triangle { .. }
+                                        );
+                                        if has_size {
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Size").small());
+                                                let mut size = match &ann.annotations[sel_idx] {
+                                                    Annotation::Circle { radius, .. } => *radius,
+                                                    Annotation::Rectangle { half_size, .. } => {
+                                                        (half_size.x + half_size.y) / 2.0
+                                                    }
+                                                    Annotation::Triangle { radius, .. } => *radius,
+                                                    _ => 0.0,
+                                                };
+                                                let old = size;
+                                                ui.add(egui::DragValue::new(&mut size).speed(1.0).range(5.0..=500.0));
+                                                if size != old && size > 0.0 {
+                                                    match &mut ann.annotations[sel_idx] {
+                                                        Annotation::Circle { radius, .. } => *radius = size,
+                                                        Annotation::Rectangle { half_size, .. } => {
+                                                            let ratio = if old > 0.0 { size / old } else { 1.0 };
+                                                            *half_size *= ratio;
+                                                        }
+                                                        Annotation::Triangle { radius, .. } => *radius = size,
+                                                        _ => {}
+                                                    }
+                                                }
+                                            });
+                                        }
+
+                                        // Color picker (for non-ship annotations)
+                                        let is_ship = matches!(ann.annotations[sel_idx], Annotation::Ship { .. });
+                                        if !is_ship {
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Color").small());
+                                                let color_ref = match &mut ann.annotations[sel_idx] {
+                                                    Annotation::FreehandStroke { color, .. } => color,
+                                                    Annotation::Line { color, .. } => color,
+                                                    Annotation::Circle { color, .. } => color,
+                                                    Annotation::Rectangle { color, .. } => color,
+                                                    Annotation::Triangle { color, .. } => color,
+                                                    _ => unreachable!(),
+                                                };
+                                                egui::color_picker::color_edit_button_srgba(
+                                                    ui,
+                                                    color_ref,
+                                                    egui::color_picker::Alpha::Opaque,
+                                                );
+                                            });
+                                        }
+
+                                        // Filled toggle (for circle, rect, triangle)
+                                        let has_filled = matches!(
+                                            ann.annotations[sel_idx],
+                                            Annotation::Circle { .. }
+                                                | Annotation::Rectangle { .. }
+                                                | Annotation::Triangle { .. }
+                                        );
+                                        if has_filled {
+                                            let filled_ref = match &mut ann.annotations[sel_idx] {
+                                                Annotation::Circle { filled, .. } => filled,
+                                                Annotation::Rectangle { filled, .. } => filled,
+                                                Annotation::Triangle { filled, .. } => filled,
+                                                _ => unreachable!(),
+                                            };
+                                            ui.checkbox(filled_ref, egui::RichText::new("Filled").small());
+                                        }
+
+                                        // Team toggle (for ships)
+                                        if is_ship {
+                                            if let Annotation::Ship { friendly, .. } = &mut ann.annotations[sel_idx] {
+                                                let label = if *friendly { "Friendly" } else { "Enemy" };
+                                                let color = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
+                                                if ui.button(egui::RichText::new(label).color(color).small()).clicked()
+                                                {
+                                                    *friendly = !*friendly;
+                                                }
+                                            }
+                                        }
+
+                                        // Delete button
+                                        if ui
+                                            .button(
+                                                egui::RichText::new(icons::TRASH)
+                                                    .color(Color32::from_rgb(255, 100, 100)),
+                                            )
+                                            .on_hover_text("Delete")
+                                            .clicked()
+                                        {
+                                            ann.save_undo();
+                                            ann.annotations.remove(sel_idx);
+                                            ann.selected_index = None;
+                                        }
+                                    });
+                                });
+                        }
+                    }
 
                     // ─── Overlay controls (video-player style) ───────────────────
 
