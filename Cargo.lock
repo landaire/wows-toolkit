@@ -3297,27 +3297,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
-name = "minimap_renderer"
-version = "0.1.0"
-dependencies = [
- "ab_glyph",
- "anyhow",
- "bytes",
- "clap",
- "convert_case 0.6.0",
- "gettext",
- "image",
- "imageproc",
- "mp4",
- "openh264",
- "resvg 0.44.0",
- "roxmltree 0.19.0",
- "tiny-skia",
- "wows_replays",
- "wowsunpack",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7420,8 +7399,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
+name = "wows_minimap_renderer"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f993f1d39b3e285af0b9781b6dfb752479eafdaf664f165bcd81c89e91f4a7b"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "bytes",
+ "clap",
+ "convert_case 0.6.0",
+ "gettext",
+ "image",
+ "imageproc",
+ "mp4",
+ "openh264",
+ "resvg 0.44.0",
+ "roxmltree 0.19.0",
+ "tiny-skia",
+ "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows_replays"
-version = "0.12.0"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f41744ed2258f253639f0f924929644e03d5d38f9ab151fa2ed8b0684fb71a49"
 dependencies = [
  "bitreader",
  "derive_builder",
@@ -7475,7 +7479,6 @@ dependencies = [
  "jiff",
  "language-tags",
  "levenshtein",
- "minimap_renderer",
  "notify",
  "octocrab",
  "ouroboros",
@@ -7499,6 +7502,7 @@ dependencies = [
  "tracing-subscriber",
  "twitch_api",
  "winresource",
+ "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
  "zip",
@@ -7506,7 +7510,9 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.11.0"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8684302c2fadcd306e2128727496dbb647c10dd8495861868345ff3fbe3eba83"
 dependencies = [
  "binrw",
  "byteorder",

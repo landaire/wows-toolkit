@@ -6,11 +6,11 @@ use std::sync::mpsc;
 use egui::mutex::Mutex;
 use egui::{Color32, CornerRadius, FontId, Pos2, Rect, Shape, Stroke, TextureHandle, Vec2};
 
-use minimap_renderer::assets;
-use minimap_renderer::draw_command::DrawCommand;
-use minimap_renderer::map_data::MapInfo;
-use minimap_renderer::renderer::{MinimapRenderer, RenderOptions};
-use minimap_renderer::{CANVAS_HEIGHT, HUD_HEIGHT, MINIMAP_SIZE, MinimapPos};
+use wows_minimap_renderer::assets;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::map_data::MapInfo;
+use wows_minimap_renderer::renderer::{MinimapRenderer, RenderOptions};
+use wows_minimap_renderer::{CANVAS_HEIGHT, HUD_HEIGHT, MINIMAP_SIZE, MinimapPos};
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -213,6 +213,7 @@ type RgbaAsset = (Vec<u8>, u32, u32);
 pub struct RendererAssetCache {
     ship_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     plane_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    consumable_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     maps: HashMap<String, CachedMapData>,
 }
 
@@ -223,7 +224,7 @@ struct CachedMapData {
 
 impl Default for RendererAssetCache {
     fn default() -> Self {
-        Self { ship_icons: None, plane_icons: None, maps: HashMap::new() }
+        Self { ship_icons: None, plane_icons: None, consumable_icons: None, maps: HashMap::new() }
     }
 }
 
@@ -270,6 +271,27 @@ impl RendererAssetCache {
         arc
     }
 
+    fn get_or_load_consumable_icons(
+        &mut self,
+        file_tree: &FileNode,
+        pkg_loader: &PkgFileLoader,
+    ) -> Arc<HashMap<String, RgbaAsset>> {
+        if let Some(ref cached) = self.consumable_icons {
+            return Arc::clone(cached);
+        }
+        let raw = assets::load_consumable_icons(file_tree, pkg_loader);
+        let converted: HashMap<String, RgbaAsset> = raw
+            .into_iter()
+            .map(|(k, img)| {
+                let (w, h) = (img.width(), img.height());
+                (k, (img.into_raw(), w, h))
+            })
+            .collect();
+        let arc = Arc::new(converted);
+        self.consumable_icons = Some(Arc::clone(&arc));
+        arc
+    }
+
     fn get_or_load_map(
         &mut self,
         map_name: &str,
@@ -307,6 +329,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_capture_points: saved.show_capture_points,
         show_buildings: saved.show_buildings,
         show_turret_direction: saved.show_turret_direction,
+        show_consumables: saved.show_consumables,
     }
 }
 
@@ -325,6 +348,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_capture_points: opts.show_capture_points,
         show_buildings: opts.show_buildings,
         show_turret_direction: opts.show_turret_direction,
+        show_consumables: opts.show_consumables,
     }
 }
 
@@ -354,13 +378,17 @@ pub struct ReplayRendererAssets {
     pub map_image: Option<Arc<RgbaAsset>>,
     pub ship_icons: Arc<HashMap<String, RgbaAsset>>,
     pub plane_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub consumable_icons: Arc<HashMap<String, RgbaAsset>>,
 }
 
 /// egui TextureHandles created on the UI thread.
 struct RendererTextures {
     map_texture: Option<TextureHandle>,
     ship_icons: HashMap<String, TextureHandle>,
+    /// Gold outline textures for detected-teammate highlight, keyed by the same variant keys as ship_icons.
+    ship_icon_outlines: HashMap<String, TextureHandle>,
     plane_icons: HashMap<String, TextureHandle>,
+    consumable_icons: HashMap<String, TextureHandle>,
 }
 
 /// Status of the background renderer.
@@ -519,9 +547,11 @@ fn playback_thread(
         let mut cache = asset_cache.lock();
         let ship_icons = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
         let plane_icons = cache.get_or_load_plane_icons(&file_tree, &pkg_loader);
+        let consumable_icons = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &file_tree, &pkg_loader);
 
-        shared_state.lock().assets = Some(ReplayRendererAssets { map_image, ship_icons, plane_icons });
+        shared_state.lock().assets =
+            Some(ReplayRendererAssets { map_image, ship_icons, plane_icons, consumable_icons });
 
         map_info
     };
@@ -562,6 +592,7 @@ fn playback_thread(
                 if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                     renderer.populate_players(&controller);
                     renderer.update_squadron_info(&controller);
+                    renderer.update_ship_abilities(&controller);
 
                     let target_frame = (prev_clock.seconds() / frame_duration) as i64;
                     while last_rendered_frame < target_frame && last_rendered_frame < TOTAL_FRAMES as i64 - 1 {
@@ -598,6 +629,7 @@ fn playback_thread(
     if prev_clock.seconds() > 0.0 {
         renderer.populate_players(&controller);
         renderer.update_squadron_info(&controller);
+        renderer.update_ship_abilities(&controller);
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
         while last_rendered_frame < target_frame && last_rendered_frame < TOTAL_FRAMES as i64 - 1 {
             last_rendered_frame += 1;
@@ -673,6 +705,7 @@ fn playback_thread(
                     if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                         renderer.populate_players(controller);
                         renderer.update_squadron_info(controller);
+                        renderer.update_ship_abilities(controller);
                     }
                     if prev_clock.seconds() == 0.0 {
                         prev_clock = packet.clock;
@@ -688,6 +721,7 @@ fn playback_thread(
 
         renderer.populate_players(controller);
         renderer.update_squadron_info(controller);
+        renderer.update_ship_abilities(controller);
     }
 
     // Request a repaint of the viewport from the background thread.
@@ -874,8 +908,8 @@ fn render_video_blocking(
     wows_data: &SharedWoWsData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
 ) -> anyhow::Result<()> {
-    use minimap_renderer::drawing::ImageTarget;
-    use minimap_renderer::video::VideoEncoder;
+    use wows_minimap_renderer::drawing::ImageTarget;
+    use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
     let (file_tree, pkg_loader, game_metadata) = {
@@ -885,10 +919,11 @@ fn render_video_blocking(
     };
 
     // Load assets — reuse cached raw RGBA data and convert to image types
-    let (map_image_rgb, ship_icons_rgba, plane_icons_rgba, map_info) = {
+    let (map_image_rgb, ship_icons_rgba, plane_icons_rgba, consumable_icons_rgba, map_info) = {
         let mut cache = asset_cache.lock();
         let ship_raw = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
         let plane_raw = cache.get_or_load_plane_icons(&file_tree, &pkg_loader);
+        let consumable_raw = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
         let (map_raw, map_info) = cache.get_or_load_map(map_name, &file_tree, &pkg_loader);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
@@ -902,6 +937,11 @@ fn render_video_blocking(
             .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
             .collect();
 
+        let consumable_icons: HashMap<String, image::RgbaImage> = consumable_raw
+            .iter()
+            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
+            .collect();
+
         let map_image = map_raw.as_ref().and_then(|arc| {
             let (data, w, h) = &**arc;
             // Cached data is RGBA, convert to RGB for ImageTarget
@@ -909,7 +949,7 @@ fn render_video_blocking(
             Some(image::DynamicImage::ImageRgba8(rgba).into_rgb8())
         });
 
-        (map_image, ship_icons, plane_icons, map_info)
+        (map_image, ship_icons, plane_icons, consumable_icons, map_info)
     };
 
     // Build replay parser components
@@ -919,7 +959,7 @@ fn render_video_blocking(
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata);
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info, &*game_metadata, options);
-    let mut target = ImageTarget::new(map_image_rgb, ship_icons_rgba, plane_icons_rgba);
+    let mut target = ImageTarget::new(map_image_rgb, ship_icons_rgba, plane_icons_rgba, consumable_icons_rgba);
     let mut encoder = VideoEncoder::new(output_path, None, game_duration);
 
     // Parse all packets, advancing the encoder at each clock tick
@@ -932,6 +972,7 @@ fn render_video_blocking(
                 if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                     renderer.populate_players(&controller);
                     renderer.update_squadron_info(&controller);
+                    renderer.update_ship_abilities(&controller);
                     encoder.advance_clock(prev_clock, &controller, &mut renderer, &mut target);
                 }
                 if prev_clock.seconds() == 0.0 {
@@ -949,6 +990,7 @@ fn render_video_blocking(
     controller.finish();
     renderer.populate_players(&controller);
     renderer.update_squadron_info(&controller);
+    renderer.update_ship_abilities(&controller);
     encoder.finish(&controller, &mut renderer, &mut target)?;
 
     Ok(())
@@ -1066,6 +1108,8 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
         DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
+        DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
+        DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
     }
 }
 
@@ -1518,20 +1562,41 @@ fn draw_command_to_shapes(
             ));
         }
 
-        DrawCommand::Ship { pos, yaw, species, color, visibility, opacity, is_self, player_name, ship_name } => {
+        DrawCommand::Ship {
+            pos,
+            yaw,
+            species,
+            color,
+            visibility,
+            opacity,
+            is_self,
+            player_name,
+            ship_name,
+            is_detected_teammate,
+        } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
+
             if let Some(sp) = species {
                 let variant_key = match (*visibility, *is_self) {
-                    (minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
-                    (minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
-                    (minimap_renderer::ShipVisibility::MinimapOnly, _) => {
+                    (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
+                    (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
+                    (wows_minimap_renderer::ShipVisibility::MinimapOnly, _) => {
                         format!("{}_last_visible", sp)
                     }
-                    (minimap_renderer::ShipVisibility::Undetected, _) => {
+                    (wows_minimap_renderer::ShipVisibility::Undetected, _) => {
                         format!("{}_invisible", sp)
                     }
                 };
+
+                // Gold icon-shaped outline for detected teammates (drawn before icon)
+                if *is_detected_teammate {
+                    let outline_tex =
+                        textures.ship_icon_outlines.get(&variant_key).or_else(|| textures.ship_icon_outlines.get(sp));
+                    if let Some(otex) = outline_tex {
+                        shapes.push(make_rotated_icon_mesh(otex.id(), center, icon_size, *yaw, Color32::WHITE));
+                    }
+                }
 
                 let texture = textures.ship_icons.get(&variant_key).or_else(|| textures.ship_icons.get(sp));
 
@@ -1774,12 +1839,91 @@ fn draw_command_to_shapes(
             let line_color = Color32::from_rgba_premultiplied(c.r(), c.g(), c.b(), 180);
             shapes.push(Shape::line_segment([start, end], Stroke::new(stroke_width, line_color)));
         }
+
+        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius_px as f32);
+            let fill_color = color_from_rgba(*color, *alpha);
+            shapes.push(Shape::circle_filled(center, r, fill_color));
+            let outline_color = color_from_rgba(*color, 0.5);
+            let stroke_w = transform.scale_stroke(2.0);
+            shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+        }
+
+        DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            // Position below HP bar (10 bar top + 3 bar height + 11 half-icon + 2 gap = 26)
+            // or below the ship icon if no HP bar (10 + 11 half-icon + 2 gap = 23)
+            let base_offset = if *has_hp_bar { 26.0 } else { 23.0 };
+            let icon_y = center.y + transform.scale_distance(base_offset);
+            let icon_size = transform.scale_distance(22.0);
+            let gap = transform.scale_distance(1.0);
+            let count = icon_keys.len() as f32;
+            let total_width = count * icon_size + (count - 1.0) * gap;
+            let start_x = center.x - total_width / 2.0 + icon_size / 2.0;
+            for (i, icon_key) in icon_keys.iter().enumerate() {
+                let icon_x = start_x + i as f32 * (icon_size + gap);
+                if let Some(tex) = textures.consumable_icons.get(icon_key) {
+                    let half = icon_size / 2.0;
+                    let mut mesh = egui::Mesh::with_texture(tex.id());
+                    let rect = Rect::from_min_max(
+                        Pos2::new(icon_x - half, icon_y - half),
+                        Pos2::new(icon_x + half, icon_y + half),
+                    );
+                    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+                    shapes.push(Shape::Mesh(mesh.into()));
+                }
+            }
+        }
     }
 
     shapes
 }
 
 // ─── Texture Upload ──────────────────────────────────────────────────────────
+
+/// Generate an outline RGBA image from a source icon's alpha channel.
+/// The outline is `thickness` pixels wide around opaque regions (alpha > 128).
+/// Returns (rgba_data, width, height) with the same dimensions as the input.
+fn generate_icon_outline(data: &[u8], w: u32, h: u32, thickness: i32) -> Vec<u8> {
+    let iw = w as i32;
+    let ih = h as i32;
+    let mut out = vec![0u8; (w * h * 4) as usize];
+
+    for y in 0..ih {
+        for x in 0..iw {
+            let idx = (y * iw + x) as usize;
+            let self_alpha = data[idx * 4 + 3];
+            if self_alpha > 128 {
+                // Inside the icon — leave transparent (icon itself will be drawn on top)
+                continue;
+            }
+
+            // Check if any neighbor within `thickness` is opaque
+            let mut has_opaque_neighbor = false;
+            'outer: for ny in (y - thickness).max(0)..=(y + thickness).min(ih - 1) {
+                for nx in (x - thickness).max(0)..=(x + thickness).min(iw - 1) {
+                    let ni = (ny * iw + nx) as usize;
+                    if data[ni * 4 + 3] > 128 {
+                        has_opaque_neighbor = true;
+                        break 'outer;
+                    }
+                }
+            }
+
+            if has_opaque_neighbor {
+                let oi = idx * 4;
+                out[oi] = 255; // R (gold)
+                out[oi + 1] = 215; // G
+                out[oi + 2] = 0; // B
+                out[oi + 3] = 230; // A
+            }
+        }
+    }
+
+    out
+}
 
 fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> RendererTextures {
     let map_texture = assets.map_image.as_ref().map(|asset| {
@@ -1788,15 +1932,19 @@ fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> Render
         ctx.load_texture("replay_map", image, egui::TextureOptions::LINEAR)
     });
 
-    let ship_icons: HashMap<String, TextureHandle> = assets
-        .ship_icons
-        .iter()
-        .map(|(key, (data, w, h))| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
-            let handle = ctx.load_texture(format!("ship_{}", key), image, egui::TextureOptions::LINEAR);
-            (key.clone(), handle)
-        })
-        .collect();
+    let mut ship_icons: HashMap<String, TextureHandle> = HashMap::new();
+    let mut ship_icon_outlines: HashMap<String, TextureHandle> = HashMap::new();
+    for (key, (data, w, h)) in assets.ship_icons.iter() {
+        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        let handle = ctx.load_texture(format!("ship_{}", key), image, egui::TextureOptions::LINEAR);
+        ship_icons.insert(key.clone(), handle);
+
+        let outline_data = generate_icon_outline(data, *w, *h, 2);
+        let outline_image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], &outline_data);
+        let outline_handle =
+            ctx.load_texture(format!("ship_outline_{}", key), outline_image, egui::TextureOptions::LINEAR);
+        ship_icon_outlines.insert(key.clone(), outline_handle);
+    }
 
     let plane_icons: HashMap<String, TextureHandle> = assets
         .plane_icons
@@ -1808,7 +1956,17 @@ fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> Render
         })
         .collect();
 
-    RendererTextures { map_texture, ship_icons, plane_icons }
+    let consumable_icons: HashMap<String, TextureHandle> = assets
+        .consumable_icons
+        .iter()
+        .map(|(key, (data, w, h))| {
+            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+            let handle = ctx.load_texture(format!("consumable_{}", key), image, egui::TextureOptions::LINEAR);
+            (key.clone(), handle)
+        })
+        .collect();
+
+    RendererTextures { map_texture, ship_icons, ship_icon_outlines, plane_icons, consumable_icons }
 }
 
 // ─── Viewport Rendering ─────────────────────────────────────────────────────
@@ -3166,6 +3324,7 @@ impl ReplayRendererViewer {
                                             changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
                                             changed |=
                                                 ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
+                                            changed |= ui.checkbox(&mut opts.show_consumables, "Consumables").changed();
                                             changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
                                             changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                             changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
