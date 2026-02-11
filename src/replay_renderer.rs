@@ -1067,6 +1067,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
 }
 
 /// Distance from a point to the nearest part of an annotation (in minimap logical coords).
+/// Returns 0 if the point is inside the shape.
 fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
     match ann {
         Annotation::Ship { pos, .. } => (*pos - point).length(),
@@ -1074,9 +1075,49 @@ fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
             points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
         }
         Annotation::Line { start, end, .. } => point_to_segment_dist(point, *start, *end),
-        Annotation::Circle { center, radius, .. } => ((point - *center).length() - *radius).abs(),
-        Annotation::Rectangle { center, .. } => (*center - point).length(),
-        Annotation::Triangle { center, .. } => (*center - point).length(),
+        Annotation::Circle { center, radius, .. } => {
+            let dist_from_center = (point - *center).length();
+            if dist_from_center <= *radius {
+                0.0 // inside the circle
+            } else {
+                dist_from_center - *radius
+            }
+        }
+        Annotation::Rectangle { center, half_size, rotation, .. } => {
+            // Transform point into the rectangle's local coordinate space
+            let dp = point - *center;
+            let cos_r = rotation.cos();
+            let sin_r = rotation.sin();
+            let local = Vec2::new(dp.x * cos_r + dp.y * sin_r, -dp.x * sin_r + dp.y * cos_r);
+            let dx = (local.x.abs() - half_size.x).max(0.0);
+            let dy = (local.y.abs() - half_size.y).max(0.0);
+            (dx * dx + dy * dy).sqrt()
+        }
+        Annotation::Triangle { center, radius, rotation, .. } => {
+            // Check if inside: use distance from center vs circumradius as approximation
+            let dist = (point - *center).length();
+            // Inradius of equilateral triangle = radius / 2
+            let inradius = *radius * 0.5;
+            if dist <= inradius {
+                0.0
+            } else {
+                // Distance to nearest edge
+                let verts: Vec<Vec2> = (0..3)
+                    .map(|i| {
+                        let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
+                        *center + Vec2::new(radius * angle.cos(), radius * angle.sin())
+                    })
+                    .collect();
+                let mut min_dist = f32::MAX;
+                for i in 0..3 {
+                    let d = point_to_segment_dist(point, verts[i], verts[(i + 1) % 3]);
+                    if d < min_dist {
+                        min_dist = d;
+                    }
+                }
+                min_dist
+            }
+        }
     }
 }
 
@@ -1172,10 +1213,7 @@ fn render_annotation(ann: &Annotation, transform: &MapTransform, textures: &Rend
                 painter.add(Shape::convex_polygon(screen_corners, *color, Stroke::NONE));
             } else {
                 let stroke = Stroke::new(transform.scale_stroke(*width), *color);
-                for i in 0..4 {
-                    painter
-                        .add(Shape::LineSegment { points: [screen_corners[i], screen_corners[(i + 1) % 4]], stroke });
-                }
+                painter.add(egui::epaint::PathShape::closed_line(screen_corners, stroke));
             }
         }
         Annotation::Triangle { center, radius, rotation, color, width, filled } => {
@@ -1191,9 +1229,7 @@ fn render_annotation(ann: &Annotation, transform: &MapTransform, textures: &Rend
                 painter.add(Shape::convex_polygon(screen_verts, *color, Stroke::NONE));
             } else {
                 let stroke = Stroke::new(transform.scale_stroke(*width), *color);
-                for i in 0..3 {
-                    painter.add(Shape::LineSegment { points: [screen_verts[i], screen_verts[(i + 1) % 3]], stroke });
-                }
+                painter.add(egui::epaint::PathShape::closed_line(screen_verts, stroke));
             }
         }
     }
@@ -1302,9 +1338,7 @@ fn render_tool_preview(
                     painter.add(Shape::convex_polygon(corners, ghost_color, Stroke::NONE));
                 } else {
                     let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
-                    for i in 0..4 {
-                        painter.add(Shape::LineSegment { points: [corners[i], corners[(i + 1) % 4]], stroke });
-                    }
+                    painter.add(egui::epaint::PathShape::closed_line(corners, stroke));
                 }
             }
         }
@@ -1328,9 +1362,7 @@ fn render_tool_preview(
                     painter.add(Shape::convex_polygon(verts, ghost_color, Stroke::NONE));
                 } else {
                     let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
-                    for i in 0..3 {
-                        painter.add(Shape::LineSegment { points: [verts[i], verts[(i + 1) % 3]], stroke });
-                    }
+                    painter.add(egui::epaint::PathShape::closed_line(verts, stroke));
                 }
             }
         }
@@ -1950,12 +1982,12 @@ impl ReplayRendererViewer {
                             let ann = annotation_arc.lock();
                             match &ann.active_tool {
                                 PaintTool::PlacingShip { .. } => Some(egui::CursorIcon::Cell),
-                                PaintTool::Freehand { .. } => Some(egui::CursorIcon::Crosshair),
-                                PaintTool::Eraser => Some(egui::CursorIcon::NotAllowed),
-                                PaintTool::DrawingLine { .. }
+                                PaintTool::Freehand { .. }
+                                | PaintTool::Eraser
+                                | PaintTool::DrawingLine { .. }
                                 | PaintTool::DrawingCircle { .. }
                                 | PaintTool::DrawingRect { .. }
-                                | PaintTool::DrawingTriangle { .. } => Some(egui::CursorIcon::Crosshair),
+                                | PaintTool::DrawingTriangle { .. } => Some(egui::CursorIcon::None),
                                 PaintTool::None => {
                                     if let Some(sel) = ann.selected_index {
                                         if ann.dragging_rotation {
@@ -2191,6 +2223,31 @@ impl ReplayRendererViewer {
                                 ann.active_tool = PaintTool::None;
                             } else {
                                 ann.selected_index = None;
+                            }
+                        }
+
+                        // Delete/Backspace to delete selected annotation
+                        if !tool_active {
+                            if let Some(sel) = ann.selected_index {
+                                if sel < ann.annotations.len()
+                                    && ctx.input(|i| {
+                                        i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
+                                    })
+                                {
+                                    ann.save_undo();
+                                    ann.annotations.remove(sel);
+                                    ann.selected_index = None;
+                                }
+                            }
+                        }
+
+                        // [ and ] to adjust stroke width when a tool is active
+                        if tool_active {
+                            if ctx.input(|i| i.key_pressed(egui::Key::OpenBracket)) {
+                                ann.stroke_width = (ann.stroke_width - 1.0).clamp(1.0, 8.0);
+                            }
+                            if ctx.input(|i| i.key_pressed(egui::Key::CloseBracket)) {
+                                ann.stroke_width = (ann.stroke_width + 1.0).clamp(1.0, 8.0);
                             }
                         }
 
@@ -2618,14 +2675,57 @@ impl ReplayRendererViewer {
 
                                         ui.separator();
 
-                                        // ── Color picker + stroke width ──
+                                        // ── Color presets + custom picker + stroke width ──
+                                        const PRESET_COLORS: &[(Color32, &str)] = &[
+                                            (Color32::WHITE, "White"),
+                                            (Color32::from_rgb(160, 160, 160), "Gray"),
+                                            (Color32::from_rgb(230, 50, 50), "Red"),
+                                            (Color32::from_rgb(240, 140, 30), "Orange"),
+                                            (Color32::from_rgb(240, 230, 50), "Yellow"),
+                                            (Color32::from_rgb(50, 200, 50), "Green"),
+                                            (Color32::from_rgb(50, 120, 230), "Blue"),
+                                            (Color32::from_rgb(180, 60, 230), "Purple"),
+                                            (Color32::from_rgb(255, 130, 180), "Pink"),
+                                        ];
                                         ui.horizontal(|ui| {
-                                            ui.label("Color:");
+                                            let swatch_size = egui::vec2(16.0, 16.0);
+
+                                            // Custom color picker first, with white outline
                                             egui::color_picker::color_edit_button_srgba(
                                                 ui,
                                                 &mut ann.paint_color,
                                                 egui::color_picker::Alpha::Opaque,
                                             );
+                                            let picker_rect = ui.min_rect();
+                                            ui.painter().rect_stroke(
+                                                picker_rect,
+                                                CornerRadius::same(2),
+                                                Stroke::new(1.5, Color32::WHITE),
+                                                egui::StrokeKind::Outside,
+                                            );
+
+                                            ui.add_space(4.0);
+
+                                            // Preset color swatches
+                                            for &(color, name) in PRESET_COLORS {
+                                                let selected = ann.paint_color == color;
+                                                let (rect, resp) =
+                                                    ui.allocate_exact_size(swatch_size, egui::Sense::click());
+                                                ui.painter().rect_filled(rect, CornerRadius::same(3), color);
+                                                if selected {
+                                                    ui.painter().rect_stroke(
+                                                        rect,
+                                                        CornerRadius::same(3),
+                                                        Stroke::new(2.0, Color32::WHITE),
+                                                        egui::StrokeKind::Outside,
+                                                    );
+                                                }
+                                                if resp.on_hover_text(name).clicked() {
+                                                    ann.paint_color = color;
+                                                }
+                                            }
+                                        });
+                                        ui.horizontal(|ui| {
                                             ui.label("Width:");
                                             ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1));
                                         });
