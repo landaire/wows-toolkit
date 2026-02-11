@@ -123,6 +123,8 @@ pub struct SavedRenderOptions {
     pub show_turret_direction: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_consumables: bool,
+    #[serde(default)]
+    pub show_dead_ships: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -142,6 +144,7 @@ impl Default for SavedRenderOptions {
             show_buildings: true,
             show_turret_direction: true,
             show_consumables: true,
+            show_dead_ships: false,
         }
     }
 }

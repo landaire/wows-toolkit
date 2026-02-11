@@ -349,6 +349,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_buildings: opts.show_buildings,
         show_turret_direction: opts.show_turret_direction,
         show_consumables: opts.show_consumables,
+        show_dead_ships: false,
     }
 }
 
@@ -406,6 +407,7 @@ pub struct SharedRendererState {
     pub playing: bool,
     pub speed: f32,
     pub options: RenderOptions,
+    pub show_dead_ships: bool,
     /// Viewport egui context, set by the UI thread on first draw.
     /// Used by the background thread to request repaints after frame updates.
     pub viewport_ctx: Option<egui::Context>,
@@ -460,8 +462,9 @@ pub fn launch_replay_renderer(
     game_duration: f32,
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
-    initial_options: RenderOptions,
+    saved_options: &SavedRenderOptions,
 ) -> ReplayRendererViewer {
+    let initial_options = render_options_from_saved(saved_options);
     let (command_tx, command_rx) = mpsc::channel();
     let shared_state = Arc::new(Mutex::new(SharedRendererState {
         status: RendererStatus::Loading,
@@ -470,6 +473,7 @@ pub fn launch_replay_renderer(
         playing: false,
         speed: 1.0,
         options: initial_options,
+        show_dead_ships: saved_options.show_dead_ships,
         viewport_ctx: None,
     }));
 
@@ -1093,14 +1097,14 @@ fn draw_ship_labels(
 
 /// Check whether a DrawCommand should be drawn given the current RenderOptions.
 /// This runs on the UI thread so option changes are instant (no cross-thread round-trip).
-fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
+fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
     match cmd {
         DrawCommand::ShotTracer { .. } => opts.show_tracers,
         DrawCommand::Torpedo { .. } => opts.show_torpedoes,
         DrawCommand::Smoke { .. } => opts.show_smoke,
         DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below
         DrawCommand::HealthBar { .. } => opts.show_hp_bars,
-        DrawCommand::DeadShip { .. } => true,
+        DrawCommand::DeadShip { .. } => show_dead_ships,
         DrawCommand::Plane { .. } => opts.show_planes,
         DrawCommand::ScoreBar { .. } => opts.show_score,
         DrawCommand::Timer { .. } => opts.show_timer,
@@ -2011,6 +2015,7 @@ impl ReplayRendererViewer {
                 let playing = state.playing;
                 let speed = state.speed;
                 let options = state.options.clone();
+                let show_dead_ships = state.show_dead_ships;
                 let frame_data =
                     state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock_seconds, f.game_duration));
                 drop(state);
@@ -2294,7 +2299,7 @@ impl ReplayRendererViewer {
                         if let Some(ref frame) = state.frame {
                             // Separate HUD and map commands so HUD draws on unclipped painter
                             for cmd in &frame.commands {
-                                if !should_draw_command(cmd, &options) {
+                                if !should_draw_command(cmd, &options, show_dead_ships) {
                                     continue;
                                 }
                                 let is_hud = matches!(
@@ -3319,12 +3324,14 @@ impl ReplayRendererViewer {
                                         .show(|ui| {
                                             ui.set_min_width(180.0);
                                             let mut opts = options.clone();
+                                            let mut show_dead = show_dead_ships;
                                             let mut changed = false;
 
                                             changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
                                             changed |=
                                                 ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
                                             changed |= ui.checkbox(&mut opts.show_consumables, "Consumables").changed();
+                                            changed |= ui.checkbox(&mut show_dead, "Dead Ships").changed();
                                             changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
                                             changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                             changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
@@ -3341,12 +3348,16 @@ impl ReplayRendererViewer {
                                                 .changed();
 
                                             if changed {
-                                                shared_state.lock().options = opts.clone();
+                                                let mut state = shared_state.lock();
+                                                state.options = opts.clone();
+                                                state.show_dead_ships = show_dead;
                                             }
 
                                             ui.separator();
                                             if ui.button("Save Defaults").clicked() {
-                                                *pending_save.lock() = Some(saved_from_render_options(&opts));
+                                                let mut saved = saved_from_render_options(&opts);
+                                                saved.show_dead_ships = show_dead;
+                                                *pending_save.lock() = Some(saved);
                                             }
                                         });
                                 });

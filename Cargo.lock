@@ -8184,9 +8184,9 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58065abae959bcc4e6ae66f2ff2645db6872825494592ca92c7e29d0de8fc815"
+checksum = "9825aa19b5d949d3808ed1e990b6201c243b7fcac031e0d170dc60427d3d0c48"
 dependencies = [
  "ab_glyph",
  "anyhow",

@@ -2694,9 +2694,6 @@ impl ToolkitTabViewer<'_> {
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let wows_data = self.tab_state.world_of_warships_data.clone().unwrap();
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
-                    let initial_options = crate::replay_renderer::render_options_from_saved(
-                        &self.tab_state.settings.renderer_options,
-                    );
                     let viewer = crate::replay_renderer::launch_replay_renderer(
                         raw_meta,
                         pkt_data,
@@ -2704,7 +2701,7 @@ impl ToolkitTabViewer<'_> {
                         game_duration,
                         wows_data,
                         asset_cache,
-                        initial_options,
+                        &self.tab_state.settings.renderer_options,
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -2810,6 +2807,7 @@ impl ToolkitTabViewer<'_> {
                         let label_response = ui
                             .add(Label::new(label_text).selectable(false).sense(Sense::click()))
                             .on_hover_text(label.as_str());
+                        let replay_weak2 = replay_weak.clone();
                         label_response.context_menu(|ui| {
                             if ui.button("Copy Path").clicked() {
                                 ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
@@ -2817,6 +2815,12 @@ impl ToolkitTabViewer<'_> {
                             }
                             if ui.button("Show in File Explorer").clicked() {
                                 util::open_file_explorer(&path_clone);
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            if ui.button("Render Replay").clicked() {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak2.clone());
+                                });
                                 ui.close_kind(UiKind::Menu);
                             }
                             ui.separator();
@@ -2846,6 +2850,8 @@ impl ToolkitTabViewer<'_> {
         if let Some(replays) = reset_replays {
             self.tab_state.replays_for_session_reset = Some(replays);
         }
+
+        self.handle_context_menu_render(ui);
 
         // Load replay outside of the closure to avoid borrow issues
         if let Some(replay) = replay_to_load
@@ -3010,6 +3016,7 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
+                            let replay_weak2 = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                                     if ui.button("Copy Path").clicked() {
@@ -3018,6 +3025,17 @@ impl ToolkitTabViewer<'_> {
                                     }
                                     if ui.button("Show in File Explorer").clicked() {
                                         util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Render Replay").clicked() {
+                                        if let Some(replay_weak) = replay_weak2.as_ref() {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(
+                                                    egui::Id::new("context_menu_render_replay"),
+                                                    replay_weak.clone(),
+                                                );
+                                            });
+                                        }
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     ui.separator();
@@ -3046,6 +3064,8 @@ impl ToolkitTabViewer<'_> {
             if let Some(replays) = reset_replays {
                 self.tab_state.replays_for_session_reset = Some(replays);
             }
+
+            self.handle_context_menu_render(ui);
 
             // Handle actions from tree
             for action in actions {
@@ -3254,6 +3274,7 @@ impl ToolkitTabViewer<'_> {
                                 None => RichText::new(label),
                             };
 
+                            let replay_weak2 = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                                     if ui.button("Copy Path").clicked() {
@@ -3262,6 +3283,17 @@ impl ToolkitTabViewer<'_> {
                                     }
                                     if ui.button("Show in File Explorer").clicked() {
                                         util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Render Replay").clicked() {
+                                        if let Some(replay_weak) = replay_weak2.as_ref() {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(
+                                                    egui::Id::new("context_menu_render_replay"),
+                                                    replay_weak.clone(),
+                                                );
+                                            });
+                                        }
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     ui.separator();
@@ -3290,6 +3322,8 @@ impl ToolkitTabViewer<'_> {
             if let Some(replays) = reset_replays {
                 self.tab_state.replays_for_session_reset = Some(replays);
             }
+
+            self.handle_context_menu_render(ui);
 
             // Handle actions from tree
             for action in actions {
@@ -3906,5 +3940,34 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
             });
+    }
+
+    fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {
+        let replay_weak: Option<Weak<RwLock<Replay>>> =
+            ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("context_menu_render_replay")));
+        if let Some(weak) = replay_weak
+            && let Some(arc) = weak.upgrade()
+            && self.tab_state.world_of_warships_data.is_some()
+        {
+            let guard = arc.read();
+            let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
+            let pkt_data = guard.replay_file.packet_data.clone();
+            let map_name = guard.replay_file.meta.mapName.clone();
+            let game_duration = guard.replay_file.meta.duration as f32;
+            drop(guard);
+
+            let wows_data = self.tab_state.world_of_warships_data.clone().unwrap();
+            let asset_cache = self.tab_state.renderer_asset_cache.clone();
+            let viewer = crate::replay_renderer::launch_replay_renderer(
+                raw_meta,
+                pkt_data,
+                map_name,
+                game_duration,
+                wows_data,
+                asset_cache,
+                &self.tab_state.settings.renderer_options,
+            );
+            self.tab_state.replay_renderers.lock().push(viewer);
+        }
     }
 }
