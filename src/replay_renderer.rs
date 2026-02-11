@@ -1118,6 +1118,9 @@ fn render_annotation(ann: &Annotation, transform: &MapTransform, textures: &Rend
             let screen_pos = minimap_vec2_to_screen(*pos, transform);
             let icon_size = transform.scale_distance(ICON_SIZE);
             let tint = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
+            // Draw outline ring to distinguish from replay ships
+            let ring_radius = icon_size * 0.6;
+            painter.add(Shape::circle_stroke(screen_pos, ring_radius, Stroke::new(1.5, tint)));
             if let Some(tex) = textures.ship_icons.get(species.as_str()) {
                 painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
             } else {
@@ -2233,7 +2236,7 @@ impl ReplayRendererViewer {
                                                 let center_screen =
                                                     annotation_screen_bounds(&ann.annotations[sel], &transform)
                                                         .center();
-                                                let angle = (cursor_screen.x - center_screen.x)
+                                                let angle = -(cursor_screen.x - center_screen.x)
                                                     .atan2(-(cursor_screen.y - center_screen.y));
                                                 match &mut ann.annotations[sel] {
                                                     Annotation::Ship { yaw, .. } => *yaw = angle,
@@ -2766,10 +2769,15 @@ impl ReplayRendererViewer {
                                         // Team toggle (for ships)
                                         if is_ship {
                                             if let Annotation::Ship { friendly, .. } = &mut ann.annotations[sel_idx] {
-                                                let label = if *friendly { "Friendly" } else { "Enemy" };
-                                                let color = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
-                                                if ui.button(egui::RichText::new(label).color(color).small()).clicked()
-                                                {
+                                                let (label, color) = if *friendly {
+                                                    ("Friendly", FRIENDLY_COLOR)
+                                                } else {
+                                                    ("Enemy  ", ENEMY_COLOR)
+                                                };
+                                                let btn =
+                                                    egui::Button::new(egui::RichText::new(label).color(color).small())
+                                                        .min_size(egui::vec2(60.0, 0.0));
+                                                if ui.add(btn).clicked() {
                                                     *friendly = !*friendly;
                                                 }
                                             }
