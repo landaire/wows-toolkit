@@ -32,5 +32,5 @@ jobs:
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md"
           ARCHIVE_TYPES: ${{ matrix.archive }}
-          TOOLCHAIN_VERSION: 1.90.0
+          TOOLCHAIN_VERSION: 1.92.0
           ARCHIVE_NAME: wows_toolkit_${{ github.event.release.tag_name }}_windows

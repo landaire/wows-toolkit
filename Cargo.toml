@@ -3,7 +3,7 @@ name = "wows_toolkit"
 version = "0.1.47-alpha2"
 authors = ["landaire"]
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.92"
 
 [package.metadata.winresource]
 

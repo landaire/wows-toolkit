@@ -1,3 +1,3 @@
 [toolchain]
-channel = "1.90.0"  # Avoid specifying a patch version here; see https://github.com/emilk/eframe_template/issues/145
+channel = "1.92.0"  # Avoid specifying a patch version here; see https://github.com/emilk/eframe_template/issues/145
 components = [ "rustfmt", "clippy" ]
