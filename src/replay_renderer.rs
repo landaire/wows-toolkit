@@ -10,7 +10,7 @@ use minimap_renderer::assets;
 use minimap_renderer::draw_command::DrawCommand;
 use minimap_renderer::map_data::MapInfo;
 use minimap_renderer::renderer::{MinimapRenderer, RenderOptions};
-use minimap_renderer::{CANVAS_HEIGHT, HUD_HEIGHT, MINIMAP_SIZE};
+use minimap_renderer::{CANVAS_HEIGHT, HUD_HEIGHT, MINIMAP_SIZE, MinimapPos};
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -29,6 +29,76 @@ use crate::wows_data::SharedWoWsData;
 const TOTAL_FRAMES: usize = 1800;
 const FPS: f64 = 30.0;
 const ICON_SIZE: f32 = 24.0;
+
+// ─── Zoom/Pan State ─────────────────────────────────────────────────────────
+
+/// Zoom and pan state for the replay viewport. Persists across frames.
+struct ViewportZoomPan {
+    /// Zoom level. 1.0 = no zoom (fit to window). Range: [1.0, 10.0].
+    zoom: f32,
+    /// Pan offset in zoomed-minimap-pixel space.
+    /// (0,0) = top-left corner of the map is at the top-left of the viewport.
+    pan: Vec2,
+}
+
+impl Default for ViewportZoomPan {
+    fn default() -> Self {
+        Self { zoom: 1.0, pan: Vec2::ZERO }
+    }
+}
+
+/// Encapsulates coordinate transforms for a single frame of viewport rendering.
+/// Handles both window-fit scaling and zoom/pan for the map region.
+struct MapTransform {
+    /// Top-left of the allocated painter rect in screen space.
+    origin: Pos2,
+    /// Uniform scale from logical canvas pixels to screen pixels.
+    window_scale: f32,
+    /// Zoom level (1.0 = no zoom).
+    zoom: f32,
+    /// Pan offset in zoomed-minimap-pixel space.
+    pan: Vec2,
+    /// HUD height in logical pixels.
+    hud_height: f32,
+    /// Logical canvas width (768).
+    canvas_width: f32,
+}
+
+impl MapTransform {
+    /// Convert a MinimapPos (in [0..768] space) to screen Pos2.
+    /// Applies zoom and pan, then window scale. Used for all map elements.
+    fn minimap_to_screen(&self, pos: &MinimapPos) -> Pos2 {
+        let zoomed_x = pos.x as f32 * self.zoom - self.pan.x;
+        let zoomed_y = pos.y as f32 * self.zoom - self.pan.y;
+        Pos2::new(
+            self.origin.x + zoomed_x * self.window_scale,
+            self.origin.y + (self.hud_height + zoomed_y) * self.window_scale,
+        )
+    }
+
+    /// Scale a distance (e.g., radius, icon size) from minimap space to screen space.
+    /// Scales with both zoom and window_scale.
+    fn scale_distance(&self, d: f32) -> f32 {
+        d * self.zoom * self.window_scale
+    }
+
+    /// Scale a stroke width. Scales with window_scale only (not zoom),
+    /// keeping lines readable at all zoom levels.
+    fn scale_stroke(&self, width: f32) -> f32 {
+        width * self.window_scale
+    }
+
+    /// Position for HUD elements (ScoreBar, Timer, KillFeed).
+    /// These scale with the window but NOT with zoom/pan.
+    fn hud_pos(&self, x: f32, y: f32) -> Pos2 {
+        Pos2::new(self.origin.x + x * self.window_scale, self.origin.y + y * self.window_scale)
+    }
+
+    /// The HUD-scaled canvas width in screen pixels.
+    fn screen_canvas_width(&self) -> f32 {
+        self.canvas_width * self.window_scale
+    }
+}
 
 // ─── Asset Cache ─────────────────────────────────────────────────────────────
 
@@ -224,6 +294,8 @@ pub struct ReplayRendererViewer {
     video_exporting: Arc<AtomicBool>,
     /// Data needed for video export (cloned from launch params).
     video_export_data: Arc<VideoExportData>,
+    /// Zoom and pan state for the viewport. Persists across frames.
+    zoom_pan: Arc<Mutex<ViewportZoomPan>>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -283,6 +355,7 @@ pub fn launch_replay_renderer(
         status_message: Arc::new(Mutex::new(None)),
         video_exporting: Arc::new(AtomicBool::new(false)),
         video_export_data,
+        zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -780,11 +853,6 @@ fn color_from_rgba(rgb: [u8; 3], alpha: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8)
 }
 
-/// Convert a MinimapPos to screen-space Pos2 given the canvas origin.
-fn minimap_to_screen(pos: &minimap_renderer::MinimapPos, origin: Pos2, y_offset: f32) -> Pos2 {
-    Pos2::new(origin.x + pos.x as f32, origin.y + pos.y as f32 + y_offset)
-}
-
 /// Build a rotated textured quad mesh for a ship/plane icon.
 fn make_rotated_icon_mesh(texture_id: egui::TextureId, center: Pos2, icon_size: f32, yaw: f32, tint: Color32) -> Shape {
     let half = icon_size / 2.0;
@@ -826,34 +894,36 @@ fn make_icon_mesh(texture_id: egui::TextureId, center: Pos2, w: f32, h: f32) -> 
 }
 
 /// Draw player name and/or ship name labels centered above an icon.
+/// `scale` controls font and offset sizing (1.0 at default 768px canvas).
 fn draw_ship_labels(
     ctx: &egui::Context,
     center: Pos2,
+    scale: f32,
     player_name: Option<&str>,
     ship_name: Option<&str>,
     shapes: &mut Vec<Shape>,
 ) {
-    let label_font = FontId::proportional(10.0);
-    let line_height = 12.0f32;
+    let label_font = FontId::proportional(10.0 * scale);
+    let line_height = 12.0 * scale;
     let label_color = Color32::WHITE;
     let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+    let shadow_offset = (1.0 * scale).min(2.0);
 
     let line_count = player_name.is_some() as i32 + ship_name.is_some() as i32;
     if line_count == 0 {
         return;
     }
 
-    // Position lines above the icon (icon radius ~12px)
-    let base_y = center.y - 14.0 - line_count as f32 * line_height;
+    // Position lines above the icon
+    let base_y = center.y - 14.0 * scale - line_count as f32 * line_height;
     let mut cur_y = base_y;
 
     if let Some(name) = player_name {
         let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), label_color));
         let text_w = galley.size().x;
         let tx = center.x - text_w / 2.0;
-        // Shadow
         let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
-        shapes.push(Shape::galley(Pos2::new(tx + 1.0, cur_y + 1.0), shadow_galley, shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
         shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, label_color));
         cur_y += line_height;
     }
@@ -862,9 +932,8 @@ fn draw_ship_labels(
         let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), label_color));
         let text_w = galley.size().x;
         let tx = center.x - text_w / 2.0;
-        // Shadow
         let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
-        shapes.push(Shape::galley(Pos2::new(tx + 1.0, cur_y + 1.0), shadow_galley, shadow_color));
+        shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
         shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, label_color));
     }
 }
@@ -889,37 +958,44 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions) -> bool {
 }
 
 /// Convert a single DrawCommand into epaint shapes.
-/// `opts` is used to filter name labels (show_player_names, show_ship_names).
+/// Uses `MapTransform` for all coordinate mapping. `opts` filters name labels.
 fn draw_command_to_shapes(
     cmd: &DrawCommand,
-    origin: Pos2,
-    y_offset: f32,
+    transform: &MapTransform,
     textures: &RendererTextures,
-    canvas_width: f32,
     ctx: &egui::Context,
     opts: &RenderOptions,
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
+    let ws = transform.window_scale;
 
     match cmd {
         DrawCommand::ShotTracer { from, to, color } => {
-            let p1 = minimap_to_screen(from, origin, y_offset);
-            let p2 = minimap_to_screen(to, origin, y_offset);
-            shapes.push(Shape::LineSegment { points: [p1, p2], stroke: Stroke::new(1.0, color_from_rgb(*color)) });
+            let p1 = transform.minimap_to_screen(from);
+            let p2 = transform.minimap_to_screen(to);
+            shapes.push(Shape::LineSegment {
+                points: [p1, p2],
+                stroke: Stroke::new(transform.scale_stroke(1.0), color_from_rgb(*color)),
+            });
         }
 
         DrawCommand::Torpedo { pos, color } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
-            shapes.push(Shape::circle_filled(center, 2.0, color_from_rgb(*color)));
+            let center = transform.minimap_to_screen(pos);
+            shapes.push(Shape::circle_filled(center, transform.scale_distance(2.0), color_from_rgb(*color)));
         }
 
         DrawCommand::Smoke { pos, radius, color, alpha } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
-            shapes.push(Shape::circle_filled(center, *radius as f32, color_from_rgba(*color, *alpha)));
+            let center = transform.minimap_to_screen(pos);
+            shapes.push(Shape::circle_filled(
+                center,
+                transform.scale_distance(*radius as f32),
+                color_from_rgba(*color, *alpha),
+            ));
         }
 
         DrawCommand::Ship { pos, yaw, species, color, visibility, opacity, is_self, player_name, ship_name } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
+            let center = transform.minimap_to_screen(pos);
+            let icon_size = transform.scale_distance(ICON_SIZE);
             if let Some(sp) = species {
                 let variant_key = match (*visibility, *is_self) {
                     (minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
@@ -940,31 +1016,29 @@ fn draw_command_to_shapes(
                     } else {
                         Color32::from_rgba_unmultiplied(255, 255, 255, (*opacity * 255.0) as u8)
                     };
-                    shapes.push(make_rotated_icon_mesh(tex.id(), center, ICON_SIZE, *yaw, tint));
+                    shapes.push(make_rotated_icon_mesh(tex.id(), center, icon_size, *yaw, tint));
                 } else {
-                    // Fallback: draw a colored circle
                     let c = color.map(|c| color_from_rgba(c, *opacity)).unwrap_or(Color32::from_rgba_unmultiplied(
                         128,
                         128,
                         128,
                         (*opacity * 255.0) as u8,
                     ));
-                    shapes.push(Shape::circle_filled(center, 5.0, c));
+                    shapes.push(Shape::circle_filled(center, transform.scale_distance(5.0), c));
                 }
             }
             let pname = if opts.show_player_names { player_name.as_deref() } else { None };
             let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
-            draw_ship_labels(ctx, center, pname, sname, &mut shapes);
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, &mut shapes);
         }
 
         DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha } => {
-            let bar_w = 20.0f32;
-            let bar_h = 3.0f32;
-            let center = minimap_to_screen(pos, origin, y_offset);
+            let bar_w = transform.scale_distance(20.0);
+            let bar_h = transform.scale_distance(3.0);
+            let center = transform.minimap_to_screen(pos);
             let bar_x = center.x - bar_w / 2.0;
-            let bar_y = center.y + 10.0;
+            let bar_y = center.y + transform.scale_distance(10.0);
 
-            // Background
             let bg_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(bar_w, bar_h));
             shapes.push(Shape::rect_filled(
                 bg_rect,
@@ -972,7 +1046,6 @@ fn draw_command_to_shapes(
                 color_from_rgba(*background_color, *background_alpha),
             ));
 
-            // Fill
             let fill_w = fraction.clamp(0.0, 1.0) * bar_w;
             if fill_w > 0.0 {
                 let fill_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(fill_w, bar_h));
@@ -981,7 +1054,8 @@ fn draw_command_to_shapes(
         }
 
         DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
+            let center = transform.minimap_to_screen(pos);
+            let icon_size = transform.scale_distance(ICON_SIZE);
             if let Some(sp) = species {
                 let variant_key = if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) };
 
@@ -989,11 +1063,10 @@ fn draw_command_to_shapes(
 
                 if let Some(tex) = texture {
                     let tint = if let Some(c) = color { Color32::from_rgb(c[0], c[1], c[2]) } else { Color32::WHITE };
-                    shapes.push(make_rotated_icon_mesh(tex.id(), center, ICON_SIZE, *yaw, tint));
+                    shapes.push(make_rotated_icon_mesh(tex.id(), center, icon_size, *yaw, tint));
                 } else {
-                    // Fallback: draw an X
-                    let s = 6.0;
-                    let stroke = Stroke::new(2.0, Color32::RED);
+                    let s = transform.scale_distance(6.0);
+                    let stroke = Stroke::new(transform.scale_stroke(2.0), Color32::RED);
                     shapes.push(Shape::LineSegment {
                         points: [Pos2::new(center.x - s, center.y - s), Pos2::new(center.x + s, center.y + s)],
                         stroke,
@@ -1006,114 +1079,114 @@ fn draw_command_to_shapes(
             }
             let pname = if opts.show_player_names { player_name.as_deref() } else { None };
             let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
-            draw_ship_labels(ctx, center, pname, sname, &mut shapes);
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, &mut shapes);
         }
 
         DrawCommand::Plane { pos, icon_key } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
+            let center = transform.minimap_to_screen(pos);
             if let Some(tex) = textures.plane_icons.get(icon_key) {
-                // Use the texture's actual size
                 let size = tex.size();
-                shapes.push(make_icon_mesh(tex.id(), center, size[0] as f32, size[1] as f32));
+                let w = transform.scale_distance(size[0] as f32);
+                let h = transform.scale_distance(size[1] as f32);
+                shapes.push(make_icon_mesh(tex.id(), center, w, h));
             } else {
-                // Fallback: small diamond
-                shapes.push(Shape::circle_filled(center, 3.0, Color32::YELLOW));
+                shapes.push(Shape::circle_filled(center, transform.scale_distance(3.0), Color32::YELLOW));
             }
         }
 
         DrawCommand::ScoreBar { team0, team1, team0_color, team1_color } => {
+            let canvas_w = transform.screen_canvas_width();
             let total = (*team0 + *team1).max(1) as f32;
-            let team0_width = (*team0 as f32 / total) * canvas_width;
-            let bar_height = 20.0;
+            let team0_width = (*team0 as f32 / total) * canvas_w;
+            let bar_height = 20.0 * ws;
 
-            // Team 0 bar
+            let bar_origin = transform.hud_pos(0.0, 0.0);
             if team0_width > 0.0 {
                 shapes.push(Shape::rect_filled(
-                    Rect::from_min_size(origin, Vec2::new(team0_width, bar_height)),
+                    Rect::from_min_size(bar_origin, Vec2::new(team0_width, bar_height)),
                     CornerRadius::ZERO,
                     color_from_rgb(*team0_color),
                 ));
             }
-            // Team 1 bar
-            if team0_width < canvas_width {
+            if team0_width < canvas_w {
                 shapes.push(Shape::rect_filled(
                     Rect::from_min_size(
-                        Pos2::new(origin.x + team0_width, origin.y),
-                        Vec2::new(canvas_width - team0_width, bar_height),
+                        Pos2::new(bar_origin.x + team0_width, bar_origin.y),
+                        Vec2::new(canvas_w - team0_width, bar_height),
                     ),
                     CornerRadius::ZERO,
                     color_from_rgb(*team1_color),
                 ));
             }
 
-            // Score text
-            let font = FontId::proportional(14.0);
+            let font = FontId::proportional(14.0 * ws);
             let t0_text = format!("{}", team0);
             let t1_text = format!("{}", team1);
 
             let t0_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, font.clone(), Color32::WHITE));
-            shapes.push(Shape::galley(Pos2::new(origin.x + 5.0, origin.y + 3.0), t0_galley, Color32::WHITE));
+            shapes.push(Shape::galley(
+                Pos2::new(bar_origin.x + 5.0 * ws, bar_origin.y + 3.0 * ws),
+                t0_galley,
+                Color32::WHITE,
+            ));
 
             let t1_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, font, Color32::WHITE));
             let t1_w = t1_galley.size().x;
             shapes.push(Shape::galley(
-                Pos2::new(origin.x + canvas_width - t1_w - 5.0, origin.y + 3.0),
+                Pos2::new(bar_origin.x + canvas_w - t1_w - 5.0 * ws, bar_origin.y + 3.0 * ws),
                 t1_galley,
                 Color32::WHITE,
             ));
         }
 
         DrawCommand::Timer { seconds } => {
+            let canvas_w = transform.screen_canvas_width();
             let total_secs = seconds.max(0.0) as u32;
             let minutes = total_secs / 60;
             let secs = total_secs % 60;
             let text = format!("{:02}:{:02}", minutes, secs);
 
-            let font = FontId::proportional(16.0);
+            let font = FontId::proportional(16.0 * ws);
             let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, font, Color32::WHITE));
             let text_w = galley.size().x;
-            shapes.push(Shape::galley(
-                Pos2::new(origin.x + canvas_width / 2.0 - text_w / 2.0, origin.y + 3.0),
-                galley,
-                Color32::WHITE,
-            ));
+            let pos = transform.hud_pos(0.0, 3.0);
+            shapes.push(Shape::galley(Pos2::new(pos.x + canvas_w / 2.0 - text_w / 2.0, pos.y), galley, Color32::WHITE));
         }
 
         DrawCommand::KillFeed { entries } => {
-            let font = FontId::proportional(11.0);
-            let mut y = origin.y + 25.0;
+            let canvas_w = transform.screen_canvas_width();
+            let font = FontId::proportional(11.0 * ws);
+            let line_h = 14.0 * ws;
+            let start = transform.hud_pos(0.0, 25.0);
+            let mut y = start.y;
             for (killer, victim) in entries.iter().take(5) {
                 let text = format!("{} > {}", killer, victim);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, font.clone(), Color32::WHITE));
                 let text_w = galley.size().x;
                 shapes.push(Shape::galley(
-                    Pos2::new(origin.x + canvas_width - text_w - 5.0, y),
+                    Pos2::new(start.x + canvas_w - text_w - 5.0 * ws, y),
                     galley,
                     Color32::WHITE,
                 ));
-                y += 14.0;
+                y += line_h;
             }
         }
 
         DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
-            let r = *radius as f32;
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius as f32);
 
-            // Base filled circle with owner's color
             shapes.push(Shape::circle_filled(center, r, color_from_rgba(*color, *alpha)));
 
-            // If capture in progress, draw a pie-slice fill in the invader's color
             if *progress > 0.001 {
                 if let Some(inv_color) = invader_color {
                     let fill_alpha = (*alpha + 0.10).min(1.0);
                     let sweep = *progress * std::f32::consts::TAU;
-                    // Build pie-slice as a triangle fan mesh
                     let segments = 64;
-                    let start_angle = -std::f32::consts::FRAC_PI_2; // start from top
+                    let start_angle = -std::f32::consts::FRAC_PI_2;
                     let pie_color = color_from_rgba(*inv_color, fill_alpha);
 
                     let mut mesh = egui::Mesh::default();
-                    // Center vertex
                     mesh.vertices.push(egui::epaint::Vertex {
                         pos: center,
                         uv: egui::pos2(0.0, 0.0),
@@ -1139,17 +1212,15 @@ fn draw_command_to_shapes(
                 }
             }
 
-            // Circle outline — use invader color when contested, owner color otherwise
             let outline_color = if *progress > 0.001 {
                 invader_color.map(|c| color_from_rgb(c)).unwrap_or_else(|| color_from_rgb(*color))
             } else {
                 color_from_rgb(*color)
             };
-            shapes.push(Shape::circle_stroke(center, r, Stroke::new(1.5, outline_color)));
+            shapes.push(Shape::circle_stroke(center, r, Stroke::new(transform.scale_stroke(1.5), outline_color)));
 
-            // Label
             if !label.is_empty() {
-                let font = FontId::proportional(11.0);
+                let font = FontId::proportional(11.0 * ws);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font, Color32::WHITE));
                 let text_w = galley.size().x;
                 let text_h = galley.size().y;
@@ -1162,8 +1233,8 @@ fn draw_command_to_shapes(
         }
 
         DrawCommand::Building { pos, color, is_alive } => {
-            let center = minimap_to_screen(pos, origin, y_offset);
-            let r = if *is_alive { 2.0 } else { 1.5 };
+            let center = transform.minimap_to_screen(pos);
+            let r = if *is_alive { transform.scale_distance(2.0) } else { transform.scale_distance(1.5) };
             shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
         }
     }
@@ -1224,10 +1295,14 @@ impl ReplayRendererViewer {
         let status_message = self.status_message.clone();
         let video_exporting = self.video_exporting.clone();
         let video_export_data = self.video_export_data.clone();
+        let zoom_pan_arc = self.zoom_pan.clone();
 
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
-            egui::ViewportBuilder::default().with_title(&*self.title).with_inner_size([800.0, 900.0]),
+            egui::ViewportBuilder::default()
+                .with_title(&*self.title)
+                .with_inner_size([800.0, 900.0])
+                .with_min_inner_size([400.0, 450.0]),
             move |ctx, _class| {
                 let state = shared_state.lock();
                 let status_is_loading = matches!(state.status, RendererStatus::Loading);
@@ -1270,8 +1345,7 @@ impl ReplayRendererViewer {
                     }
 
                     // Controls bar
-                    ui.horizontal(|ui| {
-                        // Play/Pause button
+                    let controls_resp = ui.horizontal(|ui| {
                         if playing {
                             if ui.button("\u{23F8} Pause").clicked() {
                                 let _ = command_tx.send(PlaybackCommand::Pause);
@@ -1284,7 +1358,6 @@ impl ReplayRendererViewer {
                             }
                         }
 
-                        // Seek slider
                         if let Some((frame_idx, total_frames, clock_secs, _game_dur)) = frame_data {
                             let mut seek_frame = frame_idx as f32;
                             let slider =
@@ -1294,14 +1367,12 @@ impl ReplayRendererViewer {
                                 let _ = command_tx.send(PlaybackCommand::Seek(seek_frame as usize));
                             }
 
-                            // Timer display
                             let total_secs = clock_secs as u32;
                             let mins = total_secs / 60;
                             let secs = total_secs % 60;
                             ui.label(format!("{:02}:{:02}", mins, secs));
                         }
 
-                        // Speed selector
                         let mut current_speed = speed;
                         egui::ComboBox::from_id_salt("speed")
                             .selected_text(format!("{:.1}x", current_speed))
@@ -1314,60 +1385,240 @@ impl ReplayRendererViewer {
                                     }
                                 }
                             });
-                    });
 
-                    // Canvas area
-                    let canvas_size = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
-                    let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::hover());
+                        ui.separator();
+
+                        // Settings popup button (response returned from closure)
+                        let settings_btn_resp = ui.button("\u{2699} Settings");
+
+                        // Save as Video button
+                        {
+                            let is_exporting = video_exporting.load(Ordering::Relaxed);
+                            if ui.add_enabled(!is_exporting, egui::Button::new("Save as Video")).clicked() {
+                                let opts = options.clone();
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .set_file_name("replay.mp4")
+                                    .add_filter("MP4 Video", &["mp4"])
+                                    .save_file()
+                                {
+                                    save_as_video(
+                                        path.to_string_lossy().to_string(),
+                                        video_export_data.raw_meta.clone(),
+                                        video_export_data.packet_data.clone(),
+                                        video_export_data.map_name.clone(),
+                                        video_export_data.game_duration,
+                                        opts,
+                                        video_export_data.wows_data.clone(),
+                                        Arc::clone(&video_export_data.asset_cache),
+                                        Arc::clone(&status_message),
+                                        Arc::clone(&video_exporting),
+                                    );
+                                }
+                            }
+                        }
+
+                        ui.separator();
+
+                        // Zoom slider
+                        {
+                            let mut zp = zoom_pan_arc.lock();
+                            let mut zoom_val = zp.zoom;
+                            ui.label("Zoom:");
+                            let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
+                                .logarithmic(true)
+                                .max_decimals(1)
+                                .suffix("x");
+                            if ui.add(slider).changed() {
+                                // Zoom toward center of visible area
+                                let old_zoom = zp.zoom;
+                                let center_x = zp.pan.x + MINIMAP_SIZE as f32 / 2.0;
+                                let center_y = zp.pan.y + MINIMAP_SIZE as f32 / 2.0;
+                                let minimap_cx = center_x / old_zoom;
+                                let minimap_cy = center_y / old_zoom;
+                                zp.pan.x = minimap_cx * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                zp.pan.y = minimap_cy * zoom_val - MINIMAP_SIZE as f32 / 2.0;
+                                zp.zoom = zoom_val;
+                                // Rough clamp; authoritative clamp happens below after available_size is known
+                                zp.pan.x = zp.pan.x.max(0.0);
+                                zp.pan.y = zp.pan.y.max(0.0);
+                            }
+                            if ui.button("Reset").clicked() {
+                                zp.zoom = 1.0;
+                                zp.pan = Vec2::ZERO;
+                            }
+                        }
+
+                        settings_btn_resp
+                    });
+                    let settings_btn_resp = controls_resp.inner;
+
+                    // Settings popup (rendered outside the horizontal bar)
+                    egui::Popup::from_toggle_button_response(&settings_btn_resp)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| {
+                            ui.set_min_width(180.0);
+                            let mut opts = options.clone();
+                            let mut changed = false;
+
+                            // Alphabetical order
+                            changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
+                            changed |= ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
+                            changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
+                            changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
+                            changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
+                            changed |= ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
+                            changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
+                            changed |= ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
+                            changed |= ui.checkbox(&mut opts.show_smoke, "Smoke").changed();
+                            changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
+                            changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
+                            changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
+
+                            if changed {
+                                shared_state.lock().options = opts.clone();
+                            }
+
+                            ui.separator();
+                            if ui.button("Save Defaults").clicked() {
+                                *pending_save.lock() = Some(saved_from_render_options(&opts));
+                            }
+                        });
+
+                    // Canvas area — fill all available space.
+                    // window_scale maps logical canvas pixels to screen pixels.
+                    // We use the full available rect so the viewport expands when
+                    // the window is resized (showing more map area when zoomed).
+                    let logical_canvas = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
+                    let available = ui.available_size();
+                    let window_scale = (available.x / logical_canvas.x).min(available.y / logical_canvas.y).max(0.1);
+                    let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
                     let origin = response.rect.min;
+
+                    // Zoom/pan input handling
+                    let mut zp = zoom_pan_arc.lock();
+                    let mut zoom_changed = false;
+
+                    // Scroll-wheel zoom (cursor-centered)
+                    if response.hovered() {
+                        let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
+                        if scroll_delta != 0.0 {
+                            let zoom_speed = 0.002;
+                            let old_zoom = zp.zoom;
+                            let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
+
+                            if new_zoom != old_zoom {
+                                if let Some(cursor) = response.hover_pos() {
+                                    let local_x = (cursor.x - origin.x) / window_scale;
+                                    let local_y = (cursor.y - origin.y) / window_scale - HUD_HEIGHT as f32;
+                                    let minimap_x = (local_x + zp.pan.x) / old_zoom;
+                                    let minimap_y = (local_y + zp.pan.y) / old_zoom;
+                                    zp.pan.x = minimap_x * new_zoom - local_x;
+                                    zp.pan.y = minimap_y * new_zoom - local_y;
+                                }
+                                zp.zoom = new_zoom;
+                                zoom_changed = true;
+                            }
+                        }
+                    }
+
+                    // Drag-to-pan
+                    if response.dragged_by(egui::PointerButton::Primary)
+                        || response.dragged_by(egui::PointerButton::Middle)
+                    {
+                        let drag = response.drag_delta();
+                        zp.pan.x -= drag.x / window_scale;
+                        zp.pan.y -= drag.y / window_scale;
+                        zoom_changed = true;
+                    }
+
+                    // Double-click to reset zoom
+                    if response.double_clicked() {
+                        zp.zoom = 1.0;
+                        zp.pan = Vec2::ZERO;
+                        zoom_changed = true;
+                    }
+
+                    // Clamp pan so the map can't scroll past its edges.
+                    // Visible area in zoomed-minimap-pixel space:
+                    let visible_w = available.x / window_scale;
+                    let visible_h = (available.y - HUD_HEIGHT as f32 * window_scale) / window_scale;
+                    let map_zoomed = MINIMAP_SIZE as f32 * zp.zoom;
+                    let max_pan_x = (map_zoomed - visible_w).max(0.0);
+                    let max_pan_y = (map_zoomed - visible_h).max(0.0);
+                    zp.pan.x = zp.pan.x.clamp(0.0, max_pan_x);
+                    zp.pan.y = zp.pan.y.clamp(0.0, max_pan_y);
+
+                    // Build transform for this frame
+                    let transform = MapTransform {
+                        origin,
+                        window_scale,
+                        zoom: zp.zoom,
+                        pan: zp.pan,
+                        hud_height: HUD_HEIGHT as f32,
+                        canvas_width: MINIMAP_SIZE as f32,
+                    };
+                    let current_zoom = zp.zoom;
+                    drop(zp);
+
+                    // Grab cursor when zoomed in
+                    if current_zoom > 1.01 {
+                        if response.dragged() {
+                            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else if response.hovered() {
+                            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                    }
+
+                    // Request repaint if zoom/pan changed while paused
+                    if zoom_changed && !playing {
+                        ctx.request_repaint();
+                    }
 
                     // Draw dark background
                     painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
 
-                    // Draw map texture
+                    // Clipped painter for map-region content (below HUD, full painter width/height)
+                    let hud_screen_height = HUD_HEIGHT as f32 * window_scale;
+                    let map_clip = Rect::from_min_max(
+                        Pos2::new(response.rect.min.x, response.rect.min.y + hud_screen_height),
+                        response.rect.max,
+                    );
+                    let map_painter = painter.with_clip_rect(map_clip);
+
                     let tex_guard = textures_arc.lock();
                     if let Some(ref textures) = *tex_guard {
+                        // Draw map texture (clipped to map region)
                         if let Some(ref map_tex) = textures.map_texture {
-                            let map_rect = Rect::from_min_size(
-                                Pos2::new(origin.x, origin.y + HUD_HEIGHT as f32),
-                                Vec2::new(MINIMAP_SIZE as f32, MINIMAP_SIZE as f32),
-                            );
+                            let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0, y: 0 });
+                            let map_br = transform
+                                .minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: MINIMAP_SIZE as i32 });
+                            let map_rect = Rect::from_min_max(map_tl, map_br);
                             let mut mesh = egui::Mesh::with_texture(map_tex.id());
                             let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                             mesh.add_rect_with_uv(map_rect, uv, Color32::WHITE);
-                            painter.add(Shape::Mesh(mesh.into()));
+                            map_painter.add(Shape::Mesh(mesh.into()));
                         }
 
                         // Draw grid overlay (A-J / 1-10)
                         {
-                            let map_origin = Pos2::new(origin.x, origin.y + HUD_HEIGHT as f32);
-                            let map_size = MINIMAP_SIZE as f32;
-                            let cell = map_size / 10.0;
+                            let cell_logical = MINIMAP_SIZE as f32 / 10.0;
                             let grid_color = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
-                            let grid_stroke = Stroke::new(1.0, grid_color);
+                            let grid_stroke = Stroke::new(transform.scale_stroke(1.0), grid_color);
 
                             for i in 1..10 {
-                                let offset = i as f32 * cell;
-                                // Vertical line
-                                painter.add(Shape::LineSegment {
-                                    points: [
-                                        Pos2::new(map_origin.x + offset, map_origin.y),
-                                        Pos2::new(map_origin.x + offset, map_origin.y + map_size),
-                                    ],
-                                    stroke: grid_stroke,
-                                });
-                                // Horizontal line
-                                painter.add(Shape::LineSegment {
-                                    points: [
-                                        Pos2::new(map_origin.x, map_origin.y + offset),
-                                        Pos2::new(map_origin.x + map_size, map_origin.y + offset),
-                                    ],
-                                    stroke: grid_stroke,
-                                });
+                                let offset = (i as f32 * cell_logical) as i32;
+                                let top = transform.minimap_to_screen(&MinimapPos { x: offset, y: 0 });
+                                let bottom =
+                                    transform.minimap_to_screen(&MinimapPos { x: offset, y: MINIMAP_SIZE as i32 });
+                                map_painter.add(Shape::LineSegment { points: [top, bottom], stroke: grid_stroke });
+
+                                let left = transform.minimap_to_screen(&MinimapPos { x: 0, y: offset });
+                                let right =
+                                    transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: offset });
+                                map_painter.add(Shape::LineSegment { points: [left, right], stroke: grid_stroke });
                             }
 
-                            // Labels
-                            let label_font = FontId::proportional(11.0);
+                            let label_font = FontId::proportional(11.0 * window_scale);
                             let label_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
                             for i in 0..10 {
                                 // Numbers 1-10 across the top
@@ -1375,11 +1626,10 @@ impl ReplayRendererViewer {
                                 let galley =
                                     ctx.fonts_mut(|f| f.layout_no_wrap(num_label, label_font.clone(), label_color));
                                 let text_w = galley.size().x;
-                                painter.add(Shape::galley(
-                                    Pos2::new(
-                                        map_origin.x + i as f32 * cell + cell / 2.0 - text_w / 2.0,
-                                        map_origin.y + 2.0,
-                                    ),
+                                let cell_center_x = (i as f32 * cell_logical + cell_logical / 2.0) as i32;
+                                let pos = transform.minimap_to_screen(&MinimapPos { x: cell_center_x, y: 2 });
+                                map_painter.add(Shape::galley(
+                                    Pos2::new(pos.x - text_w / 2.0, pos.y),
                                     galley,
                                     label_color,
                                 ));
@@ -1390,11 +1640,10 @@ impl ReplayRendererViewer {
                                     f.layout_no_wrap(letter.to_string(), label_font.clone(), label_color)
                                 });
                                 let text_h = galley.size().y;
-                                painter.add(Shape::galley(
-                                    Pos2::new(
-                                        map_origin.x + 3.0,
-                                        map_origin.y + i as f32 * cell + cell / 2.0 - text_h / 2.0,
-                                    ),
+                                let cell_center_y = (i as f32 * cell_logical + cell_logical / 2.0) as i32;
+                                let pos = transform.minimap_to_screen(&MinimapPos { x: 3, y: cell_center_y });
+                                map_painter.add(Shape::galley(
+                                    Pos2::new(pos.x, pos.y - text_h / 2.0),
                                     galley,
                                     label_color,
                                 ));
@@ -1404,78 +1653,27 @@ impl ReplayRendererViewer {
                         // Draw current frame's commands, filtered by UI-local options
                         let state = shared_state.lock();
                         if let Some(ref frame) = state.frame {
+                            // Separate HUD and map commands so HUD draws on unclipped painter
                             for cmd in &frame.commands {
                                 if !should_draw_command(cmd, &options) {
                                     continue;
                                 }
-                                let cmd_shapes = draw_command_to_shapes(
+                                let is_hud = matches!(
                                     cmd,
-                                    origin,
-                                    HUD_HEIGHT as f32,
-                                    textures,
-                                    MINIMAP_SIZE as f32,
-                                    ctx,
-                                    &options,
+                                    DrawCommand::ScoreBar { .. }
+                                        | DrawCommand::Timer { .. }
+                                        | DrawCommand::KillFeed { .. }
                                 );
+                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options);
+                                let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
-                                    painter.add(shape);
+                                    target_painter.add(shape);
                                 }
                             }
                         }
                         drop(state);
                     }
                     drop(tex_guard);
-
-                    // Render options panel
-                    ui.separator();
-                    ui.horizontal_wrapped(|ui| {
-                        let mut opts = options.clone();
-                        let mut changed = false;
-
-                        changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
-                        changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
-                        changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
-                        changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
-                        changed |= ui.checkbox(&mut opts.show_smoke, "Smoke").changed();
-                        changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
-                        changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
-                        changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
-                        changed |= ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
-                        changed |= ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
-                        changed |= ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
-                        changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
-
-                        if changed {
-                            shared_state.lock().options = opts.clone();
-                        }
-
-                        ui.separator();
-                        if ui.button("Save Defaults").clicked() {
-                            *pending_save.lock() = Some(saved_from_render_options(&opts));
-                        }
-
-                        let is_exporting = video_exporting.load(Ordering::Relaxed);
-                        if ui.add_enabled(!is_exporting, egui::Button::new("Save as Video")).clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name("replay.mp4")
-                                .add_filter("MP4 Video", &["mp4"])
-                                .save_file()
-                            {
-                                save_as_video(
-                                    path.to_string_lossy().to_string(),
-                                    video_export_data.raw_meta.clone(),
-                                    video_export_data.packet_data.clone(),
-                                    video_export_data.map_name.clone(),
-                                    video_export_data.game_duration,
-                                    opts.clone(),
-                                    video_export_data.wows_data.clone(),
-                                    Arc::clone(&video_export_data.asset_cache),
-                                    Arc::clone(&status_message),
-                                    Arc::clone(&video_exporting),
-                                );
-                            }
-                        }
-                    });
 
                     // Status toast (bottom-left)
                     {
