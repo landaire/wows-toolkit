@@ -228,6 +228,8 @@ impl PerformanceInfo {
 #[derive(Default)]
 pub struct SessionStats {
     pub session_replays: Vec<Arc<RwLock<Replay>>>,
+    /// If set, stats only reflect the N most recent games.
+    pub game_count_limit: Option<usize>,
 }
 
 impl SessionStats {
@@ -260,9 +262,17 @@ impl SessionStats {
         self.session_replays.sort_by(|a, b| a.read().game_time().cmp(b.read().game_time()));
     }
 
-    /// Get per-game statistics for all replays in the session
+    /// Return the most recent N replays (based on `game_count_limit`), or all if unset.
+    pub fn recent_replays(&self) -> &[Arc<RwLock<Replay>>] {
+        match self.game_count_limit {
+            Some(n) if n < self.session_replays.len() => &self.session_replays[self.session_replays.len() - n..],
+            _ => &self.session_replays,
+        }
+    }
+
+    /// Get per-game statistics for replays in the session
     pub fn per_game_stats(&self, metadata_provider: &GameMetadataProvider) -> Vec<PerGameStat> {
-        self.session_replays
+        self.recent_replays()
             .iter()
             .filter_map(|replay| {
                 let replay = replay.read();
@@ -288,7 +298,7 @@ impl SessionStats {
     /// Returns the win rate percentage for this session. Will return `None`
     /// if no games have been played.
     pub fn win_rate(&self) -> Option<f64> {
-        if self.session_replays.is_empty() {
+        if self.recent_replays().is_empty() {
             return None;
         }
 
@@ -297,19 +307,19 @@ impl SessionStats {
 
     /// Total number of games played in the current session
     pub fn games_played(&self) -> usize {
-        self.session_replays.len()
+        self.recent_replays().len()
     }
 
     /// Total number of games won in the current session
     pub fn games_won(&self) -> usize {
-        self.session_replays.iter().fold(0, |accum, replay| {
+        self.recent_replays().iter().fold(0, |accum, replay| {
             if let Some(BattleResult::Win(_)) = replay.read().battle_result() { accum + 1 } else { accum }
         })
     }
 
     /// Total number of games lost in the current session
     pub fn games_lost(&self) -> usize {
-        self.session_replays.iter().fold(0, |accum, replay| {
+        self.recent_replays().iter().fold(0, |accum, replay| {
             if let Some(BattleResult::Loss(_)) = replay.read().battle_result() { accum + 1 } else { accum }
         })
     }
@@ -328,7 +338,7 @@ impl SessionStats {
 
     /// Calculate overall Personal Rating for this session
     pub fn calculate_pr(&self, pr_data: &PersonalRatingData) -> Option<PersonalRatingResult> {
-        let stats: Vec<_> = self.session_replays.iter().filter_map(|replay| replay.read().to_battle_stats()).collect();
+        let stats: Vec<_> = self.recent_replays().iter().filter_map(|replay| replay.read().to_battle_stats()).collect();
         pr_data.calculate_pr(&stats)
     }
 
@@ -339,7 +349,7 @@ impl SessionStats {
         // Group stats by ship_id
         let mut ship_stats: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
 
-        for replay in &self.session_replays {
+        for replay in self.recent_replays() {
             if let Some(stats) = replay.read().to_battle_stats() {
                 let entry = ship_stats.entry(stats.ship_id).or_insert(ShipBattleStats {
                     ship_id: stats.ship_id,

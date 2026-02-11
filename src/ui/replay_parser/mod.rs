@@ -3452,6 +3452,25 @@ impl ToolkitTabViewer<'_> {
                 });
             });
 
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.tab_state.settings.session_stats_limit_enabled, "Limit Game Count");
+                let mut value = self.tab_state.settings.session_stats_game_count as u32;
+                if ui
+                    .add_enabled(
+                        self.tab_state.settings.session_stats_limit_enabled,
+                        egui::DragValue::new(&mut value).range(1..=999).speed(0.2),
+                    )
+                    .changed()
+                {
+                    self.tab_state.settings.session_stats_game_count = value as usize;
+                }
+                self.tab_state.session_stats.game_count_limit = if self.tab_state.settings.session_stats_limit_enabled {
+                    Some(self.tab_state.settings.session_stats_game_count)
+                } else {
+                    None
+                };
+            });
+
             let wins = self.tab_state.session_stats.games_won();
             let losses = self.tab_state.session_stats.games_lost();
             let win_rate = self.tab_state.session_stats.win_rate().unwrap_or_default();
@@ -3506,7 +3525,7 @@ impl ToolkitTabViewer<'_> {
             }
 
             let mut all_achievements: Vec<Achievement> = Vec::new();
-            for replay in &self.tab_state.session_stats.session_replays {
+            for replay in self.tab_state.session_stats.recent_replays() {
                 let replay = replay.read();
                 let Some(self_report) = replay
                     .ui_report

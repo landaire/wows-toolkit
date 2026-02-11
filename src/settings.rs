@@ -84,6 +84,10 @@ pub const fn default_bool<const V: bool>() -> bool {
     V
 }
 
+fn default_session_stats_game_count() -> usize {
+    20
+}
+
 pub fn default_sent_replays() -> Arc<RwLock<HashSet<String>>> {
     Default::default()
 }
@@ -184,6 +188,12 @@ pub struct Settings {
     pub build_consent_window_shown: bool,
     #[serde(default)]
     pub renderer_options: SavedRenderOptions,
+    /// Whether to limit session stats to the N most recent games.
+    #[serde(default = "default_bool::<false>")]
+    pub session_stats_limit_enabled: bool,
+    /// Number of most recent games to show when limit is enabled.
+    #[serde(default = "default_session_stats_game_count")]
+    pub session_stats_game_count: usize,
 }
 
 impl Default for Settings {
@@ -210,6 +220,8 @@ impl Default for Settings {
             has_041_game_params_fix: true,
             has_047_game_params_fix: true,
             renderer_options: Default::default(),
+            session_stats_limit_enabled: false,
+            session_stats_game_count: 20,
         }
     }
 }
