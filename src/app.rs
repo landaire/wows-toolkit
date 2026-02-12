@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
+use std::time::Instant;
 
 use eframe::APP_KEY;
 use egui::Color32;
@@ -140,6 +141,13 @@ pub struct WowsToolkitApp {
 
     #[serde(skip)]
     pub(crate) runtime: Arc<Runtime>,
+
+    /// Whether a constants/game version mismatch has been detected.
+    #[serde(skip)]
+    constants_version_mismatch: bool,
+    /// Last time we checked for a constants update (throttled to 30 min).
+    #[serde(skip)]
+    last_constants_update_check: Option<Instant>,
 }
 
 impl Default for WowsToolkitApp {
@@ -156,6 +164,8 @@ impl Default for WowsToolkitApp {
             dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()),
             show_error_window: false,
             error_to_show: None,
+            constants_version_mismatch: false,
+            last_constants_update_check: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
         }
     }
@@ -399,6 +409,7 @@ impl WowsToolkitApp {
                                     self.tab_state.used_filter = None;
 
                                     self.tab_state.toasts.lock().success("Successfully loaded game data");
+                                    self.check_constants_version_mismatch();
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update } => {
                                     if !skip_ui_update {
@@ -415,6 +426,7 @@ impl WowsToolkitApp {
                                         self.tab_state.session_stats.add_replay(replay.clone());
                                         self.tab_state.current_replay = Some(replay);
                                         self.tab_state.toasts.lock().success("Successfully loaded replay");
+                                        self.try_update_constants();
                                     }
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
@@ -447,6 +459,7 @@ impl WowsToolkitApp {
                                 BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {}
                                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
                                     *self.tab_state.game_constants.write() = constants;
+                                    self.check_constants_version_mismatch();
                                 }
                                 BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
                                     self.tab_state.personal_rating_data.write().load(pr_data);
@@ -534,53 +547,9 @@ impl WowsToolkitApp {
     }
 
     fn check_for_updates(&mut self) {
-        use http_body::Body;
-
-        let current_constants_commit = &self.tab_state.settings.constants_file_commit;
-
-        let (app_updates, constants_updates) = self.runtime.block_on(async {
-            let octocrab = octocrab::instance();
-            let app_updates = octocrab.repos("landaire", "wows-toolkit").releases().get_latest().await;
-
-            let latest_commit = octocrab
-                .repos("padtrack", "wows-constants")
-                .list_commits()
-                .per_page(1)
-                .send()
-                .await
-                .ok()
-                .and_then(|mut list| list.take_items().pop())
-                .map(|commit| commit.sha);
-
-            if current_constants_commit == &latest_commit || latest_commit.is_none() {
-                return (app_updates, Ok(None));
-            }
-
-            match octocrab
-                .repos("padtrack", "wows-constants")
-                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
-                .await
-            {
-                Ok(constants_updates) => {
-                    let mut body = constants_updates.into_body();
-                    let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
-
-                    while let Some(frame) = body.frame().await {
-                        match frame {
-                            Ok(frame) => {
-                                if let Some(data) = frame.data_ref() {
-                                    result.extend_from_slice(data);
-                                }
-                            }
-                            Err(e) => return (app_updates, Err(e)),
-                        }
-                    }
-
-                    (app_updates, Ok(Some((result, latest_commit))))
-                }
-                Err(e) => (app_updates, Err(e)),
-            }
-        });
+        let app_updates = self
+            .runtime
+            .block_on(async { octocrab::instance().repos("landaire", "wows-toolkit").releases().get_latest().await });
 
         if let Ok(latest_release) = app_updates
             && let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..])
@@ -596,30 +565,12 @@ impl WowsToolkitApp {
             self.tab_state.toasts.lock().error("Failed to check for app updates");
         }
 
-        match constants_updates {
-            Ok(Some((constants_updates, latest_commit))) => {
-                let mut constants_path = PathBuf::from("constants.json");
-                if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-                    constants_path = storage_dir.join(constants_path)
-                }
-
-                if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
-                    self.tab_state.settings.constants_file_commit = latest_commit;
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        Some(task::load_constants(constants_updates))
-                    );
-                }
-            }
-            // Nothing to update
-            Ok(None) => {}
-            Err(err) => {
-                let context_text = format!(
-                    "{} Failed to update replay config file. Replay data may be inaccurate. Check that WoWs Toolkit can access the internet.",
-                    icons::X_CIRCLE
-                );
-                self.show_err_window(Report::new(err).context(context_text).into());
-            }
+        if let Err(err) = self.fetch_and_update_constants() {
+            let context_text = format!(
+                "{} Failed to update replay config file. Replay data may be inaccurate. Check that WoWs Toolkit can access the internet.",
+                icons::X_CIRCLE
+            );
+            self.show_err_window(err.context(context_text).into());
         }
 
         // Check and update PR expected values
@@ -961,6 +912,118 @@ impl WowsToolkitApp {
             panic_log_path = storage_dir.join(panic_log_path)
         }
         panic_log_path
+    }
+
+    /// Fetch the latest constants from the server and load them if newer.
+    /// Returns `Err` with the underlying error if the fetch failed.
+    /// Returns `Ok(true)` if new constants were downloaded, `Ok(false)` if already up-to-date.
+    fn fetch_and_update_constants(&mut self) -> Result<bool, Report> {
+        use http_body::Body;
+
+        let current_constants_commit = &self.tab_state.settings.constants_file_commit;
+
+        let constants_updates = self.runtime.block_on(async {
+            let octocrab = octocrab::instance();
+
+            let latest_commit = octocrab
+                .repos("padtrack", "wows-constants")
+                .list_commits()
+                .per_page(1)
+                .send()
+                .await
+                .ok()
+                .and_then(|mut list| list.take_items().pop())
+                .map(|commit| commit.sha);
+
+            if current_constants_commit == &latest_commit || latest_commit.is_none() {
+                return Ok(None);
+            }
+
+            match octocrab
+                .repos("padtrack", "wows-constants")
+                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
+                .await
+            {
+                Ok(constants_updates) => {
+                    let mut body = constants_updates.into_body();
+                    let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
+
+                    while let Some(frame) = body.frame().await {
+                        match frame {
+                            Ok(frame) => {
+                                if let Some(data) = frame.data_ref() {
+                                    result.extend_from_slice(data);
+                                }
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    Ok(Some((result, latest_commit)))
+                }
+                Err(e) => Err(e),
+            }
+        });
+
+        match constants_updates {
+            Ok(Some((constants_updates, latest_commit))) => {
+                let mut constants_path = PathBuf::from("constants.json");
+                if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+                    constants_path = storage_dir.join(constants_path)
+                }
+
+                if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
+                    self.tab_state.settings.constants_file_commit = latest_commit;
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        Some(task::load_constants(constants_updates))
+                    );
+                }
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Err(err) => Err(Report::new(err).into()),
+        }
+    }
+
+    /// If a constants/game version mismatch was detected, try to fetch updated
+    /// constants from the server. Throttled to once every 30 minutes.
+    fn try_update_constants(&mut self) {
+        if !self.constants_version_mismatch {
+            return;
+        }
+
+        let now = Instant::now();
+        if let Some(last_check) = self.last_constants_update_check {
+            if now.duration_since(last_check).as_secs() < 30 * 60 {
+                return;
+            }
+        }
+        self.last_constants_update_check = Some(now);
+
+        let _ = self.fetch_and_update_constants();
+    }
+
+    fn check_constants_version_mismatch(&mut self) {
+        let constants = self.tab_state.game_constants.read();
+        let Some(wows_data) = &self.tab_state.world_of_warships_data else { return };
+        let wows_data = wows_data.read();
+        let Some(full_version) = &wows_data.full_version else { return };
+
+        let constants_version = constants.get("VERSION").and_then(|v| v.get("VERSION")).and_then(|v| v.as_str());
+
+        let Some(constants_version) = constants_version else { return };
+        let game_version = format!("{}.{}", full_version.major, full_version.minor);
+
+        if constants_version != game_version {
+            self.constants_version_mismatch = true;
+            self.tab_state.toasts.lock().warning(format!(
+                "Replay data mapping file version ({}) does not match game version ({}).\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
+                constants_version, game_version
+            ));
+        } else {
+            self.constants_version_mismatch = false;
+        }
     }
 
     fn show_err_window(&mut self, err: Report) {
