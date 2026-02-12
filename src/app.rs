@@ -47,9 +47,7 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -1019,12 +1017,16 @@ impl WowsToolkitApp {
 
         if constants_version != game_version {
             self.constants_version_mismatch = true;
-            self.tab_state.toasts.lock().warning(format!(
-                "Replay data mapping file version ({}) does not match game version ({}).\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
-                constants_version, game_version
-            ));
-        } else {
+            self.tab_state.toasts.lock()
+                .warning(format!(
+                    "Replay data mapping file version ({}) does not match game version ({}).\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
+                    constants_version, game_version
+                ))
+                .duration(None);
+        } else if self.constants_version_mismatch {
             self.constants_version_mismatch = false;
+            self.tab_state.toasts.lock().dismiss_all_toasts();
+            self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");
         }
     }
 
