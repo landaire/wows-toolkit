@@ -28,6 +28,9 @@ use wows_minimap_renderer::renderer::RenderOptions;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
+use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
+use wows_replays::analyzer::decoder::Consumable;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::idx::FileNode;
@@ -368,7 +371,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
 pub enum PlaybackCommand {
     Play,
     Pause,
-    Seek(usize),
+    Seek(f32),
     SetSpeed(f32),
     Stop,
 }
@@ -420,6 +423,8 @@ pub struct SharedRendererState {
     /// Viewport egui context, set by the UI thread on first draw.
     /// Used by the background thread to request repaints after frame updates.
     pub viewport_ctx: Option<egui::Context>,
+    /// Pre-parsed timeline events for the entire replay.
+    pub(crate) timeline_events: Option<Vec<TimelineEvent>>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -484,6 +489,7 @@ pub fn launch_replay_renderer(
         options: initial_options,
         show_dead_ships: saved_options.show_dead_ships,
         viewport_ctx: None,
+        timeline_events: None,
     }));
 
     let video_export_data = Arc::new(VideoExportData {
@@ -653,6 +659,14 @@ fn playback_thread(
     controller.finish();
 
     let actual_total_frames = frame_snapshots.len();
+    let actual_game_duration = frame_snapshots.last().map(|s| s.clock).unwrap_or(game_duration);
+
+    // 4. Event extraction pass — second full parse for timeline events
+    let timeline_events = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
+        .ok()
+        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata))
+        .unwrap_or_default();
+    shared_state.lock().timeline_events = Some(timeline_events);
 
     // Mark as ready
     shared_state.lock().status = RendererStatus::Ready;
@@ -782,14 +796,15 @@ fn playback_thread(
                 PlaybackCommand::Pause => {
                     playing = false;
                 }
-                PlaybackCommand::Seek(frame) => {
-                    let target = frame.min(actual_total_frames.saturating_sub(1));
+                PlaybackCommand::Seek(time) => {
+                    // Find first frame with clock >= target time
+                    let target = frame_snapshots
+                        .iter()
+                        .position(|s| s.clock >= time)
+                        .unwrap_or(actual_total_frames.saturating_sub(1));
                     current_frame = target;
-                    let target_clock = if current_frame < frame_snapshots.len() {
-                        frame_snapshots[current_frame].clock
-                    } else {
-                        game_duration
-                    };
+                    let target_clock =
+                        frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration);
 
                     rebuild_live_state!(target_clock);
 
@@ -799,7 +814,7 @@ fn playback_thread(
                         clock_seconds: target_clock,
                         frame_index: current_frame,
                         total_frames: actual_total_frames,
-                        game_duration,
+                        game_duration: actual_game_duration,
                     });
                     request_repaint(&shared_state);
                 }
@@ -829,7 +844,7 @@ fn playback_thread(
                 let target_clock = if current_frame < frame_snapshots.len() {
                     frame_snapshots[current_frame].clock
                 } else {
-                    game_duration
+                    actual_game_duration
                 };
 
                 rebuild_live_state!(target_clock);
@@ -840,7 +855,7 @@ fn playback_thread(
                     clock_seconds: target_clock,
                     frame_index: current_frame,
                     total_frames: actual_total_frames,
-                    game_duration,
+                    game_duration: actual_game_duration,
                 });
                 request_repaint(&shared_state);
             }
@@ -855,6 +870,206 @@ struct FrameSnapshot {
     #[allow(dead_code)]
     packet_offset: usize,
     clock: f32,
+}
+
+// ─── Event Timeline ──────────────────────────────────────────────────────────
+
+pub(crate) enum TimelineEventKind {
+    HealthLost { ship_name: String, is_friendly: bool, percent_lost: f32 },
+    Death { ship_name: String, is_friendly: bool },
+    CapContested { cap_label: String, owner_is_friendly: bool },
+    CapFlipped { cap_label: String, capturer_is_friendly: bool },
+    RadarUsed { ship_name: String, is_friendly: bool },
+}
+
+pub(crate) struct TimelineEvent {
+    clock: f32,
+    kind: TimelineEventKind,
+}
+
+fn event_color(is_friendly: bool) -> Color32 {
+    if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
+}
+
+/// Parse the entire replay and extract significant game events for the timeline.
+fn extract_timeline_events(replay_file: &ReplayFile, game_metadata: &GameMetadataProvider) -> Vec<TimelineEvent> {
+    let mut events = Vec::new();
+    let mut controller = BattleController::new(&replay_file.meta, game_metadata);
+    let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+
+    // Player info lookups (populated once players are available)
+    let mut ship_names: HashMap<EntityId, String> = HashMap::new();
+    let mut is_friendly: HashMap<EntityId, bool> = HashMap::new();
+    let mut viewer_team_id: Option<i64> = None;
+    let mut players_populated = false;
+
+    // Health tracking: entity → (window_start_clock, health_at_window_start)
+    let mut health_windows: HashMap<EntityId, (f32, f32)> = HashMap::new();
+
+    // Kill tracking
+    let mut last_kill_count: usize = 0;
+
+    // Cap tracking: cap_index → (previous has_invaders, previous team_id)
+    let mut cap_prev_contested: HashMap<usize, bool> = HashMap::new();
+    let mut cap_prev_team: HashMap<usize, i64> = HashMap::new();
+
+    // Radar tracking: entity → number of radar activations seen so far
+    let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
+
+    let mut remaining = &replay_file.packet_data[..];
+    let mut prev_clock = GameClock(0.0);
+
+    while !remaining.is_empty() {
+        match parser.parse_packet(remaining) {
+            Ok((rest, packet)) => {
+                if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
+                    // Populate player info on first tick where players are available
+                    if !players_populated {
+                        let players = controller.player_entities();
+                        if !players.is_empty() {
+                            for (entity_id, player) in players {
+                                let name = game_metadata
+                                    .localized_name_from_param(player.vehicle())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| player.initial_state().username().to_string());
+                                ship_names.insert(*entity_id, name);
+
+                                let relation = player.relation();
+                                let friendly = relation.is_self() || relation.is_ally();
+                                is_friendly.insert(*entity_id, friendly);
+
+                                if relation.is_self() {
+                                    viewer_team_id = Some(player.initial_state().team_id());
+                                }
+                            }
+                            players_populated = true;
+                        }
+                    }
+
+                    let clock = prev_clock.seconds();
+
+                    // --- Health loss detection ---
+                    for (entity_id, entity) in controller.entities_by_id() {
+                        if let Some(vehicle_rc) = entity.vehicle_ref() {
+                            let vehicle = vehicle_rc.borrow();
+                            let props = vehicle.props();
+                            let current_health = props.health();
+                            let max_health = props.max_health();
+
+                            if max_health <= 0.0 {
+                                continue;
+                            }
+
+                            if let Some((window_start, health_at_start)) = health_windows.get_mut(entity_id) {
+                                if clock - *window_start >= 3.0 {
+                                    let loss = (*health_at_start - current_health) / max_health;
+                                    if loss > 0.25 {
+                                        let name = ship_names.get(entity_id).cloned().unwrap_or_default();
+                                        let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
+                                        events.push(TimelineEvent {
+                                            clock,
+                                            kind: TimelineEventKind::HealthLost {
+                                                ship_name: name,
+                                                is_friendly: friendly,
+                                                percent_lost: loss,
+                                            },
+                                        });
+                                    }
+                                    *window_start = clock;
+                                    *health_at_start = current_health;
+                                }
+                            } else if props.is_alive() {
+                                health_windows.insert(*entity_id, (clock, current_health));
+                            }
+                        }
+                    }
+
+                    // --- Death detection ---
+                    let kills = controller.kills();
+                    if kills.len() > last_kill_count {
+                        for kill in &kills[last_kill_count..] {
+                            let name = ship_names.get(&kill.victim).cloned().unwrap_or_default();
+                            let friendly = is_friendly.get(&kill.victim).copied().unwrap_or(false);
+                            events.push(TimelineEvent {
+                                clock: kill.clock.seconds(),
+                                kind: TimelineEventKind::Death { ship_name: name, is_friendly: friendly },
+                            });
+                        }
+                        last_kill_count = kills.len();
+                    }
+
+                    // --- Capture point events ---
+                    let viewer_team = viewer_team_id.unwrap_or(0);
+                    for cap in controller.capture_points() {
+                        let cap_idx = cap.index;
+
+                        let cap_label = if cap.control_point_type == 5 {
+                            "Flag".to_string()
+                        } else {
+                            ((b'A' + cap_idx as u8) as char).to_string()
+                        };
+
+                        // Cap contested: has_invaders transitions false → true
+                        let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
+                        if cap.has_invaders && !prev_contested {
+                            events.push(TimelineEvent {
+                                clock,
+                                kind: TimelineEventKind::CapContested {
+                                    cap_label: cap_label.clone(),
+                                    owner_is_friendly: cap.team_id == viewer_team,
+                                },
+                            });
+                        }
+                        cap_prev_contested.insert(cap_idx, cap.has_invaders);
+
+                        // Cap flipped: team_id changes
+                        if let Some(&prev_team) = cap_prev_team.get(&cap_idx)
+                            && cap.team_id != prev_team
+                            && cap.team_id >= 0
+                        {
+                            events.push(TimelineEvent {
+                                clock,
+                                kind: TimelineEventKind::CapFlipped {
+                                    cap_label,
+                                    capturer_is_friendly: cap.team_id == viewer_team,
+                                },
+                            });
+                        }
+                        cap_prev_team.insert(cap_idx, cap.team_id);
+                    }
+
+                    // --- Radar activation detection ---
+                    for (entity_id, consumables) in controller.active_consumables() {
+                        let radar_count = consumables.iter().filter(|c| c.consumable == Consumable::Radar).count();
+                        let prev_count = radar_counts.get(entity_id).copied().unwrap_or(0);
+                        if radar_count > prev_count {
+                            let name = ship_names.get(entity_id).cloned().unwrap_or_default();
+                            let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
+                            events.push(TimelineEvent {
+                                clock,
+                                kind: TimelineEventKind::RadarUsed { ship_name: name, is_friendly: friendly },
+                            });
+                        }
+                        radar_counts.insert(*entity_id, radar_count);
+                    }
+
+                    prev_clock = packet.clock;
+                } else if prev_clock.seconds() == 0.0 {
+                    prev_clock = packet.clock;
+                }
+
+                controller.process(&packet);
+                remaining = rest;
+            }
+            Err(_) => break,
+        }
+    }
+
+    controller.finish();
+
+    // Sort events by clock time
+    events.sort_by(|a, b| a.clock.partial_cmp(&b.clock).unwrap_or(std::cmp::Ordering::Equal));
+    events
 }
 
 // ─── Video Export ────────────────────────────────────────────────────────────
@@ -3141,6 +3356,7 @@ impl ReplayRendererViewer {
                                     let fixed_style = taffy::Style { flex_shrink: 0.0, ..Default::default() };
 
                                     let mut settings_btn_opt: Option<egui::Response> = None;
+                                    let mut timeline_btn_opt: Option<egui::Response> = None;
 
                                     egui_taffy::tui(ui, ui.id().with("overlay_tui"))
                                         .reserve_available_width()
@@ -3168,20 +3384,18 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Seek slider (flex_grow: 1.0 — fills remaining space)
-                                            if let Some((frame_idx, total_frames, clock_secs, _game_dur)) = frame_data {
-                                                let mut seek_frame = frame_idx as f32;
+                                            if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data
+                                            {
+                                                let mut seek_time = clock_secs;
                                                 let mut seek_changed = false;
                                                 tui.tui().style(grow_style.clone()).ui(|ui| {
                                                     ui.spacing_mut().slider_width = ui.available_width();
-                                                    let slider = egui::Slider::new(
-                                                        &mut seek_frame,
-                                                        0.0..=(total_frames.saturating_sub(1)) as f32,
-                                                    )
-                                                    .show_value(false);
+                                                    let slider = egui::Slider::new(&mut seek_time, 0.0..=game_dur)
+                                                        .show_value(false);
                                                     seek_changed = ui.add(slider).changed();
                                                 });
                                                 if seek_changed {
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_frame as usize));
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_time));
                                                 }
 
                                                 let total_secs = clock_secs as u32;
@@ -3224,6 +3438,12 @@ impl ReplayRendererViewer {
                                                 egui::RichText::new(icons::GEAR_FINE).size(18.0),
                                             ));
                                             settings_btn_opt = Some(btn);
+
+                                            // Timeline button
+                                            let btn = tui.tui().style(fixed_style.clone()).ui_add(egui::Button::new(
+                                                egui::RichText::new(icons::LIST_BULLETS).size(18.0),
+                                            ));
+                                            timeline_btn_opt = Some(btn);
 
                                             // Save as Video button
                                             {
@@ -3336,6 +3556,96 @@ impl ReplayRendererViewer {
                                                 let mut saved = saved_from_render_options(&opts);
                                                 saved.show_dead_ships = show_dead;
                                                 *pending_save.lock() = Some(saved);
+                                            }
+                                        });
+
+                                    // Timeline popup
+                                    let timeline_btn = timeline_btn_opt.unwrap();
+                                    egui::Popup::from_toggle_button_response(&timeline_btn)
+                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                        .frame(
+                                            egui::Frame::popup(ui.style())
+                                                .fill(ui.style().visuals.window_fill.gamma_multiply(0.5)),
+                                        )
+                                        .show(|ui| {
+                                            ui.set_min_width(280.0);
+                                            ui.label(egui::RichText::new("Event Timeline").strong());
+                                            ui.separator();
+
+                                            let state = shared_state.lock();
+                                            if let Some(events) = &state.timeline_events {
+                                                if events.is_empty() {
+                                                    ui.label("No significant events detected.");
+                                                } else {
+                                                    egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                                                        for event in events {
+                                                            let mins = event.clock as u32 / 60;
+                                                            let secs = event.clock as u32 % 60;
+                                                            let timestamp = format!("{:02}:{:02}", mins, secs);
+
+                                                            ui.horizontal(|ui| {
+                                                                if ui.small_button(&timestamp).clicked() {
+                                                                    let _ = command_tx
+                                                                        .send(PlaybackCommand::Seek(event.clock));
+                                                                }
+
+                                                                match &event.kind {
+                                                                    TimelineEventKind::HealthLost {
+                                                                        ship_name,
+                                                                        is_friendly,
+                                                                        percent_lost,
+                                                                    } => {
+                                                                        let pct = (percent_lost * 100.0) as u32;
+                                                                        ui.colored_label(
+                                                                            event_color(*is_friendly),
+                                                                            ship_name,
+                                                                        );
+                                                                        ui.label(format!("-{}% HP", pct));
+                                                                    }
+                                                                    TimelineEventKind::Death {
+                                                                        ship_name,
+                                                                        is_friendly,
+                                                                    } => {
+                                                                        ui.colored_label(
+                                                                            event_color(*is_friendly),
+                                                                            format!("{} destroyed", ship_name),
+                                                                        );
+                                                                    }
+                                                                    TimelineEventKind::CapContested {
+                                                                        cap_label,
+                                                                        owner_is_friendly,
+                                                                    } => {
+                                                                        ui.colored_label(
+                                                                            event_color(*owner_is_friendly),
+                                                                            format!("{} contested", cap_label),
+                                                                        );
+                                                                    }
+                                                                    TimelineEventKind::CapFlipped {
+                                                                        cap_label,
+                                                                        capturer_is_friendly,
+                                                                    } => {
+                                                                        ui.colored_label(
+                                                                            event_color(*capturer_is_friendly),
+                                                                            format!("{} captured", cap_label),
+                                                                        );
+                                                                    }
+                                                                    TimelineEventKind::RadarUsed {
+                                                                        ship_name,
+                                                                        is_friendly,
+                                                                    } => {
+                                                                        ui.colored_label(
+                                                                            event_color(*is_friendly),
+                                                                            format!("{} used radar", ship_name),
+                                                                        );
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+                                                    });
+                                                }
+                                            } else {
+                                                ui.spinner();
+                                                ui.label("Parsing events...");
                                             }
                                         });
                                 });
