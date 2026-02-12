@@ -531,6 +531,7 @@ pub fn launch_replay_renderer(
 
 // ─── Background Thread ──────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn playback_thread(
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
@@ -720,11 +721,7 @@ fn playback_thread(
                         renderer.update_squadron_info(controller);
                         renderer.update_ship_abilities(controller);
                     }
-                    if prev_clock.seconds() == 0.0 {
-                        prev_clock = packet.clock;
-                    } else {
-                        prev_clock = packet.clock;
-                    }
+                    prev_clock = packet.clock;
                     controller.process(&packet);
                     remaining = rest;
                 }
@@ -864,6 +861,7 @@ struct FrameSnapshot {
 
 /// Spawn a background thread that renders the replay to an MP4 video file
 /// using the software renderer (`ImageTarget`) and `VideoEncoder`.
+#[allow(clippy::too_many_arguments)]
 fn save_as_video(
     output_path: String,
     raw_meta: Vec<u8>,
@@ -904,6 +902,7 @@ fn save_as_video(
 }
 
 /// Blocking implementation of the video export.
+#[allow(clippy::too_many_arguments)]
 fn render_video_blocking(
     output_path: &str,
     raw_meta: &[u8],
@@ -981,11 +980,7 @@ fn render_video_blocking(
                     renderer.update_ship_abilities(&controller);
                     encoder.advance_clock(prev_clock, &controller, &mut renderer, &mut target);
                 }
-                if prev_clock.seconds() == 0.0 {
-                    prev_clock = packet.clock;
-                } else {
-                    prev_clock = packet.clock;
-                }
+                prev_clock = packet.clock;
                 controller.process(&packet);
                 remaining = rest;
             }
@@ -3087,10 +3082,8 @@ impl ReplayRendererViewer {
                     let overlay_rect = ctx.memory(|mem| mem.area_rect(ui.id().with("controls_overlay")));
                     let hover_pos = ctx.input(|i| i.pointer.hover_pos());
                     let overlay_hovered = overlay_rect.is_some_and(|r| hover_pos.is_some_and(|p| r.contains(p)));
-                    let opacity = if overlay_hovered || any_popup_open {
+                    let opacity = if overlay_hovered || any_popup_open || elapsed < 2.0 {
                         1.0_f32
-                    } else if elapsed < 2.0 {
-                        1.0
                     } else if elapsed < 2.5 {
                         (1.0 - ((elapsed - 2.0) / 0.5) as f32).max(0.0)
                     } else {
