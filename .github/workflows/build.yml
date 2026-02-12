@@ -4,17 +4,11 @@ on:
 
 jobs:
   release:
-    name: release ${{ matrix.target }} (with non-required env)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-gnu
-            archive: zip
+    name: Build and upload release
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -24,13 +18,21 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          RUSTTARGET: ${{ matrix.target }}
-          EXTRA_FILES: "README.md"
-          ARCHIVE_TYPES: ${{ matrix.archive }}
-          TOOLCHAIN_VERSION: 1.92.0
-          ARCHIVE_NAME: wows_toolkit_${{ github.event.release.tag_name }}_windows
+          toolchain: 1.92.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Create zip archive
+        run: |
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","README.md" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wows_toolkit_${{ github.event.release.tag_name }}_windows.zip
