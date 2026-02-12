@@ -37,7 +37,7 @@ use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
 
 use crate::WowsToolkitApp;
-use crate::app::TimedMessage;
+
 use crate::build_tracker;
 use crate::error::ToolkitError;
 use crate::game_params::load_game_params;
@@ -65,6 +65,34 @@ pub struct DownloadProgress {
     pub total: u64,
 }
 
+#[derive(Clone)]
+pub enum ToastLevel {
+    Success,
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Clone)]
+pub struct ToastMessage {
+    pub message: String,
+    pub level: ToastLevel,
+}
+
+impl ToastMessage {
+    pub fn success(message: impl Into<String>) -> Self {
+        Self { message: message.into(), level: ToastLevel::Success }
+    }
+
+    pub fn info(message: impl Into<String>) -> Self {
+        Self { message: message.into(), level: ToastLevel::Info }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self { message: message.into(), level: ToastLevel::Error }
+    }
+}
+
 pub struct BackgroundTask {
     pub receiver: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, Report>>>,
     pub kind: BackgroundTaskKind,
@@ -84,7 +112,7 @@ pub enum BackgroundTaskKind {
     LoadingPersonalRatingData,
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
-    UpdateTimedMessage(TimedMessage),
+    UpdateTimedMessage(ToastMessage),
     OpenFileViewer(PlaintextFileViewer),
 }
 

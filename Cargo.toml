@@ -23,8 +23,10 @@ egui_dock = "0.18.0"
 egui-phosphor = "0.11"
 egui_table = "0.6.0"
 egui_commonmark = "0.22"
-# Necessary to avoid immediate runtime panic
-wgpu = { version = "*", default-features = true }
+# Pin to match eframe's wgpu version so backend features unify correctly
+# This dependency with `default-features = true` is also needed to ensure
+# that targets are properly initialized.
+wgpu = { version = "27", default-features = true }
 
 tracing = "0.1"
 wows_replays = { version = "0.13.0", features = ["arc"] }
@@ -78,6 +80,7 @@ arboard = "3.6.1"
 anyhow = "1.0"
 ouroboros = "0.18"
 egui_taffy = "0.10.0"
+egui-notify = "0.21.0"
 
 [build-dependencies]
 winresource = "0.1.20"

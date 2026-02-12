@@ -423,8 +423,8 @@ pub struct ReplayRendererViewer {
     textures: Arc<Mutex<Option<RendererTextures>>>,
     /// When set, the main app loop should save these as default render options.
     pub pending_defaults_save: Arc<Mutex<Option<SavedRenderOptions>>>,
-    /// Timed status message shown in the viewport (message, expiry time).
-    status_message: Arc<Mutex<Option<(String, std::time::Instant)>>>,
+    /// Toast notifications for this renderer viewport.
+    toasts: crate::tab_state::SharedToasts,
     /// Whether a video export is currently in progress.
     video_exporting: Arc<AtomicBool>,
     /// Data needed for video export (cloned from launch params).
@@ -493,7 +493,7 @@ pub fn launch_replay_renderer(
         command_tx,
         textures: Arc::new(Mutex::new(None)),
         pending_defaults_save: Arc::new(Mutex::new(None)),
-        status_message: Arc::new(Mutex::new(None)),
+        toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
         video_exporting: Arc::new(AtomicBool::new(false)),
         video_export_data,
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
@@ -864,12 +864,11 @@ fn save_as_video(
     options: RenderOptions,
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
-    status_message: Arc<Mutex<Option<(String, std::time::Instant)>>>,
+    toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
-    *status_message.lock() =
-        Some(("Exporting video...".to_string(), std::time::Instant::now() + std::time::Duration::from_secs(3600)));
+    toasts.lock().info("Exporting video...");
 
     std::thread::spawn(move || {
         let result = render_video_blocking(
@@ -885,16 +884,10 @@ fn save_as_video(
 
         match result {
             Ok(()) => {
-                *status_message.lock() = Some((
-                    format!("Video saved to {}", output_path),
-                    std::time::Instant::now() + std::time::Duration::from_secs(8),
-                ));
+                toasts.lock().success(format!("Video saved to {}", output_path));
             }
             Err(e) => {
-                *status_message.lock() = Some((
-                    format!("Video export failed: {}", e),
-                    std::time::Instant::now() + std::time::Duration::from_secs(10),
-                ));
+                toasts.lock().error(format!("Video export failed: {}", e));
             }
         }
         video_exporting.store(false, Ordering::Relaxed);
@@ -1991,7 +1984,7 @@ impl ReplayRendererViewer {
         let window_open = self.open.clone();
         let textures_arc = self.textures.clone();
         let pending_save = self.pending_defaults_save.clone();
-        let status_message = self.status_message.clone();
+        let toasts = self.toasts.clone();
         let video_exporting = self.video_exporting.clone();
         let video_export_data = self.video_export_data.clone();
         let zoom_pan_arc = self.zoom_pan.clone();
@@ -3273,7 +3266,7 @@ impl ReplayRendererViewer {
                                                             opts,
                                                             video_export_data.wows_data.clone(),
                                                             Arc::clone(&video_export_data.asset_cache),
-                                                            Arc::clone(&status_message),
+                                                            Arc::clone(&toasts),
                                                             Arc::clone(&video_exporting),
                                                         );
                                                     }
@@ -3364,22 +3357,7 @@ impl ReplayRendererViewer {
                             });
                     }
 
-                    // Status toast (painted on canvas)
-                    {
-                        let mut msg_guard = status_message.lock();
-                        if let Some((ref text, expiry)) = *msg_guard {
-                            if std::time::Instant::now() < expiry {
-                                let toast_pos = Pos2::new(response.rect.min.x + 8.0, response.rect.max.y - 24.0);
-                                let galley = ctx.fonts_mut(|f| {
-                                    f.layout_no_wrap(text.clone(), FontId::proportional(12.0), Color32::WHITE)
-                                });
-                                painter.add(Shape::galley(toast_pos, galley, Color32::WHITE));
-                                ctx.request_repaint_after_secs(1.0);
-                            } else {
-                                *msg_guard = None;
-                            }
-                        }
-                    }
+                    toasts.lock().show(ctx);
                 });
 
                 if ctx.input(|i| i.viewport().close_requested()) {

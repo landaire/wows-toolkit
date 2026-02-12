@@ -6,8 +6,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
-use std::time::Duration;
-use std::time::Instant;
 
 use eframe::APP_KEY;
 use egui::Color32;
@@ -111,22 +109,6 @@ impl TabViewer for ToolkitTabViewer<'_> {
 #[derive(Default)]
 pub struct ReplayParserTabState {
     pub game_chat: Vec<GameMessage>,
-}
-
-#[derive(Clone)]
-pub struct TimedMessage {
-    pub message: String,
-    pub expiration: Instant,
-}
-
-impl TimedMessage {
-    pub fn new(message: String) -> Self {
-        TimedMessage { message, expiration: Instant::now() + Duration::from_secs(10) }
-    }
-
-    pub fn is_expired(&self) -> bool {
-        self.expiration < Instant::now()
-    }
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -370,8 +352,22 @@ impl WowsToolkitApp {
                             #[cfg(feature = "mod_manager")]
                             BackgroundTaskKind::ModTask(_task_info) => {}
                             BackgroundTaskKind::LoadingPersonalRatingData => {}
-                            BackgroundTaskKind::UpdateTimedMessage(timed_message) => {
-                                self.tab_state.timed_message.write().replace(timed_message.clone());
+                            BackgroundTaskKind::UpdateTimedMessage(toast) => {
+                                let mut toasts = self.tab_state.toasts.lock();
+                                match &toast.level {
+                                    task::ToastLevel::Success => {
+                                        toasts.success(toast.message.clone());
+                                    }
+                                    task::ToastLevel::Info => {
+                                        toasts.info(toast.message.clone());
+                                    }
+                                    task::ToastLevel::Warning => {
+                                        toasts.warning(toast.message.clone());
+                                    }
+                                    task::ToastLevel::Error => {
+                                        toasts.error(toast.message.clone());
+                                    }
+                                };
                             }
                             BackgroundTaskKind::OpenFileViewer(plaintext_file_viewer) => {
                                 self.tab_state.file_viewer.lock().push(plaintext_file_viewer.clone());
@@ -402,10 +398,7 @@ impl WowsToolkitApp {
                                     self.tab_state.filtered_file_list = None;
                                     self.tab_state.used_filter = None;
 
-                                    *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                        "{} Successfully loaded game data",
-                                        icons::CHECK_CIRCLE
-                                    )));
+                                    self.tab_state.toasts.lock().success("Successfully loaded game data");
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update } => {
                                     if !skip_ui_update {
@@ -421,10 +414,7 @@ impl WowsToolkitApp {
                                         }
                                         self.tab_state.session_stats.add_replay(replay.clone());
                                         self.tab_state.current_replay = Some(replay);
-                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                            "{} Successfully loaded replay",
-                                            icons::CHECK_CIRCLE
-                                        )));
+                                        self.tab_state.toasts.lock().success("Successfully loaded replay");
                                     }
                                 }
                                 BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
@@ -467,18 +457,16 @@ impl WowsToolkitApp {
                                         self.tab_state.mod_manager_info.update_index("test".to_string(), index);
                                     }
                                     crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
-                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                            "{} Successfully installed mod: {}",
-                                            icons::CHECK_CIRCLE,
-                                            mod_info.meta.name()
-                                        )));
+                                        self.tab_state
+                                            .toasts
+                                            .lock()
+                                            .success(format!("Successfully installed mod: {}", mod_info.meta.name()));
                                     }
                                     crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
-                                        *self.tab_state.timed_message.write() = Some(TimedMessage::new(format!(
-                                            "{} Successfully uninstalled mod: {}",
-                                            icons::CHECK_CIRCLE,
-                                            mod_info.meta.name()
-                                        )));
+                                        self.tab_state
+                                            .toasts
+                                            .lock()
+                                            .success(format!("Successfully uninstalled mod: {}", mod_info.meta.name()));
                                     }
                                     crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {}
                                 },
@@ -541,21 +529,6 @@ impl WowsToolkitApp {
                     self.tab_state.unpacker_progress.take();
                     self.tab_state.last_progress.take();
                 }
-            } else {
-                let reset_message = if let Some(timed_message) = &*self.tab_state.timed_message.read() {
-                    if !timed_message.is_expired() {
-                        ui.label(timed_message.message.as_str());
-                        false
-                    } else {
-                        true
-                    }
-                } else {
-                    false
-                };
-
-                if reset_message {
-                    *self.tab_state.timed_message.write() = None;
-                }
             }
         });
     }
@@ -617,12 +590,10 @@ impl WowsToolkitApp {
                 self.update_window_open = true;
                 self.latest_release = Some(latest_release);
             } else {
-                *self.tab_state.timed_message.write() =
-                    Some(TimedMessage::new(format!("{} Application up-to-date", icons::CHECK_CIRCLE)));
+                self.tab_state.toasts.lock().success("Application up-to-date");
             }
         } else {
-            *self.tab_state.timed_message.write() =
-                Some(TimedMessage::new(format!("{} Failed to check for app updates", icons::X_CIRCLE)));
+            self.tab_state.toasts.lock().error("Failed to check for app updates");
         }
 
         match constants_updates {
@@ -868,6 +839,8 @@ impl WowsToolkitApp {
         }
 
         self.ui_file_drag_and_drop(ctx);
+
+        self.tab_state.toasts.lock().show(ctx);
 
         ctx.request_repaint_after_secs(1.0);
     }

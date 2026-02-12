@@ -33,7 +33,6 @@ use egui::ScrollArea;
 use rootcause::Report;
 use wowsunpack::game_params::types::ParamData;
 
-use crate::app::TimedMessage;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
@@ -46,6 +45,7 @@ use crate::tab_state::ChartableStat;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
+use crate::task::ToastMessage;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::update_background_task;
@@ -1518,8 +1518,8 @@ impl UiReport {
                                         let _ = self.background_task_sender.as_ref().map(|sender| {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
-                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(
-                                                    format!("{} Build link copied", icons::CHECK_CIRCLE),
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
+                                                    "Build link copied",
                                                 )),
                                             })
                                         });
@@ -1537,8 +1537,8 @@ impl UiReport {
                                         let _ = self.background_task_sender.as_ref().map(|sender| {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
-                                                kind: BackgroundTaskKind::UpdateTimedMessage(TimedMessage::new(
-                                                    format!("{} Build link copied", icons::CHECK_CIRCLE),
+                                                kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
+                                                    "Build link copied",
                                                 )),
                                             })
                                         });
@@ -2482,8 +2482,7 @@ impl ToolkitTabViewer<'_> {
 
             if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                 ui.ctx().copy_text(text);
-                *self.tab_state.timed_message.write() =
-                    Some(TimedMessage::new(format!("{} Message copied", icons::CHECK_CIRCLE)));
+                self.tab_state.toasts.lock().success("Message copied");
             }
             ui.add(Separator::default());
             ui.end_row();

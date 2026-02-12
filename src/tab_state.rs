@@ -43,6 +43,8 @@ use crate::wows_data::ReplayDependencies;
 use crate::wows_data::ReplayLoader;
 use crate::wows_data::SharedWoWsData;
 
+pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
+
 /// Available statistics for charting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChartableStat {
@@ -179,7 +181,7 @@ pub struct TabState {
     pub background_tasks: Vec<BackgroundTask>,
 
     #[serde(skip)]
-    pub timed_message: RwLock<Option<crate::app::TimedMessage>>,
+    pub toasts: SharedToasts,
 
     #[serde(skip)]
     pub can_change_wows_dir: bool,
@@ -266,7 +268,7 @@ impl Default for TabState {
             file_receiver: None,
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
-            timed_message: RwLock::new(None),
+            toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
             current_replay: None,
             used_filter: None,
             filtered_file_list: None,
