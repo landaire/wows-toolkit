@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -334,7 +332,8 @@ impl TabState {
                             if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
                                 for _ in 0..3 {
                                     if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
-                                        let replay = Replay::new(replay_file, game_metadata.clone());
+                                        let mut replay = Replay::new(replay_file, game_metadata.clone());
+                                        replay.battle_constants = Some(wows_data.battle_constants.clone());
                                         let replay = Arc::new(RwLock::new(replay));
 
                                         if let Some(replay_files) = &mut self.replay_files {

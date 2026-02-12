@@ -35,6 +35,7 @@ use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_constants::BattleConstants;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use egui_taffy::AsTuiBuilder as _;
@@ -549,8 +550,8 @@ fn playback_thread(
     command_rx: mpsc::Receiver<PlaybackCommand>,
     open: Arc<AtomicBool>,
 ) {
-    // 1. Get file tree, pkg loader, and game metadata from the app
-    let (file_tree, pkg_loader, game_metadata) = {
+    // 1. Get file tree, pkg loader, game metadata, and battle constants from the app
+    let (file_tree, pkg_loader, game_metadata, battle_constants) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -559,7 +560,7 @@ fn playback_thread(
                 return;
             }
         };
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm)
+        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, data.battle_constants.clone())
     };
 
     // 2. Load visual assets (cached across renderer instances)
@@ -589,7 +590,7 @@ fn playback_thread(
     };
 
     // 4. Create controller and renderer
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata);
+    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(battle_constants.clone()));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
 
@@ -664,7 +665,7 @@ fn playback_thread(
     // 4. Event extraction pass — second full parse for timeline events
     let timeline_events = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
         .ok()
-        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata))
+        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(battle_constants.clone())))
         .unwrap_or_default();
     shared_state.lock().timeline_events = Some(timeline_events);
 
@@ -695,7 +696,7 @@ fn playback_thread(
         Ok(rf) => rf,
         Err(_) => return,
     };
-    let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata);
+    let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(battle_constants.clone()));
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
@@ -768,7 +769,7 @@ fn playback_thread(
             };
             std::mem::swap(&mut live_replay, &mut new_replay);
             // old replay is now in new_replay and will be dropped at end of block
-            live_controller = BattleController::new(&live_replay.meta, &*game_metadata);
+            live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(battle_constants.clone()));
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, RenderOptions::default());
             parse_to_clock(
                 &live_replay,
@@ -892,9 +893,13 @@ fn event_color(is_friendly: bool) -> Color32 {
 }
 
 /// Parse the entire replay and extract significant game events for the timeline.
-fn extract_timeline_events(replay_file: &ReplayFile, game_metadata: &GameMetadataProvider) -> Vec<TimelineEvent> {
+fn extract_timeline_events(
+    replay_file: &ReplayFile,
+    game_metadata: &GameMetadataProvider,
+    battle_constants: Option<BattleConstants>,
+) -> Vec<TimelineEvent> {
     let mut events = Vec::new();
-    let mut controller = BattleController::new(&replay_file.meta, game_metadata);
+    let mut controller = BattleController::new(&replay_file.meta, game_metadata, battle_constants);
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
 
     // Player info lookups (populated once players are available)
@@ -1132,10 +1137,10 @@ fn render_video_blocking(
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
-    let (file_tree, pkg_loader, game_metadata) = {
+    let (file_tree, pkg_loader, game_metadata, battle_constants) = {
         let data = wows_data.read();
         let gm = data.game_metadata.clone().ok_or_else(|| anyhow::anyhow!("Game metadata not loaded"))?;
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm)
+        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, data.battle_constants.clone())
     };
 
     // Load assets — reuse cached raw RGBA data and convert to image types
@@ -1176,7 +1181,7 @@ fn render_video_blocking(
     let replay_file = ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec())
         .map_err(|e| anyhow::anyhow!("Failed to parse replay: {:?}", e))?;
 
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata);
+    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(battle_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, options);
     let mut target = ImageTarget::new(map_image_rgb, ship_icons_rgba, plane_icons_rgba, consumable_icons_rgba);

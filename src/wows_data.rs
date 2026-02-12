@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use wows_replays::ReplayFile;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_constants::BattleConstants;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
 
@@ -51,6 +52,9 @@ pub struct WorldOfWarshipsData {
 
     /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
     pub achievement_icons: HashMap<String, Arc<GameAsset>>,
+
+    /// Cached battle constants loaded from game files.
+    pub battle_constants: BattleConstants,
 
     #[allow(dead_code)]
     pub full_version: Option<wowsunpack::data::Version>,
@@ -101,8 +105,12 @@ impl ReplayDependencies {
         let path = replay_path.as_ref();
 
         let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
-        let game_metadata = { self.wows_data.read().game_metadata.clone()? };
-        let replay = Replay::new(replay_file, game_metadata);
+        let (game_metadata, battle_constants) = {
+            let data = self.wows_data.read();
+            (data.game_metadata.clone()?, data.battle_constants.clone())
+        };
+        let mut replay = Replay::new(replay_file, game_metadata);
+        replay.battle_constants = Some(battle_constants);
 
         self.load_replay(Arc::new(RwLock::new(replay)), update_ui)
     }

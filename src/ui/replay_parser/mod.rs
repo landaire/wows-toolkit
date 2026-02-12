@@ -120,6 +120,76 @@ type ReplayGroup = (String, Vec<ReplayEntry>);
 
 use std::cmp::Reverse;
 
+/// Transform raw battle results from positional arrays to named objects.
+/// Takes ownership of the parsed JSON to avoid cloning.
+///
+/// Input shape:
+///   `{ "commonList": [v0, v1, ...], "playersPublicInfo": { "db_id": [v0, v1, ..., {interactions}], ... } }`
+///
+/// Output shape:
+///   `{ "commonList": { "winner_team_id": v, ... }, "playersPublicInfo": { "db_id": { "exp": v, ..., "interactions": { "victim_id": { "fires": v, ... } } } } }`
+fn resolve_battle_results(mut results: serde_json::Value, constants: &serde_json::Value) -> serde_json::Value {
+    // Resolve commonList: array → object using COMMON_RESULTS names
+    if let Some(common_names) = constants.pointer("/COMMON_RESULTS").and_then(|v| v.as_array()) {
+        if let Some(common_arr) = results.get("commonList").and_then(|v| v.as_array()) {
+            results["commonList"] = serde_json::Value::Object(resolve_array(common_names, common_arr));
+        }
+    }
+
+    // Resolve each player in playersPublicInfo: array → object using CLIENT_PUBLIC_RESULTS_INDICES
+    let indices = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES").and_then(|v| v.as_object()).cloned();
+    let interaction_fields = constants.pointer("/CLIENT_VEH_INTERACTION_DETAILS").and_then(|v| v.as_array()).cloned();
+
+    if let (Some(indices), Some(players)) =
+        (indices.as_ref(), results.get_mut("playersPublicInfo").and_then(|v| v.as_object_mut()))
+    {
+        for (_db_id, player_val) in players.iter_mut() {
+            if let Some(arr) = player_val.as_array() {
+                let mut obj = serde_json::Map::new();
+                for (name, idx_val) in indices {
+                    if let Some(idx) = idx_val.as_u64().map(|i| i as usize) {
+                        if let Some(value) = arr.get(idx) {
+                            obj.insert(name.clone(), value.clone());
+                        }
+                    }
+                }
+
+                // Resolve interactions: each victim's array → object
+                if let Some(fields) = interaction_fields.as_ref() {
+                    if let Some(interactions) = obj.get_mut("interactions").and_then(|v| v.as_object_mut()) {
+                        for (_victim_id, victim_val) in interactions.iter_mut() {
+                            if let Some(victim_arr) = victim_val.as_array() {
+                                *victim_val = serde_json::Value::Object(resolve_array(fields, victim_arr));
+                            }
+                        }
+                    }
+                }
+
+                *player_val = serde_json::Value::Object(obj);
+            }
+        }
+    }
+
+    results
+}
+
+/// Convert a positional array to a named object using a parallel names array.
+/// `names[i]` provides the key for `values[i]`.
+fn resolve_array(
+    names: &[serde_json::Value],
+    values: &[serde_json::Value],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for (i, name_val) in names.iter().enumerate() {
+        if let Some(name) = name_val.as_str() {
+            if let Some(value) = values.get(i) {
+                map.insert(name.to_string(), value.clone());
+            }
+        }
+    }
+    map
+}
+
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
@@ -136,6 +206,7 @@ pub struct UiReport {
     selected_row: Option<(u64, bool)>,
     debug_mode: bool,
     battle_result: Option<BattleResult>,
+    resolved_results: Option<serde_json::Value>,
 }
 
 impl UiReport {
@@ -153,16 +224,14 @@ impl UiReport {
 
         let self_player = players.iter().find(|player| player.relation().is_self()).cloned();
 
-        let battle_result = constants_inner.pointer("/COMMON_RESULTS").and_then(|common_results_names| {
-            let winner_team_id_idx = common_results_names.as_array().and_then(|names| {
-                names.iter().position(|name| name.as_str().map(|name| name == "winner_team_id").unwrap_or_default())
-            })?;
-            let battle_results: serde_json::Value = serde_json::from_str(report.battle_results()?).ok()?;
+        let resolved_results: Option<serde_json::Value> = report
+            .battle_results()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .map(|raw| resolve_battle_results(raw, &constants_inner));
 
+        let battle_result = resolved_results.as_ref().and_then(|results| {
             let self_team_id = self_player.as_ref().map(|player| player.initial_state().team_id())?;
-
-            let common_list = battle_results.pointer("/commonList")?.as_array()?;
-            let winning_team_id = common_list.get(winner_team_id_idx)?.as_i64()?;
+            let winning_team_id = results.pointer("/commonList/winner_team_id")?.as_i64()?;
 
             if winning_team_id == self_team_id {
                 Some(BattleResult::Win(self_team_id as i8))
@@ -228,20 +297,20 @@ impl UiReport {
             };
             let name_text = RichText::new(player_state.username()).color(name_color);
 
-            let (base_xp, base_xp_text) = if let Some(base_xp) = vehicle.results_info().and_then(|info| {
-                let index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/exp")?.as_u64()? as usize;
-                info.as_array().and_then(|info_array| info_array[index].as_number().and_then(|number| number.as_i64()))
-            }) {
+            // Look up this player's resolved results by db_id
+            let player_results = resolved_results
+                .as_ref()
+                .and_then(|r| r.pointer(&format!("/playersPublicInfo/{}", player_state.db_id())));
+
+            let (base_xp, base_xp_text) = if let Some(base_xp) = player_results.and_then(|pr| pr.get("exp")?.as_i64()) {
                 let label_text = separate_number(base_xp, Some(locale));
                 (Some(base_xp), Some(RichText::new(label_text).color(player_color)))
             } else {
                 (None, None)
             };
 
-            let (raw_xp, raw_xp_text) = if let Some(raw_xp) = vehicle.results_info().and_then(|info| {
-                let index = constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/raw_exp")?.as_u64()? as usize;
-                info.as_array().and_then(|info_array| info_array[index].as_number().and_then(|number| number.as_i64()))
-            }) {
+            let (raw_xp, raw_xp_text) = if let Some(raw_xp) = player_results.and_then(|pr| pr.get("raw_exp")?.as_i64())
+            {
                 let label_text = separate_number(raw_xp, Some(locale));
                 (Some(raw_xp), Some(label_text))
             } else {
@@ -256,113 +325,82 @@ impl UiReport {
             let observed_damage = vehicle.damage().ceil() as u64;
             let observed_damage_text = separate_number(observed_damage, Some(locale));
 
-            let results_info = vehicle.results_info().and_then(|info| info.as_array());
-
             // Actual damage done to other players
-            let (damage, damage_text, damage_hover_text, damage_report) = results_info
-                .and_then(|info_array| {
-                    let total_damage_index =
-                        constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/damage")?.as_u64()? as usize;
+            let (damage, damage_text, damage_hover_text, damage_report) = player_results
+                .and_then(|pr| {
+                    let damage_number = pr.get("damage")?.as_u64()?;
 
-                    info_array[total_damage_index].as_number().and_then(|number| number.as_u64()).map(|damage_number| {
-                        // First pass over damage numbers: grab the longest description so that we can later format it
-                        let longest_width = DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx]
-                                    .as_number()
-                                    .and_then(|number| number.as_u64())
-                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
-                            })
-                            .max()
-                            .unwrap_or_default()
-                            + 1;
-
-                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
-                                    if num > 0 {
-                                        let num_str = separate_number(num, Some(locale));
-                                        Some((
-                                            (key.to_string(), num),
-                                            format!("{description:<longest_width$}: {num_str}"),
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                })
-                            })
-                            .collect();
-
-                        let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
-
-                        let damage_report_text = separate_number(damage_number, Some(locale));
-                        let damage_report_text = RichText::new(damage_report_text).color(player_color);
-                        let damage_report_hover_text =
-                            RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
-
-                        (
-                            Some(damage_number),
-                            Some(damage_report_text),
-                            Some(damage_report_hover_text),
-                            Some(Damage {
-                                ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
-                                sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
-                                he: all_damage.get(DAMAGE_MAIN_HE).copied(),
-                                he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
-                                sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
-                                torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
-                                deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
-                                fire: all_damage.get(DAMAGE_FIRE).copied(),
-                                flooding: all_damage.get(DAMAGE_FLOOD).copied(),
-                            }),
-                        )
-                    })
-                })
-                .unwrap_or_default();
-
-            // Armament hit information
-            let (hits, hits_text, hits_hover_text, hits_report) = results_info
-                .map(|info_array| {
-                    // First pass over damage numbers: grab the longest description so that we can later format it
-                    let longest_width = HITS_DESCRIPTIONS
+                    let longest_width = DAMAGE_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner
-                                .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                .as_u64()? as usize;
-                            info_array[idx]
-                                .as_number()
-                                .and_then(|number| number.as_u64())
-                                .and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                            let num = pr.get(*key)?.as_u64()?;
+                            if num > 0 { Some(description.len()) } else { None }
                         })
                         .max()
                         .unwrap_or_default()
                         + 1;
 
-                    // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
+                    let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let num = pr.get(*key)?.as_u64()?;
+                            if num > 0 {
+                                let num_str = separate_number(num, Some(locale));
+                                Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
+
+                    let damage_report_text = separate_number(damage_number, Some(locale));
+                    let damage_report_text = RichText::new(damage_report_text).color(player_color);
+                    let damage_report_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
+
+                    Some((
+                        Some(damage_number),
+                        Some(damage_report_text),
+                        Some(damage_report_hover_text),
+                        Some(Damage {
+                            ap: all_damage.get(DAMAGE_MAIN_AP).copied(),
+                            sap: all_damage.get(DAMAGE_MAIN_CS).copied(),
+                            he: all_damage.get(DAMAGE_MAIN_HE).copied(),
+                            he_secondaries: all_damage.get(DAMAGE_ATBA_HE).copied(),
+                            sap_secondaries: all_damage.get(DAMAGE_ATBA_CS).copied(),
+                            torps: all_damage.get(DAMAGE_TPD_NORMAL).copied(),
+                            deep_water_torps: all_damage.get(DAMAGE_TPD_DEEP).copied(),
+                            fire: all_damage.get(DAMAGE_FIRE).copied(),
+                            flooding: all_damage.get(DAMAGE_FLOOD).copied(),
+                        }),
+                    ))
+                })
+                .unwrap_or_default();
+
+            // Armament hit information
+            let (hits, hits_text, hits_hover_text, hits_report) = player_results
+                .map(|pr| {
+                    let longest_width = HITS_DESCRIPTIONS
+                        .iter()
+                        .filter_map(|(key, description)| {
+                            let num = pr.get(*key)?.as_u64()?;
+                            if num > 0 { Some(description.len()) } else { None }
+                        })
+                        .max()
+                        .unwrap_or_default()
+                        + 1;
+
                     let (all_hits, breakdowns): (Vec<(String, u64)>, Vec<String>) = HITS_DESCRIPTIONS
                         .iter()
                         .filter_map(|(key, description)| {
-                            let idx = constants_inner
-                                .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                .as_u64()? as usize;
-                            info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
-                                if num > 0 {
-                                    let num_str = separate_number(num, Some(locale));
-                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
-                                } else {
-                                    None
-                                }
-                            })
+                            let num = pr.get(*key)?.as_u64()?;
+                            if num > 0 {
+                                let num_str = separate_number(num, Some(locale));
+                                Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
+                            } else {
+                                None
+                            }
                         })
                         .collect();
 
@@ -386,7 +424,6 @@ impl UiReport {
                         };
 
                     let main_hits_text = separate_number(relevant_hits_number, Some(locale));
-
                     let main_hits_text = RichText::new(main_hits_text).color(player_color);
                     let hits_hover_text = RichText::new(breakdowns.join("\n")).font(FontId::monospace(12.0));
 
@@ -411,48 +448,33 @@ impl UiReport {
 
             // Received damage
             let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
-                results_info
-                    .map(|info_array| {
-                        // First pass over damage numbers: grab the longest description so that we can later format it
+                player_results
+                    .map(|pr| {
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx]
-                                    .as_number()
-                                    .and_then(|number| number.as_u64())
-                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                                let num = pr.get(&format!("received_{key}"))?.as_u64()?;
+                                if num > 0 { Some(description.len()) } else { None }
                             })
                             .max()
                             .unwrap_or_default()
                             + 1;
 
-                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
                         let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/received_{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx].as_number().and_then(|number| number.as_u64()).and_then(|num| {
-                                    if num > 0 {
-                                        let num_str = separate_number(num, Some(locale));
-                                        Some((
-                                            (key.to_string(), num),
-                                            format!("{description:<longest_width$}: {num_str}"),
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                })
+                                let num = pr.get(&format!("received_{key}"))?.as_u64()?;
+                                if num > 0 {
+                                    let num_str = separate_number(num, Some(locale));
+                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
+                                } else {
+                                    None
+                                }
                             })
                             .collect();
 
                         let all_damage: HashMap<String, u64> = HashMap::from_iter(all_damage);
-
-                        let total_received = all_damage.values().fold(0, |total, dmg| total + *dmg);
+                        let total_received: u64 = all_damage.values().sum();
 
                         let received_damage_report_text = separate_number(total_received, Some(locale));
                         let received_damage_report_text =
@@ -480,57 +502,38 @@ impl UiReport {
                     .unwrap_or_default();
 
             // Spotting damage
-            let (spotting_damage, spotting_damage_text) = if let Some(damage_number) =
-                results_info.and_then(|info_array| {
-                    let idx =
-                        constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/scouting_damage")?.as_u64()? as usize;
-                    info_array[idx].as_number().and_then(|number| number.as_u64())
-                }) {
-                (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
-            } else {
-                (None, None)
-            };
+            let (spotting_damage, spotting_damage_text) =
+                if let Some(damage_number) = player_results.and_then(|pr| pr.get("scouting_damage")?.as_u64()) {
+                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
+                } else {
+                    (None, None)
+                };
 
             let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
-                results_info
-                    .map(|info_array| {
-                        // First pass over damage numbers: grab the longest description so that we can later format it
+                player_results
+                    .map(|pr| {
                         let longest_width = POTENTIAL_DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx]
-                                    .as_number()
-                                    .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
-                                    .and_then(|num| if num > 0 { Some(description.len()) } else { None })
+                                let num =
+                                    pr.get(*key)?.as_u64().or_else(|| pr.get(*key)?.as_f64().map(|f| f as u64))?;
+                                if num > 0 { Some(description.len()) } else { None }
                             })
                             .max()
                             .unwrap_or_default()
                             + 1;
 
-                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
                         let (all_agro, breakdowns): (Vec<(String, u64)>, Vec<String>) = POTENTIAL_DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let idx = constants_inner
-                                    .pointer(format!("/CLIENT_PUBLIC_RESULTS_INDICES/{key}").as_str())?
-                                    .as_u64()? as usize;
-                                info_array[idx]
-                                    .as_number()
-                                    .and_then(|number| number.as_u64().or_else(|| number.as_f64().map(|f| f as u64)))
-                                    .and_then(|num| {
-                                        if num > 0 {
-                                            let num_str = separate_number(num, Some(locale));
-                                            Some((
-                                                (key.to_string(), num),
-                                                format!("{description:<longest_width$}: {num_str}"),
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    })
+                                let num =
+                                    pr.get(*key)?.as_u64().or_else(|| pr.get(*key)?.as_f64().map(|f| f as u64))?;
+                                if num > 0 {
+                                    let num_str = separate_number(num, Some(locale));
+                                    Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
+                                } else {
+                                    None
+                                }
                             })
                             .unzip();
                         let all_agro: HashMap<String, u64> = HashMap::from_iter(all_agro);
@@ -591,76 +594,29 @@ impl UiReport {
             let skill_info =
                 SkillInfo { skill_points, num_skills, highest_tier, num_tier_1_skills, hover_text, label_text: label };
 
-            let (damage_interactions, fires, floods, cits, crits) = constants_inner
-                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/interactions")
-                .and_then(|interactions_idx| {
+            let (damage_interactions, fires, floods, cits, crits) = player_results
+                .and_then(|pr| pr.get("interactions")?.as_object())
+                .map(|interactions| {
                     let mut damage_interactions = HashMap::new();
-                    let mut fires = 0;
-                    let mut floods = 0;
-                    let mut cits = 0;
-                    let mut crits = 0;
+                    let mut fires = 0u64;
+                    let mut floods = 0u64;
+                    let mut cits = 0u64;
+                    let mut crits = 0u64;
 
-                    let interactions_idx = interactions_idx.as_u64()? as usize;
-                    let dict = results_info?[interactions_idx].as_object()?;
-                    for (victim, victim_interactions) in dict {
-                        // Not sure if this can ever fail, but we can report wrong info to a "nobody" player
-                        // or something
-                        let victim_id: AccountId = AccountId(victim.parse::<u64>().unwrap_or_default());
-                        let vehicle_interaction_details_idx =
-                            constants_inner.pointer("/CLIENT_VEH_INTERACTION_DETAILS")?.as_array();
+                    for (victim, victim_data) in interactions {
+                        let victim_id = AccountId(victim.parse::<i64>().unwrap_or_default());
 
-                        fires += vehicle_interaction_details_idx
-                            .and_then(|names| {
-                                names
-                                    .iter()
-                                    .position(|name| name.as_str().map(|name| name == "fires").unwrap_or_default())
-                            })
-                            .and_then(|idx| victim_interactions[idx].as_u64())
-                            .unwrap_or_default();
+                        fires += victim_data.get("fires").and_then(|v| v.as_u64()).unwrap_or(0);
+                        floods += victim_data.get("floods").and_then(|v| v.as_u64()).unwrap_or(0);
+                        cits += victim_data.get("citadels").and_then(|v| v.as_u64()).unwrap_or(0);
+                        crits += victim_data.get("crits").and_then(|v| v.as_u64()).unwrap_or(0);
 
-                        floods += vehicle_interaction_details_idx
-                            .and_then(|names| {
-                                names
-                                    .iter()
-                                    .position(|name| name.as_str().map(|name| name == "floods").unwrap_or_default())
-                            })
-                            .and_then(|idx| victim_interactions[idx].as_u64())
-                            .unwrap_or_default();
-
-                        cits += vehicle_interaction_details_idx
-                            .and_then(|names| {
-                                names
-                                    .iter()
-                                    .position(|name| name.as_str().map(|name| name == "citadels").unwrap_or_default())
-                            })
-                            .and_then(|idx| victim_interactions[idx].as_u64())
-                            .unwrap_or_default();
-
-                        crits += vehicle_interaction_details_idx
-                            .and_then(|names| {
-                                names
-                                    .iter()
-                                    .position(|name| name.as_str().map(|name| name == "crits").unwrap_or_default())
-                            })
-                            .and_then(|idx| victim_interactions[idx].as_u64())
-                            .unwrap_or_default();
-
-                        // Add up all of the damage dealt
                         let mut damage_interaction = DamageInteraction::default();
 
-                        // Grab each damage index and format by <DAMAGE_TYPE>: <DAMAGE_NUM> as a collection of strings
-                        let all_damage: u64 = DAMAGE_DESCRIPTIONS.iter().fold(0, |accum, (key, _description)| {
-                            let damage = vehicle_interaction_details_idx
-                                .and_then(|names| {
-                                    names
-                                        .iter()
-                                        .position(|name| name.as_str().map(|name| name == *key).unwrap_or_default())
-                                })
-                                .and_then(|idx| victim_interactions[idx].as_u64())
-                                .unwrap_or_default();
-
-                            damage + accum
-                        });
+                        let all_damage: u64 = DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .map(|(key, _)| victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0))
+                            .sum();
 
                         damage_interaction.damage_dealt = all_damage;
                         if damage_interaction.damage_dealt > 0 {
@@ -678,21 +634,13 @@ impl UiReport {
                         damage_interactions.insert(victim_id, damage_interaction);
                     }
 
-                    Some((Some(damage_interactions), Some(fires), Some(floods), Some(cits), Some(crits)))
+                    (Some(damage_interactions), Some(fires), Some(floods), Some(cits), Some(crits))
                 })
                 .unwrap_or_default();
 
-            let distance_traveled =
-                constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/distance").and_then(|distance_idx| {
-                    let distance_idx = distance_idx.as_u64()? as usize;
-                    results_info?[distance_idx].as_f64()
-                });
+            let distance_traveled = player_results.and_then(|pr| pr.get("distance")?.as_f64());
 
-            let kills =
-                constants_inner.pointer("/CLIENT_PUBLIC_RESULTS_INDICES/ships_killed").and_then(|distance_idx| {
-                    let distance_idx = distance_idx.as_i64()? as usize;
-                    results_info?[distance_idx].as_i64()
-                });
+            let kills = player_results.and_then(|pr| pr.get("ships_killed")?.as_i64());
             let observed_kills = vehicle.frags().len() as i64;
 
             let is_test_ship = vehicle_param
@@ -701,13 +649,10 @@ impl UiReport {
                 .map(|vehicle| vehicle.group().starts_with("demo"))
                 .unwrap_or_default();
 
-            let achievements = constants_inner
-                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES/achievements")
-                .and_then(|achievements_idx| {
-                    let achievements_idx = achievements_idx.as_u64()? as usize;
-                    let achievements_array = results_info?[achievements_idx].as_array()?;
-
-                    let achievements = achievements_array
+            let achievements = player_results
+                .and_then(|pr| pr.get("achievements")?.as_array())
+                .map(|achievements_array| {
+                    achievements_array
                         .iter()
                         .filter_map(|achievement_info| {
                             let achievement_info = achievement_info.as_array()?;
@@ -739,28 +684,23 @@ impl UiReport {
                                 count: achievement_count as usize,
                             })
                         })
-                        .collect::<Vec<_>>();
-
-                    Some(achievements)
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
 
-            // Extract ribbons from results_info
-            // Ribbon indices are stored as RIBBON_<NAME> in CLIENT_PUBLIC_RESULTS_INDICES
-            let ribbons = constants_inner
-                .pointer("/CLIENT_PUBLIC_RESULTS_INDICES")
-                .and_then(|indices| {
-                    let indices_obj = indices.as_object()?;
+            // Extract ribbons from resolved player results
+            // Ribbon keys start with RIBBON_ in the resolved object
+            let ribbons = player_results
+                .and_then(|pr| pr.as_object())
+                .map(|pr_obj| {
                     let mut ribbons = HashMap::new();
 
-                    for (key, value) in indices_obj {
+                    for (key, value) in pr_obj {
                         if !key.starts_with("RIBBON_") {
                             continue;
                         }
 
-                        let idx = value.as_u64()? as usize;
-                        let count = results_info?.get(idx)?.as_u64().unwrap_or(0);
-
+                        let count = value.as_u64().unwrap_or(0);
                         if count == 0 {
                             continue;
                         }
@@ -786,7 +726,7 @@ impl UiReport {
                         };
                         let is_subribbon = is_subribbon.unwrap_or(false);
 
-                        // Look up the description: try IDS_RIBBON_<RIBBON_NAME>_DESCRIPTION first, then IDS_RIBBON_DESCRIPTION_SUB<RIBBON_NAME>
+                        // Look up the description
                         let primary_desc_id = format!("IDS_RIBBON_DESCRIPTION_{}", key);
                         let description = metadata_provider
                             .localized_name_from_id(&primary_desc_id)
@@ -799,7 +739,6 @@ impl UiReport {
                             })
                             .unwrap_or_default();
 
-                        // Icon key is the lowercase ribbon name for lookup
                         let icon_key = key.to_lowercase();
 
                         ribbons.insert(
@@ -815,7 +754,7 @@ impl UiReport {
                         );
                     }
 
-                    Some(ribbons)
+                    ribbons
                 })
                 .unwrap_or_default();
 
@@ -981,6 +920,7 @@ impl UiReport {
             background_task_sender: Some(deps.background_task_sender.clone()),
             selected_row: None,
             debug_mode: deps.is_debug_mode,
+            resolved_results,
         }
     }
 
@@ -2193,6 +2133,8 @@ pub struct Replay {
 
     pub battle_report: Option<BattleReport>,
     pub ui_report: Option<UiReport>,
+
+    pub battle_constants: Option<wowsunpack::game_constants::BattleConstants>,
 }
 
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
@@ -2212,7 +2154,7 @@ fn clan_color_for_player(player: &Player) -> Option<Color32> {
 
 impl Replay {
     pub fn new(replay_file: ReplayFile, resource_loader: Arc<GameMetadataProvider>) -> Self {
-        Replay { replay_file, resource_loader, battle_report: None, ui_report: None }
+        Replay { replay_file, resource_loader, battle_report: None, ui_report: None, battle_constants: None }
     }
 
     pub fn player_vehicle(&self) -> Option<&VehicleInfoMeta> {
@@ -2297,7 +2239,8 @@ impl Replay {
 
         // Parse packets one at a time
         let packet_data = &self.replay_file.packet_data;
-        let mut controller = BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref());
+        let mut controller =
+            BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.battle_constants.clone());
         let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
 
         let mut remaining = &packet_data[..];
@@ -2665,23 +2608,37 @@ impl ToolkitTabViewer<'_> {
 
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
-                let results_button = egui::Button::new("Results Raw JSON");
-                if self.tab_state.settings.debug_mode
-                    && ui
-                        .add_enabled(report.battle_results().is_some(), results_button)
-                        .on_hover_text("This is the disgustingly terribly-formatted raw battle results which is serialized by WG, not by this tool.")
-                        .clicked()
-                    && let Some(results_json) = report.battle_results()
-                {
-                    let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse replay metadata");
-                    let pretty_meta = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize replay metadata");
-                    let viewer = plaintext_viewer::PlaintextFileViewer {
-                        title: Arc::new("results.json".to_owned()),
-                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
-                        open: Arc::new(AtomicBool::new(true)),
-                    };
-
-                    self.tab_state.file_viewer.lock().push(viewer);
+                if self.tab_state.settings.debug_mode {
+                    let has_results = report.battle_results().is_some();
+                    ui.add_enabled_ui(has_results, |ui| {
+                        ui.menu_button("View Results", |ui| {
+                            if ui.button("Raw JSON").on_hover_text("The raw battle results as serialized by WG.").clicked() {
+                                if let Some(results_json) = report.battle_results() {
+                                    let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse battle results");
+                                    let pretty = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize battle results");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("results_raw.json".to_owned()),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+                                    self.tab_state.file_viewer.lock().push(viewer);
+                                }
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            if ui.button("Mapped JSON").on_hover_text("Battle results with positional arrays resolved to named fields.").clicked() {
+                                if let Some(resolved) = replay_file.ui_report.as_ref().and_then(|r| r.resolved_results.as_ref()) {
+                                    let pretty = serde_json::to_string_pretty(resolved).expect("failed to serialize resolved results");
+                                    let viewer = plaintext_viewer::PlaintextFileViewer {
+                                        title: Arc::new("results_mapped.json".to_owned()),
+                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        open: Arc::new(AtomicBool::new(true)),
+                                    };
+                                    self.tab_state.file_viewer.lock().push(viewer);
+                                }
+                                ui.close_kind(UiKind::Menu);
+                            }
+                        });
+                    });
                 }
 
                 if self.tab_state.world_of_warships_data.is_some()
