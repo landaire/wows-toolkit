@@ -47,7 +47,9 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -994,10 +996,10 @@ impl WowsToolkitApp {
         }
 
         let now = Instant::now();
-        if let Some(last_check) = self.last_constants_update_check {
-            if now.duration_since(last_check).as_secs() < 30 * 60 {
-                return;
-            }
+        if let Some(last_check) = self.last_constants_update_check
+            && now.duration_since(last_check).as_secs() < 30 * 60
+        {
+            return;
         }
         self.last_constants_update_check = Some(now);
 
