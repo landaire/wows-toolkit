@@ -8200,7 +8200,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.47-alpha4"
+version = "0.1.47-alpha5"
 dependencies = [
  "arboard",
  "const_format",
