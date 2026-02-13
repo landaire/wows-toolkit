@@ -10,7 +10,6 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::VehicleEntity;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
-use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -111,13 +110,8 @@ impl TranslatedBuild {
                         <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
                             .name()
                             .to_string();
-                    let translation_id = format!("IDS_TITLE_{}", game_params_name.to_uppercase());
-                    let name = metadata_provider.localized_name_from_id(&translation_id);
-
-                    let translation_id = format!("IDS_DESC_{}", game_params_name.to_uppercase());
-                    let description = metadata_provider
-                        .localized_name_from_id(&translation_id)
-                        .and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
+                    let (name, description) =
+                        wowsunpack::game_params::translations::translate_module(&game_params_name, metadata_provider);
 
                     Some(TranslatedModule { name, description, game_params_name })
                 })
@@ -131,8 +125,10 @@ impl TranslatedBuild {
                             .name()
                             .to_string();
 
-                    let translation_id = format!("IDS_DOCK_CONSUME_TITLE_{}", game_params_name.to_uppercase());
-                    let name = metadata_provider.localized_name_from_id(&translation_id);
+                    let name = wowsunpack::game_params::translations::translate_consumable(
+                        &game_params_name,
+                        metadata_provider,
+                    );
 
                     Some(TranslatedAbility { name, game_params_name })
                 })

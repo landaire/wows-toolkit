@@ -15,12 +15,13 @@ use egui::TextureHandle;
 use egui::Vec2;
 use egui::mutex::Mutex;
 
+use rootcause::report;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::assets;
-use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::{DrawCommand, ShipConfigCircleKind};
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -173,6 +174,16 @@ enum PaintTool {
     DrawingTriangle { filled: bool, center: Option<Vec2> },
 }
 
+/// Filter for which ship trails to display.
+#[derive(Clone, Default)]
+enum TrailFilter {
+    /// Show all trails (default when trails enabled).
+    #[default]
+    All,
+    /// Show trail for one ship only (by player name).
+    Single(String),
+}
+
 /// Persistent annotation layer state.
 struct AnnotationState {
     annotations: Vec<Annotation>,
@@ -184,6 +195,13 @@ struct AnnotationState {
     show_context_menu: bool,
     context_menu_pos: Pos2,
     dragging_rotation: bool,
+    /// Which ship trails to show (when trails are enabled).
+    trail_filter: TrailFilter,
+    /// Player name of ship nearest to right-click position (for context menu options).
+    context_menu_ship: Option<String>,
+    /// Per-ship range overrides. Maps player_name -> [det, mb, sec, radar, hydro].
+    /// When a ship is in this map, these flags override the global range toggles.
+    ship_range_overrides: HashMap<String, [bool; 5]>,
 }
 
 impl Default for AnnotationState {
@@ -198,6 +216,9 @@ impl Default for AnnotationState {
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
             dragging_rotation: false,
+            trail_filter: TrailFilter::All,
+            context_menu_ship: None,
+            ship_range_overrides: HashMap::new(),
         }
     }
 }
@@ -343,6 +364,10 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_buildings: saved.show_buildings,
         show_turret_direction: saved.show_turret_direction,
         show_consumables: saved.show_consumables,
+        show_armament: saved.show_armament,
+        show_trails: saved.show_trails,
+        show_ship_config: true, // always emit; UI-side per-ship filtering
+        show_dead_ship_names: saved.show_dead_ship_names,
     }
 }
 
@@ -363,6 +388,9 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_turret_direction: opts.show_turret_direction,
         show_consumables: opts.show_consumables,
         show_dead_ships: false,
+        show_dead_ship_names: opts.show_dead_ship_names,
+        show_armament: opts.show_armament,
+        show_trails: opts.show_trails,
     }
 }
 
@@ -697,7 +725,8 @@ fn playback_thread(
         Err(_) => return,
     };
     let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
-    let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
+    let initial_opts = shared_state.lock().options.clone();
+    let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, initial_opts);
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
@@ -735,6 +764,7 @@ fn playback_thread(
                         renderer.populate_players(controller);
                         renderer.update_squadron_info(controller);
                         renderer.update_ship_abilities(controller);
+                        renderer.record_positions(controller);
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
@@ -770,7 +800,8 @@ fn playback_thread(
             std::mem::swap(&mut live_replay, &mut new_replay);
             // old replay is now in new_replay and will be dropped at end of block
             live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
-            live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, RenderOptions::default());
+            let current_opts = shared_state.lock().options.clone();
+            live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, current_opts);
             parse_to_clock(
                 &live_replay,
                 &game_metadata,
@@ -809,6 +840,7 @@ fn playback_thread(
 
                     rebuild_live_state!(target_clock);
 
+                    live_renderer.options = shared_state.lock().options.clone();
                     let commands = live_renderer.draw_frame(&live_controller);
                     shared_state.lock().frame = Some(PlaybackFrame {
                         commands,
@@ -850,10 +882,34 @@ fn playback_thread(
 
                 rebuild_live_state!(target_clock);
 
+                live_renderer.options = shared_state.lock().options.clone();
                 let commands = live_renderer.draw_frame(&live_controller);
                 shared_state.lock().frame = Some(PlaybackFrame {
                     commands,
                     clock_seconds: target_clock,
+                    frame_index: current_frame,
+                    total_frames: actual_total_frames,
+                    game_duration: actual_game_duration,
+                });
+                request_repaint(&shared_state);
+            }
+        }
+
+        // When paused, check if options changed and re-render if so
+        // (armament/trail toggling requires backend to re-emit draw commands)
+        if !playing {
+            let new_opts = shared_state.lock().options.clone();
+            if live_renderer.options.show_armament != new_opts.show_armament
+                || live_renderer.options.show_trails != new_opts.show_trails
+                || live_renderer.options.show_player_names != new_opts.show_player_names
+                || live_renderer.options.show_ship_names != new_opts.show_ship_names
+                || live_renderer.options.show_ship_config != new_opts.show_ship_config
+            {
+                live_renderer.options = new_opts;
+                let commands = live_renderer.draw_frame(&live_controller);
+                shared_state.lock().frame = Some(PlaybackFrame {
+                    commands,
+                    clock_seconds: frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration),
                     frame_index: current_frame,
                     total_frames: actual_total_frames,
                     game_duration: actual_game_duration,
@@ -1148,14 +1204,14 @@ fn render_video_blocking(
     options: RenderOptions,
     wows_data: &SharedWoWsData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
-) -> anyhow::Result<()> {
+) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
     let (file_tree, pkg_loader, game_metadata, game_constants) = {
         let data = wows_data.read();
-        let gm = data.game_metadata.clone().ok_or_else(|| anyhow::anyhow!("Game metadata not loaded"))?;
+        let gm = data.game_metadata.clone().ok_or_else(|| report!("Game metadata not loaded"))?;
         (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, Arc::clone(&data.game_constants))
     };
 
@@ -1195,7 +1251,7 @@ fn render_video_blocking(
 
     // Build replay parser components
     let replay_file = ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec())
-        .map_err(|e| anyhow::anyhow!("Failed to parse replay: {:?}", e))?;
+        .map_err(|e| report!("Failed to parse replay: {:?}", e))?;
 
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
@@ -1228,7 +1284,7 @@ fn render_video_blocking(
     renderer.populate_players(&controller);
     renderer.update_squadron_info(&controller);
     renderer.update_ship_abilities(&controller);
-    encoder.finish(&controller, &mut renderer, &mut target)?;
+    encoder.finish(&controller, &mut renderer, &mut target).map_err(|e| report!("{e}"))?;
 
     Ok(())
 }
@@ -1285,12 +1341,14 @@ fn make_icon_mesh(texture_id: egui::TextureId, center: Pos2, w: f32, h: f32) -> 
 
 /// Draw player name and/or ship name labels centered above an icon.
 /// `scale` controls font and offset sizing (1.0 at default 768px canvas).
+/// `armament_color` is applied to ship_name first if shown, otherwise player_name.
 fn draw_ship_labels(
     ctx: &egui::Context,
     center: Pos2,
     scale: f32,
     player_name: Option<&str>,
     ship_name: Option<&str>,
+    armament_color: Option<Color32>,
     shapes: &mut Vec<Shape>,
 ) {
     let label_font = FontId::proportional(10.0 * scale);
@@ -1304,27 +1362,34 @@ fn draw_ship_labels(
         return;
     }
 
+    // Armament color goes on ship_name if shown, else on player_name
+    let (pn_color, sn_color) = if ship_name.is_some() {
+        (label_color, armament_color.unwrap_or(label_color))
+    } else {
+        (armament_color.unwrap_or(label_color), label_color)
+    };
+
     // Position lines above the icon
     let base_y = center.y - 14.0 * scale - line_count as f32 * line_height;
     let mut cur_y = base_y;
 
     if let Some(name) = player_name {
-        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), label_color));
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), pn_color));
         let text_w = galley.size().x;
         let tx = center.x - text_w / 2.0;
         let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
         shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
-        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, label_color));
+        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, pn_color));
         cur_y += line_height;
     }
 
     if let Some(name) = ship_name {
-        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), label_color));
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), sn_color));
         let text_w = galley.size().x;
         let tx = center.x - text_w / 2.0;
         let shadow_galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.to_string(), label_font.clone(), shadow_color));
         shapes.push(Shape::galley(Pos2::new(tx + shadow_offset, cur_y + shadow_offset), shadow_galley, shadow_color));
-        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, label_color));
+        shapes.push(Shape::galley(Pos2::new(tx, cur_y), galley, sn_color));
     }
 }
 
@@ -1347,6 +1412,8 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
         DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
         DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
+        DrawCommand::PositionTrail { .. } => opts.show_trails,
+        DrawCommand::ShipConfigCircle { .. } => true, // per-kind filtering done in drawing loop
     }
 }
 
@@ -1810,6 +1877,7 @@ fn draw_command_to_shapes(
             player_name,
             ship_name,
             is_detected_teammate,
+            name_color,
         } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
@@ -1856,7 +1924,9 @@ fn draw_command_to_shapes(
             }
             let pname = if opts.show_player_names { player_name.as_deref() } else { None };
             let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
-            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, &mut shapes);
+            let pn_color =
+                if opts.show_armament { name_color.map(|c| Color32::from_rgb(c[0], c[1], c[2])) } else { None };
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, pn_color, &mut shapes);
         }
 
         DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha } => {
@@ -1904,9 +1974,11 @@ fn draw_command_to_shapes(
                     });
                 }
             }
-            let pname = if opts.show_player_names { player_name.as_deref() } else { None };
-            let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
-            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, &mut shapes);
+            if opts.show_dead_ship_names {
+                let pname = if opts.show_player_names { player_name.as_deref() } else { None };
+                let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
+                draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, None, &mut shapes);
+            }
         }
 
         DrawCommand::Plane { pos, icon_key } => {
@@ -2107,6 +2179,54 @@ fn draw_command_to_shapes(
                     mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
                     shapes.push(Shape::Mesh(mesh.into()));
                 }
+            }
+        }
+
+        DrawCommand::PositionTrail { points, .. } => {
+            let dot_radius = transform.scale_distance(1.5);
+            for (pos, color) in points {
+                let center = transform.minimap_to_screen(pos);
+                shapes.push(Shape::circle_filled(center, dot_radius, color_from_rgb(*color)));
+            }
+        }
+
+        DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
+            let center = transform.minimap_to_screen(pos);
+            let screen_radius = transform.scale_distance(*radius_px);
+            let circle_color = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], (alpha * 255.0) as u8);
+            let stroke = Stroke::new(1.5, circle_color);
+
+            if *dashed {
+                // Dashed circle: draw as series of arcs
+                let segments = 48;
+                let gap_ratio = 0.4;
+                for i in 0..segments {
+                    let t0 = i as f32 / segments as f32 * std::f32::consts::TAU;
+                    let t1 = (i as f32 + 1.0 - gap_ratio) / segments as f32 * std::f32::consts::TAU;
+                    let steps = 4;
+                    let points: Vec<Pos2> = (0..=steps)
+                        .map(|s| {
+                            let t = t0 + (t1 - t0) * s as f32 / steps as f32;
+                            Pos2::new(center.x + screen_radius * t.cos(), center.y + screen_radius * t.sin())
+                        })
+                        .collect();
+                    shapes.push(Shape::line(points, stroke));
+                }
+            } else {
+                shapes.push(Shape::circle_stroke(center, screen_radius, stroke));
+            }
+
+            // Draw label near the top of the circle
+            if let Some(text) = label {
+                let label_pos = Pos2::new(center.x, center.y - screen_radius - 4.0);
+                let galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), egui::FontId::proportional(10.0), circle_color));
+                let text_width = galley.size().x;
+                shapes.push(Shape::galley(
+                    Pos2::new(label_pos.x - text_width / 2.0, label_pos.y - galley.size().y),
+                    galley,
+                    Color32::TRANSPARENT,
+                ));
             }
         }
     }
@@ -2524,12 +2644,42 @@ impl ReplayRendererViewer {
                         }
 
                         // Draw current frame's commands, filtered by UI-local options
+                        let (trail_filter, ship_range_overrides) = {
+                            let ann = annotation_arc.lock();
+                            (ann.trail_filter.clone(), ann.ship_range_overrides.clone())
+                        };
                         let state = shared_state.lock();
                         if let Some(ref frame) = state.frame {
                             // Separate HUD and map commands so HUD draws on unclipped painter
                             for cmd in &frame.commands {
                                 if !should_draw_command(cmd, &options, show_dead_ships) {
                                     continue;
+                                }
+                                // Apply per-ship trail filter
+                                if let DrawCommand::PositionTrail { player_name, .. } = cmd {
+                                    if let TrailFilter::Single(ref filter_name) = trail_filter {
+                                        if player_name.as_deref() != Some(filter_name.as_str()) {
+                                            continue;
+                                        }
+                                    }
+                                }
+                                // Apply per-ship config circle filter (only show if explicitly enabled via right-click)
+                                if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = cmd {
+                                    let enabled = if let Some(overrides) = ship_range_overrides.get(player_name) {
+                                        let kind_idx = match kind {
+                                            ShipConfigCircleKind::Detection => 0,
+                                            ShipConfigCircleKind::MainBattery => 1,
+                                            ShipConfigCircleKind::SecondaryBattery => 2,
+                                            ShipConfigCircleKind::Radar => 3,
+                                            ShipConfigCircleKind::Hydro => 4,
+                                        };
+                                        overrides[kind_idx]
+                                    } else {
+                                        false // hidden by default; must enable per-ship via right-click
+                                    };
+                                    if !enabled {
+                                        continue;
+                                    }
                                 }
                                 let is_hud = matches!(
                                     cmd,
@@ -2618,9 +2768,26 @@ impl ReplayRendererViewer {
                             if tool_active {
                                 ann.active_tool = PaintTool::None;
                             } else {
+                                let click_pos = response.interact_pointer_pos().unwrap_or(response.rect.center());
                                 ann.show_context_menu = true;
-                                ann.context_menu_pos =
-                                    response.interact_pointer_pos().unwrap_or(response.rect.center());
+                                ann.context_menu_pos = click_pos;
+
+                                // Detect nearest ship to right-click position
+                                ann.context_menu_ship = None;
+                                let state = shared_state.lock();
+                                if let Some(ref frame) = state.frame {
+                                    let mut best_dist = 30.0_f32; // max click distance in screen px
+                                    for cmd in &frame.commands {
+                                        if let DrawCommand::Ship { pos, player_name: Some(name), .. } = cmd {
+                                            let screen_pos = transform.minimap_to_screen(pos);
+                                            let dist = click_pos.distance(screen_pos);
+                                            if dist < best_dist {
+                                                best_dist = dist;
+                                                ann.context_menu_ship = Some(name.clone());
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -3126,6 +3293,56 @@ impl ReplayRendererViewer {
                                             ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1));
                                         });
 
+                                        // ── Ship-specific options (shown when right-clicking a ship) ──
+                                        if let Some(ref ship_name) = ann.context_menu_ship.clone() {
+                                            ui.separator();
+                                            ui.label(egui::RichText::new(ship_name.as_str()).small());
+
+                                            // Trail filter
+                                            let is_single =
+                                                matches!(&ann.trail_filter, TrailFilter::Single(n) if n == ship_name);
+                                            if is_single {
+                                                if ui.button("Show All Trails").clicked() {
+                                                    ann.trail_filter = TrailFilter::All;
+                                                    ann.show_context_menu = false;
+                                                }
+                                            } else {
+                                                if ui.button("Show Trail Only").clicked() {
+                                                    ann.trail_filter = TrailFilter::Single(ship_name.clone());
+                                                    ann.show_context_menu = false;
+                                                }
+                                            }
+
+                                            // Per-type range toggles for this ship
+                                            let mut flags =
+                                                ann.ship_range_overrides.get(ship_name).copied().unwrap_or([false; 5]);
+                                            ui.label(egui::RichText::new("Ranges").small());
+                                            let mut range_changed = false;
+                                            range_changed |= ui.checkbox(&mut flags[0], "Detection").changed();
+                                            range_changed |= ui.checkbox(&mut flags[1], "Main Battery").changed();
+                                            range_changed |= ui.checkbox(&mut flags[2], "Secondary").changed();
+                                            range_changed |= ui.checkbox(&mut flags[3], "Radar").changed();
+                                            range_changed |= ui.checkbox(&mut flags[4], "Hydro").changed();
+                                            if range_changed {
+                                                if flags == [false; 5] {
+                                                    ann.ship_range_overrides.remove(ship_name);
+                                                } else {
+                                                    ann.ship_range_overrides.insert(ship_name.clone(), flags);
+                                                }
+                                                ctx.request_repaint();
+                                            }
+                                        }
+                                        // Show "Show All Trails" when filtering but not clicking a ship
+                                        if ann.context_menu_ship.is_none()
+                                            && !matches!(ann.trail_filter, TrailFilter::All)
+                                        {
+                                            ui.separator();
+                                            if ui.button("Show All Trails").clicked() {
+                                                ann.trail_filter = TrailFilter::All;
+                                                ann.show_context_menu = false;
+                                            }
+                                        }
+
                                         // ── Clear all ──
                                         if !ann.annotations.is_empty() {
                                             ui.separator();
@@ -3546,11 +3763,15 @@ impl ReplayRendererViewer {
                                             let mut show_dead = show_dead_ships;
                                             let mut changed = false;
 
+                                            changed |= ui.checkbox(&mut opts.show_armament, "Armament").changed();
                                             changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
                                             changed |=
                                                 ui.checkbox(&mut opts.show_capture_points, "Capture Points").changed();
                                             changed |= ui.checkbox(&mut opts.show_consumables, "Consumables").changed();
                                             changed |= ui.checkbox(&mut show_dead, "Dead Ships").changed();
+                                            changed |= ui
+                                                .checkbox(&mut opts.show_dead_ship_names, "Dead Ship Names")
+                                                .changed();
                                             changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
                                             changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                             changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
@@ -3562,6 +3783,7 @@ impl ReplayRendererViewer {
                                             changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
                                             changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
                                             changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
+                                            changed |= ui.checkbox(&mut opts.show_trails, "Trails").changed();
                                             changed |= ui
                                                 .checkbox(&mut opts.show_turret_direction, "Turret Direction")
                                                 .changed();

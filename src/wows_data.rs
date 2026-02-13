@@ -91,7 +91,7 @@ impl WorldOfWarshipsData {
             return Some(icon.clone());
         }
 
-        let path = format!("gui/achievements/icon_achievement_{icon_key}.png");
+        let path = wowsunpack::game_params::translations::achievement_icon_path(icon_key);
         let icon_node = self.file_tree.find(&path).ok()?;
         let file_info = icon_node.file_info()?;
 

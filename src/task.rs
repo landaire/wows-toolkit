@@ -372,12 +372,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
     ];
 
     let icons: HashMap<Species, Arc<GameAsset>> = HashMap::from_iter(species.iter().map(|species| {
-        let path =
-            format!("gui/fla/minimap/ship_icons/minimap_{}.svg", <&'static str>::from(species).to_ascii_lowercase());
-        // let path = format!(
-        //     "gui/battle_hud/markers/minimap/ship/ship_default_svg/{}.svg",
-        //     <&'static str>::from(species).to_ascii_lowercase()
-        // );
+        let path = wowsunpack::game_params::translations::ship_class_icon_path(species);
 
         let icon_node =
             file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
@@ -457,8 +452,10 @@ pub fn load_wows_data_for_build(
 
     debug!("Loading icons for build {}", build);
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
-    let ribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/");
-    let subribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/subribbons/");
+    let ribbon_icons =
+        load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
+    let subribbon_icons =
+        load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
     let game_constants = Arc::new(GameConstants::from_pkg(&file_tree, &pkg_loader));
 
     // Load version-matched constants: try fetching from GitHub with walk-down fallback

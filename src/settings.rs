@@ -123,8 +123,14 @@ pub struct SavedRenderOptions {
     pub show_turret_direction: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_consumables: bool,
-    #[serde(default)]
+    #[serde(default = "default_bool::<true>")]
     pub show_dead_ships: bool,
+    #[serde(default)]
+    pub show_dead_ship_names: bool,
+    #[serde(default)]
+    pub show_armament: bool,
+    #[serde(default)]
+    pub show_trails: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -144,7 +150,10 @@ impl Default for SavedRenderOptions {
             show_buildings: true,
             show_turret_direction: true,
             show_consumables: true,
-            show_dead_ships: false,
+            show_dead_ships: true,
+            show_dead_ship_names: false,
+            show_armament: false,
+            show_trails: false,
         }
     }
 }
@@ -177,6 +186,8 @@ pub struct Settings {
     pub has_041_game_params_fix: bool,
     #[serde(default = "default_bool::<false>")]
     pub has_047_game_params_fix: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_048_ship_config_fix: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -222,6 +233,7 @@ impl Default for Settings {
             has_038_game_params_fix: true,
             has_041_game_params_fix: true,
             has_047_game_params_fix: true,
+            has_048_ship_config_fix: true,
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,

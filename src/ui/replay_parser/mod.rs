@@ -264,11 +264,7 @@ impl UiReport {
 
             let ship_species_text: String = vehicle_param
                 .species()
-                .and_then(|species| {
-                    let species: &'static str = species.into();
-                    let id = format!("IDS_{}", species.to_uppercase());
-                    metadata_provider.localized_name_from_id(&id)
-                })
+                .and_then(|species| metadata_provider.localized_name_from_id(&species.translation_id()))
                 .unwrap_or_else(|| "unk".to_string());
 
             let icon =
@@ -670,11 +666,16 @@ impl UiReport {
                             };
 
                             let ui_name = achievement_data.ui_name().to_string();
-                            let achievement_name =
-                                metadata_provider.localized_name_from_id(&format!("IDS_ACHIEVEMENT_{ui_name}"))?;
+                            let achievement_name = wowsunpack::game_params::translations::translate_achievement_name(
+                                &ui_name,
+                                metadata_provider.as_ref(),
+                            )?;
 
-                            let achievement_description = metadata_provider
-                                .localized_name_from_id(&format!("IDS_ACHIEVEMENT_DESCRIPTION_{ui_name}"))?;
+                            let achievement_description =
+                                wowsunpack::game_params::translations::translate_achievement_description(
+                                    &ui_name,
+                                    metadata_provider.as_ref(),
+                                )?;
 
                             Some(Achievement {
                                 game_param,
@@ -705,41 +706,17 @@ impl UiReport {
                             continue;
                         }
 
-                        // Look up the display name: try IDS_RIBBON_<RIBBON_NAME> first, then IDS_RIBBON_SUB<RIBBON_NAME>
-                        let primary_id = format!("IDS_RIBBON_{}", key);
-                        let (display_name, is_subribbon) = metadata_provider
-                            .localized_name_from_id(&primary_id)
-                            .filter(|name| name != &primary_id)
-                            .map(|name| (name, false))
-                            .or_else(|| {
-                                let fallback_id = format!("IDS_RIBBON_SUB{}", key);
-                                metadata_provider
-                                    .localized_name_from_id(&fallback_id)
-                                    .filter(|name| name != &fallback_id)
-                                    .map(|name| (name, true))
-                            })
-                            .unzip();
-
-                        // Skip ribbons without translations
-                        let Some(display_name) = display_name else {
+                        // Look up the display name and description via shared translation helper
+                        let Some(ribbon_translation) =
+                            wowsunpack::game_params::translations::translate_ribbon(key, metadata_provider.as_ref())
+                        else {
                             continue;
                         };
-                        let is_subribbon = is_subribbon.unwrap_or(false);
 
-                        // Look up the description
-                        let primary_desc_id = format!("IDS_RIBBON_DESCRIPTION_{}", key);
-                        let description = metadata_provider
-                            .localized_name_from_id(&primary_desc_id)
-                            .filter(|desc| desc != &primary_desc_id)
-                            .or_else(|| {
-                                let fallback_desc_id = format!("IDS_RIBBON_DESCRIPTION_SUB{}", key);
-                                metadata_provider
-                                    .localized_name_from_id(&fallback_desc_id)
-                                    .filter(|desc| desc != &fallback_desc_id)
-                            })
-                            .unwrap_or_default();
-
-                        let icon_key = key.to_lowercase();
+                        let display_name = ribbon_translation.display_name;
+                        let is_subribbon = ribbon_translation.is_subribbon;
+                        let description = ribbon_translation.description;
+                        let icon_key = ribbon_translation.icon_key;
 
                         ribbons.insert(
                             key.to_string(),
@@ -2179,21 +2156,15 @@ impl Replay {
     }
 
     pub fn map_name(&self, metadata_provider: &GameMetadataProvider) -> String {
-        let meta = &self.replay_file.meta;
-        let map_id = format!("IDS_{}", meta.mapName.to_uppercase());
-        metadata_provider.localized_name_from_id(&map_id).unwrap_or_else(|| meta.mapName.clone())
+        wowsunpack::game_params::translations::translate_map_name(&self.replay_file.meta.mapName, metadata_provider)
     }
 
     pub fn game_mode(&self, metadata_provider: &GameMetadataProvider) -> String {
-        let meta = &self.replay_file.meta;
-        let mode_id = format!("IDS_{}", meta.gameType.to_uppercase());
-        metadata_provider.localized_name_from_id(&mode_id).unwrap_or_else(|| meta.gameType.clone())
+        wowsunpack::game_params::translations::translate_game_mode(&self.replay_file.meta.gameType, metadata_provider)
     }
 
     pub fn scenario(&self, metadata_provider: &GameMetadataProvider) -> String {
-        let meta = &self.replay_file.meta;
-        let scenario_id = format!("IDS_SCENARIO_{}", meta.scenario.to_uppercase());
-        metadata_provider.localized_name_from_id(&scenario_id).unwrap_or_else(|| meta.scenario.clone())
+        wowsunpack::game_params::translations::translate_scenario(&self.replay_file.meta.scenario, metadata_provider)
     }
 
     pub fn game_time(&self) -> &str {
@@ -2339,6 +2310,12 @@ fn column_name_with_sort_order(
     }
 }
 
+fn copy_files_to_clipboard(paths: &[std::path::PathBuf]) {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        let _ = clipboard.set().file_list(paths);
+    }
+}
+
 impl ToolkitTabViewer<'_> {
     fn metadata_provider(&self) -> Option<Arc<GameMetadataProvider>> {
         self.tab_state.world_of_warships_data.as_ref().and_then(|wows_data| wows_data.read().game_metadata.clone())
@@ -2457,16 +2434,9 @@ impl ToolkitTabViewer<'_> {
         if let Some(report) = replay_file.battle_report.as_ref() {
             let self_player = report.self_player();
             let self_state = self_player.initial_state();
+            // --- Row 1: Key outcome info + action buttons ---
+            let mut self_report = None;
             ui.horizontal(|ui| {
-                if !self_state.clan().is_empty() {
-                    ui.label(format!("[{}]", self_state.clan()));
-                }
-                ui.label(self_state.username());
-                ui.label(report.game_type());
-                ui.label(report.version().to_path());
-                ui.label(report.game_mode());
-                ui.label(report.map_name());
-
                 if replay_file.battle_results_are_pending() {
                     let text = RichText::new(format!("{} Incomplete Match Results", icons::INFO)).color(Color32::ORANGE);
                     let hover_text = "The replay does not yet have end-of-match results. Data will be automatically re-loaded when the match ends and end-of-match results are added to the replay.";
@@ -2479,11 +2449,9 @@ impl ToolkitTabViewer<'_> {
                         BattleResult::Loss(_) => RichText::new(format!("{} Defeat", icons::SMILEY_SAD)).color(Color32::LIGHT_RED),
                         BattleResult::Draw => RichText::new(format!("{} Draw", icons::NOTCHES)).color(Color32::LIGHT_YELLOW),
                     };
-
                     ui.label(text);
                 }
 
-                // Show single-game PR
                 if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
@@ -2491,47 +2459,18 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                let mut self_report = None;
                 if let Some(ui_report) = replay_file.ui_report.as_ref() {
-                    let mut team_damage = 0;
-                    let mut red_team_damage = 0;
-
                     for vehicle_report in &ui_report.player_reports {
-                        if vehicle_report.relation().is_enemy() {
-                            red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
-                        } else {
-                            team_damage += vehicle_report.actual_damage.unwrap_or(0);
-                        }
-
                         if vehicle_report.relation().is_self() {
                             self_report = Some(vehicle_report);
                             hide_my_stats = vehicle_report.manual_stat_hide_toggle;
+                            break;
                         }
                     }
-
-                    let mut job = LayoutJob::default();
-                    job.append("Damage Dealt: ", 0.0, Default::default());
-                    job.append(
-                        &separate_number(team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                        0.0,
-                        TextFormat { color: Color32::LIGHT_GREEN, ..Default::default() },
-                    );
-                    job.append(" : ", 0.0, Default::default());
-                    job.append(
-                        &separate_number(red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref())),
-                        0.0,
-                        TextFormat { color: Color32::LIGHT_RED, ..Default::default() },
-                    );
-
-                    job.append(
-                        &format!(" ({})", separate_number(team_damage + red_team_damage, self.tab_state.settings.locale.as_ref().map(|s| s.as_ref()))),
-                        0.0,
-                        Default::default(),
-                    );
-
-                    ui.label(job);
                 }
-                ui.menu_button("Export Chat", |ui| {
+
+                ui.menu_button("Export", |ui| {
+                    ui.label(RichText::new("Chat").strong());
                     if ui.small_button(format!("{} Save To File", icons::FLOPPY_DISK)).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
@@ -2540,7 +2479,6 @@ impl ToolkitTabViewer<'_> {
                         {
                             for message in report.game_chat() {
                                 let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
-
                                 match player {
                                     Some(player) if !player.initial_state().clan().is_empty() => {
                                         let _ = writeln!(file, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
@@ -2551,10 +2489,8 @@ impl ToolkitTabViewer<'_> {
                                 }
                             }
                         }
-
                         ui.close_kind(UiKind::Menu);
                     }
-
                     if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
@@ -2568,15 +2504,13 @@ impl ToolkitTabViewer<'_> {
                                 }
                             }
                         }
-
                         let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
-
                         ui.ctx().copy_text(game_chat);
-
                         ui.close_kind(UiKind::Menu);
                     }
-                });
-                ui.menu_button("Export Results", |ui| {
+
+                    ui.separator();
+                    ui.label(RichText::new("Results").strong());
                     let format = if ui.button("JSON").clicked() {
                         Some(ReplayExportFormat::Json)
                     } else if ui.button("CBOR").clicked() {
@@ -2604,9 +2538,7 @@ impl ToolkitTabViewer<'_> {
                                         break;
                                     }
                                 }
-
                                 let _ = writer.flush();
-
                                 result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
                             }
                         };
@@ -2615,6 +2547,7 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                 });
+
                 if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
@@ -2623,7 +2556,6 @@ impl ToolkitTabViewer<'_> {
                         file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
                         open: Arc::new(AtomicBool::new(true)),
                     };
-
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
                 if self.tab_state.settings.debug_mode {
@@ -2660,7 +2592,7 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 if self.tab_state.world_of_warships_data.is_some()
-                    && ui.button(format!("{} Render Replay", icons::PLAY)).clicked()
+                    && ui.button(format!("{} Render", icons::PLAY)).clicked()
                 {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
                     let pkt_data = replay_file.replay_file.packet_data.clone();
@@ -2692,6 +2624,58 @@ impl ToolkitTabViewer<'_> {
                     && ui.checkbox(&mut hide_my_stats, "Hide My Test Ship Stats").changed()
                 {
                     hide_my_stats_changed = true;
+                }
+            });
+
+            // --- Row 2: Match context (subdued) ---
+            ui.horizontal(|ui| {
+                let weak = ui.visuals().weak_text_color();
+                if !self_state.clan().is_empty() {
+                    ui.label(RichText::new(format!("[{}]", self_state.clan())).color(weak));
+                }
+                ui.label(RichText::new(self_state.username()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.game_type()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.version().to_path()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.game_mode()).color(weak));
+                ui.label(RichText::new("\u{00B7}").color(weak));
+                ui.label(RichText::new(report.map_name()).color(weak));
+
+                if let Some(ui_report) = replay_file.ui_report.as_ref() {
+                    let mut team_damage = 0u64;
+                    let mut red_team_damage = 0u64;
+                    for vehicle_report in &ui_report.player_reports {
+                        if vehicle_report.relation().is_enemy() {
+                            red_team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        } else {
+                            team_damage += vehicle_report.actual_damage.unwrap_or(0);
+                        }
+                    }
+
+                    ui.label(RichText::new("\u{00B7}").color(weak));
+                    let locale = self.tab_state.settings.locale.as_ref().map(|s| s.as_ref());
+                    let mut job = LayoutJob::default();
+                    let weak_fmt = TextFormat { color: weak, ..Default::default() };
+                    job.append("Team Damage: ", 0.0, weak_fmt.clone());
+                    job.append(
+                        &separate_number(team_damage, locale),
+                        0.0,
+                        TextFormat { color: Color32::LIGHT_GREEN, ..Default::default() },
+                    );
+                    job.append(" : ", 0.0, weak_fmt.clone());
+                    job.append(
+                        &separate_number(red_team_damage, locale),
+                        0.0,
+                        TextFormat { color: Color32::LIGHT_RED, ..Default::default() },
+                    );
+                    job.append(
+                        &format!(" ({})", separate_number(team_damage + red_team_damage, locale)),
+                        0.0,
+                        weak_fmt,
+                    );
+                    ui.label(job);
                 }
             });
 
@@ -2794,6 +2778,10 @@ impl ToolkitTabViewer<'_> {
                                 ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                 ui.close_kind(UiKind::Menu);
                             }
+                            if ui.button("Copy Replay").clicked() {
+                                copy_files_to_clipboard(&[path_clone.clone()]);
+                                ui.close_kind(UiKind::Menu);
+                            }
                             if ui.button("Show in File Explorer").clicked() {
                                 util::open_file_explorer(&path_clone);
                                 ui.close_kind(UiKind::Menu);
@@ -2877,21 +2865,25 @@ impl ToolkitTabViewer<'_> {
             let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
             // Map group IDs to their child node IDs (for expanding directory selection)
             let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
+            let mut group_id_to_paths: HashMap<egui::Id, Vec<std::path::PathBuf>> = HashMap::new();
 
             // Pre-populate the maps before building the tree
             for (date, replays) in &groups {
                 let group_id = egui::Id::new(("date_group", date));
                 let mut group_replays = Vec::new();
                 let mut child_ids = Vec::new();
+                let mut group_paths = Vec::new();
                 for (path, replay) in replays {
                     let id = egui::Id::new(path);
                     id_to_replay.insert(id, replay.clone());
                     id_to_path.insert(id, path.clone());
                     group_replays.push(Arc::downgrade(replay));
                     child_ids.push(id);
+                    group_paths.push(path.clone());
                 }
                 group_id_to_replays.insert(group_id, group_replays);
                 group_id_to_child_ids.insert(group_id, child_ids);
+                group_id_to_paths.insert(group_id, group_paths);
             }
 
             // Clone maps for use in context menu closures (using weak refs)
@@ -2901,21 +2893,42 @@ impl ToolkitTabViewer<'_> {
 
             // For fallback context menu (multi-selection)
             let id_to_replay_weak_fallback = id_to_replay_weak.clone();
+            let id_to_path_fallback = id_to_path.clone();
+            let group_id_to_paths_fallback = group_id_to_paths.clone();
             let group_id_to_replays_fallback = group_id_to_replays.clone();
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays from selected nodes (both leaf and group nodes)
+                    // Collect all replays and paths from selected nodes (both leaf and group nodes)
                     let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
+                    let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
                     for id in selected_ids {
                         // Check if it's a group node
                         if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
                             selected_replays.extend(group_replays.iter().cloned());
                         }
+                        if let Some(paths) = group_id_to_paths_fallback.get(id) {
+                            selected_paths.extend(paths.iter().cloned());
+                        }
                         // Check if it's a leaf node
                         if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
                             selected_replays.push(replay_weak.clone());
+                        }
+                        if let Some(path) = id_to_path_fallback.get(id) {
+                            selected_paths.push(path.clone());
+                        }
+                    }
+
+                    if !selected_paths.is_empty() {
+                        let copy_label = if selected_paths.len() == 1 {
+                            "Copy Replay".to_string()
+                        } else {
+                            format!("Copy {} Replays", selected_paths.len())
+                        };
+                        if ui.button(copy_label).clicked() {
+                            copy_files_to_clipboard(&selected_paths);
+                            ui.close_kind(UiKind::Menu);
                         }
                     }
 
@@ -2955,10 +2968,20 @@ impl ToolkitTabViewer<'_> {
 
                     let group_id = egui::Id::new(("date_group", date));
                     let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
+                    let group_paths = group_id_to_paths.get(&group_id).cloned().unwrap_or_default();
                     let group_count = group_replays.len();
                     let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
                         .label(format!("{} ({}){}", date, replays.len(), win_rate))
                         .context_menu(move |ui| {
+                            let copy_label = if group_count == 1 {
+                                "Copy Replay".to_string()
+                            } else {
+                                format!("Copy {} Replays", group_count)
+                            };
+                            if ui.button(copy_label).clicked() {
+                                copy_files_to_clipboard(&group_paths);
+                                ui.close_kind(UiKind::Menu);
+                            }
                             let label = if group_count == 1 {
                                 "Set as Session Stats (1 replay)".to_string()
                             } else {
@@ -3002,6 +3025,10 @@ impl ToolkitTabViewer<'_> {
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                                     if ui.button("Copy Path").clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Copy Replay").clicked() {
+                                        copy_files_to_clipboard(&[path_clone.clone()]);
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button("Show in File Explorer").clicked() {
@@ -3137,21 +3164,25 @@ impl ToolkitTabViewer<'_> {
             let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
             // Map group IDs to their child node IDs (for expanding directory selection)
             let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
+            let mut group_id_to_paths: HashMap<egui::Id, Vec<std::path::PathBuf>> = HashMap::new();
 
             // Pre-populate the maps before building the tree
             for (ship_name, replays) in &groups {
                 let group_id = egui::Id::new(("ship_group", ship_name));
                 let mut group_replays = Vec::new();
                 let mut child_ids = Vec::new();
+                let mut group_paths = Vec::new();
                 for (path, replay) in replays {
                     let id = egui::Id::new(path);
                     id_to_replay.insert(id, replay.clone());
                     id_to_path.insert(id, path.clone());
                     group_replays.push(Arc::downgrade(replay));
                     child_ids.push(id);
+                    group_paths.push(path.clone());
                 }
                 group_id_to_replays.insert(group_id, group_replays);
                 group_id_to_child_ids.insert(group_id, child_ids);
+                group_id_to_paths.insert(group_id, group_paths);
             }
 
             // Clone maps for use in context menu closures (using weak refs)
@@ -3161,21 +3192,42 @@ impl ToolkitTabViewer<'_> {
 
             // For fallback context menu (multi-selection)
             let id_to_replay_weak_fallback = id_to_replay_weak.clone();
+            let id_to_path_fallback = id_to_path.clone();
+            let group_id_to_paths_fallback = group_id_to_paths.clone();
             let group_id_to_replays_fallback = group_id_to_replays.clone();
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays from selected nodes (both leaf and group nodes)
+                    // Collect all replays and paths from selected nodes (both leaf and group nodes)
                     let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
+                    let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
                     for id in selected_ids {
                         // Check if it's a group node
                         if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
                             selected_replays.extend(group_replays.iter().cloned());
                         }
+                        if let Some(paths) = group_id_to_paths_fallback.get(id) {
+                            selected_paths.extend(paths.iter().cloned());
+                        }
                         // Check if it's a leaf node
                         if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
                             selected_replays.push(replay_weak.clone());
+                        }
+                        if let Some(path) = id_to_path_fallback.get(id) {
+                            selected_paths.push(path.clone());
+                        }
+                    }
+
+                    if !selected_paths.is_empty() {
+                        let copy_label = if selected_paths.len() == 1 {
+                            "Copy Replay".to_string()
+                        } else {
+                            format!("Copy {} Replays", selected_paths.len())
+                        };
+                        if ui.button(copy_label).clicked() {
+                            copy_files_to_clipboard(&selected_paths);
+                            ui.close_kind(UiKind::Menu);
                         }
                     }
 
@@ -3215,10 +3267,20 @@ impl ToolkitTabViewer<'_> {
 
                     let group_id = egui::Id::new(("ship_group", ship_name));
                     let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
+                    let group_paths = group_id_to_paths.get(&group_id).cloned().unwrap_or_default();
                     let group_replay_count = group_replays.len();
                     let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
                         .label(format!("{} ({}){}", ship_name, replays.len(), win_rate))
                         .context_menu(move |ui| {
+                            let copy_label = if group_replay_count == 1 {
+                                "Copy Replay".to_string()
+                            } else {
+                                format!("Copy {} Replays", group_replay_count)
+                            };
+                            if ui.button(copy_label).clicked() {
+                                copy_files_to_clipboard(&group_paths);
+                                ui.close_kind(UiKind::Menu);
+                            }
                             let label = if group_replay_count == 1 {
                                 "Set as Session Stats (1 replay)".to_string()
                             } else {
@@ -3260,6 +3322,10 @@ impl ToolkitTabViewer<'_> {
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
                                     if ui.button("Copy Path").clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if ui.button("Copy Replay").clicked() {
+                                        copy_files_to_clipboard(&[path_clone.clone()]);
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button("Show in File Explorer").clicked() {

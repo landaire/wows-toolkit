@@ -273,6 +273,12 @@ impl WowsToolkitApp {
                 let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
+            // Added ShipConfigData (hull/artillery/ATBA ranges) to Vehicle
+            if !saved_state.tab_state.settings.has_048_ship_config_fix {
+                saved_state.tab_state.settings.has_048_ship_config_fix = true;
+                crate::game_params::clear_all_game_params_caches();
+            }
+
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(
                     saved_state

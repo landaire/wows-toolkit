@@ -30,6 +30,19 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
     }
 }
 
+/// Remove ALL versioned game_params cache files (for schema changes).
+pub fn clear_all_game_params_caches() {
+    let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
+    let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));
+    let Ok(entries) = std::fs::read_dir(&storage_dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with("game_params_") && name.to_string_lossy().ends_with(".bin") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Remove game_params cache files for builds that no longer exist in the game directory.
 pub fn cleanup_stale_caches(available_builds: &[u32]) {
     let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
