@@ -20,6 +20,11 @@ pub enum ToolkitError {
     #[error("Replay version {replay_version:?} does not match loaded game version {game_version:?}")]
     ReplayVersionMismatch { game_version: String, replay_version: String },
 
+    #[error(
+        "Game data for replay build {build} (version {version}) is not available. The game installation does not contain this build."
+    )]
+    ReplayBuildUnavailable { build: u32, version: String },
+
     #[error("Background task completed")]
     BackgroundTaskCompleted,
 

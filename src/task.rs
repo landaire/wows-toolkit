@@ -31,9 +31,11 @@ use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
+use wowsunpack::data::Version;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
 
@@ -240,6 +242,7 @@ pub enum BackgroundTaskCompletion {
         new_dir: PathBuf,
         wows_data: Box<WorldOfWarshipsData>,
         replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+        available_builds: Vec<u32>,
     },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
@@ -266,11 +269,12 @@ impl From<ModTaskCompletion> for BackgroundTaskCompletion {
 impl std::fmt::Debug for BackgroundTaskCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DataLoaded { new_dir, wows_data: _, replays: _ } => f
+            Self::DataLoaded { new_dir, wows_data: _, replays: _, available_builds } => f
                 .debug_struct("DataLoaded")
                 .field("new_dir", new_dir)
                 .field("wows_data", &"<...>")
                 .field("replays", &"<...>")
+                .field("available_builds", available_builds)
                 .finish(),
             Self::ReplayLoaded { replay: _, skip_ui_update } => f
                 .debug_struct("ReplayLoaded")
@@ -396,72 +400,21 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     Some(version_str.to_string())
 }
 
-pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<BackgroundTaskCompletion, Report> {
+/// Load game resources for a specific build number. This can be called for any build
+/// that has a directory in `bin/`. Used both at startup (for the latest build) and
+/// lazily when a replay from a different version is loaded.
+pub fn load_wows_data_for_build(
+    wows_directory: &Path,
+    build: u32,
+    locale: &str,
+    fallback_constants: &serde_json::Value,
+) -> Result<WorldOfWarshipsData, Report> {
+    let game_patch = build as usize;
+    let build_dir = wows_directory.join("bin").join(format!("{build}"));
+
+    debug!("Loading game data for build {}", build);
+
     let mut idx_files = Vec::new();
-    let bin_dir = wows_directory.join("bin");
-    if !wows_directory.exists() || !bin_dir.exists() {
-        debug!("WoWs or WoWs bin directory does not exist");
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
-    }
-
-    let mut full_version = None;
-    let mut latest_build = None;
-    let mut replays_dir = wows_directory.join("replays");
-
-    // Check to see if we can get a build from the preferences file
-    let prefs_file = wows_directory.join("preferences.xml");
-    if prefs_file.exists() {
-        // Try getting the version string from the preferences file
-        if let Some(version_str) = current_build_from_preferences(&prefs_file)
-            && version_str.contains(',')
-        {
-            let full_build_info = wowsunpack::data::Version::from_client_exe(&version_str);
-            latest_build = Some(full_build_info.build as usize);
-
-            // We want to build the version string without the patch component to get the replays dir
-            // that the replay manager mod uses
-            let friendly_build =
-                format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
-
-            full_version = Some(full_build_info);
-
-            for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
-                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-                if temp_replays_dir.exists() {
-                    replays_dir = temp_replays_dir;
-                    break;
-                }
-            }
-        }
-    }
-
-    if latest_build.is_none() {
-        for file in read_dir(wows_directory.join("bin")).context("failed to read bin directory")? {
-            if file.is_err() {
-                continue;
-            }
-
-            let file = file.unwrap();
-            if let Ok(ty) = file.file_type() {
-                if ty.is_file() {
-                    continue;
-                }
-
-                if let Some(build_num) = file.file_name().to_str().and_then(|name| name.parse::<usize>().ok())
-                    && (latest_build.is_none() || latest_build.map(|number| number < build_num).unwrap_or(false))
-                {
-                    latest_build = Some(build_num)
-                }
-            }
-        }
-    }
-
-    if latest_build.is_none() {
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
-    }
-
-    let game_patch = latest_build.unwrap();
-    let build_dir = wows_directory.join("bin").join(format!("{game_patch}"));
     for file in read_dir(build_dir.join("idx")).context("failed to read idx directory")? {
         let file = file.unwrap();
         if file.file_type().unwrap().is_file() {
@@ -477,7 +430,6 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     }
 
     let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
-
     let file_tree = idx::build_file_tree(idx_files.as_slice());
     let files = file_tree.paths();
 
@@ -485,7 +437,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let attempted_dirs = [locale, language_tag.primary_language(), "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
-        let localization_path = wows_directory.join(format!("bin/{game_patch}/res/texts/{dir}/LC_MESSAGES/global.mo"));
+        let localization_path = wows_directory.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
         if !localization_path.exists() {
             continue;
         }
@@ -495,43 +447,248 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         break;
     }
 
-    debug!("Loading GameParams");
-
-    // Try loading GameParams.data
+    debug!("Loading GameParams for build {}", build);
     let metadata_provider = load_game_params(&file_tree, &pkg_loader, game_patch).ok().map(|mut metadata_provider| {
         if let Some(catalog) = found_catalog {
             metadata_provider.set_translations(catalog)
         }
-
         Arc::new(metadata_provider)
     });
 
-    debug!("Loading icons");
+    debug!("Loading icons for build {}", build);
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
     let ribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/");
     let subribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/subribbons/");
     let game_constants = Arc::new(GameConstants::from_pkg(&file_tree, &pkg_loader));
 
-    let data = WorldOfWarshipsData {
-        game_metadata: metadata_provider.clone(),
+    // Load version-matched constants: try fetching from GitHub with walk-down fallback
+    let (replay_constants, replay_constants_exact_match) = match fetch_versioned_constants_with_fallback(build) {
+        Some((data, exact)) => (data, exact),
+        None => (fallback_constants.clone(), false),
+    };
+
+    // Try to determine full version from preferences or leave as None for non-latest builds
+    let full_version = None; // Will be set by caller for latest build
+
+    Ok(WorldOfWarshipsData {
+        game_metadata: metadata_provider,
         file_tree,
         pkg_loader,
         filtered_files: files,
         patch_version: game_patch,
         full_version,
+        build_number: build,
         ship_icons: icons,
         ribbon_icons,
         subribbon_icons,
         achievement_icons: HashMap::new(),
-        game_constants: Arc::clone(&game_constants),
-        replays_dir: replays_dir.clone(),
+        game_constants,
+        replay_constants: Arc::new(RwLock::new(replay_constants)),
+        replay_constants_exact_match,
+        replays_dir: PathBuf::new(), // Set by caller
         build_dir,
+    })
+}
+
+/// Try to load versioned constants from `constants_{build}.json` on disk.
+fn load_versioned_constants_from_disk(build: u32) -> Option<serde_json::Value> {
+    let filename = format!("constants_{build}.json");
+    let storage_dir = eframe::storage_dir(crate::APP_NAME)?;
+    let path = storage_dir.join(filename);
+    if path.exists() {
+        let data = std::fs::read(&path).ok()?;
+        serde_json::from_slice(&data).ok()
+    } else {
+        None
+    }
+}
+
+/// Save versioned constants to `constants_{build}.json` on disk.
+fn save_versioned_constants(build: u32, data: &serde_json::Value) {
+    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        let filename = format!("constants_{build}.json");
+        let path = storage_dir.join(filename);
+        if let Ok(bytes) = serde_json::to_vec(data) {
+            let _ = std::fs::write(path, bytes);
+        }
+    }
+}
+
+/// List available versioned constants builds from GitHub (data/versions/ directory).
+fn list_available_constants_builds_from_github() -> Option<Vec<u32>> {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+    rt.block_on(async {
+        let items = octocrab::instance()
+            .repos("padtrack", "wows-constants")
+            .get_content()
+            .path("data/versions")
+            .r#ref("main")
+            .send()
+            .await
+            .ok()?;
+        let mut builds: Vec<u32> =
+            items.items.iter().filter_map(|item| item.name.strip_suffix(".json")?.parse::<u32>().ok()).collect();
+        builds.sort();
+        Some(builds)
+    })
+}
+
+/// Fetch a specific build's constants from GitHub and return the parsed JSON.
+fn fetch_constants_from_github(build: u32) -> Option<serde_json::Value> {
+    use http_body::Body;
+    use http_body_util::BodyExt;
+    use octocrab::params::repos::Reference;
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+    rt.block_on(async {
+        let path = format!("data/versions/{build}.json");
+        let response = octocrab::instance()
+            .repos("padtrack", "wows-constants")
+            .raw_file(Reference::Branch("main".to_string()), &path)
+            .await
+            .ok()?;
+
+        let mut body = response.into_body();
+        let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
+
+        while let Some(frame) = body.frame().await {
+            match frame {
+                Ok(frame) => {
+                    if let Some(data) = frame.data_ref() {
+                        result.extend_from_slice(data);
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+
+        serde_json::from_slice(&result).ok()
+    })
+}
+
+/// Fetch versioned constants for a target build with walk-down fallback.
+///
+/// Strategy:
+/// 1. Check local disk for exact build — return immediately if found (exact match)
+/// 2. List available builds from GitHub (data/versions/)
+/// 3. If exact build exists on server, fetch and cache it (exact match)
+/// 4. Otherwise walk down to the nearest previous build, fetch and cache it (inexact)
+/// 5. Return None if nothing works (caller uses latest as fallback)
+///
+/// Returns `(constants_data, is_exact_match)`.
+pub fn fetch_versioned_constants_with_fallback(target_build: u32) -> Option<(serde_json::Value, bool)> {
+    // 1. Check local disk for exact build
+    if let Some(data) = load_versioned_constants_from_disk(target_build) {
+        debug!("Loaded versioned constants for build {} from disk", target_build);
+        return Some((data, true));
+    }
+
+    // 2. List available builds from GitHub
+    let available_builds = match list_available_constants_builds_from_github() {
+        Some(builds) => builds,
+        None => {
+            debug!("Failed to list available constants builds from GitHub");
+            return None;
+        }
     };
+
+    // 3. Check if exact build exists on server
+    if available_builds.contains(&target_build) {
+        if let Some(data) = fetch_constants_from_github(target_build) {
+            debug!("Fetched exact versioned constants for build {} from GitHub", target_build);
+            save_versioned_constants(target_build, &data);
+            return Some((data, true));
+        }
+    }
+
+    // 4. Walk down to the nearest previous (lower) build — never use a higher build
+    for &available_build in available_builds.iter().rev() {
+        if available_build >= target_build {
+            continue;
+        }
+        // Check disk first for this fallback build
+        if let Some(data) = load_versioned_constants_from_disk(available_build) {
+            debug!(
+                "Using locally cached constants from build {} as fallback for build {}",
+                available_build, target_build
+            );
+            // Cache under the target build name so we don't re-fetch next time
+            save_versioned_constants(target_build, &data);
+            return Some((data, false));
+        }
+        // Fetch from GitHub
+        if let Some(data) = fetch_constants_from_github(available_build) {
+            debug!("Fetched constants from build {} as fallback for build {}", available_build, target_build);
+            // Cache both the source build and the target build
+            save_versioned_constants(available_build, &data);
+            save_versioned_constants(target_build, &data);
+            return Some((data, false));
+        }
+    }
+
+    // 5. Nothing worked
+    debug!("No versioned constants available for build {} or any previous build", target_build);
+    None
+}
+
+pub fn load_wows_files(
+    wows_directory: PathBuf,
+    locale: &str,
+    fallback_constants: &serde_json::Value,
+) -> Result<BackgroundTaskCompletion, Report> {
+    let bin_dir = wows_directory.join("bin");
+    if !wows_directory.exists() || !bin_dir.exists() {
+        debug!("WoWs or WoWs bin directory does not exist");
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
+    }
+
+    // Discover all available builds
+    let available_builds = game_data::list_available_builds(&wows_directory).map_err(|e| Report::new(e))?;
+
+    if available_builds.is_empty() {
+        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
+    }
+
+    // Determine the latest build (from preferences or highest build number)
+    let mut full_version = None;
+    let mut latest_build = *available_builds.last().unwrap();
+    let mut replays_dir = wows_directory.join("replays");
+
+    let prefs_file = wows_directory.join("preferences.xml");
+    if prefs_file.exists() {
+        if let Some(version_str) = current_build_from_preferences(&prefs_file)
+            && version_str.contains(',')
+        {
+            let full_build_info = Version::from_client_exe(&version_str);
+            if available_builds.contains(&full_build_info.build) {
+                latest_build = full_build_info.build;
+            }
+
+            let friendly_build =
+                format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
+            full_version = Some(full_build_info);
+
+            for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
+                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+                if temp_replays_dir.exists() {
+                    replays_dir = temp_replays_dir;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Load data for the latest build
+    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants)?;
+    data.full_version = full_version;
+    data.replays_dir = replays_dir.clone();
+
+    let metadata_provider = data.game_metadata.clone();
+    let game_constants = Arc::clone(&data.game_constants);
 
     debug!("Loading replays");
     let replays = replay_filepaths(&replays_dir).map(|replays| {
         let iter = replays.into_iter().filter_map(|path| {
-            // Filter out any replays that don't parse correctly
             let replay_file = ReplayFile::from_file(&path).ok()?;
             let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
             replay.game_constants = Some(Arc::clone(&game_constants));
@@ -543,9 +700,17 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         HashMap::from_iter(iter)
     });
 
+    // Clean up stale caches for builds that no longer exist
+    crate::game_params::cleanup_stale_caches(&available_builds);
+
     debug!("Sending background task completion");
 
-    Ok(BackgroundTaskCompletion::DataLoaded { new_dir: wows_directory, wows_data: Box::new(data), replays })
+    Ok(BackgroundTaskCompletion::DataLoaded {
+        new_dir: wows_directory,
+        wows_data: Box::new(data),
+        replays,
+        available_builds,
+    })
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -813,6 +978,9 @@ fn parse_replay_data_in_background(
                             let deps = crate::wows_data::ReplayDependencies {
                                 game_constants: Arc::clone(&data.constants_file_data),
                                 wows_data: Arc::clone(&data.wows_data),
+                                wows_data_map: Arc::clone(&data.wows_data_map),
+                                wows_dir: data.wows_dir.clone(),
+                                locale: data.locale.clone(),
                                 twitch_state: Arc::clone(&data.twitch_state),
                                 replay_sort: Arc::new(Mutex::new(SortOrder::default())),
                                 background_task_sender: dummy_sender,
@@ -932,6 +1100,9 @@ pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     pub wows_data: SharedWoWsData,
+    pub wows_data_map: crate::wows_data::WoWsDataMap,
+    pub wows_dir: PathBuf,
+    pub locale: String,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub should_send_replays: bool,
     pub data_export_settings: DataExportSettings,

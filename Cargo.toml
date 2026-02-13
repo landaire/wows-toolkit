@@ -35,6 +35,7 @@ wowsunpack = { version = "0.12", default-features = false, features = [
     "arc",
     "cbor",
     "json",
+    "rkyv",
 ] }
 wows_minimap_renderer = { version = "0.3.0", features = ["arc"] }
 rfd = "0.15"
@@ -46,7 +47,6 @@ gettext = "0.4"
 language-tags = "0.3"
 pickled = { version = "2.0.0-alpha3", features = ["variantly"] }
 flate2 = "1.0.28"
-bincode = { version = "2.0.1", features = ["serde"] }
 thousands = "0.2.0"
 notify = "8.0.0"
 serde_json = { version = "1.0", features = ["preserve_order"] }
@@ -81,6 +81,7 @@ anyhow = "1.0"
 ouroboros = "0.18"
 egui_taffy = "0.10.0"
 egui-notify = "0.21.0"
+rkyv = "0.8.15"
 
 [build-dependencies]
 winresource = "0.1.20"

@@ -2266,7 +2266,17 @@ impl Replay {
 
     pub fn build_ui_report(&mut self, deps: &crate::wows_data::ReplayDependencies) {
         if let Some(battle_report) = &self.battle_report {
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, deps))
+            let replay_version =
+                wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
+            let build = replay_version.build;
+
+            // Resolve version-matched deps so the UI report uses the correct constants
+            let resolved_deps = match deps.resolve_versioned_deps(build, &replay_version) {
+                Some(d) => d,
+                None => deps.clone(),
+            };
+
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &resolved_deps))
         }
     }
 
@@ -2652,7 +2662,14 @@ impl ToolkitTabViewer<'_> {
                     let pkt_data = replay_file.replay_file.packet_data.clone();
                     let map_name = replay_file.replay_file.meta.mapName.clone();
                     let game_duration = replay_file.replay_file.meta.duration as f32;
-                    let wows_data = self.tab_state.world_of_warships_data.clone().unwrap();
+                    let replay_version =
+                        wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
+                    let wows_data = self
+                        .tab_state
+                        .wows_data_map
+                        .as_ref()
+                        .and_then(|map| map.read().get(&replay_version.build).cloned())
+                        .unwrap_or_else(|| self.tab_state.world_of_warships_data.clone().unwrap());
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
                     let viewer = crate::replay_renderer::launch_replay_renderer(
                         raw_meta,
@@ -3914,9 +3931,16 @@ impl ToolkitTabViewer<'_> {
             let pkt_data = guard.replay_file.packet_data.clone();
             let map_name = guard.replay_file.meta.mapName.clone();
             let game_duration = guard.replay_file.meta.duration as f32;
+            let replay_version =
+                wowsunpack::data::Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
             drop(guard);
 
-            let wows_data = self.tab_state.world_of_warships_data.clone().unwrap();
+            let wows_data = self
+                .tab_state
+                .wows_data_map
+                .as_ref()
+                .and_then(|map| map.read().get(&replay_version.build).cloned())
+                .unwrap_or_else(|| self.tab_state.world_of_warships_data.clone().unwrap());
             let asset_cache = self.tab_state.renderer_asset_cache.clone();
             let viewer = crate::replay_renderer::launch_replay_renderer(
                 raw_meta,

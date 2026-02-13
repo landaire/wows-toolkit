@@ -41,7 +41,7 @@ use tokio::runtime::Runtime;
 use wows_replays::analyzer::battle_controller::GameMessage;
 
 use crate::error::ToolkitError;
-use crate::game_params::game_params_bin_path;
+use crate::game_params::old_game_params_bin_path;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
@@ -240,21 +240,21 @@ impl WowsToolkitApp {
                 saved_state.tab_state.settings.has_019_game_params_update = true;
 
                 // Remove the old game params
-                let _ = std::fs::remove_file(game_params_bin_path());
+                let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
             if !saved_state.tab_state.settings.has_037_crew_skills_fix {
                 saved_state.tab_state.settings.has_037_crew_skills_fix = true;
 
                 // Remove the old game params
-                let _ = std::fs::remove_file(game_params_bin_path());
+                let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
             if !saved_state.tab_state.settings.has_038_game_params_fix {
                 saved_state.tab_state.settings.has_038_game_params_fix = true;
 
                 // Remove the old game params
-                let _ = std::fs::remove_file(game_params_bin_path());
+                let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
             // Added the Achievements to GameParams
@@ -262,7 +262,7 @@ impl WowsToolkitApp {
                 saved_state.tab_state.settings.has_041_game_params_fix = true;
 
                 // Remove the old game params
-                let _ = std::fs::remove_file(game_params_bin_path());
+                let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
             // Added Aircraft to GameParams
@@ -270,7 +270,7 @@ impl WowsToolkitApp {
                 saved_state.tab_state.settings.has_047_game_params_fix = true;
 
                 // Remove the old game params
-                let _ = std::fs::remove_file(game_params_bin_path());
+                let _ = std::fs::remove_file(old_game_params_bin_path());
             }
 
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
@@ -387,8 +387,15 @@ impl WowsToolkitApp {
                         match result {
                             Ok(data) => match data {
                                 BackgroundTaskCompletion::NoReceiver => {}
-                                BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays } => {
+                                BackgroundTaskCompletion::DataLoaded {
+                                    new_dir,
+                                    wows_data,
+                                    replays,
+                                    available_builds,
+                                } => {
                                     let replays_dir = wows_data.replays_dir.clone();
+                                    let build_number = wows_data.build_number;
+
                                     if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
                                         *old_wows_data.write() = wows_data;
                                     } else {
@@ -403,6 +410,20 @@ impl WowsToolkitApp {
                                             self.tab_state.background_task_sender.clone(),
                                         );
                                     }
+
+                                    // Initialize or update the version data map
+                                    let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
+                                    if let Some(map) = &self.tab_state.wows_data_map {
+                                        map.write().insert(build_number, Arc::clone(wows_data_ref));
+                                    } else {
+                                        let mut map = std::collections::HashMap::new();
+                                        map.insert(build_number, Arc::clone(wows_data_ref));
+                                        self.tab_state.wows_data_map = Some(Arc::new(parking_lot::RwLock::new(map)));
+                                    }
+
+                                    self.tab_state.available_builds = available_builds;
+                                    self.tab_state.selected_browser_build = build_number;
+
                                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                                     self.tab_state.replay_files = replays;
                                     self.tab_state.filtered_file_list = None;

@@ -42,6 +42,7 @@ use crate::update_background_task;
 use crate::wows_data::ReplayDependencies;
 use crate::wows_data::ReplayLoader;
 use crate::wows_data::SharedWoWsData;
+use crate::wows_data::WoWsDataMap;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 
@@ -242,6 +243,18 @@ pub struct TabState {
     /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
     #[serde(skip)]
     pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
+
+    /// All loaded version data, keyed by build number.
+    #[serde(skip)]
+    pub wows_data_map: Option<WoWsDataMap>,
+
+    /// All build numbers available in the game's bin/ directory.
+    #[serde(skip)]
+    pub available_builds: Vec<u32>,
+
+    /// Currently selected build in the Resource Browser.
+    #[serde(skip)]
+    pub selected_browser_build: u32,
 }
 
 impl Default for TabState {
@@ -291,6 +304,9 @@ impl Default for TabState {
             session_stats_chart_config: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
+            wows_data_map: None,
+            available_builds: Vec::new(),
+            selected_browser_build: 0,
         }
     }
 }
@@ -299,9 +315,13 @@ impl TabState {
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
     pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
         let wows_data = self.world_of_warships_data.as_ref()?;
+        let wows_data_map = self.wows_data_map.as_ref()?;
         Some(ReplayDependencies {
             game_constants: Arc::clone(&self.game_constants),
             wows_data: Arc::clone(wows_data),
+            wows_data_map: Arc::clone(wows_data_map),
+            wows_dir: PathBuf::from(&self.settings.wows_dir),
+            locale: self.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
             twitch_state: Arc::clone(&self.twitch_state),
             replay_sort: Arc::clone(&self.replay_sort),
             background_task_sender: self.background_task_sender.clone(),
@@ -464,6 +484,12 @@ impl TabState {
                     rx: background_rx,
                     sent_replays: Arc::clone(&self.settings.sent_replays),
                     wows_data,
+                    wows_data_map: self
+                        .wows_data_map
+                        .clone()
+                        .unwrap_or_else(|| Arc::new(RwLock::new(std::collections::HashMap::new()))),
+                    wows_dir: PathBuf::from(&self.settings.wows_dir),
+                    locale: self.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
                     twitch_state: Arc::clone(&self.twitch_state),
                     should_send_replays: self.settings.send_replay_data,
                     data_export_settings: DataExportSettings {
@@ -550,8 +576,9 @@ impl TabState {
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = mpsc::channel();
         let locale = self.settings.locale.clone().unwrap();
+        let fallback_constants = self.game_constants.read().clone();
         let _join_handle = std::thread::spawn(move || {
-            let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str()));
+            let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));
         });
 
         BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }

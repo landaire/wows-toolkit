@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{
-    self,
-};
+use std::fs::{self};
 use std::io::BufWriter;
 use std::path::Path;
 use std::path::PathBuf;
@@ -32,9 +30,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
+use crate::plaintext_viewer::{self};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -55,7 +51,9 @@ enum GameParamsFormat {
 
 impl ToolkitTabViewer<'_> {
     fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
-        self.tab_state.world_of_warships_data.as_ref().map(|wows_data| wows_data.read().pkg_loader.clone())
+        self.selected_browser_data()
+            .or_else(|| self.tab_state.world_of_warships_data.clone())
+            .map(|wows_data| wows_data.read().pkg_loader.clone())
     }
 
     fn add_view_file_menu(&self, file_label: &Response, node: &FileNode) {
@@ -281,15 +279,64 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
+    /// Returns the SharedWoWsData for the currently selected browser build.
+    fn selected_browser_data(&self) -> Option<crate::wows_data::SharedWoWsData> {
+        let map = self.tab_state.wows_data_map.as_ref()?.read();
+        let build = self.tab_state.selected_browser_build;
+        map.get(&build).cloned()
+    }
+
     /// Builds the file unpacker tab
     pub fn build_unpacker_tab(&mut self, ui: &mut egui::Ui) {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
+                // Version selector dropdown (only shown when multiple builds are available)
+                if self.tab_state.available_builds.len() > 1 {
+                    if let Some(map) = &self.tab_state.wows_data_map {
+                        let map_guard = map.read();
+                        let mut builds: Vec<u32> = map_guard.keys().copied().collect();
+                        builds.sort();
+                        builds.reverse();
+
+                        let selected_label = map_guard
+                            .get(&self.tab_state.selected_browser_build)
+                            .map(|d| d.read().version_label())
+                            .unwrap_or_else(|| format!("{}", self.tab_state.selected_browser_build));
+
+                        drop(map_guard);
+
+                        ui.horizontal(|ui| {
+                            ui.label("Version:");
+                            egui::ComboBox::from_id_salt("browser_version_select")
+                                .selected_text(&selected_label)
+                                .show_ui(ui, |ui| {
+                                    let map_guard = map.read();
+                                    for &build in &builds {
+                                        let label = map_guard
+                                            .get(&build)
+                                            .map(|d| d.read().version_label())
+                                            .unwrap_or_else(|| format!("{}", build));
+                                        if ui
+                                            .selectable_value(&mut self.tab_state.selected_browser_build, build, &label)
+                                            .changed()
+                                        {
+                                            self.tab_state.filtered_file_list = None;
+                                            self.tab_state.used_filter = None;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.separator();
+                    }
+                }
+
                 if self.tab_state.used_filter.is_none()
                     || self.tab_state.filter.as_str() != self.tab_state.used_filter.as_ref().unwrap().as_str()
                 {
                     debug!("Filtering file listing again");
-                    let filter_list = if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                    let filter_list = if let Some(wows_data) =
+                        self.selected_browser_data().or_else(|| self.tab_state.world_of_warships_data.clone())
+                    {
                         let wows_data = wows_data.read();
                         let files = &wows_data.filtered_files;
                         if self.tab_state.filter.len() >= 3 {
@@ -347,7 +394,9 @@ impl ToolkitTabViewer<'_> {
                     });
                     strip.cell(|ui| {
                         egui::ScrollArea::both().id_salt("file_tree_scroll_area").show(ui, |ui| {
-                            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+                            if let Some(wows_data) =
+                                self.selected_browser_data().or_else(|| self.tab_state.world_of_warships_data.clone())
+                            {
                                 let wows_data = wows_data.read();
                                 let file_tree = &wows_data.file_tree;
                                 if let Some(filtered_files) = &filter_list {
