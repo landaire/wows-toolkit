@@ -102,7 +102,7 @@ panic_handler = []
 
 [profile.release]
 opt-level = 3 # fast and small wasm
-lto = true
+lto = "thin"
 
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
