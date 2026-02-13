@@ -1,3 +1,4 @@
+use crate::icon_str;
 use std::env;
 use std::fs::File;
 use std::io::Read;
@@ -71,13 +72,13 @@ pub enum Tab {
 }
 
 impl Tab {
-    fn title(&self) -> String {
+    fn title(&self) -> &'static str {
         match self {
-            Tab::Unpacker => format!("{} Resource Unpacker", icons::ARCHIVE),
-            Tab::Settings => format!("{} Settings", icons::GEAR_FINE),
-            Tab::ReplayParser => format!("{} Replay Inspector", icons::MAGNIFYING_GLASS),
-            Tab::PlayerTracker => format!("{} Player Tracker", icons::DETECTIVE),
-            Tab::ModManager => format!("{} Mod Manager", icons::WRENCH),
+            Tab::Unpacker => icon_str!(icons::ARCHIVE, "Resource Unpacker"),
+            Tab::Settings => icon_str!(icons::GEAR_FINE, "Settings"),
+            Tab::ReplayParser => icon_str!(icons::MAGNIFYING_GLASS, "Replay Inspector"),
+            Tab::PlayerTracker => icon_str!(icons::DETECTIVE, "Player Tracker"),
+            Tab::ModManager => icon_str!(icons::WRENCH, "Mod Manager"),
         }
     }
 }
@@ -420,11 +421,14 @@ impl WowsToolkitApp {
                                     // Initialize or update the version data map
                                     let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
                                     if let Some(map) = &self.tab_state.wows_data_map {
-                                        map.write().insert(build_number, Arc::clone(wows_data_ref));
-                                    } else {
-                                        let mut map = std::collections::HashMap::new();
                                         map.insert(build_number, Arc::clone(wows_data_ref));
-                                        self.tab_state.wows_data_map = Some(Arc::new(parking_lot::RwLock::new(map)));
+                                    } else {
+                                        let map = crate::wows_data::WoWsDataMap::new(
+                                            PathBuf::from(&new_dir),
+                                            self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
+                                        );
+                                        map.insert(build_number, Arc::clone(wows_data_ref));
+                                        self.tab_state.wows_data_map = Some(map);
                                     }
 
                                     self.tab_state.available_builds = available_builds;
@@ -438,7 +442,11 @@ impl WowsToolkitApp {
                                     self.tab_state.toasts.lock().success("Successfully loaded game data");
                                     self.check_constants_version_mismatch();
                                 }
-                                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update } => {
+                                BackgroundTaskCompletion::ReplayLoaded {
+                                    replay,
+                                    skip_ui_update,
+                                    track_session_stats,
+                                } => {
                                     if !skip_ui_update {
                                         {
                                             self.tab_state.replay_parser_tab.lock().game_chat.clear();
@@ -450,7 +458,9 @@ impl WowsToolkitApp {
                                                 .write()
                                                 .update_from_replay(&replay.read());
                                         }
-                                        self.tab_state.session_stats.add_replay(replay.clone());
+                                        if track_session_stats {
+                                            self.tab_state.session_stats.add_replay(replay.clone());
+                                        }
                                         self.tab_state.current_replay = Some(replay);
                                         self.tab_state.toasts.lock().success("Successfully loaded replay");
                                         self.try_update_constants();
@@ -666,7 +676,7 @@ impl WowsToolkitApp {
             self.tab_state.settings.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true,)
+                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true, false)
             );
         }
     }
@@ -753,11 +763,11 @@ impl WowsToolkitApp {
                     ui.add_space(16.0);
                 }
 
-                if ui.button(format!("{} Create Issue", icons::BUG)).clicked() {
+                if ui.button(icon_str!(icons::BUG, "Create Issue")).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
                 }
 
-                if ui.button(format!("{} Discord", icons::DISCORD_LOGO)).clicked() {
+                if ui.button(icon_str!(icons::DISCORD_LOGO, "Discord")).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
                 }
             });
@@ -844,12 +854,12 @@ impl WowsToolkitApp {
                         if ui.button("Copy").clicked() {
                             Context::copy_text(ctx, panic_info.clone());
                         }
-                        if ui.button(format!("{} GitHub", icons::GITHUB_LOGO)).clicked() {
+                        if ui.button(icon_str!(icons::GITHUB_LOGO, "GitHub")).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab(
                                 "https://github.com/landaire/wows-toolkit/issues/new/choose",
                             ));
                         }
-                        if ui.button(format!("{} Discord", icons::DISCORD_LOGO)).clicked() {
+                        if ui.button(icon_str!(icons::DISCORD_LOGO, "Discord")).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
                         }
                     });
@@ -1099,7 +1109,7 @@ fn build_about_window(ui: &mut egui::Ui) {
 
 fn build_error_window(ui: &mut egui::Ui, error: &str) {
     ui.vertical(|ui| {
-        ui.label(format!("{} An error occurred:", icons::WARNING));
+        ui.label(icon_str!(icons::WARNING, "An error occurred:"));
         ui.label(error);
     });
 }

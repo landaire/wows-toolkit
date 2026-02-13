@@ -38,8 +38,78 @@ impl std::fmt::Debug for GameAsset {
 
 pub type SharedWoWsData = Arc<RwLock<Box<WorldOfWarshipsData>>>;
 
-/// Maps build numbers to their loaded game data.
-pub type WoWsDataMap = Arc<RwLock<HashMap<u32, SharedWoWsData>>>;
+/// Manages all loaded game data versions, keyed by build number.
+/// Provides version resolution for replay parsing and lazy-loading of build data.
+#[derive(Clone)]
+pub struct WoWsDataMap {
+    builds: Arc<RwLock<HashMap<u32, SharedWoWsData>>>,
+    wows_dir: PathBuf,
+    locale: String,
+}
+
+impl WoWsDataMap {
+    pub fn new(wows_dir: PathBuf, locale: String) -> Self {
+        Self { builds: Arc::new(RwLock::new(HashMap::new())), wows_dir, locale }
+    }
+
+    /// Insert data for a specific build number.
+    pub fn insert(&self, build: u32, data: SharedWoWsData) {
+        self.builds.write().insert(build, data);
+    }
+
+    /// Look up already-loaded data by build number. Does NOT lazy-load.
+    pub fn get(&self, build: u32) -> Option<SharedWoWsData> {
+        self.builds.read().get(&build).cloned()
+    }
+
+    /// Returns all loaded build numbers.
+    pub fn loaded_builds(&self) -> Vec<u32> {
+        self.builds.read().keys().copied().collect()
+    }
+
+    /// Iterate over loaded builds with a closure (avoids exposing the inner lock).
+    pub fn with_builds<R>(&self, f: impl FnOnce(&HashMap<u32, SharedWoWsData>) -> R) -> R {
+        f(&self.builds.read())
+    }
+
+    /// Resolve the correct game data for a replay's version.
+    /// Checks the map first, then tries to lazy-load from disk.
+    /// Returns None if the version's build data is unavailable.
+    pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
+        let build = version.build;
+
+        // Check if already loaded
+        if let Some(data) = self.get(build) {
+            return Some(data);
+        }
+
+        // Try to load from disk
+        let build_dir = self.wows_dir.join("bin").join(build.to_string());
+        if !build_dir.exists() {
+            return None;
+        }
+
+        debug!("Lazily loading game data for build {}", build);
+        let fallback_constants = {
+            // Use any already-loaded build's constants as fallback
+            let builds = self.builds.read();
+            builds.values().next().map(|d| d.read().replay_constants.read().clone())
+        };
+        let fallback_constants = fallback_constants.unwrap_or_default();
+
+        match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants) {
+            Ok(wows_data) => {
+                let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                self.insert(build, Arc::clone(&shared));
+                Some(shared)
+            }
+            Err(e) => {
+                warn!("Could not load data for build {}: {}", build, e);
+                None
+            }
+        }
+    }
+}
 
 pub struct WorldOfWarshipsData {
     pub file_tree: FileNode,
@@ -84,9 +154,15 @@ pub struct WorldOfWarshipsData {
 }
 
 impl WorldOfWarshipsData {
-    /// Get an achievement icon by name, lazy-loading and caching it from the game files.
-    /// The icon_key should be the lowercase achievement name (e.g., "pve_honorsstar").
-    pub fn achievement_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
+    /// Look up a cached achievement icon (read-only, no loading).
+    pub fn cached_achievement_icon(&self, icon_key: &str) -> Option<Arc<GameAsset>> {
+        self.achievement_icons.get(icon_key).cloned()
+    }
+
+    /// Load and cache an achievement icon from the game files.
+    /// Only call this on a cache miss (when `cached_achievement_icon` returns None).
+    pub fn load_achievement_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
+        // Double-check in case another call populated it
         if let Some(icon) = self.achievement_icons.get(icon_key) {
             return Some(icon.clone());
         }
@@ -113,11 +189,7 @@ impl WorldOfWarshipsData {
 /// This bundles together all the Arc-wrapped state that replay loading requires.
 #[derive(Clone)]
 pub struct ReplayDependencies {
-    pub game_constants: Arc<RwLock<serde_json::Value>>,
-    pub wows_data: SharedWoWsData,
     pub wows_data_map: WoWsDataMap,
-    pub wows_dir: PathBuf,
-    pub locale: String,
     pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
     pub background_task_sender: mpsc::Sender<BackgroundTask>,
@@ -125,75 +197,25 @@ pub struct ReplayDependencies {
 }
 
 impl ReplayDependencies {
-    /// Create a copy of these dependencies pointing at a specific build's data.
-    /// This ensures `wows_data` and `game_constants` are version-matched.
-    fn with_versioned_data(&self, versioned_wows_data: &SharedWoWsData) -> ReplayDependencies {
-        let mut deps = self.clone();
-        deps.wows_data = Arc::clone(versioned_wows_data);
-        deps.game_constants = versioned_wows_data.read().replay_constants.clone();
-        deps
-    }
-
     /// Resolve version-matched deps for a specific build. Returns None if
-    /// the build data can't be loaded (caller should fall back to latest).
-    pub fn resolve_versioned_deps(&self, build: u32, version: &Version) -> Option<ReplayDependencies> {
-        match self.get_or_load_build(build, version) {
-            Ok(versioned_data) => Some(self.with_versioned_data(&versioned_data)),
-            Err(e) => {
-                warn!("Could not resolve versioned deps for build {}: {}", build, e);
-                None
-            }
-        }
-    }
-
-    /// Get or load the WorldOfWarshipsData for a specific build number.
-    /// Returns the SharedWoWsData for the build, or an error if the build is unavailable.
-    fn get_or_load_build(&self, build: u32, version: &Version) -> Result<SharedWoWsData, ToolkitError> {
-        // Check if already loaded
-        {
-            let map = self.wows_data_map.read();
-            if let Some(data) = map.get(&build) {
-                return Ok(Arc::clone(data));
-            }
-        }
-
-        // Check if the build directory exists
-        let build_dir = self.wows_dir.join("bin").join(build.to_string());
-        if !build_dir.exists() {
-            return Err(ToolkitError::ReplayBuildUnavailable { build, version: version.to_path() });
-        }
-
-        // Load data for this build
-        debug!("Lazily loading game data for build {}", build);
-        let wows_data = load_wows_data_for_build(&self.wows_dir, build, &self.locale, &self.game_constants.read())
-            .map_err(|_| ToolkitError::ReplayBuildUnavailable { build, version: version.to_path() })?;
-        let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
-
-        // Insert into map
-        {
-            let mut map = self.wows_data_map.write();
-            map.insert(build, Arc::clone(&shared));
-        }
-
-        Ok(shared)
+    /// the build data can't be loaded.
+    pub fn resolve_versioned_deps(&self, version: &Version) -> Option<SharedWoWsData> {
+        self.wows_data_map.resolve(version)
     }
 
     /// Parse a replay file from disk and start loading it in the background.
-    pub fn parse_replay_from_path<P: AsRef<Path>>(&self, replay_path: P, update_ui: bool) -> Option<BackgroundTask> {
+    pub fn parse_replay_from_path<P: AsRef<Path>>(
+        &self,
+        replay_path: P,
+        update_ui: bool,
+        track_session_stats: bool,
+    ) -> Option<BackgroundTask> {
         let path = replay_path.as_ref();
 
         let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-        let build = replay_version.build;
 
-        let wows_data_for_build = match self.get_or_load_build(build, &replay_version) {
-            Ok(data) => data,
-            Err(e) => {
-                warn!("Failed to load game data for replay: {}", e);
-                // Fall back to latest version data
-                Arc::clone(&self.wows_data)
-            }
-        };
+        let wows_data_for_build = self.wows_data_map.resolve(&replay_version)?;
 
         let (game_metadata, game_constants) = {
             let data = wows_data_for_build.read();
@@ -202,7 +224,14 @@ impl ReplayDependencies {
         let mut replay = Replay::new(replay_file, game_metadata);
         replay.game_constants = Some(game_constants);
 
-        self.load_replay(Arc::new(RwLock::new(replay)), update_ui)
+        let mut loader = ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay)));
+        if !update_ui {
+            loader = loader.skip_ui_update();
+        }
+        if !track_session_stats {
+            loader = loader.skip_session_stats();
+        }
+        loader.load()
     }
 
     /// Load an already-parsed replay in the background.
@@ -218,11 +247,12 @@ pub struct ReplayLoader {
     deps: ReplayDependencies,
     replay: Arc<RwLock<Replay>>,
     skip_ui_update: bool,
+    track_session_stats: bool,
 }
 
 impl ReplayLoader {
     pub fn new(deps: ReplayDependencies, replay: Arc<RwLock<Replay>>) -> Self {
-        Self { deps, replay, skip_ui_update: false }
+        Self { deps, replay, skip_ui_update: false, track_session_stats: true }
     }
 
     /// Skip updating the UI when the replay finishes loading.
@@ -232,9 +262,17 @@ impl ReplayLoader {
         self
     }
 
+    /// Don't track this replay in session stats.
+    /// Used for manually opened or drag-and-dropped replays.
+    pub fn skip_session_stats(mut self) -> Self {
+        self.track_session_stats = false;
+        self
+    }
+
     /// Start loading the replay in the background
     pub fn load(self) -> Option<BackgroundTask> {
         let skip_ui_update = self.skip_ui_update;
+        let track_session_stats = self.track_session_stats;
 
         let (tx, rx) = mpsc::channel();
 
@@ -249,13 +287,12 @@ impl ReplayLoader {
             };
             let build = replay_version.build;
 
-            let wows_data_for_build = match deps.get_or_load_build(build, &replay_version) {
-                Ok(data) => data,
-                Err(e) => {
-                    error!("Failed to load game data for build {}: {}", build, e);
-                    let _ = tx.send(Err(e.into()));
-                    return;
-                }
+            let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
+                error!("Failed to load game data for build {}", build);
+                let _ = tx.send(Err(
+                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path() }.into()
+                ));
+                return;
             };
 
             let game_version = {
@@ -300,7 +337,7 @@ impl ReplayLoader {
                     replay_guard.battle_report = Some(report);
                     replay_guard.build_ui_report(&deps);
                 }
-                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update }
+                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update, track_session_stats }
             });
 
             let _ = tx.send(res);

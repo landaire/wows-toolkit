@@ -27,6 +27,7 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 use tracing::debug;
 use tracing::error;
+use tracing::warn;
 use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
@@ -60,7 +61,7 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
 use crate::wows_data::GameAsset;
-use crate::wows_data::SharedWoWsData;
+
 use crate::wows_data::WorldOfWarshipsData;
 
 pub struct DownloadProgress {
@@ -248,6 +249,8 @@ pub enum BackgroundTaskCompletion {
         replay: Arc<RwLock<Replay>>,
         /// If true, don't update the current replay in the UI (used for batch session stats loading)
         skip_ui_update: bool,
+        /// If true, add this replay to session stats
+        track_session_stats: bool,
     },
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateDownloaded(PathBuf),
@@ -276,10 +279,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("replays", &"<...>")
                 .field("available_builds", available_builds)
                 .finish(),
-            Self::ReplayLoaded { replay: _, skip_ui_update } => f
+            Self::ReplayLoaded { replay: _, skip_ui_update, track_session_stats } => f
                 .debug_struct("ReplayLoaded")
                 .field("replay", &"<...>")
                 .field("skip_ui_update", skip_ui_update)
+                .field("track_session_stats", track_session_stats)
                 .finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
@@ -899,11 +903,17 @@ fn parse_replay_data_in_background(
                 // We only send back random battles
                 let game_type = replay_file.meta.gameType.clone();
 
-                let cloned = data.wows_data.clone();
-                let wows_data = cloned.read();
+                // Resolve version-matched data for this replay's build
+                let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+                let Some(wows_data_for_build) = data.wows_data_map.resolve(&replay_version) else {
+                    warn!("Skipping replay {:?}: no data for build {}", path, replay_version.build);
+                    return Ok(());
+                };
 
-                let (metadata_provider, game_version, gc) =
-                    { (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone()) };
+                let (metadata_provider, game_version, gc) = {
+                    let wows_data = wows_data_for_build.read();
+                    (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
+                };
                 if let Some(metadata_provider) = metadata_provider {
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     replay.game_constants = Some(gc);
@@ -973,11 +983,7 @@ fn parse_replay_data_in_background(
                             // Create a dummy sender since we don't need to send background tasks from here
                             let (dummy_sender, _) = mpsc::channel();
                             let deps = crate::wows_data::ReplayDependencies {
-                                game_constants: Arc::clone(&data.constants_file_data),
-                                wows_data: Arc::clone(&data.wows_data),
-                                wows_data_map: Arc::clone(&data.wows_data_map),
-                                wows_dir: data.wows_dir.clone(),
-                                locale: data.locale.clone(),
+                                wows_data_map: data.wows_data_map.clone(),
                                 twitch_state: Arc::clone(&data.twitch_state),
                                 replay_sort: Arc::new(Mutex::new(SortOrder::default())),
                                 background_task_sender: dummy_sender,
@@ -986,9 +992,10 @@ fn parse_replay_data_in_background(
                             replay.build_ui_report(&deps);
 
                             if data.data_export_settings.should_auto_export {
-                                let export_path = data.data_export_settings.export_path.join(replay.better_file_name(
-                                    wows_data.game_metadata.as_ref().expect("no metadata provider?"),
-                                ));
+                                let export_path = data
+                                    .data_export_settings
+                                    .export_path
+                                    .join(replay.better_file_name(&metadata_provider));
                                 let export_path =
                                     export_path.with_extension(match data.data_export_settings.export_format {
                                         ReplayExportFormat::Json => "json",
@@ -1096,14 +1103,10 @@ pub enum ReplayBackgroundParserThreadMessage {
 pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
-    pub wows_data: SharedWoWsData,
     pub wows_data_map: crate::wows_data::WoWsDataMap,
-    pub wows_dir: PathBuf,
-    pub locale: String,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub should_send_replays: bool,
     pub data_export_settings: DataExportSettings,
-    pub constants_file_data: Arc<RwLock<serde_json::Value>>,
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     pub is_debug: bool,
     pub parser_lock: Arc<Mutex<()>>,
@@ -1134,10 +1137,15 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
-            let wows_data = data.wows_data.read();
+            let Some(replays_dir) =
+                data.wows_data_map.with_builds(|builds| builds.values().next().map(|d| d.read().replays_dir.clone()))
+            else {
+                error!("No game data loaded, cannot enumerate replays directory");
+                return;
+            };
 
             // Try to see if we have any historical replays we can send
-            match std::fs::read_dir(&wows_data.replays_dir) {
+            match std::fs::read_dir(&replays_dir) {
                 Ok(read_dir) => {
                     for file in read_dir.flatten() {
                         let path = file.path();
@@ -1200,7 +1208,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
 
 pub fn start_populating_player_inspector(
     replays: Vec<PathBuf>,
-    wows_data: SharedWoWsData,
+    wows_data_map: crate::wows_data::WoWsDataMap,
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
@@ -1208,9 +1216,15 @@ pub fn start_populating_player_inspector(
         for path in replays {
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {
-                    let wows_data = wows_data.read();
+                    let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+                    let Some(wows_data_for_build) = wows_data_map.resolve(&replay_version) else {
+                        warn!("Skipping replay {:?}: no data for build {}", path, replay_version.build);
+                        continue;
+                    };
+
                     let (metadata_provider, game_version, gc) = {
-                        (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
+                        let data = wows_data_for_build.read();
+                        (data.game_metadata.clone(), data.patch_version, data.game_constants.clone())
                     };
                     if let Some(metadata_provider) = metadata_provider {
                         let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
@@ -1221,13 +1235,13 @@ pub fn start_populating_player_inspector(
                                 player_tracker.write().update_from_replay(&replay);
                             }
                             Err(e) => {
-                                println!("error attempting to parse replay for replay inspector: {e:?}");
+                                warn!("error attempting to parse replay for replay inspector: {e:?}");
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    println!("error attempting to open replay for replay inspector: {e:?}");
+                    warn!("error attempting to open replay for replay inspector: {e:?}");
                 }
             }
         }

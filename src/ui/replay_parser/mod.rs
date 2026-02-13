@@ -2,6 +2,7 @@ mod damage_types;
 mod models;
 mod sorting;
 
+use crate::icon_str;
 pub use models::Achievement;
 pub use models::Damage;
 pub use models::DamageInteraction;
@@ -49,6 +50,7 @@ use crate::task::ToastMessage;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::update_background_task;
+use crate::wows_data::GameAsset;
 use crate::wows_data::SharedWoWsData;
 
 use damage_types::*;
@@ -210,10 +212,15 @@ pub struct UiReport {
 }
 
 impl UiReport {
-    pub fn new(replay_file: &ReplayFile, report: &BattleReport, deps: &crate::wows_data::ReplayDependencies) -> Self {
-        let wows_data_inner = deps.wows_data.read();
+    pub fn new(
+        replay_file: &ReplayFile,
+        report: &BattleReport,
+        wows_data: &SharedWoWsData,
+        deps: &crate::wows_data::ReplayDependencies,
+    ) -> Self {
+        let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
-        let constants_inner = deps.game_constants.read();
+        let constants_inner = wows_data_inner.replay_constants.read();
 
         let match_timestamp = util::replay_timestamp(&replay_file.meta);
 
@@ -867,7 +874,7 @@ impl UiReport {
             player_reports,
             self_player,
             replay_sort: Arc::clone(&deps.replay_sort),
-            wows_data: Arc::clone(&deps.wows_data),
+            wows_data: Arc::clone(wows_data),
             twitch_state: Arc::clone(&deps.twitch_state),
             battle_result,
             is_row_expanded: Default::default(),
@@ -1401,7 +1408,7 @@ impl UiReport {
                         if report.relation().is_enemy() && !self.debug_mode {
                             ui.label("-");
                         } else if !report.has_vehicle_entity {
-                            ui.label(RichText::new(format!("{} -", icons::EXCLAMATION_MARK)).color(Color32::LIGHT_RED))
+                            ui.label(RichText::new(icon_str!(icons::EXCLAMATION_MARK, "-")).color(Color32::LIGHT_RED))
                                 .on_hover_text("This ship was never spotted. Build info unavailable.");
                         } else {
                             let response = ui.label(report.skill_info.label_text.clone());
@@ -1421,7 +1428,7 @@ impl UiReport {
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
                             if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
-                                if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
+                                if ui.small_button(icon_str!(icons::SHARE, "Open Build in Browser")).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1430,7 +1437,7 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(format!("{} Copy Build Link", icons::COPY)).clicked() {
+                                if ui.small_button(icon_str!(icons::COPY, "Copy Build Link")).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1449,7 +1456,7 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(format!("{} Copy Short Build Link", icons::COPY)).clicked() {
+                                if ui.small_button(icon_str!(icons::COPY, "Copy Short Build Link")).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider)
@@ -1471,7 +1478,7 @@ impl UiReport {
                                 ui.separator();
                             }
 
-                            if ui.small_button(format!("{} Open WoWs Numbers Page", icons::SHARE)).clicked() {
+                            if ui.small_button(icon_str!(icons::SHARE, "Open WoWs Numbers Page")).clicked() {
                                 if let Some(url) = build_wows_numbers_url(report.player()) {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
@@ -1483,7 +1490,7 @@ impl UiReport {
                                 ui.separator();
 
                                 if let Some(player) = Some(report.player())
-                                    && ui.small_button(format!("{} View Raw Player Metadata", icons::BUG)).clicked()
+                                    && ui.small_button(icon_str!(icons::BUG, "View Raw Player Metadata")).clicked()
                                 {
                                     let pretty_meta =
                                         serde_json::to_string_pretty(player).expect("failed to serialize player");
@@ -1542,10 +1549,32 @@ impl UiReport {
                             if !report.achievements.is_empty() {
                                 ui.strong("Achievements");
 
-                                let mut wows_data = self.wows_data.write();
-                                for achievement in &report.achievements {
+                                // Resolve icons: read lock for cache hits, write lock only on misses
+                                let icons: Vec<Option<Arc<GameAsset>>> = {
+                                    let wows_data = self.wows_data.read();
+                                    report
+                                        .achievements
+                                        .iter()
+                                        .map(|a| wows_data.cached_achievement_icon(&a.icon_key))
+                                        .collect()
+                                };
+                                let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+                                    let mut wows_data = self.wows_data.write();
+                                    report
+                                        .achievements
+                                        .iter()
+                                        .zip(icons)
+                                        .map(|(a, cached)| {
+                                            cached.or_else(|| wows_data.load_achievement_icon(&a.icon_key))
+                                        })
+                                        .collect()
+                                } else {
+                                    icons
+                                };
+
+                                for (achievement, icon) in report.achievements.iter().zip(icons) {
                                     ui.horizontal(|ui| {
-                                        if let Some(icon) = wows_data.achievement_icon(&achievement.icon_key) {
+                                        if let Some(icon) = icon {
                                             let image = Image::new(ImageSource::Bytes {
                                                 uri: icon.path.clone().into(),
                                                 bytes: icon.data.clone().into(),
@@ -1562,7 +1591,6 @@ impl UiReport {
                                         response.on_hover_text(&achievement.description);
                                     });
                                 }
-                                drop(wows_data);
                             }
 
                             // Display ribbons
@@ -2243,15 +2271,14 @@ impl Replay {
         if let Some(battle_report) = &self.battle_report {
             let replay_version =
                 wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
-            let build = replay_version.build;
 
-            // Resolve version-matched deps so the UI report uses the correct constants
-            let resolved_deps = match deps.resolve_versioned_deps(build, &replay_version) {
-                Some(d) => d,
-                None => deps.clone(),
+            // Resolve version-matched data so the UI report uses the correct constants
+            let Some(wows_data) = deps.resolve_versioned_deps(&replay_version) else {
+                tracing::warn!("Could not resolve versioned data for build {}", replay_version.build);
+                return;
             };
 
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &resolved_deps))
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps))
         }
     }
 
@@ -2438,16 +2465,16 @@ impl ToolkitTabViewer<'_> {
             let mut self_report = None;
             ui.horizontal(|ui| {
                 if replay_file.battle_results_are_pending() {
-                    let text = RichText::new(format!("{} Incomplete Match Results", icons::INFO)).color(Color32::ORANGE);
+                    let text = RichText::new(icon_str!(icons::INFO, "Incomplete Match Results")).color(Color32::ORANGE);
                     let hover_text = "The replay does not yet have end-of-match results. Data will be automatically re-loaded when the match ends and end-of-match results are added to the replay.";
                     ui.strong(text).on_hover_text(hover_text);
                 }
 
                 if let Some(battle_result) = replay_file.battle_result() {
                     let text = match battle_result {
-                        BattleResult::Win(_) => RichText::new(format!("{} Victory", icons::TROPHY)).color(Color32::LIGHT_GREEN),
-                        BattleResult::Loss(_) => RichText::new(format!("{} Defeat", icons::SMILEY_SAD)).color(Color32::LIGHT_RED),
-                        BattleResult::Draw => RichText::new(format!("{} Draw", icons::NOTCHES)).color(Color32::LIGHT_YELLOW),
+                        BattleResult::Win(_) => RichText::new(icon_str!(icons::TROPHY, "Victory")).color(Color32::LIGHT_GREEN),
+                        BattleResult::Loss(_) => RichText::new(icon_str!(icons::SMILEY_SAD, "Defeat")).color(Color32::LIGHT_RED),
+                        BattleResult::Draw => RichText::new(icon_str!(icons::NOTCHES, "Draw")).color(Color32::LIGHT_YELLOW),
                     };
                     ui.label(text);
                 }
@@ -2471,7 +2498,7 @@ impl ToolkitTabViewer<'_> {
 
                 ui.menu_button("Export", |ui| {
                     ui.label(RichText::new("Chat").strong());
-                    if ui.small_button(format!("{} Save To File", icons::FLOPPY_DISK)).clicked() {
+                    if ui.small_button(icon_str!(icons::FLOPPY_DISK, "Save To File")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
                             .save_file()
@@ -2491,7 +2518,7 @@ impl ToolkitTabViewer<'_> {
                         }
                         ui.close_kind(UiKind::Menu);
                     }
-                    if ui.small_button(format!("{} Copy", icons::COPY)).clicked() {
+                    if ui.small_button(icon_str!(icons::COPY, "Copy")).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
                             let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
@@ -2591,8 +2618,8 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
-                if self.tab_state.world_of_warships_data.is_some()
-                    && ui.button(format!("{} Render", icons::PLAY)).clicked()
+                if self.tab_state.wows_data_map.is_some()
+                    && ui.button(icon_str!(icons::PLAY, "Render")).clicked()
                 {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
                     let pkt_data = replay_file.replay_file.packet_data.clone();
@@ -2600,12 +2627,15 @@ impl ToolkitTabViewer<'_> {
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
-                    let wows_data = self
+                    let Some(wows_data) = self
                         .tab_state
                         .wows_data_map
                         .as_ref()
-                        .and_then(|map| map.read().get(&replay_version.build).cloned())
-                        .unwrap_or_else(|| self.tab_state.world_of_warships_data.clone().unwrap());
+                        .and_then(|map| map.resolve(&replay_version))
+                    else {
+                        tracing::warn!("No data for build {}", replay_version.build);
+                        return;
+                    };
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
                     let viewer = crate::replay_renderer::launch_replay_renderer(
                         raw_meta,
@@ -2774,19 +2804,19 @@ impl ToolkitTabViewer<'_> {
                             .on_hover_text(label.as_str());
                         let replay_weak2 = replay_weak.clone();
                         label_response.context_menu(|ui| {
-                            if ui.button("Copy Path").clicked() {
+                            if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                 ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if ui.button("Copy Replay").clicked() {
+                            if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
                                 copy_files_to_clipboard(&[path_clone.clone()]);
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if ui.button("Show in File Explorer").clicked() {
+                            if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                 util::open_file_explorer(&path_clone);
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if ui.button("Render Replay").clicked() {
+                            if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak2.clone());
                                 });
@@ -3023,19 +3053,19 @@ impl ToolkitTabViewer<'_> {
                             let replay_weak2 = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                    if ui.button("Copy Path").clicked() {
+                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Copy Replay").clicked() {
+                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
                                         copy_files_to_clipboard(&[path_clone.clone()]);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Show in File Explorer").clicked() {
+                                    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Render Replay").clicked() {
+                                    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                         if let Some(replay_weak) = replay_weak2.as_ref() {
                                             ui.ctx().data_mut(|data| {
                                                 data.insert_temp(
@@ -3320,19 +3350,19 @@ impl ToolkitTabViewer<'_> {
                             let replay_weak2 = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                    if ui.button("Copy Path").clicked() {
+                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Copy Replay").clicked() {
+                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
                                         copy_files_to_clipboard(&[path_clone.clone()]);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Show in File Explorer").clicked() {
+                                    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if ui.button("Render Replay").clicked() {
+                                    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                         if let Some(replay_weak) = replay_weak2.as_ref() {
                                             ui.ctx().data_mut(|data| {
                                                 data.insert_temp(
@@ -3423,7 +3453,7 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button(format!("{} Manually Open Replay File...", icons::FOLDER_OPEN)).clicked()
+            if ui.button(icon_str!(icons::FOLDER_OPEN, "Manually Open Replay File...")).clicked()
                 && let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file()
             {
                 self.tab_state.settings.current_replay_path = file;
@@ -3431,7 +3461,7 @@ impl ToolkitTabViewer<'_> {
                 if let Some(deps) = self.tab_state.replay_dependencies() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true,)
+                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true, false)
                     );
                 }
             }
@@ -3472,7 +3502,7 @@ impl ToolkitTabViewer<'_> {
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
                 });
 
-            if ui.button(format!("{} Show Session Stats", icons::CHART_BAR)).clicked() {
+            if ui.button(icon_str!(icons::CHART_BAR, "Show Session Stats")).clicked() {
                 self.tab_state.show_session_stats = true;
             }
         });
@@ -3524,10 +3554,10 @@ impl ToolkitTabViewer<'_> {
             ui.horizontal(|ui| {
                 ui.heading("Overall Stats");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(format!("{} Clear", icons::ERASER)).clicked() {
+                    if ui.button(icon_str!(icons::ERASER, "Clear")).clicked() {
                         self.tab_state.session_stats.clear();
                     }
-                    if ui.button(format!("{} Chart", icons::CHART_LINE)).clicked() {
+                    if ui.button(icon_str!(icons::CHART_LINE, "Chart")).clicked() {
                         self.tab_state.show_session_stats_chart = true;
                     }
                 });
@@ -3634,10 +3664,29 @@ impl ToolkitTabViewer<'_> {
             if !all_achievements.is_empty() {
                 ui.strong("Achievements");
 
-                let mut wows_data = self.tab_state.world_of_warships_data.as_ref().unwrap().write();
-                for achievement in all_achievements {
+                let wows_data_lock = self.tab_state.world_of_warships_data.as_ref().unwrap();
+
+                // Resolve icons: read lock for cache hits, write lock only on cache misses
+                let icons: Vec<Option<Arc<GameAsset>>> = {
+                    let wows_data = wows_data_lock.read();
+                    all_achievements.iter().map(|a| wows_data.cached_achievement_icon(&a.icon_key)).collect()
+                };
+
+                // Load any cache misses (only takes write lock if needed)
+                let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+                    let mut wows_data = wows_data_lock.write();
+                    all_achievements
+                        .iter()
+                        .zip(icons)
+                        .map(|(a, cached)| cached.or_else(|| wows_data.load_achievement_icon(&a.icon_key)))
+                        .collect()
+                } else {
+                    icons
+                };
+
+                for (achievement, icon) in all_achievements.iter().zip(icons) {
                     ui.horizontal(|ui| {
-                        if let Some(icon) = wows_data.achievement_icon(&achievement.icon_key) {
+                        if let Some(icon) = icon {
                             let image = Image::new(ImageSource::Bytes {
                                 uri: icon.path.clone().into(),
                                 bytes: icon.data.clone().into(),
@@ -3646,7 +3695,7 @@ impl ToolkitTabViewer<'_> {
                             ui.add(image).on_hover_text(&achievement.description);
                         }
 
-                        let response = ui.label(achievement.display_name);
+                        let response = ui.label(&achievement.display_name);
                         response.on_hover_text(&achievement.description);
 
                         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3654,7 +3703,6 @@ impl ToolkitTabViewer<'_> {
                         });
                     });
                 }
-                drop(wows_data);
             }
 
             ui.separator();
@@ -3981,7 +4029,7 @@ impl ToolkitTabViewer<'_> {
                 // Copy as Image button
                 if plot_rect.is_some() {
                     ui.separator();
-                    if ui.button(format!("{} Copy as Image", icons::CAMERA)).clicked() {
+                    if ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
                         self.tab_state.session_stats_chart_config.screenshot_requested = true;
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
                     }
@@ -3994,7 +4042,7 @@ impl ToolkitTabViewer<'_> {
             ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("context_menu_render_replay")));
         if let Some(weak) = replay_weak
             && let Some(arc) = weak.upgrade()
-            && self.tab_state.world_of_warships_data.is_some()
+            && self.tab_state.wows_data_map.is_some()
         {
             let guard = arc.read();
             let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
@@ -4005,12 +4053,11 @@ impl ToolkitTabViewer<'_> {
                 wowsunpack::data::Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
             drop(guard);
 
-            let wows_data = self
-                .tab_state
-                .wows_data_map
-                .as_ref()
-                .and_then(|map| map.read().get(&replay_version.build).cloned())
-                .unwrap_or_else(|| self.tab_state.world_of_warships_data.clone().unwrap());
+            let Some(wows_data) = self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
+            else {
+                tracing::warn!("No data for build {}", replay_version.build);
+                return;
+            };
             let asset_cache = self.tab_state.renderer_asset_cache.clone();
             let viewer = crate::replay_renderer::launch_replay_renderer(
                 raw_meta,

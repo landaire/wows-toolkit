@@ -1,3 +1,4 @@
+use crate::icon_str;
 use std::collections::HashSet;
 use std::fs::File;
 use std::fs::{self};
@@ -9,6 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
+use crate::icons;
 use egui::CollapsingHeader;
 use egui::Label;
 use egui::Response;
@@ -18,7 +20,6 @@ use egui::UiKind;
 use egui::mutex::Mutex;
 use egui_extras::Size;
 use egui_extras::StripBuilder;
-use egui_phosphor::regular as icons;
 use pickled::HashableValue;
 use serde::Serialize;
 use serde_cbor::ser::IoWrite;
@@ -281,9 +282,8 @@ impl ToolkitTabViewer<'_> {
 
     /// Returns the SharedWoWsData for the currently selected browser build.
     fn selected_browser_data(&self) -> Option<crate::wows_data::SharedWoWsData> {
-        let map = self.tab_state.wows_data_map.as_ref()?.read();
-        let build = self.tab_state.selected_browser_build;
-        map.get(&build).cloned()
+        let map = self.tab_state.wows_data_map.as_ref()?;
+        map.get(self.tab_state.selected_browser_build)
     }
 
     /// Builds the file unpacker tab
@@ -293,27 +293,23 @@ impl ToolkitTabViewer<'_> {
                 // Version selector dropdown (only shown when multiple builds are available)
                 if self.tab_state.available_builds.len() > 1 {
                     if let Some(map) = &self.tab_state.wows_data_map {
-                        let map_guard = map.read();
-                        let mut builds: Vec<u32> = map_guard.keys().copied().collect();
+                        let mut builds: Vec<u32> = map.loaded_builds();
                         builds.sort();
                         builds.reverse();
 
-                        let selected_label = map_guard
-                            .get(&self.tab_state.selected_browser_build)
+                        let selected_label = map
+                            .get(self.tab_state.selected_browser_build)
                             .map(|d| d.read().version_label())
                             .unwrap_or_else(|| format!("{}", self.tab_state.selected_browser_build));
-
-                        drop(map_guard);
 
                         ui.horizontal(|ui| {
                             ui.label("Version:");
                             egui::ComboBox::from_id_salt("browser_version_select")
                                 .selected_text(&selected_label)
                                 .show_ui(ui, |ui| {
-                                    let map_guard = map.read();
                                     for &build in &builds {
-                                        let label = map_guard
-                                            .get(&build)
+                                        let label = map
+                                            .get(build)
                                             .map(|d| d.read().version_label())
                                             .unwrap_or_else(|| format!("{}", build));
                                         if ui
@@ -446,7 +442,7 @@ impl ToolkitTabViewer<'_> {
 
                 strip.cell(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.menu_button(format!("{} Dump GameParams", icons::FLOPPY_DISK), |ui| {
+                        ui.menu_button(icon_str!(icons::FLOPPY_DISK, "Dump GameParams"), |ui| {
                             if ui.small_button("Base As JSON").clicked() {
                                 if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file()
                                 {

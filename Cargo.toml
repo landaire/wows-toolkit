@@ -80,6 +80,7 @@ arboard = "3.6.1"
 egui_taffy = "0.10.0"
 egui-notify = "0.21.0"
 rkyv = "0.8.15"
+const_format = "0.2.35"
 
 [build-dependencies]
 winresource = "0.1.20"

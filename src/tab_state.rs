@@ -314,14 +314,9 @@ impl Default for TabState {
 impl TabState {
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
     pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
-        let wows_data = self.world_of_warships_data.as_ref()?;
         let wows_data_map = self.wows_data_map.as_ref()?;
         Some(ReplayDependencies {
-            game_constants: Arc::clone(&self.game_constants),
-            wows_data: Arc::clone(wows_data),
-            wows_data_map: Arc::clone(wows_data_map),
-            wows_dir: PathBuf::from(&self.settings.wows_dir),
-            locale: self.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
+            wows_data_map: wows_data_map.clone(),
             twitch_state: Arc::clone(&self.twitch_state),
             replay_sort: Arc::clone(&self.replay_sort),
             background_task_sender: self.background_task_sender.clone(),
@@ -479,17 +474,11 @@ impl TabState {
 
             self.background_parser_tx = Some(background_tx.clone());
 
-            if let Some(wows_data) = self.world_of_warships_data.clone() {
+            if let Some(wows_data_map) = self.wows_data_map.clone() {
                 let background_thread_data = BackgroundParserThread {
                     rx: background_rx,
                     sent_replays: Arc::clone(&self.settings.sent_replays),
-                    wows_data,
-                    wows_data_map: self
-                        .wows_data_map
-                        .clone()
-                        .unwrap_or_else(|| Arc::new(RwLock::new(std::collections::HashMap::new()))),
-                    wows_dir: PathBuf::from(&self.settings.wows_dir),
-                    locale: self.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
+                    wows_data_map,
                     twitch_state: Arc::clone(&self.twitch_state),
                     should_send_replays: self.settings.send_replay_data,
                     data_export_settings: DataExportSettings {
@@ -498,7 +487,6 @@ impl TabState {
                         export_format: self.settings.replay_settings.auto_export_format,
                     },
 
-                    constants_file_data: Arc::clone(&self.game_constants),
                     player_tracker: Arc::clone(&self.settings.player_tracker),
                     is_debug: self.settings.debug_mode,
                     parser_lock: Arc::clone(&self.parser_lock),

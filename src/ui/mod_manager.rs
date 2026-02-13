@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::icon_str;
 use crate::icons;
 use egui::CollapsingHeader;
 use egui::ImageSource;
@@ -252,9 +253,9 @@ impl ToolkitTabViewer<'_> {
                                 .send(selected_mod.clone())
                                 .expect("failed to send selected mod on mod_action_sender");
                         }
-                        ui.hyperlink_to(format!("{} Mod Home Page", icons::BROWSER), &selected_mod.meta.repo_url);
+                        ui.hyperlink_to(icon_str!(icons::BROWSER, "Mod Home Page"), &selected_mod.meta.repo_url);
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
-                            ui.hyperlink_to(format!("{} Discord Approval Thread", icons::DISCORD_LOGO), discord_url);
+                            ui.hyperlink_to(icon_str!(icons::DISCORD_LOGO, "Discord Approval Thread"), discord_url);
                         }
                     });
                     CommonMarkViewer::new().show(
@@ -272,8 +273,8 @@ impl ToolkitTabViewer<'_> {
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.button(format!("{} Save Mod Config", icons::FLOPPY_DISK)).clicked();
-                ui.button(format!("{} Load Mod Config", icons::FOLDER)).clicked();
+                ui.button(icon_str!(icons::FLOPPY_DISK, "Save Mod Config")).clicked();
+                ui.button(icon_str!(icons::FOLDER, "Load Mod Config")).clicked();
                 ui.add(egui::TextEdit::singleline(&mut mod_manager_info.filter_text).hint_text("Filter"));
             });
 

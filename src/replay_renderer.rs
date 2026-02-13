@@ -1,3 +1,4 @@
+use crate::icon_str;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -3352,7 +3353,7 @@ impl ReplayRendererViewer {
                                             ui.separator();
                                             if ui
                                                 .button(
-                                                    egui::RichText::new(format!("{} Clear All", icons::TRASH))
+                                                    egui::RichText::new(icon_str!(icons::TRASH, "Clear All"))
                                                         .color(Color32::from_rgb(255, 100, 100)),
                                                 )
                                                 .clicked()

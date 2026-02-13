@@ -1,3 +1,4 @@
+use crate::icon_str;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -176,7 +177,7 @@ impl ToolkitTabViewer<'_> {
             ui.label("Twitch Settings");
             ui.group(|ui| {
                 if ui
-                    .button(format!("{} Get Login Token", icons::BROWSER))
+                    .button(icon_str!(icons::BROWSER, "Get Login Token"))
                     .on_hover_text(
                         "We use Chatterino's login page as it provides a token with the \
                         necessary permissions (basically a moderator token with chat permissions), \
