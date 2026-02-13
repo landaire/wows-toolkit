@@ -30,10 +30,10 @@ use tracing::error;
 use twitch_api::twitch_oauth2::AccessToken;
 use twitch_api::twitch_oauth2::UserToken;
 use wows_replays::ReplayFile;
+use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
-use wowsunpack::game_constants::BattleConstants;
 use wowsunpack::game_params::types::Species;
 use zip::ZipArchive;
 
@@ -510,7 +510,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
     let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
     let ribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/");
     let subribbon_icons = load_ribbon_icons(&file_tree, &pkg_loader, "gui/ribbons/subribbons/");
-    let battle_constants = BattleConstants::load(&file_tree, &pkg_loader);
+    let game_constants = Arc::new(GameConstants::from_pkg(&file_tree, &pkg_loader));
 
     let data = WorldOfWarshipsData {
         game_metadata: metadata_provider.clone(),
@@ -523,7 +523,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
         ribbon_icons,
         subribbon_icons,
         achievement_icons: HashMap::new(),
-        battle_constants: battle_constants.clone(),
+        game_constants: Arc::clone(&game_constants),
         replays_dir: replays_dir.clone(),
         build_dir,
     };
@@ -534,7 +534,7 @@ pub fn load_wows_files(wows_directory: PathBuf, locale: &str) -> Result<Backgrou
             // Filter out any replays that don't parse correctly
             let replay_file = ReplayFile::from_file(&path).ok()?;
             let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
-            replay.battle_constants = Some(battle_constants.clone());
+            replay.game_constants = Some(Arc::clone(&game_constants));
             let replay = Arc::new(RwLock::new(replay));
 
             Some((path, replay))
@@ -740,11 +740,11 @@ fn parse_replay_data_in_background(
                 let cloned = data.wows_data.clone();
                 let wows_data = cloned.read();
 
-                let (metadata_provider, game_version, bc) =
-                    { (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.battle_constants.clone()) };
+                let (metadata_provider, game_version, gc) =
+                    { (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone()) };
                 if let Some(metadata_provider) = metadata_provider {
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
-                    replay.battle_constants = Some(bc);
+                    replay.game_constants = Some(gc);
                     let mut build_uploaded_successfully = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
@@ -1041,12 +1041,12 @@ pub fn start_populating_player_inspector(
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {
                     let wows_data = wows_data.read();
-                    let (metadata_provider, game_version, bc) = {
-                        (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.battle_constants.clone())
+                    let (metadata_provider, game_version, gc) = {
+                        (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
                     };
                     if let Some(metadata_provider) = metadata_provider {
                         let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
-                        replay.battle_constants = Some(bc);
+                        replay.game_constants = Some(gc);
                         match replay.parse(game_version.to_string().as_str()) {
                             Ok(report) => {
                                 replay.battle_report = Some(report);

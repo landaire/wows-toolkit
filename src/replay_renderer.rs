@@ -30,12 +30,12 @@ use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::decoder::Consumable;
+use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
-use wowsunpack::game_constants::BattleConstants;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use egui_taffy::AsTuiBuilder as _;
@@ -550,8 +550,8 @@ fn playback_thread(
     command_rx: mpsc::Receiver<PlaybackCommand>,
     open: Arc<AtomicBool>,
 ) {
-    // 1. Get file tree, pkg loader, game metadata, and battle constants from the app
-    let (file_tree, pkg_loader, game_metadata, battle_constants) = {
+    // 1. Get file tree, pkg loader, game metadata, and game constants from the app
+    let (file_tree, pkg_loader, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -560,7 +560,7 @@ fn playback_thread(
                 return;
             }
         };
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, data.battle_constants.clone())
+        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, Arc::clone(&data.game_constants))
     };
 
     // 2. Load visual assets (cached across renderer instances)
@@ -590,7 +590,7 @@ fn playback_thread(
     };
 
     // 4. Create controller and renderer
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(battle_constants.clone()));
+    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
 
@@ -665,7 +665,7 @@ fn playback_thread(
     // 4. Event extraction pass — second full parse for timeline events
     let timeline_events = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
         .ok()
-        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(battle_constants.clone())))
+        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)))
         .unwrap_or_default();
     shared_state.lock().timeline_events = Some(timeline_events);
 
@@ -696,7 +696,7 @@ fn playback_thread(
         Ok(rf) => rf,
         Err(_) => return,
     };
-    let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(battle_constants.clone()));
+    let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
@@ -769,7 +769,7 @@ fn playback_thread(
             };
             std::mem::swap(&mut live_replay, &mut new_replay);
             // old replay is now in new_replay and will be dropped at end of block
-            live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(battle_constants.clone()));
+            live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, RenderOptions::default());
             parse_to_clock(
                 &live_replay,
@@ -880,6 +880,7 @@ pub(crate) enum TimelineEventKind {
     Death { ship_name: String, is_friendly: bool },
     CapContested { cap_label: String, owner_is_friendly: bool },
     CapFlipped { cap_label: String, capturer_is_friendly: bool },
+    CapBeingCaptured { cap_label: String, capturer_is_friendly: bool },
     RadarUsed { ship_name: String, is_friendly: bool },
 }
 
@@ -896,10 +897,10 @@ fn event_color(is_friendly: bool) -> Color32 {
 fn extract_timeline_events(
     replay_file: &ReplayFile,
     game_metadata: &GameMetadataProvider,
-    battle_constants: Option<BattleConstants>,
+    game_constants: Option<&GameConstants>,
 ) -> Vec<TimelineEvent> {
     let mut events = Vec::new();
-    let mut controller = BattleController::new(&replay_file.meta, game_metadata, battle_constants);
+    let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
 
     // Player info lookups (populated once players are available)
@@ -917,6 +918,7 @@ fn extract_timeline_events(
     // Cap tracking: cap_index → (previous has_invaders, previous team_id)
     let mut cap_prev_contested: HashMap<usize, bool> = HashMap::new();
     let mut cap_prev_team: HashMap<usize, i64> = HashMap::new();
+    let mut cap_prev_invader_team: HashMap<usize, i64> = HashMap::new();
 
     // Radar tracking: entity → number of radar activations seen so far
     let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
@@ -1014,9 +1016,9 @@ fn extract_timeline_events(
                             ((b'A' + cap_idx as u8) as char).to_string()
                         };
 
-                        // Cap contested: has_invaders transitions false → true
+                        // Cap contested: both_inside transitions false → true
                         let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
-                        if cap.has_invaders && !prev_contested {
+                        if cap.both_inside && !prev_contested {
                             events.push(TimelineEvent {
                                 clock,
                                 kind: TimelineEventKind::CapContested {
@@ -1025,7 +1027,21 @@ fn extract_timeline_events(
                                 },
                             });
                         }
-                        cap_prev_contested.insert(cap_idx, cap.has_invaders);
+                        cap_prev_contested.insert(cap_idx, cap.both_inside);
+
+                        // Cap being captured (uncontested): invader_team transitions from
+                        // no-invader (<0) to a valid team (>=0), while not contested
+                        let prev_invader = cap_prev_invader_team.get(&cap_idx).copied().unwrap_or(-1);
+                        if cap.invader_team >= 0 && prev_invader < 0 && !cap.both_inside {
+                            events.push(TimelineEvent {
+                                clock,
+                                kind: TimelineEventKind::CapBeingCaptured {
+                                    cap_label: cap_label.clone(),
+                                    capturer_is_friendly: cap.invader_team == viewer_team,
+                                },
+                            });
+                        }
+                        cap_prev_invader_team.insert(cap_idx, cap.invader_team);
 
                         // Cap flipped: team_id changes
                         if let Some(&prev_team) = cap_prev_team.get(&cap_idx)
@@ -1137,10 +1153,10 @@ fn render_video_blocking(
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
-    let (file_tree, pkg_loader, game_metadata, battle_constants) = {
+    let (file_tree, pkg_loader, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = data.game_metadata.clone().ok_or_else(|| anyhow::anyhow!("Game metadata not loaded"))?;
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, data.battle_constants.clone())
+        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, Arc::clone(&data.game_constants))
     };
 
     // Load assets — reuse cached raw RGBA data and convert to image types
@@ -1181,7 +1197,7 @@ fn render_video_blocking(
     let replay_file = ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec())
         .map_err(|e| anyhow::anyhow!("Failed to parse replay: {:?}", e))?;
 
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(battle_constants));
+    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, options);
     let mut target = ImageTarget::new(map_image_rgb, ship_icons_rgba, plane_icons_rgba, consumable_icons_rgba);
@@ -3632,6 +3648,15 @@ impl ReplayRendererViewer {
                                                                         ui.colored_label(
                                                                             event_color(*capturer_is_friendly),
                                                                             format!("{} captured", cap_label),
+                                                                        );
+                                                                    }
+                                                                    TimelineEventKind::CapBeingCaptured {
+                                                                        cap_label,
+                                                                        capturer_is_friendly,
+                                                                    } => {
+                                                                        ui.colored_label(
+                                                                            event_color(*capturer_is_friendly),
+                                                                            format!("{} being captured", cap_label),
                                                                         );
                                                                     }
                                                                     TimelineEventKind::RadarUsed {

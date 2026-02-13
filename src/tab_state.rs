@@ -333,7 +333,7 @@ impl TabState {
                                 for _ in 0..3 {
                                     if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
                                         let mut replay = Replay::new(replay_file, game_metadata.clone());
-                                        replay.battle_constants = Some(wows_data.battle_constants.clone());
+                                        replay.game_constants = Some(Arc::clone(&wows_data.game_constants));
                                         let replay = Arc::new(RwLock::new(replay));
 
                                         if let Some(replay_files) = &mut self.replay_files {

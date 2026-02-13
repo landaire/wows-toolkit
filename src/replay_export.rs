@@ -491,7 +491,7 @@ impl From<&GameMessage> for Message {
             if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
         Self {
             sender_db_id: value.player.as_ref().expect("no player for message").initial_state().db_id(),
-            channel: value.channel,
+            channel: value.channel.clone(),
             message,
         }
     }

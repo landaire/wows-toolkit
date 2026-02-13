@@ -2134,7 +2134,7 @@ pub struct Replay {
     pub battle_report: Option<BattleReport>,
     pub ui_report: Option<UiReport>,
 
-    pub battle_constants: Option<wowsunpack::game_constants::BattleConstants>,
+    pub game_constants: Option<Arc<wows_replays::game_constants::GameConstants>>,
 }
 
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
@@ -2154,7 +2154,7 @@ fn clan_color_for_player(player: &Player) -> Option<Color32> {
 
 impl Replay {
     pub fn new(replay_file: ReplayFile, resource_loader: Arc<GameMetadataProvider>) -> Self {
-        Replay { replay_file, resource_loader, battle_report: None, ui_report: None, battle_constants: None }
+        Replay { replay_file, resource_loader, battle_report: None, ui_report: None, game_constants: None }
     }
 
     pub fn player_vehicle(&self) -> Option<&VehicleInfoMeta> {
@@ -2239,8 +2239,11 @@ impl Replay {
 
         // Parse packets one at a time
         let packet_data = &self.replay_file.packet_data;
-        let mut controller =
-            BattleController::new(&self.replay_file.meta, self.resource_loader.as_ref(), self.battle_constants.clone());
+        let mut controller = BattleController::new(
+            &self.replay_file.meta,
+            self.resource_loader.as_ref(),
+            self.game_constants.as_deref(),
+        );
         let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
 
         let mut remaining = &packet_data[..];
@@ -2415,6 +2418,7 @@ impl ToolkitTabViewer<'_> {
                 ChatChannel::Division => Color32::GOLD,
                 ChatChannel::Global => Color32::WHITE,
                 ChatChannel::Team => Color32::LIGHT_GREEN,
+                _ => Color32::ORANGE,
             };
 
             job.append(
