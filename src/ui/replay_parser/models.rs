@@ -280,6 +280,7 @@ pub struct PlayerReport {
     pub achievements: Vec<Achievement>,
     pub ribbons: HashMap<String, Ribbon>,
     pub personal_rating: Option<crate::personal_rating::PersonalRatingResult>,
+    pub has_vehicle_entity: bool,
 }
 
 #[allow(dead_code)]

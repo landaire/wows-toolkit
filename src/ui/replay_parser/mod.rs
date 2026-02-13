@@ -245,8 +245,8 @@ impl UiReport {
         let locale = "en-US";
 
         let player_reports = players.iter().filter_map(|player| {
-            // Get the VehicleEntity for this player
-            let vehicle = player.vehicle_entity()?;
+            // Get the VehicleEntity for this player (may be None if they never spawned)
+            let vehicle = player.vehicle_entity();
             let player_state = player.initial_state();
             let mut player_color = player_color_for_team_relation(player.relation());
 
@@ -322,7 +322,7 @@ impl UiReport {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| format!("{}", vehicle_param.id()));
 
-            let observed_damage = vehicle.damage().ceil() as u64;
+            let observed_damage = vehicle.map(|v| v.damage().ceil() as u64).unwrap_or(0);
             let observed_damage_text = separate_number(observed_damage, Some(locale));
 
             // Actual damage done to other players
@@ -557,7 +557,7 @@ impl UiReport {
                     .unwrap_or_default();
 
             let (time_lived, time_lived_text) = vehicle
-                .death_info()
+                .and_then(|v| v.death_info())
                 .map(|death_info| {
                     let secs = death_info.time_lived().as_secs();
                     (Some(secs), Some(format!("{}:{:02}", secs / 60, secs % 60)))
@@ -566,7 +566,7 @@ impl UiReport {
 
             let species = vehicle_param.species().expect("ship has no species?");
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
-                .commander_skills(species.clone())
+                .and_then(|v| v.commander_skills(species.clone()))
                 .map(|skills| {
                     let points = skills
                         .iter()
@@ -588,7 +588,7 @@ impl UiReport {
                 num_skills,
                 highest_tier,
                 num_tier_1_skills,
-                vehicle.commander_skills(species.clone()),
+                vehicle.and_then(|v| v.commander_skills(species.clone())),
             );
 
             let skill_info =
@@ -641,7 +641,7 @@ impl UiReport {
             let distance_traveled = player_results.and_then(|pr| pr.get("distance")?.as_f64());
 
             let kills = player_results.and_then(|pr| pr.get("ships_killed")?.as_i64());
-            let observed_kills = vehicle.frags().len() as i64;
+            let observed_kills = vehicle.map(|v| v.frags().len() as i64).unwrap_or(0);
 
             let is_test_ship = vehicle_param
                 .data()
@@ -809,6 +809,7 @@ impl UiReport {
                 achievements,
                 ribbons,
                 personal_rating: None,
+                has_vehicle_entity: vehicle.is_some(),
             };
 
             Some(report)
@@ -1422,6 +1423,9 @@ impl UiReport {
                     ReplayColumn::Skills => {
                         if report.relation().is_enemy() && !self.debug_mode {
                             ui.label("-");
+                        } else if !report.has_vehicle_entity {
+                            ui.label(RichText::new(format!("{} -", icons::EXCLAMATION_MARK)).color(Color32::LIGHT_RED))
+                                .on_hover_text("This ship was never spotted. Build info unavailable.");
                         } else {
                             let response = ui.label(report.skill_info.label_text.clone());
                             if let Some(hover_text) = &report.skill_info.hover_text {
@@ -1439,7 +1443,7 @@ impl UiReport {
                     }
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
-                            if !report.relation().is_enemy() || self.debug_mode {
+                            if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
                                 if ui.small_button(format!("{} Open Build in Browser", icons::SHARE)).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
