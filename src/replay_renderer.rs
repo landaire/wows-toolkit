@@ -760,6 +760,10 @@ fn playback_thread(
                     if packet.clock.seconds() > target_clock + frame_duration {
                         break;
                     }
+                    // Stop if clock resets to 0 after game started — those are post-game packets
+                    if prev_clock.seconds() > 0.0 && packet.clock.seconds() == 0.0 {
+                        break;
+                    }
                     if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                         renderer.populate_players(controller);
                         renderer.update_squadron_info(controller);
