@@ -30,7 +30,7 @@ jobs:
 
       - name: Create zip archive
         run: |
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","README.md" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
