@@ -3633,7 +3633,7 @@ impl ReplayRendererViewer {
                 .with_inner_size([800.0, 900.0])
                 .with_min_inner_size([400.0, 450.0]),
             move |ctx, _class| {
-                if !window_open.load(Ordering::Relaxed) {
+                if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
                     return;
                 }
 

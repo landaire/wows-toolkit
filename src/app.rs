@@ -718,6 +718,10 @@ impl WowsToolkitApp {
     }
 
     fn update_impl(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if mitigate_wgpu_mem_leak(ctx) {
+            return;
+        }
+
         if ctx
             .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D)))
         {
@@ -1214,4 +1218,17 @@ fn build_error_window(ui: &mut egui::Ui, error: &str) {
         ui.label(icon_str!(icons::WARNING, "An error occurred:"));
         ui.label(error);
     });
+}
+
+/// Helper function to mitigate https://github.com/emilk/egui/issues/7434.
+///
+/// If this returns true, the app should early return in the `update()` function
+/// or call `wgpu::Device::poll()`
+pub fn mitigate_wgpu_mem_leak(ctx: &egui::Context) -> bool {
+    let mut is_minimized = false;
+    ctx.input(|reader| {
+        is_minimized = reader.viewport().minimized.unwrap_or_default();
+    });
+
+    is_minimized
 }
