@@ -404,7 +404,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_trails: saved.show_trails,
         show_dead_trails: saved.show_dead_trails,
         show_speed_trails: saved.show_speed_trails,
-        show_ship_config: true, // always emit; UI-side per-ship filtering
+        show_ship_config: saved.show_ship_config,
         show_dead_ship_names: saved.show_dead_ship_names,
         show_battle_result: saved.show_battle_result,
         show_buffs: saved.show_buffs,
@@ -435,6 +435,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_speed_trails: opts.show_speed_trails,
         show_battle_result: opts.show_battle_result,
         show_buffs: opts.show_buffs,
+        show_ship_config: opts.show_ship_config,
     }
 }
 
@@ -1578,7 +1579,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
         DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
         DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,
-        DrawCommand::ShipConfigCircle { .. } => true, // per-kind filtering done in drawing loop
+        DrawCommand::ShipConfigCircle { .. } => opts.show_ship_config,
         DrawCommand::BuffZone { .. } => opts.show_capture_points,
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
@@ -2251,7 +2252,7 @@ fn draw_command_to_shapes(
             let canvas_w = transform.screen_canvas_width();
             let name_font = FontId::proportional(10.0 * ws);
             let line_h = 18.0 * ws;
-            let icon_size = transform.scale_distance(14.0);
+            let icon_size = 14.0 * ws;
             let cause_icon_size = icon_size;
             let gap = 2.0 * ws;
             let right_margin = 4.0 * ws;
@@ -2512,7 +2513,7 @@ fn draw_command_to_shapes(
             // or below the ship icon if no HP bar (10 + 11 half-icon + 2 gap = 23)
             let base_offset = if *has_hp_bar { 26.0 } else { 23.0 };
             let icon_y = center.y + transform.scale_distance(base_offset);
-            let icon_size = transform.scale_distance(22.0);
+            let icon_size = transform.scale_distance(16.0);
             let gap = transform.scale_distance(1.0);
             let count = icon_keys.len() as f32;
             let total_width = count * icon_size + (count - 1.0) * gap;
@@ -3005,7 +3006,7 @@ impl ReplayRendererViewer {
                             drop(ann);
 
                             if !scroll_used_by_tool {
-                                let zoom_speed = 0.002;
+                                let zoom_speed = 0.01;
                                 let old_zoom = zp.zoom;
                                 let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
 
@@ -3730,7 +3731,7 @@ impl ReplayRendererViewer {
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().rev().find(|e| e.clock < clock_secs - 0.5) {
+                                    if let Some(event) = events.iter().rev().find(|e| e.clock < clock_secs) {
                                         let seek_clock = event.clock;
                                         let desc = format_timeline_event(event);
                                         drop(state);
@@ -3742,7 +3743,7 @@ impl ReplayRendererViewer {
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().find(|e| e.clock > clock_secs + 0.5) {
+                                    if let Some(event) = events.iter().find(|e| e.clock > clock_secs) {
                                         let seek_clock = event.clock;
                                         let desc = format_timeline_event(event);
                                         drop(state);
@@ -4007,6 +4008,16 @@ impl ReplayRendererViewer {
                                             range_changed |= ui.checkbox(&mut flags[2], "Secondary").changed();
                                             range_changed |= ui.checkbox(&mut flags[3], "Radar").changed();
                                             range_changed |= ui.checkbox(&mut flags[4], "Hydro").changed();
+                                            let all_on = flags == [true; 5];
+                                            if !all_on && ui.button("Enable All").clicked() {
+                                                flags = [true; 5];
+                                                range_changed = true;
+                                                // Also ensure global ship config is on
+                                                let mut state = shared_state.lock();
+                                                if !state.options.show_ship_config {
+                                                    state.options.show_ship_config = true;
+                                                }
+                                            }
                                             if range_changed {
                                                 if flags == [false; 5] {
                                                     ann.ship_range_overrides.remove(ship_name);
@@ -4273,17 +4284,28 @@ impl ReplayRendererViewer {
                                         .reserve_available_width()
                                         .style(row_style)
                                         .show(|tui| {
+                                            // Jump to start
+                                            {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::SKIP_BACK));
+                                                if btn.on_hover_text("Jump to start").clicked() {
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(0.0));
+                                                }
+                                            }
+
                                             // Skip to previous event
                                             if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::SKIP_BACK));
+                                                    .ui_add(egui::Button::new(icons::REWIND));
                                                 if btn.on_hover_text("Previous event (Shift+Left)").clicked() {
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events {
                                                         if let Some(event) =
-                                                            events.iter().rev().find(|e| e.clock < clock_secs - 0.5)
+                                                            events.iter().rev().find(|e| e.clock < clock_secs)
                                                         {
                                                             let seek_clock = event.clock;
                                                             let desc = format_timeline_event(event);
@@ -4347,12 +4369,12 @@ impl ReplayRendererViewer {
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new(icons::SKIP_FORWARD));
+                                                    .ui_add(egui::Button::new(icons::FAST_FORWARD));
                                                 if btn.on_hover_text("Next event (Shift+Right)").clicked() {
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events {
                                                         if let Some(event) =
-                                                            events.iter().find(|e| e.clock > clock_secs + 0.5)
+                                                            events.iter().find(|e| e.clock > clock_secs)
                                                         {
                                                             let seek_clock = event.clock;
                                                             let desc = format_timeline_event(event);
@@ -4361,6 +4383,17 @@ impl ReplayRendererViewer {
                                                             toasts.lock().info(desc);
                                                         }
                                                     }
+                                                }
+                                            }
+
+                                            // Jump to end
+                                            if let Some((_fi, _tf, _clock_secs, game_dur)) = frame_data {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::SKIP_FORWARD));
+                                                if btn.on_hover_text("Jump to end").clicked() {
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(game_dur));
                                                 }
                                             }
 
@@ -4546,6 +4579,8 @@ impl ReplayRendererViewer {
                                                 changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
+                                                changed |=
+                                                    ui.checkbox(&mut opts.show_ship_config, "Ship Ranges").changed();
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
                                                 changed |= ui

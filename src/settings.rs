@@ -139,6 +139,8 @@ pub struct SavedRenderOptions {
     pub show_battle_result: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_buffs: bool,
+    #[serde(default)]
+    pub show_ship_config: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -166,6 +168,7 @@ impl Default for SavedRenderOptions {
             show_speed_trails: false,
             show_battle_result: true,
             show_buffs: true,
+            show_ship_config: false,
         }
     }
 }
