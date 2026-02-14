@@ -149,6 +149,10 @@ pub struct WowsToolkitApp {
     /// Last time we checked for a constants update (throttled to 30 min).
     #[serde(skip)]
     last_constants_update_check: Option<Instant>,
+    /// Whether we've already shown a network error for constants updates
+    /// (to avoid spamming the user on repeated failures).
+    #[serde(skip)]
+    constants_update_error_shown: bool,
 }
 
 impl Default for WowsToolkitApp {
@@ -167,6 +171,7 @@ impl Default for WowsToolkitApp {
             error_to_show: None,
             constants_version_mismatch: false,
             last_constants_update_check: None,
+            constants_update_error_shown: false,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
         }
     }
@@ -1063,32 +1068,93 @@ impl WowsToolkitApp {
         }
         self.last_constants_update_check = Some(now);
 
-        let _ = self.fetch_and_update_constants();
+        if let Err(err) = self.fetch_and_update_constants() {
+            tracing::warn!("try_update_constants failed: {:?}", err);
+            if !self.constants_update_error_shown {
+                self.constants_update_error_shown = true;
+                self.tab_state
+                    .toasts
+                    .lock()
+                    .error("Failed to fetch updated replay data mapping. Will retry later.")
+                    .duration(None);
+            }
+        }
     }
 
     fn check_constants_version_mismatch(&mut self) {
-        let constants = self.tab_state.game_constants.read();
-        let Some(wows_data) = &self.tab_state.world_of_warships_data else { return };
-        let wows_data = wows_data.read();
-        let Some(full_version) = &wows_data.full_version else { return };
+        // Determine mismatch status under locks, then drop them before acting
+        let mismatch_status = {
+            let constants = self.tab_state.game_constants.read();
+            let Some(wows_data) = &self.tab_state.world_of_warships_data else { return };
+            let wows_data = wows_data.read();
+            let Some(full_version) = &wows_data.full_version else { return };
 
-        let constants_version = constants.get("VERSION").and_then(|v| v.get("VERSION")).and_then(|v| v.as_str());
+            let constants_version = constants.get("VERSION").and_then(|v| v.get("VERSION")).and_then(|v| v.as_str());
+            let Some(constants_version) = constants_version else { return };
+            let game_version = format!("{}.{}", full_version.major, full_version.minor);
 
-        let Some(constants_version) = constants_version else { return };
-        let game_version = format!("{}.{}", full_version.major, full_version.minor);
+            if constants_version != game_version {
+                Some(true) // mismatch
+            } else if self.constants_version_mismatch {
+                Some(false) // mismatch just resolved
+            } else {
+                None // no change
+            }
+        };
 
-        if constants_version != game_version {
-            self.constants_version_mismatch = true;
-            self.tab_state.toasts.lock()
-                .warning(format!(
-                    "Replay data mapping file version ({}) does not match game version ({}).\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
-                    constants_version, game_version
-                ))
-                .duration(None);
-        } else if self.constants_version_mismatch {
-            self.constants_version_mismatch = false;
-            self.tab_state.toasts.lock().dismiss_all_toasts();
-            self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");
+        match mismatch_status {
+            Some(true) => {
+                self.constants_version_mismatch = true;
+                self.tab_state.toasts.lock()
+                    .warning(format!(
+                        "Replay data mapping file version does not match game version.\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
+                    ))
+                    .duration(None);
+            }
+            Some(false) => {
+                self.constants_version_mismatch = false;
+                self.tab_state.toasts.lock().dismiss_all_toasts();
+
+                // Rebuild all loaded WorldOfWarshipsData with fresh constants
+                let rebuild_ok = self
+                    .tab_state
+                    .wows_data_map
+                    .as_ref()
+                    .map(|map| map.rebuild_all_with_new_constants())
+                    .unwrap_or(true);
+
+                if rebuild_ok {
+                    self.constants_update_error_shown = false;
+
+                    // Invalidate ui_report on all loaded replays so they re-build
+                    // with the new constants on next access
+                    if let Some(replay_files) = &self.tab_state.replay_files {
+                        for replay in replay_files.values() {
+                            replay.write().ui_report = None;
+                        }
+                    }
+                    if let Some(current) = &self.tab_state.current_replay {
+                        current.write().ui_report = None;
+                    }
+
+                    // Re-load the current replay to rebuild its ui_report
+                    if let Some(current) = self.tab_state.current_replay.clone() {
+                        if let Some(deps) = self.tab_state.replay_dependencies() {
+                            update_background_task!(self.tab_state.background_tasks, deps.load_replay(current, true));
+                        }
+                    }
+
+                    self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");
+                } else if !self.constants_update_error_shown {
+                    self.constants_update_error_shown = true;
+                    self.tab_state
+                        .toasts
+                        .lock()
+                        .error("Failed to fetch versioned constants during rebuild. Will retry later.")
+                        .duration(None);
+                }
+            }
+            None => {}
         }
     }
 

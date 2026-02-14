@@ -344,7 +344,7 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     }
 }
 
-fn load_ribbon_icons(
+pub fn load_ribbon_icons(
     file_tree: &FileNode,
     pkg_loader: &PkgFileLoader,
     dir_path: &str,
@@ -381,7 +381,7 @@ fn load_ribbon_icons(
     icons
 }
 
-fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<GameAsset>> {
+pub fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<GameAsset>> {
     // Try loading ship icons
     let species = [
         Species::AirCarrier,
@@ -413,6 +413,35 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     let version_str = &data[start_of_node + "<last_server_version>".len()..(start_of_node + end_of_node)].trim();
 
     Some(version_str.to_string())
+}
+
+/// Build `GameConstants` from pkg files and merge in replay constants (CONSUMABLE_IDS, BATTLE_STAGES).
+pub fn build_game_constants(
+    file_tree: &FileNode,
+    pkg_loader: &PkgFileLoader,
+    replay_constants: &serde_json::Value,
+    build: u32,
+) -> GameConstants {
+    let mut game_constants = GameConstants::from_pkg(file_tree, pkg_loader);
+    if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
+        let types = game_constants.common_mut().consumable_types_mut();
+        for (key, value) in consumable_ids {
+            let id = value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32;
+            types.insert(id, Cow::Owned(key.clone()));
+        }
+    }
+    if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
+        let stages = game_constants.common_mut().battle_stages_mut();
+        let version = Version { major: 0, minor: 0, patch: 0, build };
+        for (key, value) in battle_stages {
+            if let Some(id) = value.as_i64() {
+                if let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known() {
+                    stages.insert(id as i32, stage);
+                }
+            }
+        }
+    }
+    game_constants
 }
 
 /// Load game resources for a specific build number. This can be called for any build
@@ -483,27 +512,7 @@ pub fn load_wows_data_for_build(
         None => (fallback_constants.clone(), false),
     };
 
-    let mut game_constants = GameConstants::from_pkg(&file_tree, &pkg_loader);
-    if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
-        let types = game_constants.common_mut().consumable_types_mut();
-        for (key, value) in consumable_ids {
-            let id = value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32;
-            types.insert(id, Cow::Owned(key.clone()));
-        }
-    }
-
-    if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
-        let stages = game_constants.common_mut().battle_stages_mut();
-        let version = wowsunpack::data::Version { major: 0, minor: 0, patch: 0, build };
-        for (key, value) in battle_stages {
-            if let Some(id) = value.as_i64() {
-                if let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known() {
-                    stages.insert(id as i32, stage);
-                }
-            }
-        }
-    }
-
+    let game_constants = build_game_constants(&file_tree, &pkg_loader, &replay_constants, build);
     let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds

@@ -72,6 +72,20 @@ impl WoWsDataMap {
         f(&self.builds.read())
     }
 
+    /// Rebuild all loaded builds' data after constants have changed.
+    /// Returns `true` if all builds rebuilt successfully, `false` if any failed.
+    pub fn rebuild_all_with_new_constants(&self) -> bool {
+        let builds = self.builds.read();
+        let mut all_ok = true;
+        for (build, data) in builds.iter() {
+            debug!("Rebuilding data for build {}", build);
+            if !data.write().rebuild_with_new_constants() {
+                all_ok = false;
+            }
+        }
+        all_ok
+    }
+
     /// Resolve the correct game data for a replay's version.
     /// Checks the map first, then tries to lazy-load from disk.
     /// Returns None if the version's build data is unavailable.
@@ -182,6 +196,55 @@ impl WorldOfWarshipsData {
     /// Returns a display-friendly version string (e.g., "15.0.0" or "build 11791718").
     pub fn version_label(&self) -> String {
         if let Some(v) = &self.full_version { v.to_path() } else { format!("build {}", self.build_number) }
+    }
+
+    /// Rebuild this data from scratch after constants have changed.
+    /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
+    /// full_version, patch_version, build_number.
+    /// Regenerates everything else (icons, game_constants, replay_constants, etc.).
+    /// Returns `false` if versioned constants could not be fetched (network/disk failure).
+    pub fn rebuild_with_new_constants(&mut self) -> bool {
+        use crate::task::{build_game_constants, fetch_versioned_constants_with_fallback};
+
+        debug!("Rebuilding WorldOfWarshipsData for build {}", self.build_number);
+
+        // Reload version-matched replay constants
+        let (new_replay_constants, exact_match) = match fetch_versioned_constants_with_fallback(self.build_number) {
+            Some((data, exact)) => (data, exact),
+            None => {
+                warn!("Failed to fetch versioned constants for build {} during rebuild", self.build_number);
+                return false;
+            }
+        };
+
+        // Rebuild game constants from pkg files + new replay constants
+        let new_game_constants =
+            build_game_constants(&self.file_tree, &self.pkg_loader, &new_replay_constants, self.build_number);
+
+        // Reload all icons from game files
+        let new_ship_icons = crate::task::load_ship_icons(self.file_tree.clone(), &self.pkg_loader);
+        let new_ribbon_icons = crate::task::load_ribbon_icons(
+            &self.file_tree,
+            &self.pkg_loader,
+            wowsunpack::game_params::translations::RIBBON_ICONS_DIR,
+        );
+        let new_subribbon_icons = crate::task::load_ribbon_icons(
+            &self.file_tree,
+            &self.pkg_loader,
+            wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR,
+        );
+
+        // Apply all regenerated fields
+        self.ship_icons = new_ship_icons;
+        self.ribbon_icons = new_ribbon_icons;
+        self.subribbon_icons = new_subribbon_icons;
+        self.achievement_icons = HashMap::new();
+        self.game_constants = Arc::new(new_game_constants);
+        *self.replay_constants.write() = new_replay_constants;
+        self.replay_constants_exact_match = exact_match;
+
+        debug!("Rebuild complete for build {}", self.build_number);
+        true
     }
 }
 
