@@ -2900,6 +2900,10 @@ impl ReplayRendererViewer {
             }
         }
 
+        if !self.open.load(Ordering::Relaxed) {
+            return;
+        }
+
         let shared_state = self.shared_state.clone();
         let command_tx = self.command_tx.clone();
         let window_open = self.open.clone();
@@ -3235,6 +3239,19 @@ impl ReplayRendererViewer {
                         };
                         let state = shared_state.lock();
                         if let Some(ref frame) = state.frame {
+                            // Collect alive ship names for filtering config circles
+                            let alive_ships: HashSet<&str> = frame
+                                .commands
+                                .iter()
+                                .filter_map(|cmd| {
+                                    if let DrawCommand::Ship { player_name: Some(name), .. } = cmd {
+                                        Some(name.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+
                             // Separate HUD and map commands so HUD draws on unclipped painter
                             for cmd in &frame.commands {
                                 if !should_draw_command(cmd, &options, show_dead_ships) {
@@ -3248,8 +3265,11 @@ impl ReplayRendererViewer {
                                         }
                                     }
                                 }
-                                // Apply per-ship config circle filter (only show if explicitly enabled via right-click)
+                                // Apply per-ship config circle filter (only show if explicitly enabled via right-click, never for dead ships)
                                 if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = cmd {
+                                    if !alive_ships.contains(player_name.as_str()) {
+                                        continue;
+                                    }
                                     let enabled = if let Some(overrides) = ship_range_overrides.get(player_name) {
                                         let kind_idx = match kind {
                                             ShipConfigCircleKind::Detection => 0,
@@ -3969,6 +3989,25 @@ impl ReplayRendererViewer {
                                                     }
                                                 } else {
                                                     ann.trail_hidden_ships.insert(ship_name.clone());
+                                                    // If all trails are now hidden, turn off global
+                                                    let state = shared_state.lock();
+                                                    if let Some(ref frame) = state.frame {
+                                                        let all_hidden = frame.commands.iter().all(|cmd| {
+                                                            if let DrawCommand::PositionTrail {
+                                                                player_name: Some(name),
+                                                                ..
+                                                            } = cmd
+                                                            {
+                                                                ann.trail_hidden_ships.contains(name)
+                                                            } else {
+                                                                true
+                                                            }
+                                                        });
+                                                        if all_hidden && state.options.show_trails {
+                                                            drop(state);
+                                                            shared_state.lock().options.show_trails = false;
+                                                        }
+                                                    }
                                                 }
                                                 ctx.request_repaint();
                                             }
@@ -4008,15 +4047,14 @@ impl ReplayRendererViewer {
                                             range_changed |= ui.checkbox(&mut flags[2], "Secondary").changed();
                                             range_changed |= ui.checkbox(&mut flags[3], "Radar").changed();
                                             range_changed |= ui.checkbox(&mut flags[4], "Hydro").changed();
+                                            let any_on = flags.iter().any(|&f| f);
                                             let all_on = flags == [true; 5];
                                             if !all_on && ui.button("Enable All").clicked() {
                                                 flags = [true; 5];
                                                 range_changed = true;
-                                                // Also ensure global ship config is on
-                                                let mut state = shared_state.lock();
-                                                if !state.options.show_ship_config {
-                                                    state.options.show_ship_config = true;
-                                                }
+                                            } else if all_on && ui.button("Disable All").clicked() {
+                                                flags = [false; 5];
+                                                range_changed = true;
                                             }
                                             if range_changed {
                                                 if flags == [false; 5] {
@@ -4024,6 +4062,59 @@ impl ReplayRendererViewer {
                                                 } else {
                                                     ann.ship_range_overrides.insert(ship_name.clone(), flags);
                                                 }
+                                                // Auto-enable global when turning on any range
+                                                if flags.iter().any(|&f| f) {
+                                                    let mut state = shared_state.lock();
+                                                    if !state.options.show_ship_config {
+                                                        state.options.show_ship_config = true;
+                                                    }
+                                                }
+                                                // Auto-disable global when no ship has any range enabled
+                                                if ann.ship_range_overrides.is_empty() {
+                                                    let mut state = shared_state.lock();
+                                                    if state.options.show_ship_config {
+                                                        state.options.show_ship_config = false;
+                                                    }
+                                                }
+                                                ctx.request_repaint();
+                                            }
+
+                                            // Disable all other ships' ranges
+                                            if any_on && ui.button("Disable All Other Ranges").clicked() {
+                                                let keys: Vec<String> = ann
+                                                    .ship_range_overrides
+                                                    .keys()
+                                                    .filter(|k| k.as_str() != ship_name)
+                                                    .cloned()
+                                                    .collect();
+                                                for k in keys {
+                                                    ann.ship_range_overrides.remove(&k);
+                                                }
+                                                ann.show_context_menu = false;
+                                                ctx.request_repaint();
+                                            }
+
+                                            // Enable ranges for all alive ships
+                                            if ui.button("Enable All Ships' Ranges").clicked() {
+                                                let state = shared_state.lock();
+                                                if let Some(ref frame) = state.frame {
+                                                    for cmd in &frame.commands {
+                                                        if let DrawCommand::Ship { player_name: Some(name), .. } = cmd {
+                                                            ann.ship_range_overrides
+                                                                .entry(name.clone())
+                                                                .or_insert([true; 5]);
+                                                            // Set all flags to true for ships that already have entries
+                                                            if let Some(f) = ann.ship_range_overrides.get_mut(name) {
+                                                                *f = [true; 5];
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if !state.options.show_ship_config {
+                                                    drop(state);
+                                                    shared_state.lock().options.show_ship_config = true;
+                                                }
+                                                ann.show_context_menu = false;
                                                 ctx.request_repaint();
                                             }
                                         }
@@ -4754,6 +4845,7 @@ impl ReplayRendererViewer {
                 if ctx.input(|i| i.viewport().close_requested()) {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
+                    ctx.request_repaint();
                 } else if playing {
                     ctx.request_repaint();
                 }
