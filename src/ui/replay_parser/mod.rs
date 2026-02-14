@@ -2624,6 +2624,10 @@ impl ToolkitTabViewer<'_> {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
                     let pkt_data = replay_file.replay_file.packet_data.clone();
                     let map_name = replay_file.replay_file.meta.mapName.clone();
+                    let replay_name = self.tab_state.settings.current_replay_path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "replay".to_owned());
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
@@ -2641,6 +2645,7 @@ impl ToolkitTabViewer<'_> {
                         raw_meta,
                         pkt_data,
                         map_name,
+                        replay_name,
                         game_duration,
                         wows_data,
                         asset_cache,
@@ -4048,6 +4053,15 @@ impl ToolkitTabViewer<'_> {
             let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
             let pkt_data = guard.replay_file.packet_data.clone();
             let map_name = guard.replay_file.meta.mapName.clone();
+            let replay_name = self
+                .tab_state
+                .settings
+                .current_replay_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| {
+                    format!("{} - {}", guard.replay_file.meta.playerName, guard.replay_file.meta.mapName)
+                });
             let game_duration = guard.replay_file.meta.duration as f32;
             let replay_version =
                 wowsunpack::data::Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
@@ -4063,6 +4077,7 @@ impl ToolkitTabViewer<'_> {
                 raw_meta,
                 pkt_data,
                 map_name,
+                replay_name,
                 game_duration,
                 wows_data,
                 asset_cache,

@@ -55,6 +55,7 @@ use crate::wows_data::SharedWoWsData;
 const TOTAL_FRAMES: usize = 1800;
 const FPS: f64 = 30.0;
 const ICON_SIZE: f32 = assets::ICON_SIZE as f32;
+const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 
 // ─── Zoom/Pan State ─────────────────────────────────────────────────────────
 
@@ -528,6 +529,7 @@ struct VideoExportData {
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
     map_name: String,
+    replay_name: String,
     game_duration: f32,
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -545,6 +547,7 @@ pub fn launch_replay_renderer(
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
     map_name: String,
+    replay_name: String,
     game_duration: f32,
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -557,7 +560,7 @@ pub fn launch_replay_renderer(
         frame: None,
         assets: None,
         playing: false,
-        speed: 1.0,
+        speed: 20.0,
         options: initial_options,
         show_dead_ships: saved_options.show_dead_ships,
         viewport_ctx: None,
@@ -568,6 +571,7 @@ pub fn launch_replay_renderer(
         raw_meta: raw_meta.clone(),
         packet_data: packet_data.clone(),
         map_name: map_name.clone(),
+        replay_name,
         game_duration,
         wows_data: wows_data.clone(),
         asset_cache: Arc::clone(&asset_cache),
@@ -762,7 +766,7 @@ fn playback_thread(
     // renderer options and call draw_frame() again — no re-parsing needed.
     let mut current_frame: usize = 0;
     let mut playing = false;
-    let mut speed: f32 = 1.0;
+    let mut speed: f32 = 20.0;
     let mut last_advance = std::time::Instant::now();
 
     // Rebuild live state at frame 0 — drop the initial-parse objects first
@@ -918,7 +922,8 @@ fn playback_thread(
         if playing && actual_total_frames > 0 {
             let now = std::time::Instant::now();
             let dt = now.duration_since(last_advance).as_secs_f32();
-            let frames_to_advance = dt * FPS as f32 * speed;
+            let base_fps = actual_total_frames as f32 / actual_game_duration.max(1.0);
+            let frames_to_advance = dt * base_fps * speed;
 
             if frames_to_advance >= 1.0 {
                 current_frame = (current_frame + frames_to_advance as usize).min(actual_total_frames - 1);
@@ -1004,6 +1009,23 @@ pub(crate) struct TimelineEvent {
 
 fn event_color(is_friendly: bool) -> Color32 {
     if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
+}
+
+fn format_timeline_event(event: &TimelineEvent) -> String {
+    let mins = event.clock as u32 / 60;
+    let secs = event.clock as u32 % 60;
+    let time = format!("{:02}:{:02}", mins, secs);
+    let desc = match &event.kind {
+        TimelineEventKind::HealthLost { ship_name, percent_lost, .. } => {
+            format!("{} -{}% HP", ship_name, (percent_lost * 100.0) as u32)
+        }
+        TimelineEventKind::Death { ship_name, .. } => format!("{} destroyed", ship_name),
+        TimelineEventKind::CapContested { cap_label, .. } => format!("{} contested", cap_label),
+        TimelineEventKind::CapFlipped { cap_label, .. } => format!("{} captured", cap_label),
+        TimelineEventKind::CapBeingCaptured { cap_label, .. } => format!("{} being captured", cap_label),
+        TimelineEventKind::RadarUsed { ship_name, .. } => format!("{} used radar", ship_name),
+    };
+    format!("[{}] {}", time, desc)
 }
 
 /// Parse the entire replay and extract significant game events for the timeline.
@@ -1241,6 +1263,61 @@ fn save_as_video(
         match result {
             Ok(()) => {
                 toasts.lock().success(format!("Video saved to {}", output_path));
+            }
+            Err(e) => {
+                toasts.lock().error(format!("Video export failed: {}", e));
+            }
+        }
+        video_exporting.store(false, Ordering::Relaxed);
+    });
+}
+
+/// Spawn a background thread that renders the replay to a temporary MP4 file,
+/// then copies it to the clipboard.
+fn render_video_to_clipboard(
+    file_name: String,
+    export_data: Arc<VideoExportData>,
+    options: RenderOptions,
+    toasts: crate::tab_state::SharedToasts,
+    video_exporting: Arc<AtomicBool>,
+) {
+    video_exporting.store(true, Ordering::Relaxed);
+    toasts.lock().info("Rendering video to clipboard...");
+
+    std::thread::spawn(move || {
+        let temp_dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                toasts.lock().error(format!("Failed to create temp dir: {}", e));
+                video_exporting.store(false, Ordering::Relaxed);
+                return;
+            }
+        };
+        let output_path = temp_dir.path().join(&file_name);
+        let output_str = output_path.to_string_lossy().to_string();
+
+        let result = render_video_blocking(
+            &output_str,
+            &export_data.raw_meta,
+            &export_data.packet_data,
+            &export_data.map_name,
+            export_data.game_duration,
+            options,
+            &export_data.wows_data,
+            &export_data.asset_cache,
+        );
+
+        match result {
+            Ok(()) => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set().file_list(&[output_path]);
+                    // Leak the tempdir so the file persists until the OS cleans it up
+                    // or the process exits — clipboard consumers need the file to exist.
+                    std::mem::forget(temp_dir);
+                    toasts.lock().success("Video copied to clipboard");
+                } else {
+                    toasts.lock().error("Failed to open clipboard");
+                }
             }
             Err(e) => {
                 toasts.lock().error(format!("Video export failed: {}", e));
@@ -3512,6 +3589,79 @@ impl ReplayRendererViewer {
                         }
                     }
 
+                    // ─── Playback keyboard shortcuts ──────────────────────────────
+                    {
+                        // Space: toggle play/pause
+                        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+                            if playing {
+                                let _ = command_tx.send(PlaybackCommand::Pause);
+                                shared_state.lock().playing = false;
+                            } else {
+                                let _ = command_tx.send(PlaybackCommand::Play);
+                                shared_state.lock().playing = true;
+                            }
+                        }
+
+                        // Up/Down arrows: change playback speed
+                        {
+                            if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                                let current = shared_state.lock().speed;
+                                if let Some(&next) = PLAYBACK_SPEEDS.iter().find(|&&s| s > current + 0.1) {
+                                    let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
+                                    shared_state.lock().speed = next;
+                                    toasts.lock().info(format!("{:.0}x", next));
+                                }
+                            }
+                            if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                                let current = shared_state.lock().speed;
+                                if let Some(&next) = PLAYBACK_SPEEDS.iter().rev().find(|&&s| s < current - 0.1) {
+                                    let _ = command_tx.send(PlaybackCommand::SetSpeed(next));
+                                    shared_state.lock().speed = next;
+                                    toasts.lock().info(format!("{:.0}x", next));
+                                }
+                            }
+                        }
+
+                        if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data {
+                            // Left/Right arrows: seek +/-10 seconds
+                            let shift = ctx.input(|i| i.modifiers.shift);
+                            if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                                let target = (clock_secs - 10.0).max(0.0);
+                                let _ = command_tx.send(PlaybackCommand::Seek(target));
+                            }
+                            if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                                let target = (clock_secs + 10.0).min(game_dur);
+                                let _ = command_tx.send(PlaybackCommand::Seek(target));
+                            }
+
+                            // Shift+Left/Right: skip to prev/next timeline event
+                            if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                                let state = shared_state.lock();
+                                if let Some(ref events) = state.timeline_events {
+                                    if let Some(event) = events.iter().rev().find(|e| e.clock < clock_secs - 0.5) {
+                                        let seek_clock = event.clock;
+                                        let desc = format_timeline_event(event);
+                                        drop(state);
+                                        let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                        toasts.lock().info(desc);
+                                    }
+                                }
+                            }
+                            if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                                let state = shared_state.lock();
+                                if let Some(ref events) = state.timeline_events {
+                                    if let Some(event) = events.iter().find(|e| e.clock > clock_secs + 0.5) {
+                                        let seek_clock = event.clock;
+                                        let desc = format_timeline_event(event);
+                                        drop(state);
+                                        let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                        toasts.lock().info(desc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // ─── Context menu (egui::Area at cursor) ─────────────────────
                     {
                         let show_menu = annotation_arc.lock().show_context_menu;
@@ -4031,12 +4181,47 @@ impl ReplayRendererViewer {
                                         .reserve_available_width()
                                         .style(row_style)
                                         .show(|tui| {
+                                            // Skip to previous event
+                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::SKIP_BACK));
+                                                if btn.on_hover_text("Previous event (Shift+Left)").clicked() {
+                                                    let state = shared_state.lock();
+                                                    if let Some(ref events) = state.timeline_events {
+                                                        if let Some(event) =
+                                                            events.iter().rev().find(|e| e.clock < clock_secs - 0.5)
+                                                        {
+                                                            let seek_clock = event.clock;
+                                                            let desc = format_timeline_event(event);
+                                                            drop(state);
+                                                            let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                                            toasts.lock().info(desc);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Back 10 seconds
+                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
+                                                if btn.on_hover_text("Back 10s (Left)").clicked() {
+                                                    let target = (clock_secs - 10.0).max(0.0);
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(target));
+                                                }
+                                            }
+
                                             // Play/Pause
                                             if playing {
                                                 if tui
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::PAUSE))
+                                                    .on_hover_text("Pause (Space)")
                                                     .clicked()
                                                 {
                                                     let _ = command_tx.send(PlaybackCommand::Pause);
@@ -4046,10 +4231,45 @@ impl ReplayRendererViewer {
                                                 .tui()
                                                 .style(fixed_style.clone())
                                                 .ui_add(egui::Button::new(icons::PLAY))
+                                                .on_hover_text("Play (Space)")
                                                 .clicked()
                                             {
                                                 let _ = command_tx.send(PlaybackCommand::Play);
                                                 shared_state.lock().playing = true;
+                                            }
+
+                                            // Forward 10 seconds
+                                            if let Some((_fi, _tf, clock_secs, game_dur)) = frame_data {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
+                                                if btn.on_hover_text("Forward 10s (Right)").clicked() {
+                                                    let target = (clock_secs + 10.0).min(game_dur);
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(target));
+                                                }
+                                            }
+
+                                            // Skip to next event
+                                            if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .ui_add(egui::Button::new(icons::SKIP_FORWARD));
+                                                if btn.on_hover_text("Next event (Shift+Right)").clicked() {
+                                                    let state = shared_state.lock();
+                                                    if let Some(ref events) = state.timeline_events {
+                                                        if let Some(event) =
+                                                            events.iter().find(|e| e.clock > clock_secs + 0.5)
+                                                        {
+                                                            let seek_clock = event.clock;
+                                                            let desc = format_timeline_event(event);
+                                                            drop(state);
+                                                            let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
+                                                            toasts.lock().info(desc);
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             // Seek slider (flex_grow: 1.0 — fills remaining space)
@@ -4079,15 +4299,15 @@ impl ReplayRendererViewer {
                                             let mut current_speed = speed;
                                             tui.tui().style(fixed_style.clone()).ui(|ui| {
                                                 egui::ComboBox::from_id_salt("overlay_speed")
-                                                    .selected_text(format!("{:.1}x", current_speed))
+                                                    .selected_text(format!("{:.0}x", current_speed))
                                                     .width(60.0)
                                                     .show_ui(ui, |ui| {
-                                                        for s in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0] {
+                                                        for s in PLAYBACK_SPEEDS {
                                                             if ui
                                                                 .selectable_value(
                                                                     &mut current_speed,
                                                                     s,
-                                                                    format!("{:.1}x", s),
+                                                                    format!("{:.0}x", s),
                                                                 )
                                                                 .changed()
                                                             {
@@ -4126,8 +4346,9 @@ impl ReplayRendererViewer {
                                                     ));
                                                 if btn.on_hover_text("Save as Video").clicked() {
                                                     let opts = options.clone();
+                                                    let default_name = format!("{}.mp4", video_export_data.replay_name);
                                                     if let Some(path) = rfd::FileDialog::new()
-                                                        .set_file_name("replay.mp4")
+                                                        .set_file_name(&default_name)
                                                         .add_filter("MP4 Video", &["mp4"])
                                                         .save_file()
                                                     {
@@ -4147,12 +4368,40 @@ impl ReplayRendererViewer {
                                                 }
                                             }
 
+                                            // Render Video to Clipboard button
+                                            {
+                                                let is_exporting = video_exporting.load(Ordering::Relaxed);
+                                                let btn = tui
+                                                    .tui()
+                                                    .style(fixed_style.clone())
+                                                    .enabled_ui(!is_exporting)
+                                                    .ui_add(egui::Button::new(
+                                                        egui::RichText::new(icons::CLIPBOARD).size(18.0),
+                                                    ));
+                                                if btn.on_hover_text("Render Video to Clipboard").clicked() {
+                                                    let opts = options.clone();
+                                                    let file_name = format!("{}.mp4", video_export_data.replay_name);
+                                                    let export_data = Arc::clone(&video_export_data);
+                                                    let toasts2 = Arc::clone(&toasts);
+                                                    let exporting = Arc::clone(&video_exporting);
+                                                    render_video_to_clipboard(
+                                                        file_name,
+                                                        export_data,
+                                                        opts,
+                                                        toasts2,
+                                                        exporting,
+                                                    );
+                                                }
+                                            }
+
                                             tui.tui()
                                                 .style(fixed_style.clone())
                                                 .ui_add(egui_taffy::widgets::TaffySeparator::default());
 
                                             // Zoom slider
                                             {
+                                                tui.tui().style(fixed_style.clone()).label(icons::MAGNIFYING_GLASS);
+
                                                 let mut zp = zoom_pan_arc.lock();
                                                 let mut zoom_val = zp.zoom;
                                                 let slider = egui::Slider::new(&mut zoom_val, 1.0..=10.0_f32)
@@ -4269,7 +4518,7 @@ impl ReplayRendererViewer {
                                                 .fill(ui.style().visuals.window_fill.gamma_multiply(0.5)),
                                         )
                                         .show(|ui| {
-                                            ui.set_min_width(280.0);
+                                            ui.set_width(280.0);
                                             ui.label(egui::RichText::new("Event Timeline").strong());
                                             ui.separator();
 
@@ -4279,77 +4528,83 @@ impl ReplayRendererViewer {
                                                     ui.label("No significant events detected.");
                                                 } else {
                                                     egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                                                        ui.set_width(ui.available_width());
                                                         for event in events {
                                                             let mins = event.clock as u32 / 60;
                                                             let secs = event.clock as u32 % 60;
                                                             let timestamp = format!("{:02}:{:02}", mins, secs);
 
-                                                            ui.horizontal(|ui| {
-                                                                if ui.small_button(&timestamp).clicked() {
-                                                                    let _ = command_tx
-                                                                        .send(PlaybackCommand::Seek(event.clock));
-                                                                }
+                                                            let row = ui.horizontal(|ui| {
+                                                                let mut clicked = ui.small_button(&timestamp).clicked();
 
-                                                                match &event.kind {
+                                                                let (color, text) = match &event.kind {
                                                                     TimelineEventKind::HealthLost {
                                                                         ship_name,
                                                                         is_friendly,
                                                                         percent_lost,
                                                                     } => {
                                                                         let pct = (percent_lost * 100.0) as u32;
-                                                                        ui.colored_label(
+                                                                        (
                                                                             event_color(*is_friendly),
-                                                                            ship_name,
-                                                                        );
-                                                                        ui.label(format!("-{}% HP", pct));
+                                                                            format!("{} -{}% HP", ship_name, pct),
+                                                                        )
                                                                     }
                                                                     TimelineEventKind::Death {
                                                                         ship_name,
                                                                         is_friendly,
-                                                                    } => {
-                                                                        ui.colored_label(
-                                                                            event_color(*is_friendly),
-                                                                            format!("{} destroyed", ship_name),
-                                                                        );
-                                                                    }
+                                                                    } => (
+                                                                        event_color(*is_friendly),
+                                                                        format!("{} destroyed", ship_name),
+                                                                    ),
                                                                     TimelineEventKind::CapContested {
                                                                         cap_label,
                                                                         owner_is_friendly,
-                                                                    } => {
-                                                                        ui.colored_label(
-                                                                            event_color(*owner_is_friendly),
-                                                                            format!("{} contested", cap_label),
-                                                                        );
-                                                                    }
+                                                                    } => (
+                                                                        event_color(*owner_is_friendly),
+                                                                        format!("{} contested", cap_label),
+                                                                    ),
                                                                     TimelineEventKind::CapFlipped {
                                                                         cap_label,
                                                                         capturer_is_friendly,
-                                                                    } => {
-                                                                        ui.colored_label(
-                                                                            event_color(*capturer_is_friendly),
-                                                                            format!("{} captured", cap_label),
-                                                                        );
-                                                                    }
+                                                                    } => (
+                                                                        event_color(*capturer_is_friendly),
+                                                                        format!("{} captured", cap_label),
+                                                                    ),
                                                                     TimelineEventKind::CapBeingCaptured {
                                                                         cap_label,
                                                                         capturer_is_friendly,
-                                                                    } => {
-                                                                        ui.colored_label(
-                                                                            event_color(*capturer_is_friendly),
-                                                                            format!("{} being captured", cap_label),
-                                                                        );
-                                                                    }
+                                                                    } => (
+                                                                        event_color(*capturer_is_friendly),
+                                                                        format!("{} being captured", cap_label),
+                                                                    ),
                                                                     TimelineEventKind::RadarUsed {
                                                                         ship_name,
                                                                         is_friendly,
-                                                                    } => {
-                                                                        ui.colored_label(
-                                                                            event_color(*is_friendly),
-                                                                            format!("{} used radar", ship_name),
-                                                                        );
-                                                                    }
+                                                                    } => (
+                                                                        event_color(*is_friendly),
+                                                                        format!("{} used radar", ship_name),
+                                                                    ),
+                                                                };
+
+                                                                let label_resp = ui.add(
+                                                                    egui::Label::new(
+                                                                        egui::RichText::new(text).color(color),
+                                                                    )
+                                                                    .selectable(false)
+                                                                    .sense(egui::Sense::click()),
+                                                                );
+                                                                if label_resp.hovered() {
+                                                                    ui.ctx().set_cursor_icon(
+                                                                        egui::CursorIcon::PointingHand,
+                                                                    );
                                                                 }
+                                                                clicked |= label_resp.clicked();
+                                                                clicked
                                                             });
+                                                            if row.inner {
+                                                                let _ =
+                                                                    command_tx.send(PlaybackCommand::Seek(event.clock));
+                                                            }
                                                         }
                                                     });
                                                 }
