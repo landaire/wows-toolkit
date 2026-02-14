@@ -831,7 +831,18 @@ fn playback_thread(
                         renderer.populate_players(controller);
                         renderer.update_squadron_info(controller);
                         renderer.update_ship_abilities(controller);
-                        renderer.record_positions(controller, prev_clock);
+                        let dead_ships = controller.dead_ships();
+                        let minimap_positions = controller.minimap_positions();
+                        renderer.record_positions(controller, prev_clock, |eid| {
+                            // Skip dead ships
+                            if let Some(dead) = dead_ships.get(eid) {
+                                if prev_clock >= dead.clock {
+                                    return false;
+                                }
+                            }
+                            // Only record detected ships (visible on minimap)
+                            minimap_positions.get(eid).map(|mm| mm.visible).unwrap_or(false)
+                        });
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
@@ -1581,6 +1592,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::Building { .. } => opts.show_buildings,
         DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
         DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
+        DrawCommand::PatrolRadius { .. } => opts.show_planes,
         DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
         DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,
         DrawCommand::ShipConfigCircle { .. } => opts.show_ship_config,
@@ -2061,7 +2073,7 @@ fn draw_command_to_shapes(
                     (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
                     (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
                     (wows_minimap_renderer::ShipVisibility::MinimapOnly, _) => {
-                        format!("{}_last_visible", sp)
+                        format!("{}_invisible", sp)
                     }
                     (wows_minimap_renderer::ShipVisibility::Undetected, _) => {
                         format!("{}_invisible", sp)
@@ -2255,9 +2267,9 @@ fn draw_command_to_shapes(
             use wows_replays::analyzer::decoder::DeathCause;
 
             let canvas_w = transform.screen_canvas_width();
-            let name_font = FontId::proportional(10.0 * ws);
-            let line_h = 18.0 * ws;
-            let icon_size = 14.0 * ws;
+            let name_font = FontId::proportional(12.0 * ws);
+            let line_h = 20.0 * ws;
+            let icon_size = ICON_SIZE * ws;
             let cause_icon_size = icon_size;
             let gap = 2.0 * ws;
             let right_margin = 4.0 * ws;
@@ -2295,7 +2307,7 @@ fn draw_command_to_shapes(
                 let killer_name_w = killer_galley.size().x;
                 let victim_name_w = victim_galley.size().x;
 
-                let ship_font = FontId::proportional(9.0 * ws);
+                let ship_font = name_font.clone();
                 let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
                 let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
                 let killer_ship_galley = if !killer_ship.is_empty() {
@@ -2347,7 +2359,9 @@ fn draw_command_to_shapes(
                 shapes.push(Shape::rect_filled(bg_rect, CornerRadius::ZERO, Color32::from_black_alpha(128)));
 
                 let mut x = start.x + canvas_w - total_w - right_margin;
-                let icon_center_y = y + line_h / 2.0 - 2.0 * ws;
+                // Vertically center icons with the text
+                let row_rect = killer_galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::ZERO);
+                let icon_center_y = y + row_rect.center().y;
 
                 // Killer name
                 shapes.push(Shape::galley(Pos2::new(x, y), killer_galley, Color32::TRANSPARENT));
@@ -2375,7 +2389,7 @@ fn draw_command_to_shapes(
 
                 // Killer ship name
                 if let Some(galley) = killer_ship_galley {
-                    shapes.push(Shape::galley(Pos2::new(x, y + 1.0 * ws), galley, Color32::TRANSPARENT));
+                    shapes.push(Shape::galley(Pos2::new(x, y), galley, Color32::TRANSPARENT));
                     x += killer_ship_w;
                 }
 
@@ -2423,7 +2437,7 @@ fn draw_command_to_shapes(
 
                 // Victim ship name
                 if let Some(galley) = victim_ship_galley {
-                    shapes.push(Shape::galley(Pos2::new(x, y + 1.0 * ws), galley, Color32::TRANSPARENT));
+                    shapes.push(Shape::galley(Pos2::new(x, y), galley, Color32::TRANSPARENT));
                 }
             }
         }
@@ -2510,6 +2524,13 @@ fn draw_command_to_shapes(
             let outline_color = color_from_rgba(*color, 0.5);
             let stroke_w = transform.scale_stroke(2.0);
             shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
+        }
+
+        DrawCommand::PatrolRadius { pos, radius_px, color, alpha } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius_px as f32);
+            let fill_color = color_from_rgba(*color, *alpha);
+            shapes.push(Shape::circle_filled(center, r, fill_color));
         }
 
         DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
@@ -2777,38 +2798,38 @@ fn draw_command_to_shapes(
             let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
             let header_font = FontId::proportional(11.0 * ws);
             let msg_font = FontId::proportional(11.0 * ws);
-            let ship_name_font = FontId::proportional(10.0 * ws);
             let line_h = 14.0 * ws;
             let icon_size = 12.0 * ws;
             let padding = 6.0 * ws;
-            let gap = 3.0 * ws;
+            let entry_gap = 6.0 * ws;
 
             // Chat box: left side, vertically centered, 25% of canvas width
             let box_w = canvas_w * 0.25;
             let box_x = transform.origin.x + 4.0 * ws;
-
-            // Pre-measure to figure out total height
-            let mut total_lines = 0usize;
             let inner_w = box_w - padding * 2.0;
 
             struct ChatLayout {
+                /// Line 1: "[CLAN] PlayerName" — clan portion in clan color, rest in team color
                 clan_galley: Option<std::sync::Arc<egui::Galley>>,
                 name_galley: std::sync::Arc<egui::Galley>,
+                /// Line 2: ship icon + ship name
                 ship_icon_species: Option<String>,
                 ship_name_galley: Option<std::sync::Arc<egui::Galley>>,
+                /// Line 3+: word-wrapped message
                 msg_galleys: Vec<std::sync::Arc<egui::Galley>>,
                 opacity: f32,
                 team_color: [u8; 3],
             }
 
             let mut layouts = Vec::new();
+            let mut total_h = padding; // top padding
             for entry in entries {
                 let opacity = entry.opacity;
                 let alpha = (opacity * 255.0) as u8;
                 let team_color = entry.team_color;
-
-                // Clan tag in clan color (or team color fallback)
                 let team_c = Color32::from_rgba_unmultiplied(team_color[0], team_color[1], team_color[2], alpha);
+
+                // Line 1: clan tag + player name
                 let clan_galley =
                     if !entry.clan_tag.is_empty() {
                         let clan_c = if let Some(cc) = entry.clan_color {
@@ -2822,17 +2843,17 @@ fn draw_command_to_shapes(
                     } else {
                         None
                     };
-
-                // Player name in team color
                 let name_galley =
                     ctx.fonts_mut(|f| f.layout_no_wrap(entry.player_name.clone(), header_font.clone(), team_c));
 
-                let ship_name_galley = entry.ship_name.as_ref().map(|sn| {
-                    let tc = Color32::from_rgba_unmultiplied(team_color[0], team_color[1], team_color[2], alpha);
-                    ctx.fonts_mut(|f| f.layout_no_wrap(format!("{}:", sn), ship_name_font.clone(), tc))
-                });
+                // Line 2: ship icon + ship name (optional)
+                let ship_name_galley = entry
+                    .ship_name
+                    .as_ref()
+                    .map(|sn| ctx.fonts_mut(|f| f.layout_no_wrap(sn.clone(), header_font.clone(), team_c)));
+                let has_ship_line = ship_name_galley.is_some();
 
-                // Word-wrap message text
+                // Message lines (word-wrapped)
                 let msg_color = Color32::from_rgba_unmultiplied(
                     entry.message_color[0],
                     entry.message_color[1],
@@ -2846,9 +2867,9 @@ fn draw_command_to_shapes(
                     vec![galley]
                 });
 
-                // Count lines: 1 for header, N for message rows
                 let msg_lines: usize = msg_galleys.iter().map(|g| g.rows.len().max(1)).sum();
-                total_lines += 1 + msg_lines;
+                let line_count = 1 + has_ship_line as usize + msg_lines;
+                total_h += line_count as f32 * line_h + entry_gap;
 
                 layouts.push(ChatLayout {
                     clan_galley,
@@ -2861,10 +2882,10 @@ fn draw_command_to_shapes(
                 });
             }
 
-            if total_lines == 0 {
+            if layouts.is_empty() {
                 // nothing to draw
             } else {
-                let total_h = total_lines as f32 * line_h + padding * 2.0;
+                total_h += padding; // bottom padding
                 let box_y = transform.origin.y + canvas_h / 2.0 - total_h / 2.0;
 
                 // Semi-translucent background
@@ -2874,48 +2895,47 @@ fn draw_command_to_shapes(
                 let mut y = box_y + padding;
                 for layout in &layouts {
                     let alpha = (layout.opacity * 255.0) as u8;
-                    let mut x = box_x + padding;
+                    let x = box_x + padding;
 
-                    // Clan tag
+                    // Line 1: [CLAN] PlayerName
+                    let mut nx = x;
                     if let Some(ref cg) = layout.clan_galley {
-                        shapes.push(Shape::galley(Pos2::new(x, y), cg.clone(), Color32::TRANSPARENT));
-                        x += cg.size().x;
+                        shapes.push(Shape::galley(Pos2::new(nx, y), cg.clone(), Color32::TRANSPARENT));
+                        nx += cg.size().x;
                     }
-
-                    // Player name
-                    shapes.push(Shape::galley(Pos2::new(x, y), layout.name_galley.clone(), Color32::TRANSPARENT));
-                    x += layout.name_galley.size().x + gap;
-
-                    // Ship icon (facing right)
-                    if let Some(ref species) = layout.ship_icon_species {
-                        if let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                            let tc = layout.team_color;
-                            let tint = Color32::from_rgba_unmultiplied(tc[0], tc[1], tc[2], alpha);
-                            let icon_y = y + line_h / 2.0;
-                            shapes.push(make_rotated_icon_mesh(
-                                tex.id(),
-                                Pos2::new(x + icon_size / 2.0, icon_y),
-                                icon_size,
-                                0.0,
-                                tint,
-                            ));
-                            x += icon_size + gap;
-                        }
-                    }
-
-                    // Ship name
-                    if let Some(ref sng) = layout.ship_name_galley {
-                        shapes.push(Shape::galley(Pos2::new(x, y), sng.clone(), Color32::TRANSPARENT));
-                    }
-
+                    shapes.push(Shape::galley(Pos2::new(nx, y), layout.name_galley.clone(), Color32::TRANSPARENT));
                     y += line_h;
+
+                    // Line 2: ship icon + ship name
+                    if let Some(ref sng) = layout.ship_name_galley {
+                        let mut sx = x;
+                        if let Some(ref species) = layout.ship_icon_species {
+                            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                                let tc = layout.team_color;
+                                let tint = Color32::from_rgba_unmultiplied(tc[0], tc[1], tc[2], alpha);
+                                // Vertically center icon with the text on this line
+                                let icon_center_y = y + sng.size().y / 2.0;
+                                shapes.push(make_rotated_icon_mesh(
+                                    tex.id(),
+                                    Pos2::new(sx + icon_size / 2.0, icon_center_y),
+                                    icon_size,
+                                    0.0,
+                                    tint,
+                                ));
+                            }
+                            sx += icon_size + 2.0 * ws;
+                        }
+                        shapes.push(Shape::galley(Pos2::new(sx, y), sng.clone(), Color32::TRANSPARENT));
+                        y += line_h;
+                    }
 
                     // Message text (word-wrapped)
                     for galley in &layout.msg_galleys {
-                        let msg_x = box_x + padding + 8.0 * ws; // slight indent
-                        shapes.push(Shape::galley(Pos2::new(msg_x, y), galley.clone(), Color32::TRANSPARENT));
+                        shapes.push(Shape::galley(Pos2::new(x, y), galley.clone(), Color32::TRANSPARENT));
                         y += galley.rows.len().max(1) as f32 * line_h;
                     }
+
+                    y += entry_gap;
                 }
             }
         }

@@ -48,7 +48,10 @@ impl PlayerTracker {
         self.live_game_players = Some((timestamp, players))
     }
     pub fn update_from_replay(&mut self, replay: &Replay) {
-        if !matches!(replay.replay_file.meta.gameType.as_str(), "RandomBattle" | "RankedBattle") {
+        if !matches!(
+            replay.replay_file.meta.gameType,
+            wowsunpack::game_types::BattleType::Random | wowsunpack::game_types::BattleType::Ranked
+        ) {
             // Only update from randoms / ranked
             return;
         }

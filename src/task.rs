@@ -38,6 +38,7 @@ use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::Consumable;
 use zip::ZipArchive;
 
 use crate::WowsToolkitApp;
@@ -460,13 +461,28 @@ pub fn load_wows_data_for_build(
         load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
     let subribbon_icons =
         load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
-    let game_constants = Arc::new(GameConstants::from_pkg(&file_tree, &pkg_loader));
 
     // Load version-matched constants: try fetching from GitHub with walk-down fallback
     let (replay_constants, replay_constants_exact_match) = match fetch_versioned_constants_with_fallback(build) {
         Some((data, exact)) => (data, exact),
         None => (fallback_constants.clone(), false),
     };
+
+    let mut game_constants = GameConstants::from_pkg(&file_tree, &pkg_loader);
+    if let Some(consumable_mapping_override) =
+        replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()).map(|obj| {
+            HashMap::from_iter(obj.iter().filter_map(|(key, value)| {
+                Some((
+                    value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32,
+                    Consumable::from_consumable_type(key)?,
+                ))
+            }))
+        })
+    {
+        game_constants.common_mut().set_consumable_types(consumable_mapping_override)
+    }
+
+    let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds
     let full_version = None; // Will be set by caller for latest build
@@ -923,8 +939,10 @@ fn parse_replay_data_in_background(
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             debug!("replay parsed successfully");
-                            let is_valid_game_type_for_shipbuilds =
-                                matches!(game_type.as_str(), "RandomBattle" | "RankedBattle");
+                            let is_valid_game_type_for_shipbuilds = matches!(
+                                game_type,
+                                wowsunpack::game_types::BattleType::Random | wowsunpack::game_types::BattleType::Ranked
+                            );
                             if !is_valid_game_type_for_shipbuilds {
                                 debug!("game type is: {}", &game_type);
                             }
@@ -942,7 +960,7 @@ fn parse_replay_data_in_background(
                                             player,
                                             player.initial_state().realm().to_string(),
                                             report.version(),
-                                            game_type.clone(),
+                                            game_type.to_string(),
                                             &metadata_provider,
                                         ) {
                                             // TODO: Bulk API

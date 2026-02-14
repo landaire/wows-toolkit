@@ -2200,7 +2200,10 @@ impl Replay {
     }
 
     pub fn game_mode(&self, metadata_provider: &GameMetadataProvider) -> String {
-        wowsunpack::game_params::translations::translate_game_mode(&self.replay_file.meta.gameType, metadata_provider)
+        wowsunpack::game_params::translations::translate_game_mode(
+            &self.replay_file.meta.gameType.to_string(),
+            metadata_provider,
+        )
     }
 
     pub fn scenario(&self, metadata_provider: &GameMetadataProvider) -> String {
@@ -2687,7 +2690,7 @@ impl ToolkitTabViewer<'_> {
                 }
                 ui.label(RichText::new(self_state.username()).color(weak));
                 ui.label(RichText::new("\u{00B7}").color(weak));
-                ui.label(RichText::new(report.game_type()).color(weak));
+                ui.label(RichText::new(report.game_type().to_string()).color(weak));
                 ui.label(RichText::new("\u{00B7}").color(weak));
                 ui.label(RichText::new(report.version().to_path()).color(weak));
                 ui.label(RichText::new("\u{00B7}").color(weak));
