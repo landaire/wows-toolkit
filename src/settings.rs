@@ -143,6 +143,10 @@ pub struct SavedRenderOptions {
     pub show_ship_config: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_chat: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_advantage: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_score_timer: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -172,6 +176,8 @@ impl Default for SavedRenderOptions {
             show_buffs: true,
             show_ship_config: false,
             show_chat: true,
+            show_advantage: true,
+            show_score_timer: true,
         }
     }
 }

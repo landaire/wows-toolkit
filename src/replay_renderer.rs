@@ -409,6 +409,8 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_battle_result: saved.show_battle_result,
         show_buffs: saved.show_buffs,
         show_chat: saved.show_chat,
+        show_advantage: saved.show_advantage,
+        show_score_timer: saved.show_score_timer,
     }
 }
 
@@ -438,6 +440,8 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_buffs: opts.show_buffs,
         show_ship_config: opts.show_ship_config,
         show_chat: opts.show_chat,
+        show_advantage: opts.show_advantage,
+        show_score_timer: opts.show_score_timer,
     }
 }
 
@@ -986,6 +990,8 @@ fn playback_thread(
                 || live_renderer.options.show_ship_names != new_opts.show_ship_names
                 || live_renderer.options.show_ship_config != new_opts.show_ship_config
                 || live_renderer.options.show_chat != new_opts.show_chat
+                || live_renderer.options.show_advantage != new_opts.show_advantage
+                || live_renderer.options.show_score_timer != new_opts.show_score_timer
             {
                 live_renderer.options = new_opts;
                 let commands = live_renderer.draw_frame(&live_controller);
@@ -1014,12 +1020,43 @@ struct FrameSnapshot {
 // ─── Event Timeline ──────────────────────────────────────────────────────────
 
 pub(crate) enum TimelineEventKind {
-    HealthLost { ship_name: String, is_friendly: bool, percent_lost: f32 },
-    Death { ship_name: String, is_friendly: bool },
-    CapContested { cap_label: String, owner_is_friendly: bool },
-    CapFlipped { cap_label: String, capturer_is_friendly: bool },
-    CapBeingCaptured { cap_label: String, capturer_is_friendly: bool },
-    RadarUsed { ship_name: String, is_friendly: bool },
+    HealthLost {
+        ship_name: String,
+        player_name: String,
+        is_friendly: bool,
+        percent_lost: f32,
+        old_hp: f32,
+        new_hp: f32,
+        max_hp: f32,
+    },
+    Death {
+        ship_name: String,
+        player_name: String,
+        is_friendly: bool,
+        killer_ship: String,
+        killer_player: String,
+    },
+    CapContested {
+        cap_label: String,
+        owner_is_friendly: bool,
+    },
+    CapFlipped {
+        cap_label: String,
+        capturer_is_friendly: bool,
+    },
+    CapBeingCaptured {
+        cap_label: String,
+        capturer_is_friendly: bool,
+    },
+    RadarUsed {
+        ship_name: String,
+        player_name: String,
+        is_friendly: bool,
+    },
+    AdvantageChanged {
+        label: String,
+        is_friendly: bool,
+    },
 }
 
 pub(crate) struct TimelineEvent {
@@ -1036,14 +1073,32 @@ fn format_timeline_event(event: &TimelineEvent) -> String {
     let secs = event.clock as u32 % 60;
     let time = format!("{:02}:{:02}", mins, secs);
     let desc = match &event.kind {
-        TimelineEventKind::HealthLost { ship_name, percent_lost, .. } => {
-            format!("{} -{}% HP", ship_name, (percent_lost * 100.0) as u32)
+        TimelineEventKind::HealthLost { ship_name, player_name, percent_lost, old_hp, new_hp, max_hp, .. } => {
+            format!(
+                "{} ({}) -{}% HP ({:.0}/{:.0} -> {:.0}/{:.0})",
+                ship_name,
+                player_name,
+                (percent_lost * 100.0) as u32,
+                old_hp,
+                max_hp,
+                new_hp,
+                max_hp
+            )
         }
-        TimelineEventKind::Death { ship_name, .. } => format!("{} destroyed", ship_name),
+        TimelineEventKind::Death { ship_name, player_name, killer_ship, killer_player, .. } => {
+            if killer_ship.is_empty() {
+                format!("{} ({}) destroyed", ship_name, player_name)
+            } else {
+                format!("{} ({}) destroyed by {} ({})", ship_name, player_name, killer_ship, killer_player)
+            }
+        }
         TimelineEventKind::CapContested { cap_label, .. } => format!("{} contested", cap_label),
         TimelineEventKind::CapFlipped { cap_label, .. } => format!("{} captured", cap_label),
         TimelineEventKind::CapBeingCaptured { cap_label, .. } => format!("{} being captured", cap_label),
-        TimelineEventKind::RadarUsed { ship_name, .. } => format!("{} used radar", ship_name),
+        TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
+            format!("{} ({}) used radar", ship_name, player_name)
+        }
+        TimelineEventKind::AdvantageChanged { label, .. } => label.clone(),
     };
     format!("[{}] {}", time, desc)
 }
@@ -1060,6 +1115,7 @@ fn extract_timeline_events(
 
     // Player info lookups (populated once players are available)
     let mut ship_names: HashMap<EntityId, String> = HashMap::new();
+    let mut player_names: HashMap<EntityId, String> = HashMap::new();
     let mut is_friendly: HashMap<EntityId, bool> = HashMap::new();
     let mut viewer_team_id: Option<i64> = None;
     let mut players_populated = false;
@@ -1078,6 +1134,11 @@ fn extract_timeline_events(
     // Radar tracking: entity → number of radar activations seen so far
     let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
 
+    // Advantage tracking
+    use wows_minimap_renderer::advantage::{self, ScoringParams, TeamAdvantage, TeamState};
+    let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
+    let mut advantage_check_clock: f32 = 0.0;
+
     let mut remaining = &replay_file.packet_data[..];
     let mut prev_clock = GameClock(0.0);
 
@@ -1090,11 +1151,12 @@ fn extract_timeline_events(
                         let players = controller.player_entities();
                         if !players.is_empty() {
                             for (entity_id, player) in players {
-                                let name = game_metadata
+                                let ship_name = game_metadata
                                     .localized_name_from_param(player.vehicle())
                                     .map(|s| s.to_string())
-                                    .unwrap_or_else(|| player.initial_state().username().to_string());
-                                ship_names.insert(*entity_id, name);
+                                    .unwrap_or_default();
+                                ship_names.insert(*entity_id, ship_name);
+                                player_names.insert(*entity_id, player.initial_state().username().to_string());
 
                                 let relation = player.relation();
                                 let friendly = relation.is_self() || relation.is_ally();
@@ -1126,14 +1188,19 @@ fn extract_timeline_events(
                                 if clock - *window_start >= 3.0 {
                                     let loss = (*health_at_start - current_health) / max_health;
                                     if loss > 0.25 {
-                                        let name = ship_names.get(entity_id).cloned().unwrap_or_default();
+                                        let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
+                                        let pname = player_names.get(entity_id).cloned().unwrap_or_default();
                                         let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
                                         events.push(TimelineEvent {
                                             clock,
                                             kind: TimelineEventKind::HealthLost {
-                                                ship_name: name,
+                                                ship_name: sname,
+                                                player_name: pname,
                                                 is_friendly: friendly,
                                                 percent_lost: loss,
+                                                old_hp: *health_at_start,
+                                                new_hp: current_health,
+                                                max_hp: max_health,
                                             },
                                         });
                                     }
@@ -1150,11 +1217,20 @@ fn extract_timeline_events(
                     let kills = controller.kills();
                     if kills.len() > last_kill_count {
                         for kill in &kills[last_kill_count..] {
-                            let name = ship_names.get(&kill.victim).cloned().unwrap_or_default();
+                            let victim_ship = ship_names.get(&kill.victim).cloned().unwrap_or_default();
+                            let victim_player = player_names.get(&kill.victim).cloned().unwrap_or_default();
                             let friendly = is_friendly.get(&kill.victim).copied().unwrap_or(false);
+                            let killer_ship = ship_names.get(&kill.killer).cloned().unwrap_or_default();
+                            let killer_player = player_names.get(&kill.killer).cloned().unwrap_or_default();
                             events.push(TimelineEvent {
                                 clock: kill.clock.seconds(),
-                                kind: TimelineEventKind::Death { ship_name: name, is_friendly: friendly },
+                                kind: TimelineEventKind::Death {
+                                    ship_name: victim_ship,
+                                    player_name: victim_player,
+                                    is_friendly: friendly,
+                                    killer_ship,
+                                    killer_player,
+                                },
                             });
                         }
                         last_kill_count = kills.len();
@@ -1219,14 +1295,175 @@ fn extract_timeline_events(
                         let radar_count = consumables.iter().filter(|c| c.consumable == Consumable::Radar).count();
                         let prev_count = radar_counts.get(entity_id).copied().unwrap_or(0);
                         if radar_count > prev_count {
-                            let name = ship_names.get(entity_id).cloned().unwrap_or_default();
+                            let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
+                            let pname = player_names.get(entity_id).cloned().unwrap_or_default();
                             let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
                             events.push(TimelineEvent {
                                 clock,
-                                kind: TimelineEventKind::RadarUsed { ship_name: name, is_friendly: friendly },
+                                kind: TimelineEventKind::RadarUsed {
+                                    ship_name: sname,
+                                    player_name: pname,
+                                    is_friendly: friendly,
+                                },
                             });
                         }
                         radar_counts.insert(*entity_id, radar_count);
+                    }
+
+                    // --- Advantage change detection (check every ~3 seconds) ---
+                    if clock - advantage_check_clock >= 3.0 && players_populated {
+                        advantage_check_clock = clock;
+
+                        let viewer_team = viewer_team_id.unwrap_or(0);
+                        let swap = viewer_team == 1;
+                        let players = controller.player_entities();
+                        let entities = controller.entities_by_id();
+
+                        let mut teams = [
+                            TeamState {
+                                score: 0,
+                                uncontested_caps: 0,
+                                total_hp: 0.0,
+                                max_hp: 0.0,
+                                ships_alive: 0,
+                                ships_total: 0,
+                                ships_known: 0,
+                            },
+                            TeamState {
+                                score: 0,
+                                uncontested_caps: 0,
+                                total_hp: 0.0,
+                                max_hp: 0.0,
+                                ships_alive: 0,
+                                ships_total: 0,
+                                ships_known: 0,
+                            },
+                        ];
+
+                        let scores = controller.team_scores();
+                        if scores.len() >= 2 {
+                            teams[0].score = scores[0].score;
+                            teams[1].score = scores[1].score;
+                        }
+
+                        for cp in controller.capture_points() {
+                            if !cp.is_enabled || cp.has_invaders {
+                                continue;
+                            }
+                            if cp.team_id == 0 {
+                                teams[0].uncontested_caps += 1;
+                            } else if cp.team_id == 1 {
+                                teams[1].uncontested_caps += 1;
+                            }
+                        }
+
+                        for (entity_id, player) in players {
+                            let team = player.initial_state().team_id() as usize;
+                            if team > 1 {
+                                continue;
+                            }
+                            teams[team].ships_total += 1;
+                            if let Some(entity) = entities.get(entity_id) {
+                                if let Some(vehicle) = entity.vehicle_ref() {
+                                    let v = vehicle.borrow();
+                                    let props = v.props();
+                                    teams[team].ships_known += 1;
+                                    teams[team].max_hp += props.max_health();
+                                    if props.is_alive() {
+                                        teams[team].ships_alive += 1;
+                                        teams[team].total_hp += props.health();
+                                    }
+                                }
+                            }
+                        }
+
+                        let scoring = controller
+                            .scoring_rules()
+                            .map(|r| ScoringParams {
+                                team_win_score: r.team_win_score,
+                                hold_reward: r.hold_reward,
+                                hold_period: r.hold_period,
+                            })
+                            .unwrap_or(ScoringParams { team_win_score: 1000, hold_reward: 3, hold_period: 5.0 });
+
+                        let result =
+                            advantage::calculate_advantage(&teams[0], &teams[1], &scoring, controller.time_left());
+
+                        // Swap so Team0 = friendly
+                        let current = if swap {
+                            match result.advantage {
+                                TeamAdvantage::Team0(level) => TeamAdvantage::Team1(level),
+                                TeamAdvantage::Team1(level) => TeamAdvantage::Team0(level),
+                                other => other,
+                            }
+                        } else {
+                            result.advantage
+                        };
+
+                        if current != prev_advantage {
+                            let level_label = |adv: &TeamAdvantage| -> Option<(&str, bool)> {
+                                match adv {
+                                    TeamAdvantage::Team0(level) => Some((level.label(), true)),
+                                    TeamAdvantage::Team1(level) => Some((level.label(), false)),
+                                    TeamAdvantage::Even => None,
+                                }
+                            };
+
+                            let label = match (level_label(&prev_advantage), level_label(&current)) {
+                                // Gained advantage from even
+                                (None, Some((new_label, _))) => {
+                                    format!("{} advantage gained", new_label)
+                                }
+                                // Lost advantage to even
+                                (Some((old_label, _)), None) => {
+                                    format!("{} advantage lost", old_label)
+                                }
+                                // Same team, level changed
+                                (Some((old_label, old_friendly)), Some((new_label, new_friendly)))
+                                    if old_friendly == new_friendly =>
+                                {
+                                    let old_val = match &prev_advantage {
+                                        TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
+                                        _ => None,
+                                    };
+                                    let new_val = match &current {
+                                        TeamAdvantage::Team0(l) | TeamAdvantage::Team1(l) => Some(*l),
+                                        _ => None,
+                                    };
+                                    // Compare by discriminant order (Absolute=0 > Strong=1 > Moderate=2 > Weak=3)
+                                    if let (Some(o), Some(n)) = (old_val, new_val) {
+                                        if (n as u8) < (o as u8) {
+                                            format!("{} advantage gained", new_label)
+                                        } else {
+                                            format!("Dropped to {} advantage", new_label)
+                                        }
+                                    } else {
+                                        format!("{} advantage", new_label)
+                                    }
+                                }
+                                // Advantage flipped teams
+                                (Some(_), Some((new_label, _))) => {
+                                    format!("{} advantage gained", new_label)
+                                }
+                                _ => String::new(),
+                            };
+
+                            if !label.is_empty() {
+                                let is_friendly = match &current {
+                                    TeamAdvantage::Team0(_) => true,
+                                    TeamAdvantage::Team1(_) => false,
+                                    TeamAdvantage::Even => match &prev_advantage {
+                                        TeamAdvantage::Team1(_) => true, // enemy lost advantage = good for us
+                                        _ => false,
+                                    },
+                                };
+                                events.push(TimelineEvent {
+                                    clock,
+                                    kind: TimelineEventKind::AdvantageChanged { label, is_friendly },
+                                });
+                            }
+                            prev_advantage = current;
+                        }
                     }
 
                     prev_clock = packet.clock;
@@ -1600,6 +1837,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
         DrawCommand::ChatOverlay { .. } => opts.show_chat,
+        DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
     }
 }
 
@@ -2179,10 +2417,10 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::ScoreBar { team0, team1, team0_color, team1_color } => {
+        DrawCommand::ScoreBar { team0, team1, team0_color, team1_color, max_score, team0_timer, team1_timer } => {
             let canvas_w = transform.screen_canvas_width();
             let bar_height = 20.0 * ws;
-            let max_score = 1000.0f32;
+            let max_score = *max_score as f32;
             let half = canvas_w / 2.0;
             let center_gap = 2.0 * ws;
 
@@ -2234,7 +2472,24 @@ fn draw_command_to_shapes(
                 Color32::BLACK,
             ));
             let t0_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, font.clone(), Color32::WHITE));
+            let t0_text_w = t0_galley.size().x;
             shapes.push(Shape::galley(t0_pos, t0_galley, Color32::WHITE));
+
+            // Team 0 timer (right of score text)
+            if let Some(timer) = team0_timer {
+                let timer_font = FontId::proportional(12.0 * ws);
+                let timer_color = Color32::from_rgb(200, 200, 200);
+                let timer_x = t0_pos.x + t0_text_w + 4.0 * ws;
+                let timer_pos = Pos2::new(timer_x, bar_origin.y + 3.0 * ws);
+                let ts = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::BLACK));
+                shapes.push(Shape::galley(
+                    Pos2::new(timer_pos.x + shadow_off, timer_pos.y + shadow_off),
+                    ts,
+                    Color32::BLACK,
+                ));
+                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
+                shapes.push(Shape::galley(timer_pos, tg, timer_color));
+            }
 
             // Team 1 score text with shadow
             let t1_galley_shadow = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text.clone(), font.clone(), Color32::BLACK));
@@ -2247,6 +2502,23 @@ fn draw_command_to_shapes(
             ));
             let t1_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, font, Color32::WHITE));
             shapes.push(Shape::galley(t1_pos, t1_galley, Color32::WHITE));
+
+            // Team 1 timer (left of score text)
+            if let Some(timer) = team1_timer {
+                let timer_font = FontId::proportional(12.0 * ws);
+                let timer_color = Color32::from_rgb(200, 200, 200);
+                let tg_measure = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::BLACK));
+                let tw = tg_measure.size().x;
+                let timer_x = t1_pos.x - tw - 4.0 * ws;
+                let timer_pos = Pos2::new(timer_x, bar_origin.y + 3.0 * ws);
+                shapes.push(Shape::galley(
+                    Pos2::new(timer_pos.x + shadow_off, timer_pos.y + shadow_off),
+                    tg_measure,
+                    Color32::BLACK,
+                ));
+                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
+                shapes.push(Shape::galley(timer_pos, tg, timer_color));
+            }
         }
 
         DrawCommand::Timer { seconds } => {
@@ -2261,6 +2533,21 @@ fn draw_command_to_shapes(
             let text_w = galley.size().x;
             let pos = transform.hud_pos(0.0, 3.0);
             shapes.push(Shape::galley(Pos2::new(pos.x + canvas_w / 2.0 - text_w / 2.0, pos.y), galley, Color32::WHITE));
+        }
+
+        DrawCommand::TeamAdvantage { label, color, .. } => {
+            if !label.is_empty() {
+                let canvas_w = transform.screen_canvas_width();
+                let font = FontId::proportional(11.0 * ws);
+                let shadow_off = 1.0 * ws;
+                let label_color = color_from_rgb(*color);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), label_color));
+                let text_w = galley.size().x;
+                let pos = transform.hud_pos(canvas_w / 2.0 / ws - text_w / 2.0 / ws, 21.0);
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(pos.x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
+                shapes.push(Shape::galley(pos, galley, label_color));
+            }
         }
 
         DrawCommand::KillFeed { entries } => {
@@ -3467,11 +3754,95 @@ impl ReplayRendererViewer {
                                         | DrawCommand::TeamBuffs { .. }
                                         | DrawCommand::BattleResultOverlay { .. }
                                         | DrawCommand::ChatOverlay { .. }
+                                        | DrawCommand::TeamAdvantage { .. }
                                 );
                                 let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
                                     target_painter.add(shape);
+                                }
+                            }
+
+                            // Hover tooltip for TeamAdvantage
+                            let ws = transform.window_scale;
+                            for cmd in &frame.commands {
+                                if let DrawCommand::TeamAdvantage { label, color, breakdown } = cmd {
+                                    if label.is_empty() {
+                                        break;
+                                    }
+                                    let canvas_w = transform.screen_canvas_width();
+                                    let font = FontId::proportional(11.0 * ws);
+                                    let galley = ctx
+                                        .fonts_mut(|f| f.layout_no_wrap(label.clone(), font, color_from_rgb(*color)));
+                                    let text_w = galley.size().x;
+                                    let text_h = galley.size().y;
+                                    let pos = transform.hud_pos(canvas_w / 2.0 / ws - text_w / 2.0 / ws, 21.0);
+                                    let label_rect = Rect::from_min_size(pos, Vec2::new(text_w, text_h));
+                                    let resp = ui.interact(
+                                        label_rect,
+                                        egui::Id::new("advantage_tooltip"),
+                                        egui::Sense::hover(),
+                                    );
+                                    resp.on_hover_ui(|ui| {
+                                        let bd = breakdown;
+                                        let fmt_contrib = |val: f64| -> String {
+                                            if val > 0.0 {
+                                                format!("+{:.1}", val)
+                                            } else if val < 0.0 {
+                                                format!("{:.1}", val)
+                                            } else {
+                                                "0".to_string()
+                                            }
+                                        };
+                                        ui.label(egui::RichText::new("Advantage Breakdown").strong());
+                                        ui.separator();
+                                        if bd.team_eliminated {
+                                            ui.label("A team has been eliminated");
+                                        } else {
+                                            egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
+                                                if bd.time_to_win != 0.0 {
+                                                    ui.label("Time to Win");
+                                                    ui.label(fmt_contrib(bd.time_to_win));
+                                                    ui.end_row();
+                                                }
+                                                if bd.score_gap != 0.0 {
+                                                    ui.label("Score Gap");
+                                                    ui.label(fmt_contrib(bd.score_gap));
+                                                    ui.end_row();
+                                                }
+                                                if bd.projection != 0.0 {
+                                                    ui.label("Score Projection");
+                                                    ui.label(fmt_contrib(bd.projection));
+                                                    ui.end_row();
+                                                }
+                                                if bd.cap_control != 0.0 {
+                                                    ui.label("Cap Control");
+                                                    ui.label(fmt_contrib(bd.cap_control));
+                                                    ui.end_row();
+                                                }
+                                                if bd.hp != 0.0 {
+                                                    ui.label("HP Advantage");
+                                                    ui.label(fmt_contrib(bd.hp));
+                                                    ui.end_row();
+                                                }
+                                                if bd.ship_count != 0.0 {
+                                                    ui.label("Ship Count");
+                                                    ui.label(fmt_contrib(bd.ship_count));
+                                                    ui.end_row();
+                                                }
+                                                ui.separator();
+                                                ui.separator();
+                                                ui.end_row();
+                                                ui.label(egui::RichText::new("Total").strong());
+                                                ui.label(egui::RichText::new(fmt_contrib(bd.total)).strong());
+                                                ui.end_row();
+                                            });
+                                            if !bd.hp_data_reliable {
+                                                ui.small("HP/ship data incomplete — only score factors shown");
+                                            }
+                                        }
+                                    });
+                                    break;
                                 }
                             }
                         }
@@ -4889,6 +5260,10 @@ impl ReplayRendererViewer {
                                                 changed |= ui.checkbox(&mut opts.show_chat, "Chat").changed();
                                                 changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                                 changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
+                                                changed |=
+                                                    ui.checkbox(&mut opts.show_score_timer, "Score Timers").changed();
+                                                changed |=
+                                                    ui.checkbox(&mut opts.show_advantage, "Team Advantage").changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
                                             });
 
@@ -4916,7 +5291,25 @@ impl ReplayRendererViewer {
                                         )
                                         .show(|ui| {
                                             ui.set_width(280.0);
-                                            ui.label(egui::RichText::new("Event Timeline").strong());
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Event Timeline").strong());
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        let state = shared_state.lock();
+                                                        if let Some(events) = &state.timeline_events {
+                                                            if ui.small_button("Copy").clicked() {
+                                                                let text: String = events
+                                                                    .iter()
+                                                                    .map(|e| format_timeline_event(e))
+                                                                    .collect::<Vec<_>>()
+                                                                    .join("\n");
+                                                                ui.ctx().copy_text(text);
+                                                            }
+                                                        }
+                                                    },
+                                                );
+                                            });
                                             ui.separator();
 
                                             let state = shared_state.lock();
@@ -4934,53 +5327,66 @@ impl ReplayRendererViewer {
                                                             let row = ui.horizontal(|ui| {
                                                                 let mut clicked = ui.small_button(&timestamp).clicked();
 
-                                                                let (color, text) = match &event.kind {
+                                                                let (color, text, hover) = match &event.kind {
                                                                     TimelineEventKind::HealthLost {
-                                                                        ship_name,
-                                                                        is_friendly,
-                                                                        percent_lost,
+                                                                        ship_name, player_name, is_friendly,
+                                                                        percent_lost, old_hp, new_hp, max_hp,
                                                                     } => {
                                                                         let pct = (percent_lost * 100.0) as u32;
                                                                         (
                                                                             event_color(*is_friendly),
                                                                             format!("{} -{}% HP", ship_name, pct),
+                                                                            format!("{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP",
+                                                                                ship_name, player_name, old_hp, max_hp, new_hp, max_hp),
                                                                         )
                                                                     }
                                                                     TimelineEventKind::Death {
-                                                                        ship_name,
-                                                                        is_friendly,
-                                                                    } => (
-                                                                        event_color(*is_friendly),
-                                                                        format!("{} destroyed", ship_name),
-                                                                    ),
+                                                                        ship_name, player_name, is_friendly,
+                                                                        killer_ship, killer_player,
+                                                                    } => {
+                                                                        let hover = if killer_ship.is_empty() {
+                                                                            format!("{} ({})", ship_name, player_name)
+                                                                        } else {
+                                                                            format!("{} ({})\nKilled by {} ({})",
+                                                                                ship_name, player_name, killer_ship, killer_player)
+                                                                        };
+                                                                        (
+                                                                            event_color(*is_friendly),
+                                                                            format!("{} destroyed", ship_name),
+                                                                            hover,
+                                                                        )
+                                                                    }
                                                                     TimelineEventKind::CapContested {
-                                                                        cap_label,
-                                                                        owner_is_friendly,
+                                                                        cap_label, owner_is_friendly,
                                                                     } => (
                                                                         event_color(*owner_is_friendly),
                                                                         format!("{} contested", cap_label),
+                                                                        String::new(),
                                                                     ),
                                                                     TimelineEventKind::CapFlipped {
-                                                                        cap_label,
-                                                                        capturer_is_friendly,
+                                                                        cap_label, capturer_is_friendly,
                                                                     } => (
                                                                         event_color(*capturer_is_friendly),
                                                                         format!("{} captured", cap_label),
+                                                                        String::new(),
                                                                     ),
                                                                     TimelineEventKind::CapBeingCaptured {
-                                                                        cap_label,
-                                                                        capturer_is_friendly,
+                                                                        cap_label, capturer_is_friendly,
                                                                     } => (
                                                                         event_color(*capturer_is_friendly),
                                                                         format!("{} being captured", cap_label),
+                                                                        String::new(),
                                                                     ),
                                                                     TimelineEventKind::RadarUsed {
-                                                                        ship_name,
-                                                                        is_friendly,
+                                                                        ship_name, player_name, is_friendly,
                                                                     } => (
                                                                         event_color(*is_friendly),
                                                                         format!("{} used radar", ship_name),
+                                                                        format!("{} ({})", ship_name, player_name),
                                                                     ),
+                                                                    TimelineEventKind::AdvantageChanged {
+                                                                        label, is_friendly,
+                                                                    } => (event_color(*is_friendly), label.clone(), String::new()),
                                                                 };
 
                                                                 let label_resp = ui.add(
@@ -4990,6 +5396,9 @@ impl ReplayRendererViewer {
                                                                     .selectable(false)
                                                                     .sense(egui::Sense::click()),
                                                                 );
+                                                                if !hover.is_empty() {
+                                                                    label_resp.clone().on_hover_text(&hover);
+                                                                }
                                                                 if label_resp.hovered() {
                                                                     ui.ctx().set_cursor_icon(
                                                                         egui::CursorIcon::PointingHand,

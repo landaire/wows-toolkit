@@ -2293,7 +2293,7 @@ impl Replay {
                 return;
             };
 
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps))
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps));
         }
     }
 
