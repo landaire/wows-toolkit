@@ -135,6 +135,10 @@ pub struct SavedRenderOptions {
     pub show_dead_trails: bool,
     #[serde(default)]
     pub show_speed_trails: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_battle_result: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_buffs: bool,
 }
 
 impl Default for SavedRenderOptions {
@@ -160,6 +164,8 @@ impl Default for SavedRenderOptions {
             show_trails: false,
             show_dead_trails: false,
             show_speed_trails: false,
+            show_battle_result: true,
+            show_buffs: true,
         }
     }
 }

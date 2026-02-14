@@ -406,6 +406,8 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_speed_trails: saved.show_speed_trails,
         show_ship_config: true, // always emit; UI-side per-ship filtering
         show_dead_ship_names: saved.show_dead_ship_names,
+        show_battle_result: saved.show_battle_result,
+        show_buffs: saved.show_buffs,
     }
 }
 
@@ -431,6 +433,8 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_trails: opts.show_trails,
         show_dead_trails: opts.show_dead_trails,
         show_speed_trails: opts.show_speed_trails,
+        show_battle_result: opts.show_battle_result,
+        show_buffs: opts.show_buffs,
     }
 }
 
@@ -1576,7 +1580,8 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,
         DrawCommand::ShipConfigCircle { .. } => true, // per-kind filtering done in drawing loop
         DrawCommand::BuffZone { .. } => opts.show_capture_points,
-        DrawCommand::TeamBuffs { .. } => true, // HUD element, always draw when present
+        DrawCommand::TeamBuffs { .. } => opts.show_buffs,
+        DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
     }
 }
 
@@ -2609,6 +2614,92 @@ fn draw_command_to_shapes(
             }
         }
 
+        DrawCommand::BattleResultOverlay { text, subtitle, color } => {
+            let canvas_w = transform.screen_canvas_width();
+            let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
+            let center_x = transform.origin.x + canvas_w / 2.0;
+            let center_y = transform.origin.y + canvas_h / 2.0;
+
+            // Main text: 1/8 of canvas width as font size
+            let font_size = canvas_w / 8.0;
+            let main_font = FontId::proportional(font_size);
+            let main_galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), main_font, Color32::WHITE));
+            let main_w = main_galley.size().x;
+            let main_h = main_galley.size().y;
+
+            // Subtitle: 1/4 of main font size
+            let sub_galley = subtitle.as_ref().map(|s| {
+                let sub_font = FontId::proportional(font_size / 4.0);
+                ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), sub_font, Color32::from_gray(200)))
+            });
+            let sub_h = sub_galley.as_ref().map(|g| g.size().y).unwrap_or(0.0);
+            let gap = if subtitle.is_some() { 8.0 * ws } else { 0.0 };
+            let total_h = main_h + gap + sub_h;
+
+            // Centered position for main text
+            let text_x = center_x - main_w / 2.0;
+            let text_y = center_y - total_h / 2.0;
+
+            // Text glow layers matching video renderer approach:
+            // dark shadows for contrast, then colored glow, then white text
+            let offsets: &[(f32, f32)] =
+                &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+            let glow_layers: &[(f32, [u8; 3], f32)] = &[
+                (6.0, [0, 0, 0], 0.15),
+                (4.0, [0, 0, 0], 0.25),
+                (3.0, *color, 0.30),
+                (2.0, *color, 0.50),
+                (1.0, *color, 0.70),
+            ];
+
+            for &(dist, c, opacity) in glow_layers {
+                let layer_color = Color32::from_rgba_premultiplied(
+                    (c[0] as f32 * opacity) as u8,
+                    (c[1] as f32 * opacity) as u8,
+                    (c[2] as f32 * opacity) as u8,
+                    (255.0 * opacity) as u8,
+                );
+                let glow_font = FontId::proportional(font_size);
+                for &(dx, dy) in offsets {
+                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), glow_font.clone(), layer_color));
+                    shapes.push(Shape::galley(
+                        Pos2::new(text_x + dx * dist, text_y + dy * dist),
+                        galley,
+                        Color32::TRANSPARENT,
+                    ));
+                }
+            }
+
+            // Main white text on top
+            shapes.push(Shape::galley(Pos2::new(text_x, text_y), main_galley, Color32::TRANSPARENT));
+
+            // Subtitle
+            if let Some(sub_galley) = sub_galley {
+                let sub_w = sub_galley.size().x;
+                let sub_x = center_x - sub_w / 2.0;
+                let sub_y = text_y + main_h + gap;
+
+                // Subtitle dark outline
+                let sub_font = FontId::proportional(font_size / 4.0);
+                for &(dx, dy) in offsets {
+                    let outline = ctx.fonts_mut(|f| {
+                        f.layout_no_wrap(
+                            subtitle.as_ref().unwrap().clone(),
+                            sub_font.clone(),
+                            Color32::from_rgba_premultiplied(0, 0, 0, 180),
+                        )
+                    });
+                    shapes.push(Shape::galley(
+                        Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0),
+                        outline,
+                        Color32::TRANSPARENT,
+                    ));
+                }
+
+                shapes.push(Shape::galley(Pos2::new(sub_x, sub_y), sub_galley, Color32::TRANSPARENT));
+            }
+        }
+
         DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
             let canvas_w = transform.screen_canvas_width();
             let icon_size = 16.0 * ws;
@@ -3180,6 +3271,7 @@ impl ReplayRendererViewer {
                                         | DrawCommand::Timer { .. }
                                         | DrawCommand::KillFeed { .. }
                                         | DrawCommand::TeamBuffs { .. }
+                                        | DrawCommand::BattleResultOverlay { .. }
                                 );
                                 let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
@@ -4490,6 +4582,10 @@ impl ReplayRendererViewer {
                                             // ── HUD Settings ──
                                             ui.label(egui::RichText::new("HUD Settings").small().strong());
                                             ui.indent("hud_settings", |ui| {
+                                                changed |= ui
+                                                    .checkbox(&mut opts.show_battle_result, "Battle Result")
+                                                    .changed();
+                                                changed |= ui.checkbox(&mut opts.show_buffs, "Buff Counters").changed();
                                                 changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                                 changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
