@@ -271,13 +271,16 @@ impl UiReport {
 
             let vehicle_param = player.vehicle();
 
-            let ship_species_text: String = vehicle_param
-                .species()
+            let known_species = vehicle_param.species().and_then(|r| r.known().cloned());
+
+            let ship_species_text: String = known_species
+                .as_ref()
                 .and_then(|species| metadata_provider.localized_name_from_id(&species.translation_id()))
                 .unwrap_or_else(|| "unk".to_string());
 
-            let icon =
-                ship_class_icon_from_species(vehicle_param.species().expect("ship has no species"), &wows_data_inner);
+            let icon = known_species
+                .as_ref()
+                .and_then(|species| ship_class_icon_from_species(species.clone(), &wows_data_inner));
 
             let name_color = if player_state.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
@@ -421,12 +424,16 @@ impl UiReport {
                         + all_hits.get(HITS_SKIP_ALT).copied().unwrap_or(0)
                         + all_hits.get(HITS_SKIP_AIRSUPPORT).copied().unwrap_or(0);
 
-                    let relevant_hits_number =
-                        if vehicle_param.species().map(|species| species == Species::AirCarrier).unwrap_or(false) {
-                            plane_hits
-                        } else {
-                            main_hits
-                        };
+                    let relevant_hits_number = if vehicle_param
+                        .species()
+                        .and_then(|r| r.known())
+                        .map(|s| *s == Species::AirCarrier)
+                        .unwrap_or(false)
+                    {
+                        plane_hits
+                    } else {
+                        main_hits
+                    };
 
                     let main_hits_text = separate_number(relevant_hits_number, Some(locale));
                     let main_hits_text = RichText::new(main_hits_text).color(player_color);
@@ -569,7 +576,7 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let species = vehicle_param.species().expect("ship has no species?");
+            let species = vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
                 .and_then(|v| v.commander_skills(species.clone()))
                 .map(|skills| {
@@ -925,7 +932,9 @@ impl UiReport {
                 SortColumn::BaseXp => SortKey::I64(report.base_xp),
                 SortColumn::RawXp => SortKey::I64(report.raw_xp),
                 SortColumn::ShipName => SortKey::String(report.ship_name.clone()),
-                SortColumn::ShipClass => SortKey::Species(player.vehicle().species().expect("no species for vehicle?")),
+                SortColumn::ShipClass => SortKey::Species(
+                    player.vehicle().species().and_then(|r| r.known()).cloned().expect("no species for vehicle?"),
+                ),
                 SortColumn::ObservedDamage => SortKey::U64(Some(if report.should_hide_stats() && !self.debug_mode {
                     0
                 } else {
@@ -2690,7 +2699,13 @@ impl ToolkitTabViewer<'_> {
                 }
                 ui.label(RichText::new(self_state.username()).color(weak));
                 ui.label(RichText::new("\u{00B7}").color(weak));
-                ui.label(RichText::new(report.game_type().to_string()).color(weak));
+                ui.label(
+                    RichText::new(wowsunpack::game_params::translations::translate_game_mode(
+                        &report.game_type().to_string(),
+                        metadata_provider,
+                    ))
+                    .color(weak),
+                );
                 ui.label(RichText::new("\u{00B7}").color(weak));
                 ui.label(RichText::new(report.version().to_path()).color(weak));
                 ui.label(RichText::new("\u{00B7}").color(weak));
@@ -3609,11 +3624,16 @@ impl ToolkitTabViewer<'_> {
 
             let wins = self.tab_state.session_stats.games_won();
             let losses = self.tab_state.session_stats.games_lost();
+            let draws = self.tab_state.session_stats.games_drawn();
             let win_rate = self.tab_state.session_stats.win_rate().unwrap_or_default();
             ui.horizontal(|ui| {
                 ui.strong("Win Rate:");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{wins}W/{losses}L ({win_rate:.02}%)"));
+                    if draws > 0 {
+                        ui.label(format!("{wins}W/{losses}L/{draws}D ({win_rate:.02}%)"));
+                    } else {
+                        ui.label(format!("{wins}W/{losses}L ({win_rate:.02}%)"));
+                    }
                 });
             });
 

@@ -24,6 +24,7 @@ use rootcause::Report;
 use rootcause::prelude::ResultExt;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use tokio::runtime::Runtime;
 use tracing::debug;
 use tracing::error;
@@ -38,7 +39,6 @@ use wowsunpack::data::idx::{self};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
-use wowsunpack::game_types::Consumable;
 use zip::ZipArchive;
 
 use crate::WowsToolkitApp;
@@ -131,6 +131,22 @@ impl From<crate::mod_manager::ModTaskInfo> for BackgroundTaskKind {
 }
 
 impl BackgroundTask {
+    /// Check if the task has completed without rendering any UI.
+    pub fn check_completion(&mut self) -> Option<Result<BackgroundTaskCompletion, Report>> {
+        if self.receiver.is_none() {
+            return Some(Ok(BackgroundTaskCompletion::NoReceiver));
+        }
+
+        match self.receiver.as_ref().unwrap().try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                self.receiver = None;
+                Some(Ok(BackgroundTaskCompletion::NoReceiver))
+            }
+        }
+    }
+
     /// TODO: has a bug currently where if multiple tasks are running at the same time, the message looks a bit wonky
     pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, Report>> {
         if self.receiver.is_none() {
@@ -379,8 +395,7 @@ fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<S
     let icons: HashMap<Species, Arc<GameAsset>> = HashMap::from_iter(species.iter().map(|species| {
         let path = wowsunpack::game_params::translations::ship_class_icon_path(species);
 
-        let icon_node =
-            file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", <&'static str>::from(species)));
+        let icon_node = file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", species.name()));
 
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
@@ -469,17 +484,24 @@ pub fn load_wows_data_for_build(
     };
 
     let mut game_constants = GameConstants::from_pkg(&file_tree, &pkg_loader);
-    if let Some(consumable_mapping_override) =
-        replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()).map(|obj| {
-            HashMap::from_iter(obj.iter().filter_map(|(key, value)| {
-                Some((
-                    value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32,
-                    Consumable::from_consumable_type(key)?,
-                ))
-            }))
-        })
-    {
-        game_constants.common_mut().set_consumable_types(consumable_mapping_override)
+    if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
+        let types = game_constants.common_mut().consumable_types_mut();
+        for (key, value) in consumable_ids {
+            let id = value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32;
+            types.insert(id, Cow::Owned(key.clone()));
+        }
+    }
+
+    if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
+        let stages = game_constants.common_mut().battle_stages_mut();
+        let version = wowsunpack::data::Version { major: 0, minor: 0, patch: 0, build };
+        for (key, value) in battle_stages {
+            if let Some(id) = value.as_i64() {
+                if let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known() {
+                    stages.insert(id as i32, stage);
+                }
+            }
+        }
     }
 
     let game_constants = Arc::new(game_constants);
@@ -939,9 +961,14 @@ fn parse_replay_data_in_background(
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             debug!("replay parsed successfully");
+                            let battle_type =
+                                wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
                             let is_valid_game_type_for_shipbuilds = matches!(
-                                game_type,
-                                wowsunpack::game_types::BattleType::Random | wowsunpack::game_types::BattleType::Ranked
+                                battle_type.known(),
+                                Some(
+                                    wowsunpack::game_types::BattleType::Random
+                                        | wowsunpack::game_types::BattleType::Ranked
+                                )
                             );
                             if !is_valid_game_type_for_shipbuilds {
                                 debug!("game type is: {}", &game_type);

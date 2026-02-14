@@ -357,11 +357,30 @@ impl WowsToolkitApp {
         ui.horizontal(|ui| {
             let mut remove_tasks = Vec::new();
 
+            // Count pending LoadingReplay tasks so we can show a single consolidated indicator
+            let pending_replay_count = self
+                .tab_state
+                .background_tasks
+                .iter()
+                .filter(|t| matches!(t.kind, BackgroundTaskKind::LoadingReplay) && t.receiver.is_some())
+                .count();
+            let mut shown_replay_spinner = false;
+
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
 
                 let remove_task = {
-                    let desc = task.build_description(ui);
+                    // For LoadingReplay tasks, show one consolidated spinner instead of many
+                    let desc = if matches!(task.kind, BackgroundTaskKind::LoadingReplay) && pending_replay_count > 1 {
+                        if !shown_replay_spinner {
+                            shown_replay_spinner = true;
+                            ui.spinner();
+                            ui.label(format!("Loading {} replays...", pending_replay_count));
+                        }
+                        task.check_completion()
+                    } else {
+                        task.build_description(ui)
+                    };
                     trace!("Task description: {:?}", desc);
                     if let Some(result) = desc {
                         match &task.kind {
@@ -453,6 +472,9 @@ impl WowsToolkitApp {
                                     skip_ui_update,
                                     track_session_stats,
                                 } => {
+                                    if track_session_stats {
+                                        self.tab_state.session_stats.add_replay(replay.clone());
+                                    }
                                     if !skip_ui_update {
                                         {
                                             self.tab_state.replay_parser_tab.lock().game_chat.clear();
@@ -463,9 +485,6 @@ impl WowsToolkitApp {
                                                 .player_tracker
                                                 .write()
                                                 .update_from_replay(&replay.read());
-                                        }
-                                        if track_session_stats {
-                                            self.tab_state.session_stats.add_replay(replay.clone());
                                         }
                                         self.tab_state.current_replay = Some(replay);
                                         self.tab_state.toasts.lock().success("Successfully loaded replay");

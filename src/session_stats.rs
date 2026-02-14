@@ -296,18 +296,19 @@ impl SessionStats {
     }
 
     /// Returns the win rate percentage for this session. Will return `None`
-    /// if no games have been played.
+    /// if no games with results have been played.
     pub fn win_rate(&self) -> Option<f64> {
-        if self.recent_replays().is_empty() {
+        let played = self.games_played();
+        if played == 0 {
             return None;
         }
 
-        Some((self.games_won() as f64 / self.games_played() as f64) * 100.0)
+        Some((self.games_won() as f64 / played as f64) * 100.0)
     }
 
-    /// Total number of games played in the current session
+    /// Total number of games with a result (win, loss, or draw) in the current session
     pub fn games_played(&self) -> usize {
-        self.recent_replays().len()
+        self.recent_replays().iter().filter(|replay| replay.read().battle_result().is_some()).count()
     }
 
     /// Total number of games won in the current session
@@ -321,6 +322,13 @@ impl SessionStats {
     pub fn games_lost(&self) -> usize {
         self.recent_replays().iter().fold(0, |accum, replay| {
             if let Some(BattleResult::Loss(_)) = replay.read().battle_result() { accum + 1 } else { accum }
+        })
+    }
+
+    /// Total number of games drawn in the current session
+    pub fn games_drawn(&self) -> usize {
+        self.recent_replays().iter().fold(0, |accum, replay| {
+            if let Some(BattleResult::Draw) = replay.read().battle_result() { accum + 1 } else { accum }
         })
     }
 

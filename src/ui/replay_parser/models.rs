@@ -100,7 +100,7 @@ impl TranslatedBuild {
     pub fn new(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<Self> {
         let vehicle_entity = player.vehicle_entity()?;
         let config = vehicle_entity.props().ship_config();
-        let species = player.vehicle().species()?;
+        let species = player.vehicle().species()?.known()?.clone();
         let result = Self {
             modules: config
                 .modernization()

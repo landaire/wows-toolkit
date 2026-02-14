@@ -399,7 +399,7 @@ impl Vehicle {
             index: player_data.vehicle().index().to_string(),
             name: value.ship_name().to_string(),
             nation: player_data.vehicle().nation().to_string(),
-            class: player_data.vehicle().species().expect("no species"),
+            class: player_data.vehicle().species().and_then(|r| r.known().cloned()).expect("no species"),
             tier: player_data.vehicle().data().vehicle_ref().expect("no vehicle ref").level(),
             is_test_ship: value.is_test_ship(),
             is_enemy: value.relation().is_enemy(),

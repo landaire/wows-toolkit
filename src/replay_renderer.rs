@@ -36,9 +36,11 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::recognized::Recognized;
 
 use egui_taffy::AsTuiBuilder as _;
 use egui_taffy::TuiBuilderLogic as _;
@@ -52,8 +54,9 @@ use crate::wows_data::SharedWoWsData;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TOTAL_FRAMES: usize = 1800;
-const FPS: f64 = 30.0;
+/// Approximate number of frame snapshots per second of game time.
+/// Controls the granularity of seeking in the replay.
+const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const ICON_SIZE: f32 = assets::ICON_SIZE as f32;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 
@@ -509,6 +512,9 @@ pub struct SharedRendererState {
     pub viewport_ctx: Option<egui::Context>,
     /// Pre-parsed timeline events for the entire replay.
     pub(crate) timeline_events: Option<Vec<TimelineEvent>>,
+    /// Absolute game clock at which the battle started (after pre-battle countdown).
+    /// Used to convert between absolute clock (used by seeking) and elapsed time (used by timeline).
+    pub battle_start: f32,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -575,6 +581,7 @@ pub fn launch_replay_renderer(
         show_dead_ships: saved_options.show_dead_ships,
         viewport_ctx: None,
         timeline_events: None,
+        battle_start: 0.0,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -685,16 +692,18 @@ fn playback_thread(
     };
 
     // 4. Create controller and renderer
+    let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
-    let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, RenderOptions::default());
+    let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
 
     // Parse all packets, tracking frame boundaries
-    let frame_duration = if game_duration > 0.0 { game_duration / TOTAL_FRAMES as f32 } else { 1.0 / FPS as f32 };
+    let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
+    let estimated_frames = (game_duration * SNAPSHOTS_PER_SECOND) as usize + 1;
 
     // Pre-parse: build a mapping of packet offsets to clock times
     // so we can efficiently seek by re-parsing
-    let mut frame_snapshots: Vec<FrameSnapshot> = Vec::with_capacity(TOTAL_FRAMES);
+    let mut frame_snapshots: Vec<FrameSnapshot> = Vec::with_capacity(estimated_frames);
     let mut last_rendered_frame: i64 = -1;
     let mut prev_clock = GameClock(0.0);
 
@@ -711,7 +720,7 @@ fn playback_thread(
                     renderer.update_ship_abilities(&controller);
 
                     let target_frame = (prev_clock.seconds() / frame_duration) as i64;
-                    while last_rendered_frame < target_frame && last_rendered_frame < TOTAL_FRAMES as i64 - 1 {
+                    while last_rendered_frame < target_frame {
                         last_rendered_frame += 1;
                         let commands = renderer.draw_frame(&controller);
                         frame_snapshots
@@ -724,7 +733,7 @@ fn playback_thread(
                                 commands,
                                 clock_seconds: prev_clock.seconds(),
                                 frame_index: 0,
-                                total_frames: TOTAL_FRAMES,
+                                total_frames: estimated_frames,
                                 game_duration,
                             });
                         }
@@ -747,7 +756,7 @@ fn playback_thread(
         renderer.update_squadron_info(&controller);
         renderer.update_ship_abilities(&controller);
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
-        while last_rendered_frame < target_frame && last_rendered_frame < TOTAL_FRAMES as i64 - 1 {
+        while last_rendered_frame < target_frame {
             last_rendered_frame += 1;
             frame_snapshots.push(FrameSnapshot { packet_offset: full_packet_data.len(), clock: prev_clock.seconds() });
         }
@@ -758,11 +767,15 @@ fn playback_thread(
     let actual_game_duration = frame_snapshots.last().map(|s| s.clock).unwrap_or(game_duration);
 
     // 4. Event extraction pass — second full parse for timeline events
-    let timeline_events = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
+    let (timeline_events, battle_start) = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
         .ok()
         .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)))
         .unwrap_or_default();
-    shared_state.lock().timeline_events = Some(timeline_events);
+    {
+        let mut state = shared_state.lock();
+        state.timeline_events = Some(timeline_events);
+        state.battle_start = battle_start;
+    }
 
     // Mark as ready
     shared_state.lock().status = RendererStatus::Ready;
@@ -793,7 +806,7 @@ fn playback_thread(
     };
     let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
     let initial_opts = shared_state.lock().options.clone();
-    let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, initial_opts);
+    let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
@@ -883,7 +896,7 @@ fn playback_thread(
             // old replay is now in new_replay and will be dropped at end of block
             live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
             let current_opts = shared_state.lock().options.clone();
-            live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, current_opts);
+            live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             parse_to_clock(
                 &live_replay,
                 &game_metadata,
@@ -1104,11 +1117,13 @@ fn format_timeline_event(event: &TimelineEvent) -> String {
 }
 
 /// Parse the entire replay and extract significant game events for the timeline.
+/// Returns `(events, battle_start)` where `battle_start` is the absolute game clock
+/// at which the battle started. Event clocks are adjusted to elapsed time.
 fn extract_timeline_events(
     replay_file: &ReplayFile,
     game_metadata: &GameMetadataProvider,
     game_constants: Option<&GameConstants>,
-) -> Vec<TimelineEvent> {
+) -> (Vec<TimelineEvent>, f32) {
     let mut events = Vec::new();
     let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
@@ -1292,7 +1307,8 @@ fn extract_timeline_events(
 
                     // --- Radar activation detection ---
                     for (entity_id, consumables) in controller.active_consumables() {
-                        let radar_count = consumables.iter().filter(|c| c.consumable == Consumable::Radar).count();
+                        let radar_count =
+                            consumables.iter().filter(|c| c.consumable == Recognized::Known(Consumable::Radar)).count();
                         let prev_count = radar_counts.get(entity_id).copied().unwrap_or(0);
                         if radar_count > prev_count {
                             let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
@@ -1480,9 +1496,15 @@ fn extract_timeline_events(
 
     controller.finish();
 
+    // Translate event times from absolute game clock to elapsed time since battle start
+    let battle_start = controller.battle_start_clock().map(|c| c.seconds()).unwrap_or(0.0);
+    for event in &mut events {
+        event.clock = controller.game_clock_to_elapsed(event.clock);
+    }
+
     // Sort events by clock time
     events.sort_by(|a, b| a.clock.partial_cmp(&b.clock).unwrap_or(std::cmp::Ordering::Equal));
-    events
+    (events, battle_start)
 }
 
 // ─── Video Export ────────────────────────────────────────────────────────────
@@ -1664,9 +1686,10 @@ fn render_video_blocking(
     let replay_file = ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec())
         .map_err(|e| report!("Failed to parse replay: {:?}", e))?;
 
+    let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
-    let mut renderer = MinimapRenderer::new(map_info, &game_metadata, options);
+    let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options);
     let mut target = ImageTarget::new(
         map_image_rgb,
         ship_icons_rgba,
@@ -1824,6 +1847,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::Plane { .. } => opts.show_planes,
         DrawCommand::ScoreBar { .. } => opts.show_score,
         DrawCommand::Timer { .. } => opts.show_timer,
+        DrawCommand::PreBattleCountdown { .. } => opts.show_timer,
         DrawCommand::KillFeed { .. } => opts.show_kill_feed,
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
@@ -2521,18 +2545,58 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::Timer { seconds } => {
+        DrawCommand::Timer { time_remaining, elapsed } => {
             let canvas_w = transform.screen_canvas_width();
-            let total_secs = seconds.max(0.0) as u32;
-            let minutes = total_secs / 60;
-            let secs = total_secs % 60;
-            let text = format!("{:02}:{:02}", minutes, secs);
+            let main_font = FontId::proportional(16.0 * ws);
+            let shadow_off = 1.0 * ws;
 
-            let font = FontId::proportional(16.0 * ws);
-            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, font, Color32::WHITE));
-            let text_w = galley.size().x;
-            let pos = transform.hud_pos(0.0, 3.0);
-            shapes.push(Shape::galley(Pos2::new(pos.x + canvas_w / 2.0 - text_w / 2.0, pos.y), galley, Color32::WHITE));
+            if let Some(remaining) = time_remaining {
+                // Main: time remaining centered
+                let r = (*remaining).max(0) as u32;
+                let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
+                let galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text.clone(), main_font.clone(), Color32::WHITE));
+                let text_w = galley.size().x;
+                let pos = transform.hud_pos(0.0, 2.0);
+                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text, main_font, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, Color32::WHITE));
+
+                // Below: +elapsed in smaller gray text
+                let small_font = FontId::proportional(11.0 * ws);
+                let e = elapsed.max(0.0) as u32;
+                let elapsed_text = format!("+{:02}:{:02}", e / 60, e % 60);
+                let gray = Color32::from_rgb(180, 180, 180);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text.clone(), small_font.clone(), gray));
+                let text_w = galley.size().x;
+                let pos = transform.hud_pos(0.0, 18.0);
+                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text, small_font, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, gray));
+            } else {
+                // Fallback: just show elapsed time centered
+                let e = elapsed.max(0.0) as u32;
+                let text = format!("{:02}:{:02}", e / 60, e % 60);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), main_font.clone(), Color32::WHITE));
+                let text_w = galley.size().x;
+                let pos = transform.hud_pos(0.0, 2.0);
+                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
+                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, Color32::WHITE));
+            }
+        }
+
+        DrawCommand::PreBattleCountdown { seconds } => {
+            // Reuse the BattleResultOverlay rendering with gold color and subtitle
+            let overlay = DrawCommand::BattleResultOverlay {
+                text: format!("{}", seconds),
+                subtitle: Some("BATTLE STARTS IN".to_string()),
+                color: [255, 200, 50],
+            };
+            shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, opts));
         }
 
         DrawCommand::TeamAdvantage { label, color, .. } => {
@@ -2568,21 +2632,21 @@ fn draw_command_to_shapes(
                 let killer_color = color_from_rgb(entry.killer_color);
                 let victim_color = color_from_rgb(entry.victim_color);
 
-                let cause_key = match &entry.cause {
-                    DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell => {
+                let cause_key = match entry.cause.known() {
+                    Some(DeathCause::Artillery | DeathCause::ApShell | DeathCause::HeShell | DeathCause::CsShell) => {
                         "main_caliber"
                     }
-                    DeathCause::Secondaries => "atba",
-                    DeathCause::Torpedo | DeathCause::AerialTorpedo => "torpedo",
-                    DeathCause::Fire => "burning",
-                    DeathCause::Flooding => "flood",
-                    DeathCause::DiveBomber => "bomb",
-                    DeathCause::SkipBombs => "skip",
-                    DeathCause::AerialRocket => "rocket",
-                    DeathCause::Detonation => "detonate",
-                    DeathCause::Ramming => "ram",
-                    DeathCause::DepthCharge | DeathCause::AerialDepthCharge => "depthbomb",
-                    DeathCause::Missile => "missile",
+                    Some(DeathCause::Secondaries) => "atba",
+                    Some(DeathCause::Torpedo | DeathCause::AerialTorpedo) => "torpedo",
+                    Some(DeathCause::Fire) => "burning",
+                    Some(DeathCause::Flooding) => "flood",
+                    Some(DeathCause::DiveBomber) => "bomb",
+                    Some(DeathCause::SkipBombs) => "skip",
+                    Some(DeathCause::AerialRocket) => "rocket",
+                    Some(DeathCause::Detonation) => "detonate",
+                    Some(DeathCause::Ramming) => "ram",
+                    Some(DeathCause::DepthCharge | DeathCause::AerialDepthCharge) => "depthbomb",
+                    Some(DeathCause::Missile) => "missile",
                     _ => "main_caliber",
                 };
 
@@ -3394,6 +3458,7 @@ impl ReplayRendererViewer {
                 let speed = state.speed;
                 let options = state.options.clone();
                 let show_dead_ships = state.show_dead_ships;
+                let battle_start = state.battle_start;
                 let frame_data =
                     state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock_seconds, f.game_duration));
                 drop(state);
@@ -3750,6 +3815,7 @@ impl ReplayRendererViewer {
                                     cmd,
                                     DrawCommand::ScoreBar { .. }
                                         | DrawCommand::Timer { .. }
+                                        | DrawCommand::PreBattleCountdown { .. }
                                         | DrawCommand::KillFeed { .. }
                                         | DrawCommand::TeamBuffs { .. }
                                         | DrawCommand::BattleResultOverlay { .. }
@@ -4293,11 +4359,12 @@ impl ReplayRendererViewer {
                             }
 
                             // Shift+Left/Right: skip to prev/next timeline event
+                            let elapsed = (clock_secs - battle_start).max(0.0);
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().rev().find(|e| e.clock < clock_secs) {
-                                        let seek_clock = event.clock;
+                                    if let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5) {
+                                        let seek_clock = event.clock + battle_start;
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -4308,8 +4375,8 @@ impl ReplayRendererViewer {
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().find(|e| e.clock > clock_secs) {
-                                        let seek_clock = event.clock;
+                                    if let Some(event) = events.iter().find(|e| e.clock > elapsed) {
+                                        let seek_clock = event.clock + battle_start;
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -4933,6 +5000,7 @@ impl ReplayRendererViewer {
 
                                             // Skip to previous event
                                             if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
+                                                let elapsed = (clock_secs - battle_start).max(0.0);
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
@@ -4941,9 +5009,9 @@ impl ReplayRendererViewer {
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events {
                                                         if let Some(event) =
-                                                            events.iter().rev().find(|e| e.clock < clock_secs)
+                                                            events.iter().rev().find(|e| e.clock < elapsed - 0.5)
                                                         {
-                                                            let seek_clock = event.clock;
+                                                            let seek_clock = event.clock + battle_start;
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -5007,12 +5075,13 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::FAST_FORWARD));
                                                 if btn.on_hover_text("Next event (Shift+Right)").clicked() {
+                                                    let elapsed = (clock_secs - battle_start).max(0.0);
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events {
                                                         if let Some(event) =
-                                                            events.iter().find(|e| e.clock > clock_secs)
+                                                            events.iter().find(|e| e.clock > elapsed)
                                                         {
-                                                            let seek_clock = event.clock;
+                                                            let seek_clock = event.clock + battle_start;
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -5048,9 +5117,9 @@ impl ReplayRendererViewer {
                                                     let _ = command_tx.send(PlaybackCommand::Seek(seek_time));
                                                 }
 
-                                                let total_secs = clock_secs as u32;
-                                                let mins = total_secs / 60;
-                                                let secs = total_secs % 60;
+                                                let elapsed_secs = (clock_secs - battle_start).max(0.0) as u32;
+                                                let mins = elapsed_secs / 60;
+                                                let secs = elapsed_secs % 60;
                                                 tui.tui()
                                                     .style(fixed_style.clone())
                                                     .label(format!("{:02}:{:02}", mins, secs));
@@ -5409,7 +5478,7 @@ impl ReplayRendererViewer {
                                                             });
                                                             if row.inner {
                                                                 let _ =
-                                                                    command_tx.send(PlaybackCommand::Seek(event.clock));
+                                                                    command_tx.send(PlaybackCommand::Seek(event.clock + battle_start));
                                                             }
                                                         }
                                                     });
