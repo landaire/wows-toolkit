@@ -1070,6 +1070,11 @@ pub(crate) enum TimelineEventKind {
         label: String,
         is_friendly: bool,
     },
+    Disconnected {
+        ship_name: String,
+        player_name: String,
+        is_friendly: bool,
+    },
 }
 
 pub(crate) struct TimelineEvent {
@@ -1112,6 +1117,9 @@ fn format_timeline_event(event: &TimelineEvent) -> String {
             format!("{} ({}) used radar", ship_name, player_name)
         }
         TimelineEventKind::AdvantageChanged { label, .. } => label.clone(),
+        TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
+            format!("{} ({}) disconnected", ship_name, player_name)
+        }
     };
     format!("[{}] {}", time, desc)
 }
@@ -1495,6 +1503,28 @@ fn extract_timeline_events(
     }
 
     controller.finish();
+
+    // --- Disconnect events (non-death) ---
+    {
+        use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
+        for (entity_id, player) in controller.player_entities() {
+            for info in player.connection_change_info() {
+                if info.event_kind() == ConnectionChangeKind::Disconnected && !info.had_death_event() {
+                    let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
+                    let pname = player_names.get(entity_id).cloned().unwrap_or_default();
+                    let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
+                    events.push(TimelineEvent {
+                        clock: info.at_game_duration().as_secs_f32(),
+                        kind: TimelineEventKind::Disconnected {
+                            ship_name: sname,
+                            player_name: pname,
+                            is_friendly: friendly,
+                        },
+                    });
+                }
+            }
+        }
+    }
 
     // Translate event times from absolute game clock to elapsed time since battle start
     let battle_start = controller.battle_start_clock().map(|c| c.seconds()).unwrap_or(0.0);
@@ -2441,7 +2471,17 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::ScoreBar { team0, team1, team0_color, team1_color, max_score, team0_timer, team1_timer } => {
+        DrawCommand::ScoreBar {
+            team0,
+            team1,
+            team0_color,
+            team1_color,
+            max_score,
+            team0_timer,
+            team1_timer,
+            advantage_label,
+            advantage_team,
+        } => {
             let canvas_w = transform.screen_canvas_width();
             let bar_height = 20.0 * ws;
             let max_score = *max_score as f32;
@@ -2482,109 +2522,210 @@ fn draw_command_to_shapes(
                 ));
             }
 
-            let font = FontId::proportional(14.0 * ws);
+            let score_font = FontId::proportional(14.0 * ws);
+            let timer_font = FontId::proportional(12.0 * ws);
+            let adv_font = FontId::proportional(11.0 * ws);
             let t0_text = format!("{}", team0);
             let t1_text = format!("{}", team1);
-            let shadow_off = 1.0 * ws;
+            let timer_color = Color32::from_rgb(200, 200, 200);
+            let pill_color = Color32::from_rgba_unmultiplied(0, 0, 0, 140);
+            let pill_pad_x = 4.0 * ws;
+            let pill_pad_y = 1.0 * ws;
+            let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
 
-            // Team 0 score text with shadow
-            let t0_pos = Pos2::new(bar_origin.x + 8.0 * ws, bar_origin.y + 2.0 * ws);
-            let t0_shadow = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text.clone(), font.clone(), Color32::BLACK));
-            shapes.push(Shape::galley(
-                Pos2::new(t0_pos.x + shadow_off, t0_pos.y + shadow_off),
-                t0_shadow,
-                Color32::BLACK,
-            ));
-            let t0_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, font.clone(), Color32::WHITE));
-            let t0_text_w = t0_galley.size().x;
-            shapes.push(Shape::galley(t0_pos, t0_galley, Color32::WHITE));
+            // ── Measure all team 0 elements ──
+            let t0_score_g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text.clone(), score_font.clone(), Color32::WHITE));
+            let t0_score_w = t0_score_g.size().x;
+            let t0_score_h = t0_score_g.size().y;
+            drop(t0_score_g);
 
-            // Team 0 timer (right of score text)
-            if let Some(timer) = team0_timer {
-                let timer_font = FontId::proportional(12.0 * ws);
-                let timer_color = Color32::from_rgb(200, 200, 200);
-                let timer_x = t0_pos.x + t0_text_w + 4.0 * ws;
-                let timer_pos = Pos2::new(timer_x, bar_origin.y + 3.0 * ws);
-                let ts = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::BLACK));
-                shapes.push(Shape::galley(
-                    Pos2::new(timer_pos.x + shadow_off, timer_pos.y + shadow_off),
-                    ts,
-                    Color32::BLACK,
-                ));
-                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
-                shapes.push(Shape::galley(timer_pos, tg, timer_color));
+            let t0_timer_w = team0_timer.as_ref().map(|t| {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(t.clone(), timer_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                w
+            });
+
+            let t0_adv_w = if *advantage_team == 0 && !advantage_label.is_empty() {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                Some(w)
+            } else {
+                None
+            };
+
+            // Total width for team 0 pill
+            let mut t0_total_w = t0_score_w;
+            if let Some(tw) = t0_timer_w {
+                t0_total_w += 4.0 * ws + tw;
+            }
+            if let Some(aw) = t0_adv_w {
+                t0_total_w += 6.0 * ws + aw;
             }
 
-            // Team 1 score text with shadow
-            let t1_galley_shadow = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text.clone(), font.clone(), Color32::BLACK));
-            let t1_w = t1_galley_shadow.size().x;
-            let t1_pos = Pos2::new(bar_origin.x + canvas_w - t1_w - 8.0 * ws, bar_origin.y + 2.0 * ws);
-            shapes.push(Shape::galley(
-                Pos2::new(t1_pos.x + shadow_off, t1_pos.y + shadow_off),
-                t1_galley_shadow,
-                Color32::BLACK,
+            // Draw team 0 pill + text
+            let t0_pill_x = bar_origin.x + 8.0 * ws - pill_pad_x;
+            let t0_pill_y = bar_origin.y + 2.0 * ws - pill_pad_y;
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(t0_pill_x, t0_pill_y),
+                    Vec2::new(t0_total_w + pill_pad_x * 2.0, t0_score_h + pill_pad_y * 2.0),
+                ),
+                pill_rounding,
+                pill_color,
             ));
-            let t1_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, font, Color32::WHITE));
-            shapes.push(Shape::galley(t1_pos, t1_galley, Color32::WHITE));
 
-            // Team 1 timer (left of score text)
+            let mut t0_cursor = bar_origin.x + 8.0 * ws;
+            let t0_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
+            shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 2.0 * ws), t0_score_galley, Color32::WHITE));
+            t0_cursor += t0_score_w;
+
+            if let Some(timer) = team0_timer {
+                t0_cursor += 4.0 * ws;
+                let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), timer_color));
+                let tw = tg.size().x;
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 3.0 * ws), tg, timer_color));
+                t0_cursor += tw;
+            }
+
+            let _t0_end_x = t0_cursor;
+
+            if let Some(_) = t0_adv_w {
+                t0_cursor += 6.0 * ws;
+                let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 4.0 * ws), ag, Color32::WHITE));
+            }
+
+            // ── Measure all team 1 elements ──
+            let t1_score_g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text.clone(), score_font.clone(), Color32::WHITE));
+            let t1_score_w = t1_score_g.size().x;
+            let t1_score_h = t1_score_g.size().y;
+            drop(t1_score_g);
+
+            let t1_timer_w = team1_timer.as_ref().map(|t| {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(t.clone(), timer_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                w
+            });
+
+            let t1_adv_w = if *advantage_team == 1 && !advantage_label.is_empty() {
+                let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
+                let w = g.size().x;
+                drop(g);
+                Some(w)
+            } else {
+                None
+            };
+
+            // Total width for team 1 pill
+            let mut t1_total_w = t1_score_w;
+            if let Some(tw) = t1_timer_w {
+                t1_total_w += 4.0 * ws + tw;
+            }
+            if let Some(aw) = t1_adv_w {
+                t1_total_w += 6.0 * ws + aw;
+            }
+
+            // Draw team 1 pill + text (right-aligned)
+            let t1_pill_x = bar_origin.x + canvas_w - 8.0 * ws - t1_total_w - pill_pad_x;
+            let t1_pill_y = bar_origin.y + 2.0 * ws - pill_pad_y;
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(t1_pill_x, t1_pill_y),
+                    Vec2::new(t1_total_w + pill_pad_x * 2.0, t1_score_h + pill_pad_y * 2.0),
+                ),
+                pill_rounding,
+                pill_color,
+            ));
+
+            // Lay out team 1 elements right-to-left
+            let mut t1_cursor = bar_origin.x + canvas_w - 8.0 * ws;
+
+            // Score (rightmost)
+            t1_cursor -= t1_score_w;
+            let t1_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
+            shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 2.0 * ws), t1_score_galley, Color32::WHITE));
+            let _t1_score_x = t1_cursor;
+
+            // Timer (left of score)
             if let Some(timer) = team1_timer {
-                let timer_font = FontId::proportional(12.0 * ws);
-                let timer_color = Color32::from_rgb(200, 200, 200);
-                let tg_measure = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::BLACK));
-                let tw = tg_measure.size().x;
-                let timer_x = t1_pos.x - tw - 4.0 * ws;
-                let timer_pos = Pos2::new(timer_x, bar_origin.y + 3.0 * ws);
-                shapes.push(Shape::galley(
-                    Pos2::new(timer_pos.x + shadow_off, timer_pos.y + shadow_off),
-                    tg_measure,
-                    Color32::BLACK,
-                ));
                 let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
-                shapes.push(Shape::galley(timer_pos, tg, timer_color));
+                let tw = tg.size().x;
+                t1_cursor -= 4.0 * ws + tw;
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 3.0 * ws), tg, timer_color));
+            }
+
+            let _t1_start_x = t1_cursor;
+
+            // Advantage (leftmost, if team 1)
+            if let Some(aw) = t1_adv_w {
+                t1_cursor -= 6.0 * ws + aw;
+                let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font, Color32::WHITE));
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 4.0 * ws), ag, Color32::WHITE));
             }
         }
 
         DrawCommand::Timer { time_remaining, elapsed } => {
             let canvas_w = transform.screen_canvas_width();
             let main_font = FontId::proportional(16.0 * ws);
-            let shadow_off = 1.0 * ws;
+            let pill_color = Color32::from_rgba_unmultiplied(0, 0, 0, 140);
+            let pill_pad_x = 4.0 * ws;
+            let pill_pad_y = 1.0 * ws;
+            let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
 
             if let Some(remaining) = time_remaining {
-                // Main: time remaining centered
+                // Measure both lines to size a single pill
                 let r = (*remaining).max(0) as u32;
                 let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
-                let galley =
-                    ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text.clone(), main_font.clone(), Color32::WHITE));
-                let text_w = galley.size().x;
-                let pos = transform.hud_pos(0.0, 2.0);
-                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
-                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text, main_font, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, Color32::WHITE));
-
-                // Below: +elapsed in smaller gray text
                 let small_font = FontId::proportional(11.0 * ws);
                 let e = elapsed.max(0.0) as u32;
                 let elapsed_text = format!("+{:02}:{:02}", e / 60, e % 60);
                 let gray = Color32::from_rgb(180, 180, 180);
-                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text.clone(), small_font.clone(), gray));
-                let text_w = galley.size().x;
-                let pos = transform.hud_pos(0.0, 18.0);
-                let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
-                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text, small_font, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, gray));
+
+                let rg = ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text, main_font, Color32::WHITE));
+                let r_w = rg.size().x;
+                let r_h = rg.size().y;
+                let eg = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text, small_font, gray));
+                let e_w = eg.size().x;
+                let e_h = eg.size().y;
+
+                let pill_w = r_w.max(e_w);
+                let pill_h = r_h + e_h;
+                let pos = transform.hud_pos(0.0, 2.0);
+                let pill_x = pos.x + canvas_w / 2.0 - pill_w / 2.0 - pill_pad_x;
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(pill_x, pos.y - pill_pad_y),
+                        Vec2::new(pill_w + pill_pad_x * 2.0, pill_h + pill_pad_y * 2.0),
+                    ),
+                    pill_rounding,
+                    pill_color,
+                ));
+
+                let r_x = pos.x + canvas_w / 2.0 - r_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(r_x, pos.y), rg, Color32::WHITE));
+
+                let e_x = pos.x + canvas_w / 2.0 - e_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(e_x, pos.y + r_h), eg, gray));
             } else {
                 // Fallback: just show elapsed time centered
                 let e = elapsed.max(0.0) as u32;
                 let text = format!("{:02}:{:02}", e / 60, e % 60);
-                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), main_font.clone(), Color32::WHITE));
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::WHITE));
                 let text_w = galley.size().x;
+                let text_h = galley.size().y;
                 let pos = transform.hud_pos(0.0, 2.0);
                 let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
-                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
+                shapes.push(Shape::rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(x - pill_pad_x, pos.y - pill_pad_y),
+                        Vec2::new(text_w + pill_pad_x * 2.0, text_h + pill_pad_y * 2.0),
+                    ),
+                    pill_rounding,
+                    pill_color,
+                ));
                 shapes.push(Shape::galley(Pos2::new(x, pos.y), galley, Color32::WHITE));
             }
         }
@@ -2599,19 +2740,8 @@ fn draw_command_to_shapes(
             shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, opts));
         }
 
-        DrawCommand::TeamAdvantage { label, color, .. } => {
-            if !label.is_empty() {
-                let canvas_w = transform.screen_canvas_width();
-                let font = FontId::proportional(11.0 * ws);
-                let shadow_off = 1.0 * ws;
-                let label_color = color_from_rgb(*color);
-                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), label_color));
-                let text_w = galley.size().x;
-                let pos = transform.hud_pos(canvas_w / 2.0 / ws - text_w / 2.0 / ws, 21.0);
-                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font, Color32::BLACK));
-                shapes.push(Shape::galley(Pos2::new(pos.x + shadow_off, pos.y + shadow_off), shadow, Color32::BLACK));
-                shapes.push(Shape::galley(pos, galley, label_color));
-            }
+        DrawCommand::TeamAdvantage { .. } => {
+            // Rendering handled by ScoreBar; this command is kept for tooltip interaction only
         }
 
         DrawCommand::KillFeed { entries } => {
@@ -3831,19 +3961,61 @@ impl ReplayRendererViewer {
 
                             // Hover tooltip for TeamAdvantage
                             let ws = transform.window_scale;
+                            // Find ScoreBar to compute advantage label position
+                            let score_bar_info = frame.commands.iter().find_map(|cmd| {
+                                if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage_team, .. } = cmd {
+                                    Some((*team0, *team1, team0_timer.clone(), team1_timer.clone(), *advantage_team))
+                                } else {
+                                    None
+                                }
+                            });
                             for cmd in &frame.commands {
                                 if let DrawCommand::TeamAdvantage { label, color, breakdown } = cmd {
                                     if label.is_empty() {
                                         break;
                                     }
                                     let canvas_w = transform.screen_canvas_width();
-                                    let font = FontId::proportional(11.0 * ws);
-                                    let galley = ctx
-                                        .fonts_mut(|f| f.layout_no_wrap(label.clone(), font, color_from_rgb(*color)));
+                                    let bar_height = 20.0 * ws;
+                                    let bar_origin = transform.hud_pos(0.0, 0.0);
+
+                                    // Recompute cursor positions matching ScoreBar rendering
+                                    let score_font = FontId::proportional(14.0 * ws);
+                                    let timer_font = FontId::proportional(12.0 * ws);
+                                    let adv_font = FontId::proportional(11.0 * ws);
+                                    let adv_color = color_from_rgb(*color);
+                                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
                                     let text_w = galley.size().x;
                                     let text_h = galley.size().y;
-                                    let pos = transform.hud_pos(canvas_w / 2.0 / ws - text_w / 2.0 / ws, 21.0);
-                                    let label_rect = Rect::from_min_size(pos, Vec2::new(text_w, text_h));
+
+                                    let (t0_end_x, t1_start_x) = if let Some((t0_score, t1_score, ref t0_timer, ref t1_timer, _)) = score_bar_info {
+                                        let t0_text = format!("{}", t0_score);
+                                        let t0g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
+                                        let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
+                                        if let Some(timer) = t0_timer {
+                                            let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), Color32::WHITE));
+                                            t0_end = t0_end + 4.0 * ws + tg.size().x;
+                                        }
+                                        let t1_text = format!("{}", t1_score);
+                                        let t1g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
+                                        let mut t1_start = bar_origin.x + canvas_w - t1g.size().x - 8.0 * ws;
+                                        if let Some(timer) = t1_timer {
+                                            let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, Color32::WHITE));
+                                            t1_start = t1_start - tg.size().x - 4.0 * ws;
+                                        }
+                                        (t0_end, t1_start)
+                                    } else {
+                                        let half = canvas_w / 2.0;
+                                        (bar_origin.x + half, bar_origin.x + half)
+                                    };
+
+                                    let adv_team = score_bar_info.as_ref().map(|s| s.4).unwrap_or(-1);
+                                    let x = if adv_team == 0 {
+                                        t0_end_x + 6.0 * ws
+                                    } else {
+                                        t1_start_x - text_w - 6.0 * ws
+                                    };
+                                    let y = bar_origin.y + (bar_height - text_h) / 2.0;
+                                    let label_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(text_w, text_h));
                                     let resp = ui.interact(
                                         label_rect,
                                         egui::Id::new("advantage_tooltip"),
@@ -5456,6 +5628,13 @@ impl ReplayRendererViewer {
                                                                     TimelineEventKind::AdvantageChanged {
                                                                         label, is_friendly,
                                                                     } => (event_color(*is_friendly), label.clone(), String::new()),
+                                                                    TimelineEventKind::Disconnected {
+                                                                        ship_name, player_name, is_friendly,
+                                                                    } => (
+                                                                        event_color(*is_friendly),
+                                                                        format!("{} disconnected", ship_name),
+                                                                        format!("{} ({})", ship_name, player_name),
+                                                                    ),
                                                                 };
 
                                                                 let label_resp = ui.add(
