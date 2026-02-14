@@ -223,6 +223,7 @@ impl ReplayDependencies {
         };
         let mut replay = Replay::new(replay_file, game_metadata);
         replay.game_constants = Some(game_constants);
+        replay.source_path = Some(path.to_path_buf());
 
         let mut loader = ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay)));
         if !update_ui {

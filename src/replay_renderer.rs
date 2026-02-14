@@ -408,6 +408,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_dead_ship_names: saved.show_dead_ship_names,
         show_battle_result: saved.show_battle_result,
         show_buffs: saved.show_buffs,
+        show_chat: saved.show_chat,
     }
 }
 
@@ -436,6 +437,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_battle_result: opts.show_battle_result,
         show_buffs: opts.show_buffs,
         show_ship_config: opts.show_ship_config,
+        show_chat: opts.show_chat,
     }
 }
 
@@ -506,7 +508,6 @@ pub struct SharedRendererState {
 }
 
 /// The cloneable viewport handle stored in TabState.
-#[derive(Clone)]
 pub struct ReplayRendererViewer {
     pub title: Arc<String>,
     pub open: Arc<AtomicBool>,
@@ -572,6 +573,8 @@ pub fn launch_replay_renderer(
         timeline_events: None,
     }));
 
+    let title = Arc::new(format!("Replay Renderer - {replay_name}"));
+
     let video_export_data = Arc::new(VideoExportData {
         raw_meta: raw_meta.clone(),
         packet_data: packet_data.clone(),
@@ -583,7 +586,7 @@ pub fn launch_replay_renderer(
     });
 
     let viewer = ReplayRendererViewer {
-        title: Arc::new("Replay Renderer".to_string()),
+        title,
         open: Arc::new(AtomicBool::new(true)),
         shared_state: Arc::clone(&shared_state),
         command_tx,
@@ -971,6 +974,7 @@ fn playback_thread(
                 || live_renderer.options.show_player_names != new_opts.show_player_names
                 || live_renderer.options.show_ship_names != new_opts.show_ship_names
                 || live_renderer.options.show_ship_config != new_opts.show_ship_config
+                || live_renderer.options.show_chat != new_opts.show_chat
             {
                 live_renderer.options = new_opts;
                 let commands = live_renderer.draw_frame(&live_controller);
@@ -1583,6 +1587,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::BuffZone { .. } => opts.show_capture_points,
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
+        DrawCommand::ChatOverlay { .. } => opts.show_chat,
     }
 }
 
@@ -2766,6 +2771,154 @@ fn draw_command_to_shapes(
                 }
             }
         }
+
+        DrawCommand::ChatOverlay { entries } => {
+            let canvas_w = transform.screen_canvas_width();
+            let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
+            let header_font = FontId::proportional(11.0 * ws);
+            let msg_font = FontId::proportional(11.0 * ws);
+            let ship_name_font = FontId::proportional(10.0 * ws);
+            let line_h = 14.0 * ws;
+            let icon_size = 12.0 * ws;
+            let padding = 6.0 * ws;
+            let gap = 3.0 * ws;
+
+            // Chat box: left side, vertically centered, 25% of canvas width
+            let box_w = canvas_w * 0.25;
+            let box_x = transform.origin.x + 4.0 * ws;
+
+            // Pre-measure to figure out total height
+            let mut total_lines = 0usize;
+            let inner_w = box_w - padding * 2.0;
+
+            struct ChatLayout {
+                clan_galley: Option<std::sync::Arc<egui::Galley>>,
+                name_galley: std::sync::Arc<egui::Galley>,
+                ship_icon_species: Option<String>,
+                ship_name_galley: Option<std::sync::Arc<egui::Galley>>,
+                msg_galleys: Vec<std::sync::Arc<egui::Galley>>,
+                opacity: f32,
+                team_color: [u8; 3],
+            }
+
+            let mut layouts = Vec::new();
+            for entry in entries {
+                let opacity = entry.opacity;
+                let alpha = (opacity * 255.0) as u8;
+                let team_color = entry.team_color;
+
+                // Clan tag in clan color (or team color fallback)
+                let team_c = Color32::from_rgba_unmultiplied(team_color[0], team_color[1], team_color[2], alpha);
+                let clan_galley =
+                    if !entry.clan_tag.is_empty() {
+                        let clan_c = if let Some(cc) = entry.clan_color {
+                            Color32::from_rgba_unmultiplied(cc[0], cc[1], cc[2], alpha)
+                        } else {
+                            team_c
+                        };
+                        Some(ctx.fonts_mut(|f| {
+                            f.layout_no_wrap(format!("[{}] ", entry.clan_tag), header_font.clone(), clan_c)
+                        }))
+                    } else {
+                        None
+                    };
+
+                // Player name in team color
+                let name_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.player_name.clone(), header_font.clone(), team_c));
+
+                let ship_name_galley = entry.ship_name.as_ref().map(|sn| {
+                    let tc = Color32::from_rgba_unmultiplied(team_color[0], team_color[1], team_color[2], alpha);
+                    ctx.fonts_mut(|f| f.layout_no_wrap(format!("{}:", sn), ship_name_font.clone(), tc))
+                });
+
+                // Word-wrap message text
+                let msg_color = Color32::from_rgba_unmultiplied(
+                    entry.message_color[0],
+                    entry.message_color[1],
+                    entry.message_color[2],
+                    alpha,
+                );
+                let msg_galleys = ctx.fonts_mut(|f| {
+                    let job =
+                        egui::text::LayoutJob::simple(entry.message.clone(), msg_font.clone(), msg_color, inner_w);
+                    let galley = f.layout_job(job);
+                    vec![galley]
+                });
+
+                // Count lines: 1 for header, N for message rows
+                let msg_lines: usize = msg_galleys.iter().map(|g| g.rows.len().max(1)).sum();
+                total_lines += 1 + msg_lines;
+
+                layouts.push(ChatLayout {
+                    clan_galley,
+                    name_galley,
+                    ship_icon_species: entry.ship_species.clone(),
+                    ship_name_galley,
+                    msg_galleys,
+                    opacity,
+                    team_color,
+                });
+            }
+
+            if total_lines == 0 {
+                // nothing to draw
+            } else {
+                let total_h = total_lines as f32 * line_h + padding * 2.0;
+                let box_y = transform.origin.y + canvas_h / 2.0 - total_h / 2.0;
+
+                // Semi-translucent background
+                let bg_rect = Rect::from_min_size(Pos2::new(box_x, box_y), Vec2::new(box_w, total_h));
+                shapes.push(Shape::rect_filled(bg_rect, CornerRadius::same(3), Color32::from_black_alpha(90)));
+
+                let mut y = box_y + padding;
+                for layout in &layouts {
+                    let alpha = (layout.opacity * 255.0) as u8;
+                    let mut x = box_x + padding;
+
+                    // Clan tag
+                    if let Some(ref cg) = layout.clan_galley {
+                        shapes.push(Shape::galley(Pos2::new(x, y), cg.clone(), Color32::TRANSPARENT));
+                        x += cg.size().x;
+                    }
+
+                    // Player name
+                    shapes.push(Shape::galley(Pos2::new(x, y), layout.name_galley.clone(), Color32::TRANSPARENT));
+                    x += layout.name_galley.size().x + gap;
+
+                    // Ship icon (facing right)
+                    if let Some(ref species) = layout.ship_icon_species {
+                        if let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                            let tc = layout.team_color;
+                            let tint = Color32::from_rgba_unmultiplied(tc[0], tc[1], tc[2], alpha);
+                            let icon_y = y + line_h / 2.0;
+                            shapes.push(make_rotated_icon_mesh(
+                                tex.id(),
+                                Pos2::new(x + icon_size / 2.0, icon_y),
+                                icon_size,
+                                0.0,
+                                tint,
+                            ));
+                            x += icon_size + gap;
+                        }
+                    }
+
+                    // Ship name
+                    if let Some(ref sng) = layout.ship_name_galley {
+                        shapes.push(Shape::galley(Pos2::new(x, y), sng.clone(), Color32::TRANSPARENT));
+                    }
+
+                    y += line_h;
+
+                    // Message text (word-wrapped)
+                    for galley in &layout.msg_galleys {
+                        let msg_x = box_x + padding + 8.0 * ws; // slight indent
+                        shapes.push(Shape::galley(Pos2::new(msg_x, y), galley.clone(), Color32::TRANSPARENT));
+                        y += galley.rows.len().max(1) as f32 * line_h;
+                    }
+                }
+            }
+        }
     }
 
     shapes
@@ -2900,10 +3053,6 @@ impl ReplayRendererViewer {
             }
         }
 
-        if !self.open.load(Ordering::Relaxed) {
-            return;
-        }
-
         let shared_state = self.shared_state.clone();
         let command_tx = self.command_tx.clone();
         let window_open = self.open.clone();
@@ -2923,6 +3072,10 @@ impl ReplayRendererViewer {
                 .with_inner_size([800.0, 900.0])
                 .with_min_inner_size([400.0, 450.0]),
             move |ctx, _class| {
+                if !window_open.load(Ordering::Relaxed) {
+                    return;
+                }
+
                 let state = shared_state.lock();
                 let status_is_loading = matches!(state.status, RendererStatus::Loading);
                 let status_error = match &state.status {
@@ -3293,6 +3446,7 @@ impl ReplayRendererViewer {
                                         | DrawCommand::KillFeed { .. }
                                         | DrawCommand::TeamBuffs { .. }
                                         | DrawCommand::BattleResultOverlay { .. }
+                                        | DrawCommand::ChatOverlay { .. }
                                 );
                                 let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
@@ -4712,6 +4866,7 @@ impl ReplayRendererViewer {
                                                     .checkbox(&mut opts.show_battle_result, "Battle Result")
                                                     .changed();
                                                 changed |= ui.checkbox(&mut opts.show_buffs, "Buff Counters").changed();
+                                                changed |= ui.checkbox(&mut opts.show_chat, "Chat").changed();
                                                 changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
                                                 changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();

@@ -693,6 +693,7 @@ pub fn load_wows_files(
             let replay_file = ReplayFile::from_file(&path).ok()?;
             let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
             replay.game_constants = Some(Arc::clone(&game_constants));
+            replay.source_path = Some(path.clone());
             let replay = Arc::new(RwLock::new(replay));
 
             Some((path, replay))
@@ -917,6 +918,7 @@ fn parse_replay_data_in_background(
                 if let Some(metadata_provider) = metadata_provider {
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     replay.game_constants = Some(gc);
+                    replay.source_path = Some(path.to_path_buf());
                     let mut build_uploaded_successfully = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
@@ -1229,6 +1231,7 @@ pub fn start_populating_player_inspector(
                     if let Some(metadata_provider) = metadata_provider {
                         let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                         replay.game_constants = Some(gc);
+                        replay.source_path = Some(path.clone());
                         match replay.parse(game_version.to_string().as_str()) {
                             Ok(report) => {
                                 replay.battle_report = Some(report);

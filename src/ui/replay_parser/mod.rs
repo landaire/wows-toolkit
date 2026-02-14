@@ -2,6 +2,8 @@ mod damage_types;
 mod models;
 mod sorting;
 
+use std::path::PathBuf;
+
 use crate::icon_str;
 pub use models::Achievement;
 pub use models::Damage;
@@ -2144,6 +2146,9 @@ pub struct Replay {
     pub ui_report: Option<UiReport>,
 
     pub game_constants: Option<Arc<wows_replays::game_constants::GameConstants>>,
+
+    /// Original file path this replay was loaded from, if available.
+    pub source_path: Option<PathBuf>,
 }
 
 fn clan_color_for_player(player: &Player) -> Option<Color32> {
@@ -2163,7 +2168,14 @@ fn clan_color_for_player(player: &Player) -> Option<Color32> {
 
 impl Replay {
     pub fn new(replay_file: ReplayFile, resource_loader: Arc<GameMetadataProvider>) -> Self {
-        Replay { replay_file, resource_loader, battle_report: None, ui_report: None, game_constants: None }
+        Replay {
+            replay_file,
+            resource_loader,
+            battle_report: None,
+            ui_report: None,
+            game_constants: None,
+            source_path: None,
+        }
     }
 
     pub fn player_vehicle(&self) -> Option<&VehicleInfoMeta> {
@@ -2624,10 +2636,15 @@ impl ToolkitTabViewer<'_> {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
                     let pkt_data = replay_file.replay_file.packet_data.clone();
                     let map_name = replay_file.replay_file.meta.mapName.clone();
-                    let replay_name = self.tab_state.settings.current_replay_path
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "replay".to_owned());
+                    let translated_map = replay_file.map_name(metadata_provider);
+                    let base = format!("{} - {}", replay_file.replay_file.meta.playerName, translated_map);
+                    let replay_name = if let Some(stem) = replay_file.source_path.as_ref()
+                        .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+                    {
+                        format!("{} - {}", base, stem)
+                    } else {
+                        base
+                    };
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
@@ -4053,15 +4070,17 @@ impl ToolkitTabViewer<'_> {
             let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
             let pkt_data = guard.replay_file.packet_data.clone();
             let map_name = guard.replay_file.meta.mapName.clone();
-            let replay_name = self
-                .tab_state
-                .settings
-                .current_replay_path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| {
-                    format!("{} - {}", guard.replay_file.meta.playerName, guard.replay_file.meta.mapName)
-                });
+            let translated_map = guard.map_name(&guard.resource_loader);
+            let base = format!("{} - {}", guard.replay_file.meta.playerName, translated_map);
+            let replay_name = if let Some(stem) = guard
+                .source_path
+                .as_ref()
+                .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            {
+                format!("{} - {}", base, stem)
+            } else {
+                base
+            };
             let game_duration = guard.replay_file.meta.duration as f32;
             let replay_version =
                 wowsunpack::data::Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
