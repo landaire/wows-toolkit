@@ -665,7 +665,7 @@ impl UiReport {
                             // Look this achievement up from game params
                             let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(
                                 metadata_provider,
-                                achievement_id as u32,
+                                (achievement_id as u32).into(),
                             )?;
 
                             let ParamData::Achievement(achievement_data) = game_param.data() else {
@@ -2173,7 +2173,7 @@ impl Replay {
 
     pub fn vehicle_name(&self, metadata_provider: &GameMetadataProvider) -> String {
         self.player_vehicle()
-            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw()))
+            .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw().into()))
             .and_then(|id| metadata_provider.localized_name_from_id(id))
             .unwrap_or_else(|| "Spectator".to_string())
     }

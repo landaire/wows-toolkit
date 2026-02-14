@@ -5,6 +5,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::GameParamId;
 
 #[derive(Serialize)]
 pub(crate) struct BuildTrackerPayload {
@@ -31,7 +32,7 @@ pub(crate) struct BuildTrackerPayload {
     game_type: String,
 }
 
-fn indicies_to_index(ids: &[u32], metadata_provider: &GameMetadataProvider) -> Vec<String> {
+fn indicies_to_index(ids: &[GameParamId], metadata_provider: &GameMetadataProvider) -> Vec<String> {
     ids.iter().filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())).collect()
 }
 

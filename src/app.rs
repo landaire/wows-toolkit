@@ -275,8 +275,14 @@ impl WowsToolkitApp {
             }
 
             // Added ShipConfigData (hull/artillery/ATBA ranges) to Vehicle
-            if !saved_state.tab_state.settings.has_048_ship_config_fix {
-                saved_state.tab_state.settings.has_048_ship_config_fix = true;
+            if !saved_state.tab_state.settings.has_047_ship_config_fix {
+                saved_state.tab_state.settings.has_047_ship_config_fix = true;
+                crate::game_params::clear_all_game_params_caches();
+            }
+
+            // Added ShipConfigData (hull/artillery/ATBA ranges) to Vehicle
+            if !saved_state.tab_state.settings.has_047_game_params_fix_for_buffs {
+                saved_state.tab_state.settings.has_047_game_params_fix_for_buffs = true;
                 crate::game_params::clear_all_game_params_caches();
             }
 
