@@ -518,6 +518,22 @@ pub struct SharedRendererState {
 }
 
 /// The cloneable viewport handle stored in TabState.
+/// What kind of video export action is pending behind the GPU warning dialog.
+enum PendingVideoExport {
+    /// Save to a user-chosen file path.
+    SaveToFile { output_path: String, options: RenderOptions },
+    /// Render to a temporary file and copy to clipboard.
+    CopyToClipboard { options: RenderOptions },
+}
+
+/// State for the GPU encoder warning dialog.
+struct GpuEncoderWarning {
+    /// The pending export action to execute if the user clicks "Ok".
+    pending_action: PendingVideoExport,
+    /// Whether the "Don't show this again" checkbox is checked.
+    dont_show_again: bool,
+}
+
 pub struct ReplayRendererViewer {
     pub title: Arc<String>,
     pub open: Arc<AtomicBool>,
@@ -538,6 +554,10 @@ pub struct ReplayRendererViewer {
     overlay_state: Arc<Mutex<OverlayState>>,
     /// Annotation/painting layer state.
     annotation_state: Arc<Mutex<AnnotationState>>,
+    /// Shared flag for "suppress GPU encoder warning" (persisted in Settings).
+    pub suppress_gpu_warning: Arc<AtomicBool>,
+    /// Active GPU encoder warning dialog, if any.
+    gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -568,6 +588,7 @@ pub fn launch_replay_renderer(
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     saved_options: &SavedRenderOptions,
+    suppress_gpu_warning: Arc<AtomicBool>,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (command_tx, command_rx) = mpsc::channel();
@@ -609,6 +630,8 @@ pub fn launch_replay_renderer(
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
         overlay_state: Arc::new(Mutex::new(OverlayState::default())),
         annotation_state: Arc::new(Mutex::new(AnnotationState::default())),
+        suppress_gpu_warning,
+        gpu_encoder_warning: Arc::new(Mutex::new(None)),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -1538,6 +1561,41 @@ fn extract_timeline_events(
 }
 
 // ─── Video Export ────────────────────────────────────────────────────────────
+
+/// Execute a pending video export action.
+fn execute_video_export(
+    action: PendingVideoExport,
+    video_export_data: &Arc<VideoExportData>,
+    toasts: &crate::tab_state::SharedToasts,
+    video_exporting: &Arc<AtomicBool>,
+) {
+    match action {
+        PendingVideoExport::SaveToFile { output_path, options } => {
+            save_as_video(
+                output_path,
+                video_export_data.raw_meta.clone(),
+                video_export_data.packet_data.clone(),
+                video_export_data.map_name.clone(),
+                video_export_data.game_duration,
+                options,
+                video_export_data.wows_data.clone(),
+                Arc::clone(&video_export_data.asset_cache),
+                Arc::clone(toasts),
+                Arc::clone(video_exporting),
+            );
+        }
+        PendingVideoExport::CopyToClipboard { options } => {
+            let file_name = format!("{}.mp4", video_export_data.replay_name);
+            render_video_to_clipboard(
+                file_name,
+                Arc::clone(video_export_data),
+                options,
+                Arc::clone(toasts),
+                Arc::clone(video_exporting),
+            );
+        }
+    }
+}
 
 /// Spawn a background thread that renders the replay to an MP4 video file
 /// using the software renderer (`ImageTarget`) and `VideoEncoder`.
@@ -3565,6 +3623,8 @@ impl ReplayRendererViewer {
         let zoom_pan_arc = self.zoom_pan.clone();
         let overlay_state_arc = self.overlay_state.clone();
         let annotation_arc = self.annotation_state.clone();
+        let suppress_gpu_warning = self.suppress_gpu_warning.clone();
+        let gpu_encoder_warning = self.gpu_encoder_warning.clone();
 
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
@@ -5339,10 +5399,11 @@ impl ReplayRendererViewer {
                                             // Save as Video button
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
+                                                let has_warning = gpu_encoder_warning.lock().is_some();
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .enabled_ui(!is_exporting)
+                                                    .enabled_ui(!is_exporting && !has_warning)
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
                                                     ));
@@ -5354,18 +5415,19 @@ impl ReplayRendererViewer {
                                                         .add_filter("MP4 Video", &["mp4"])
                                                         .save_file()
                                                     {
-                                                        save_as_video(
-                                                            path.to_string_lossy().to_string(),
-                                                            video_export_data.raw_meta.clone(),
-                                                            video_export_data.packet_data.clone(),
-                                                            video_export_data.map_name.clone(),
-                                                            video_export_data.game_duration,
-                                                            opts,
-                                                            video_export_data.wows_data.clone(),
-                                                            Arc::clone(&video_export_data.asset_cache),
-                                                            Arc::clone(&toasts),
-                                                            Arc::clone(&video_exporting),
-                                                        );
+                                                        let action = PendingVideoExport::SaveToFile {
+                                                            output_path: path.to_string_lossy().to_string(),
+                                                            options: opts,
+                                                        };
+                                                        let status = wows_minimap_renderer::check_encoder();
+                                                        if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                            execute_video_export(action, &video_export_data, &toasts, &video_exporting);
+                                                        } else {
+                                                            *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
+                                                                pending_action: action,
+                                                                dont_show_again: false,
+                                                            });
+                                                        }
                                                     }
                                                 }
                                             }
@@ -5373,26 +5435,26 @@ impl ReplayRendererViewer {
                                             // Render Video to Clipboard button
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
+                                                let has_warning = gpu_encoder_warning.lock().is_some();
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .enabled_ui(!is_exporting)
+                                                    .enabled_ui(!is_exporting && !has_warning)
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::CLIPBOARD).size(18.0),
                                                     ));
                                                 if btn.on_hover_text("Render Video to Clipboard").clicked() {
                                                     let opts = options.clone();
-                                                    let file_name = format!("{}.mp4", video_export_data.replay_name);
-                                                    let export_data = Arc::clone(&video_export_data);
-                                                    let toasts2 = Arc::clone(&toasts);
-                                                    let exporting = Arc::clone(&video_exporting);
-                                                    render_video_to_clipboard(
-                                                        file_name,
-                                                        export_data,
-                                                        opts,
-                                                        toasts2,
-                                                        exporting,
-                                                    );
+                                                    let action = PendingVideoExport::CopyToClipboard { options: opts };
+                                                    let status = wows_minimap_renderer::check_encoder();
+                                                    if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                        execute_video_export(action, &video_export_data, &toasts, &video_exporting);
+                                                    } else {
+                                                        *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
+                                                            pending_action: action,
+                                                            dont_show_again: false,
+                                                        });
+                                                    }
                                                 }
                                             }
 
@@ -5669,6 +5731,51 @@ impl ReplayRendererViewer {
                                         });
                                 });
                             });
+                    }
+
+                    // GPU encoder warning dialog
+                    if gpu_encoder_warning.lock().is_some() {
+                        let mut close_dialog = false;
+                        let mut proceed = false;
+
+                        egui::Window::new("GPU Video Encoder Unavailable")
+                            .collapsible(false)
+                            .resizable(false)
+                            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                            .show(ctx, |ui| {
+                                ui.label(
+                                    "Could not find a supported GPU video encoder. \
+                                     Video export will fall back to CPU encoding, \
+                                     which will be significantly slower."
+                                );
+                                ui.add_space(8.0);
+                                let mut warning = gpu_encoder_warning.lock();
+                                if let Some(w) = warning.as_mut() {
+                                    ui.checkbox(&mut w.dont_show_again, "Don't show this again");
+                                }
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("Ok").clicked() {
+                                        proceed = true;
+                                        close_dialog = true;
+                                    }
+                                    if ui.button("Cancel").clicked() {
+                                        close_dialog = true;
+                                    }
+                                });
+                            });
+
+                        if close_dialog {
+                            let warning = gpu_encoder_warning.lock().take();
+                            if let Some(w) = warning {
+                                if w.dont_show_again {
+                                    suppress_gpu_warning.store(true, Ordering::Relaxed);
+                                }
+                                if proceed {
+                                    execute_video_export(w.pending_action, &video_export_data, &toasts, &video_exporting);
+                                }
+                            }
+                        }
                     }
 
                     toasts.lock().show(ctx);

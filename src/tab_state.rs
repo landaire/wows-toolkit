@@ -255,6 +255,10 @@ pub struct TabState {
     /// Currently selected build in the Resource Browser.
     #[serde(skip)]
     pub selected_browser_build: u32,
+
+    /// Shared flag for "suppress GPU encoder warning" — synced from Settings on startup.
+    #[serde(skip)]
+    pub suppress_gpu_encoder_warning: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for TabState {
@@ -307,6 +311,7 @@ impl Default for TabState {
             wows_data_map: None,
             available_builds: Vec::new(),
             selected_browser_build: 0,
+            suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }

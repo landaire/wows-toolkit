@@ -291,6 +291,12 @@ impl WowsToolkitApp {
                 crate::game_params::clear_all_game_params_caches();
             }
 
+            // Sync the GPU encoder warning flag from persisted settings
+            saved_state.tab_state.suppress_gpu_encoder_warning.store(
+                saved_state.tab_state.settings.suppress_gpu_encoder_warning,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(
                     saved_state
@@ -846,6 +852,11 @@ impl WowsToolkitApp {
                 // Check if renderer wants to save default options
                 if let Some(saved) = renderer.pending_defaults_save.lock().take() {
                     self.tab_state.settings.renderer_options = saved;
+                }
+                // Sync GPU warning suppress flag back to settings
+                let suppress = renderer.suppress_gpu_warning.load(Ordering::Relaxed);
+                if suppress != self.tab_state.settings.suppress_gpu_encoder_warning {
+                    self.tab_state.settings.suppress_gpu_encoder_warning = suppress;
                 }
             }
 

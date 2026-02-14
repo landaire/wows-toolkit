@@ -2679,6 +2679,7 @@ impl ToolkitTabViewer<'_> {
                         wows_data,
                         asset_cache,
                         &self.tab_state.settings.renderer_options,
+                        Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -4124,6 +4125,7 @@ impl ToolkitTabViewer<'_> {
                 wows_data,
                 asset_cache,
                 &self.tab_state.settings.renderer_options,
+                Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
             );
             self.tab_state.replay_renderers.lock().push(viewer);
         }

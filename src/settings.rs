@@ -234,6 +234,9 @@ pub struct Settings {
     /// Number of most recent games to show when limit is enabled.
     #[serde(default = "default_session_stats_game_count")]
     pub session_stats_game_count: usize,
+    /// If true, suppress the warning dialog when GPU video encoding is unavailable.
+    #[serde(default)]
+    pub suppress_gpu_encoder_warning: bool,
 }
 
 impl Default for Settings {
@@ -264,6 +267,7 @@ impl Default for Settings {
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,
+            suppress_gpu_encoder_warning: false,
         }
     }
 }

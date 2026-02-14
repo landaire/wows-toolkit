@@ -37,7 +37,7 @@ wowsunpack = { version = "0.15", default-features = false, features = [
     "json",
     "rkyv",
 ] }
-wows_minimap_renderer = { version = "0.6.0", default-features = false, features = ["gpu", "arc"] }
+wows_minimap_renderer = { version = "0.6.0", default-features = false, features = ["gpu", "cpu", "arc"] }
 rfd = "0.15"
 humansize = "2.1.3"
 thiserror = "2.0.12"
