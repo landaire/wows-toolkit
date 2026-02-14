@@ -204,7 +204,8 @@ impl WorldOfWarshipsData {
     /// Regenerates everything else (icons, game_constants, replay_constants, etc.).
     /// Returns `false` if versioned constants could not be fetched (network/disk failure).
     pub fn rebuild_with_new_constants(&mut self) -> bool {
-        use crate::task::{build_game_constants, fetch_versioned_constants_with_fallback};
+        use crate::task::build_game_constants;
+        use crate::task::fetch_versioned_constants_with_fallback;
 
         debug!("Rebuilding WorldOfWarshipsData for build {}", self.build_number);
 
@@ -388,7 +389,7 @@ impl ReplayLoader {
                                     player,
                                     player.initial_state().realm().to_owned(),
                                     report.version(),
-                                    report.game_type().to_owned(),
+                                    report.game_type().to_string(),
                                     metadata_provider,
                                 ))
                                 .send()

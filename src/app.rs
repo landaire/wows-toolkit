@@ -48,7 +48,9 @@ use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -1121,9 +1123,7 @@ impl WowsToolkitApp {
             Some(true) => {
                 self.constants_version_mismatch = true;
                 self.tab_state.toasts.lock()
-                    .warning(format!(
-                        "Replay data mapping file version does not match game version.\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.",
-                    ))
+                    .warning("Replay data mapping file version does not match game version.\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.".to_string())
                     .duration(None);
             }
             Some(false) => {
@@ -1153,10 +1153,10 @@ impl WowsToolkitApp {
                     }
 
                     // Re-load the current replay to rebuild its ui_report
-                    if let Some(current) = self.tab_state.current_replay.clone() {
-                        if let Some(deps) = self.tab_state.replay_dependencies() {
-                            update_background_task!(self.tab_state.background_tasks, deps.load_replay(current, true));
-                        }
+                    if let Some(current) = self.tab_state.current_replay.clone()
+                        && let Some(deps) = self.tab_state.replay_dependencies()
+                    {
+                        update_background_task!(self.tab_state.background_tasks, deps.load_replay(current, true));
                     }
 
                     self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");

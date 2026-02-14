@@ -7,7 +7,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -35,7 +37,9 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{self};
+use wowsunpack::data::idx::{
+    self,
+};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
@@ -56,7 +60,9 @@ use crate::replay_export::Match;
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{self};
+use crate::twitch::{
+    self,
+};
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -400,7 +406,7 @@ pub fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashM
         let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
         icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
 
-        (species.clone(), Arc::new(GameAsset { path, data: icon_data }))
+        (*species, Arc::new(GameAsset { path, data: icon_data }))
     }));
 
     icons
@@ -434,10 +440,10 @@ pub fn build_game_constants(
         let stages = game_constants.common_mut().battle_stages_mut();
         let version = Version { major: 0, minor: 0, patch: 0, build };
         for (key, value) in battle_stages {
-            if let Some(id) = value.as_i64() {
-                if let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known() {
-                    stages.insert(id as i32, stage);
-                }
+            if let Some(id) = value.as_i64()
+                && let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known()
+            {
+                stages.insert(id as i32, stage);
             }
         }
     }
@@ -641,12 +647,12 @@ pub fn fetch_versioned_constants_with_fallback(target_build: u32) -> Option<(ser
     };
 
     // 3. Check if exact build exists on server
-    if available_builds.contains(&target_build) {
-        if let Some(data) = fetch_constants_from_github(target_build) {
-            debug!("Fetched exact versioned constants for build {} from GitHub", target_build);
-            save_versioned_constants(target_build, &data);
-            return Some((data, true));
-        }
+    if available_builds.contains(&target_build)
+        && let Some(data) = fetch_constants_from_github(target_build)
+    {
+        debug!("Fetched exact versioned constants for build {} from GitHub", target_build);
+        save_versioned_constants(target_build, &data);
+        return Some((data, true));
     }
 
     // 4. Walk down to the nearest previous (lower) build — never use a higher build
@@ -703,25 +709,23 @@ pub fn load_wows_files(
     let mut replays_dir = wows_directory.join("replays");
 
     let prefs_file = wows_directory.join("preferences.xml");
-    if prefs_file.exists() {
-        if let Some(version_str) = current_build_from_preferences(&prefs_file)
-            && version_str.contains(',')
-        {
-            let full_build_info = Version::from_client_exe(&version_str);
-            if available_builds.contains(&full_build_info.build) {
-                latest_build = full_build_info.build;
-            }
+    if prefs_file.exists()
+        && let Some(version_str) = current_build_from_preferences(&prefs_file)
+        && version_str.contains(',')
+    {
+        let full_build_info = Version::from_client_exe(&version_str);
+        if available_builds.contains(&full_build_info.build) {
+            latest_build = full_build_info.build;
+        }
 
-            let friendly_build =
-                format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
-            full_version = Some(full_build_info);
+        let friendly_build = format!("{}.{}.{}.0", full_build_info.major, full_build_info.minor, full_build_info.patch);
+        full_version = Some(full_build_info);
 
-            for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
-                debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
-                if temp_replays_dir.exists() {
-                    replays_dir = temp_replays_dir;
-                    break;
-                }
+        for temp_replays_dir in [replays_dir.join(&friendly_build), replays_dir.join(friendly_build)] {
+            debug!("Looking for build-specific replays dir at {:?}", temp_replays_dir);
+            if temp_replays_dir.exists() {
+                replays_dir = temp_replays_dir;
+                break;
             }
         }
     }

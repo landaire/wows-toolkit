@@ -134,10 +134,10 @@ use std::cmp::Reverse;
 ///   `{ "commonList": { "winner_team_id": v, ... }, "playersPublicInfo": { "db_id": { "exp": v, ..., "interactions": { "victim_id": { "fires": v, ... } } } } }`
 fn resolve_battle_results(mut results: serde_json::Value, constants: &serde_json::Value) -> serde_json::Value {
     // Resolve commonList: array → object using COMMON_RESULTS names
-    if let Some(common_names) = constants.pointer("/COMMON_RESULTS").and_then(|v| v.as_array()) {
-        if let Some(common_arr) = results.get("commonList").and_then(|v| v.as_array()) {
-            results["commonList"] = serde_json::Value::Object(resolve_array(common_names, common_arr));
-        }
+    if let Some(common_names) = constants.pointer("/COMMON_RESULTS").and_then(|v| v.as_array())
+        && let Some(common_arr) = results.get("commonList").and_then(|v| v.as_array())
+    {
+        results["commonList"] = serde_json::Value::Object(resolve_array(common_names, common_arr));
     }
 
     // Resolve each player in playersPublicInfo: array → object using CLIENT_PUBLIC_RESULTS_INDICES
@@ -151,20 +151,20 @@ fn resolve_battle_results(mut results: serde_json::Value, constants: &serde_json
             if let Some(arr) = player_val.as_array() {
                 let mut obj = serde_json::Map::new();
                 for (name, idx_val) in indices {
-                    if let Some(idx) = idx_val.as_u64().map(|i| i as usize) {
-                        if let Some(value) = arr.get(idx) {
-                            obj.insert(name.clone(), value.clone());
-                        }
+                    if let Some(idx) = idx_val.as_u64().map(|i| i as usize)
+                        && let Some(value) = arr.get(idx)
+                    {
+                        obj.insert(name.clone(), value.clone());
                     }
                 }
 
                 // Resolve interactions: each victim's array → object
-                if let Some(fields) = interaction_fields.as_ref() {
-                    if let Some(interactions) = obj.get_mut("interactions").and_then(|v| v.as_object_mut()) {
-                        for (_victim_id, victim_val) in interactions.iter_mut() {
-                            if let Some(victim_arr) = victim_val.as_array() {
-                                *victim_val = serde_json::Value::Object(resolve_array(fields, victim_arr));
-                            }
+                if let Some(fields) = interaction_fields.as_ref()
+                    && let Some(interactions) = obj.get_mut("interactions").and_then(|v| v.as_object_mut())
+                {
+                    for (_victim_id, victim_val) in interactions.iter_mut() {
+                        if let Some(victim_arr) = victim_val.as_array() {
+                            *victim_val = serde_json::Value::Object(resolve_array(fields, victim_arr));
                         }
                     }
                 }
@@ -185,10 +185,10 @@ fn resolve_array(
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     for (i, name_val) in names.iter().enumerate() {
-        if let Some(name) = name_val.as_str() {
-            if let Some(value) = values.get(i) {
-                map.insert(name.to_string(), value.clone());
-            }
+        if let Some(name) = name_val.as_str()
+            && let Some(value) = values.get(i)
+        {
+            map.insert(name.to_string(), value.clone());
         }
     }
     map
@@ -278,9 +278,8 @@ impl UiReport {
                 .and_then(|species| metadata_provider.localized_name_from_id(&species.translation_id()))
                 .unwrap_or_else(|| "unk".to_string());
 
-            let icon = known_species
-                .as_ref()
-                .and_then(|species| ship_class_icon_from_species(species.clone(), &wows_data_inner));
+            let icon =
+                known_species.as_ref().and_then(|species| ship_class_icon_from_species(*species, &wows_data_inner));
 
             let name_color = if player_state.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
@@ -465,7 +464,7 @@ impl UiReport {
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let num = pr.get(&format!("received_{key}"))?.as_u64()?;
+                                let num = pr.get(format!("received_{key}"))?.as_u64()?;
                                 if num > 0 { Some(description.len()) } else { None }
                             })
                             .max()
@@ -475,7 +474,7 @@ impl UiReport {
                         let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
-                                let num = pr.get(&format!("received_{key}"))?.as_u64()?;
+                                let num = pr.get(format!("received_{key}"))?.as_u64()?;
                                 if num > 0 {
                                     let num_str = separate_number(num, Some(locale));
                                     Some(((key.to_string(), num), format!("{description:<longest_width$}: {num_str}")))
@@ -578,14 +577,13 @@ impl UiReport {
 
             let species = vehicle_param.species().and_then(|r| r.known()).cloned().expect("ship has no species?");
             let (skill_points, num_skills, highest_tier, num_tier_1_skills) = vehicle
-                .and_then(|v| v.commander_skills(species.clone()))
+                .and_then(|v| v.commander_skills(species))
                 .map(|skills| {
-                    let points = skills
-                        .iter()
-                        .fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species.clone()));
-                    let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species.clone())).max();
+                    let points =
+                        skills.iter().fold(0usize, |accum, skill| accum + skill.tier().get_for_species(species));
+                    let highest_tier = skills.iter().map(|skill| skill.tier().get_for_species(species)).max();
                     let num_tier_1_skills = skills.iter().fold(0, |mut accum, skill| {
-                        if skill.tier().get_for_species(species.clone()) == 1 {
+                        if skill.tier().get_for_species(species) == 1 {
                             accum += 1;
                         }
                         accum
@@ -600,7 +598,7 @@ impl UiReport {
                 num_skills,
                 highest_tier,
                 num_tier_1_skills,
-                vehicle.and_then(|v| v.commander_skills(species.clone())),
+                vehicle.and_then(|v| v.commander_skills(species)),
             );
 
             let skill_info =
@@ -1834,7 +1832,7 @@ impl UiReport {
             let frags = report.kills.unwrap_or(0);
 
             let stats = crate::personal_rating::ShipBattleStats {
-                ship_id: ship_id.into(),
+                ship_id: ship_id,
                 battles: 1,
                 damage: actual_damage,
                 wins: if is_win { 1 } else { 0 },

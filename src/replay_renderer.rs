@@ -1,5 +1,6 @@
 use crate::icon_str;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -22,7 +23,8 @@ use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::assets;
-use wows_minimap_renderer::draw_command::{DrawCommand, ShipConfigCircleKind};
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -875,10 +877,10 @@ fn playback_thread(
                         let minimap_positions = controller.minimap_positions();
                         renderer.record_positions(controller, prev_clock, |eid| {
                             // Skip dead ships
-                            if let Some(dead) = dead_ships.get(eid) {
-                                if prev_clock >= dead.clock {
-                                    return false;
-                                }
+                            if let Some(dead) = dead_ships.get(eid)
+                                && prev_clock >= dead.clock
+                            {
+                                return false;
                             }
                             // Only record detected ships (visible on minimap)
                             minimap_positions.get(eid).map(|mm| mm.visible).unwrap_or(false)
@@ -1181,7 +1183,12 @@ fn extract_timeline_events(
     let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
 
     // Advantage tracking
-    use wows_minimap_renderer::advantage::{self, ScoringParams, TeamAdvantage, TeamState};
+    use wows_minimap_renderer::advantage::ScoringParams;
+    use wows_minimap_renderer::advantage::TeamAdvantage;
+    use wows_minimap_renderer::advantage::TeamState;
+    use wows_minimap_renderer::advantage::{
+        self,
+    };
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock: f32 = 0.0;
 
@@ -1410,16 +1417,16 @@ fn extract_timeline_events(
                                 continue;
                             }
                             teams[team].ships_total += 1;
-                            if let Some(entity) = entities.get(entity_id) {
-                                if let Some(vehicle) = entity.vehicle_ref() {
-                                    let v = vehicle.borrow();
-                                    let props = v.props();
-                                    teams[team].ships_known += 1;
-                                    teams[team].max_hp += props.max_health();
-                                    if props.is_alive() {
-                                        teams[team].ships_alive += 1;
-                                        teams[team].total_hp += props.health();
-                                    }
+                            if let Some(entity) = entities.get(entity_id)
+                                && let Some(vehicle) = entity.vehicle_ref()
+                            {
+                                let v = vehicle.borrow();
+                                let props = v.props();
+                                teams[team].ships_known += 1;
+                                teams[team].max_hp += props.max_health();
+                                if props.is_alive() {
+                                    teams[team].ships_alive += 1;
+                                    teams[team].total_hp += props.health();
                                 }
                             }
                         }
@@ -2649,7 +2656,7 @@ fn draw_command_to_shapes(
 
             let _t0_end_x = t0_cursor;
 
-            if let Some(_) = t0_adv_w {
+            if t0_adv_w.is_some() {
                 t0_cursor += 6.0 * ws;
                 let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
                 shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 4.0 * ws), ag, Color32::WHITE));
@@ -2866,9 +2873,9 @@ fn draw_command_to_shapes(
                 let cause_w = if has_cause_icon { cause_icon_size } else { 0.0 };
 
                 let has_killer_icon =
-                    entry.killer_species.as_ref().map_or(false, |sp| textures.ship_icons.contains_key(sp.as_str()));
+                    entry.killer_species.as_ref().is_some_and(|sp| textures.ship_icons.contains_key(sp.as_str()));
                 let has_victim_icon =
-                    entry.victim_species.as_ref().map_or(false, |sp| textures.ship_icons.contains_key(sp.as_str()));
+                    entry.victim_species.as_ref().is_some_and(|sp| textures.ship_icons.contains_key(sp.as_str()));
 
                 // Total width: killer_name [gap icon gap] killer_ship gap cause gap victim_name [gap icon gap] victim_ship
                 let mut total_w = killer_name_w;
@@ -3161,22 +3168,22 @@ fn draw_command_to_shapes(
             ));
 
             // Powerup icon centered on zone
-            if let Some(name) = marker_name {
-                if let Some(tex) = textures.powerup_icons.get(name.as_str()) {
-                    let icon_size = transform.scale_distance(16.0);
-                    let half = icon_size / 2.0;
-                    let mut mesh = egui::Mesh::with_texture(tex.id());
-                    let rect = Rect::from_min_max(
-                        Pos2::new(center.x - half, center.y - half),
-                        Pos2::new(center.x + half, center.y + half),
-                    );
-                    mesh.add_rect_with_uv(
-                        rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                    shapes.push(Shape::Mesh(mesh.into()));
-                }
+            if let Some(name) = marker_name
+                && let Some(tex) = textures.powerup_icons.get(name.as_str())
+            {
+                let icon_size = transform.scale_distance(16.0);
+                let half = icon_size / 2.0;
+                let mut mesh = egui::Mesh::with_texture(tex.id());
+                let rect = Rect::from_min_max(
+                    Pos2::new(center.x - half, center.y - half),
+                    Pos2::new(center.x + half, center.y + half),
+                );
+                mesh.add_rect_with_uv(
+                    rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                shapes.push(Shape::Mesh(mesh.into()));
             }
         }
 
@@ -3973,13 +3980,11 @@ impl ReplayRendererViewer {
                                     continue;
                                 }
                                 // Apply per-ship trail filter
-                                if let DrawCommand::PositionTrail { player_name, .. } = cmd {
-                                    if let Some(name) = player_name {
-                                        if trail_hidden_ships.contains(name) {
+                                if let DrawCommand::PositionTrail { player_name, .. } = cmd
+                                    && let Some(name) = player_name
+                                        && trail_hidden_ships.contains(name) {
                                             continue;
                                         }
-                                    }
-                                }
                                 // Apply per-ship config circle filter (only show if explicitly enabled via right-click, never for dead ships)
                                 if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = cmd {
                                     if !alive_ships.contains(player_name.as_str()) {
@@ -4594,27 +4599,25 @@ impl ReplayRendererViewer {
                             let elapsed = (clock_secs - battle_start).max(0.0);
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
                                 let state = shared_state.lock();
-                                if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5) {
+                                if let Some(ref events) = state.timeline_events
+                                    && let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5) {
                                         let seek_clock = event.clock + battle_start;
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                         toasts.lock().info(desc);
                                     }
-                                }
                             }
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
                                 let state = shared_state.lock();
-                                if let Some(ref events) = state.timeline_events {
-                                    if let Some(event) = events.iter().find(|e| e.clock > elapsed) {
+                                if let Some(ref events) = state.timeline_events
+                                    && let Some(event) = events.iter().find(|e| e.clock > elapsed) {
                                         let seek_clock = event.clock + battle_start;
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                         toasts.lock().info(desc);
                                     }
-                                }
                             }
                         }
                     }
@@ -4865,11 +4868,9 @@ impl ReplayRendererViewer {
                                                             player_name: Some(name),
                                                             ..
                                                         } = cmd
-                                                        {
-                                                            if name != ship_name {
+                                                            && name != ship_name {
                                                                 ann.trail_hidden_ships.insert(name.clone());
                                                             }
-                                                        }
                                                     }
                                                 }
                                                 ann.trail_hidden_ships.remove(ship_name);
@@ -5239,8 +5240,8 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(icons::REWIND));
                                                 if btn.on_hover_text("Previous event (Shift+Left)").clicked() {
                                                     let state = shared_state.lock();
-                                                    if let Some(ref events) = state.timeline_events {
-                                                        if let Some(event) =
+                                                    if let Some(ref events) = state.timeline_events
+                                                        && let Some(event) =
                                                             events.iter().rev().find(|e| e.clock < elapsed - 0.5)
                                                         {
                                                             let seek_clock = event.clock + battle_start;
@@ -5249,7 +5250,6 @@ impl ReplayRendererViewer {
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                                             toasts.lock().info(desc);
                                                         }
-                                                    }
                                                 }
                                             }
 
@@ -5309,8 +5309,8 @@ impl ReplayRendererViewer {
                                                 if btn.on_hover_text("Next event (Shift+Right)").clicked() {
                                                     let elapsed = (clock_secs - battle_start).max(0.0);
                                                     let state = shared_state.lock();
-                                                    if let Some(ref events) = state.timeline_events {
-                                                        if let Some(event) =
+                                                    if let Some(ref events) = state.timeline_events
+                                                        && let Some(event) =
                                                             events.iter().find(|e| e.clock > elapsed)
                                                         {
                                                             let seek_clock = event.clock + battle_start;
@@ -5319,7 +5319,6 @@ impl ReplayRendererViewer {
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                                             toasts.lock().info(desc);
                                                         }
-                                                    }
                                                 }
                                             }
 
@@ -5600,16 +5599,15 @@ impl ReplayRendererViewer {
                                                     egui::Layout::right_to_left(egui::Align::Center),
                                                     |ui| {
                                                         let state = shared_state.lock();
-                                                        if let Some(events) = &state.timeline_events {
-                                                            if ui.small_button("Copy").clicked() {
+                                                        if let Some(events) = &state.timeline_events
+                                                            && ui.small_button("Copy").clicked() {
                                                                 let text: String = events
                                                                     .iter()
-                                                                    .map(|e| format_timeline_event(e))
+                                                                    .map(format_timeline_event)
                                                                     .collect::<Vec<_>>()
                                                                     .join("\n");
                                                                 ui.ctx().copy_text(text);
                                                             }
-                                                        }
                                                     },
                                                 );
                                             });

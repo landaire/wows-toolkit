@@ -1,7 +1,9 @@
 use crate::icon_str;
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{self};
+use std::fs::{
+    self,
+};
 use std::io::BufWriter;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,7 +33,9 @@ use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{self};
+use crate::plaintext_viewer::{
+    self,
+};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -291,39 +295,40 @@ impl ToolkitTabViewer<'_> {
         egui::SidePanel::left("left").show_inside(ui, |ui| {
             ui.vertical(|ui| {
                 // Version selector dropdown (only shown when multiple builds are available)
-                if self.tab_state.available_builds.len() > 1 {
-                    if let Some(map) = &self.tab_state.wows_data_map {
-                        let mut builds: Vec<u32> = map.loaded_builds();
-                        builds.sort();
-                        builds.reverse();
+                if self.tab_state.available_builds.len() > 1
+                    && let Some(map) = &self.tab_state.wows_data_map
+                {
+                    let mut builds: Vec<u32> = map.loaded_builds();
+                    builds.sort();
+                    builds.reverse();
 
-                        let selected_label = map
-                            .get(self.tab_state.selected_browser_build)
-                            .map(|d| d.read().version_label())
-                            .unwrap_or_else(|| format!("{}", self.tab_state.selected_browser_build));
+                    let selected_label = map
+                        .get(self.tab_state.selected_browser_build)
+                        .map(|d| d.read().version_label())
+                        .unwrap_or_else(|| format!("{}", self.tab_state.selected_browser_build));
 
-                        ui.horizontal(|ui| {
-                            ui.label("Version:");
-                            egui::ComboBox::from_id_salt("browser_version_select")
-                                .selected_text(&selected_label)
-                                .show_ui(ui, |ui| {
-                                    for &build in &builds {
-                                        let label = map
-                                            .get(build)
-                                            .map(|d| d.read().version_label())
-                                            .unwrap_or_else(|| format!("{}", build));
-                                        if ui
-                                            .selectable_value(&mut self.tab_state.selected_browser_build, build, &label)
-                                            .changed()
-                                        {
-                                            self.tab_state.filtered_file_list = None;
-                                            self.tab_state.used_filter = None;
-                                        }
+                    ui.horizontal(|ui| {
+                        ui.label("Version:");
+                        egui::ComboBox::from_id_salt("browser_version_select").selected_text(&selected_label).show_ui(
+                            ui,
+                            |ui| {
+                                for &build in &builds {
+                                    let label = map
+                                        .get(build)
+                                        .map(|d| d.read().version_label())
+                                        .unwrap_or_else(|| format!("{}", build));
+                                    if ui
+                                        .selectable_value(&mut self.tab_state.selected_browser_build, build, &label)
+                                        .changed()
+                                    {
+                                        self.tab_state.filtered_file_list = None;
+                                        self.tab_state.used_filter = None;
                                     }
-                                });
-                        });
-                        ui.separator();
-                    }
+                                }
+                            },
+                        );
+                    });
+                    ui.separator();
                 }
 
                 if self.tab_state.used_filter.is_none()

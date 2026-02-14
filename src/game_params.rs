@@ -56,25 +56,21 @@ pub fn cleanup_stale_caches(available_builds: &[u32]) {
         let name_str = name.to_string_lossy();
 
         // Clean up versioned game_params
-        if let Some(rest) = name_str.strip_prefix("game_params_") {
-            if let Some(build_str) = rest.strip_suffix(".bin") {
-                if let Ok(build) = build_str.parse::<u32>() {
-                    if !available_builds.contains(&build) {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
+        if let Some(rest) = name_str.strip_prefix("game_params_")
+            && let Some(build_str) = rest.strip_suffix(".bin")
+            && let Ok(build) = build_str.parse::<u32>()
+            && !available_builds.contains(&build)
+        {
+            let _ = std::fs::remove_file(entry.path());
         }
 
         // Clean up versioned constants
-        if let Some(rest) = name_str.strip_prefix("constants_") {
-            if let Some(build_str) = rest.strip_suffix(".json") {
-                if let Ok(build) = build_str.parse::<u32>() {
-                    if !available_builds.contains(&build) {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
+        if let Some(rest) = name_str.strip_prefix("constants_")
+            && let Some(build_str) = rest.strip_suffix(".json")
+            && let Ok(build) = build_str.parse::<u32>()
+            && !available_builds.contains(&build)
+        {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }

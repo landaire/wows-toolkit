@@ -59,7 +59,7 @@ pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataPr
     let entity = player.vehicle_entity()?;
     let config = entity.props().ship_config();
     let ship = player.vehicle();
-    let species = ship.species()?.known()?.clone();
+    let species = *ship.species()?.known()?;
 
     let json = json!({
         "BuildName": format!("replay_{}", player.initial_state().username()),
@@ -109,7 +109,7 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
     let entity = player.vehicle_entity()?;
     let config = entity.props().ship_config();
     let ship = player.vehicle();
-    let species = ship.species()?.known()?.clone();
+    let species = *ship.species()?.known()?;
     let mut parts: Vec<String> = vec![String::new(); 9];
 
     // Ship

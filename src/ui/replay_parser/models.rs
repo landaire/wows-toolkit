@@ -100,7 +100,7 @@ impl TranslatedBuild {
     pub fn new(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<Self> {
         let vehicle_entity = player.vehicle_entity()?;
         let config = vehicle_entity.props().ship_config();
-        let species = player.vehicle().species()?.known()?.clone();
+        let species = *player.vehicle().species()?.known()?;
         let result = Self {
             modules: config
                 .modernization()
@@ -133,11 +133,9 @@ impl TranslatedBuild {
                     Some(TranslatedAbility { name, game_params_name })
                 })
                 .collect(),
-            captain_skills: vehicle_entity.commander_skills(species.clone()).map(|skills| {
-                let mut skills: Vec<TranslatedCrewSkill> = skills
-                    .iter()
-                    .map(|skill| TranslatedCrewSkill::new(skill, species.clone(), metadata_provider))
-                    .collect();
+            captain_skills: vehicle_entity.commander_skills(species).map(|skills| {
+                let mut skills: Vec<TranslatedCrewSkill> =
+                    skills.iter().map(|skill| TranslatedCrewSkill::new(skill, species, metadata_provider)).collect();
 
                 skills.sort_by_key(|skill| skill.tier);
 
