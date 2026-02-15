@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use tracing::debug;
 use tracing::error;
+use tracing::instrument;
 use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
@@ -21,6 +22,7 @@ use crate::error::ToolkitError;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
+use crate::task::NetworkJob;
 use crate::task::load_wows_data_for_build;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -45,11 +47,16 @@ pub struct WoWsDataMap {
     builds: Arc<RwLock<HashMap<u32, SharedWoWsData>>>,
     wows_dir: PathBuf,
     locale: String,
+    network_job_tx: Option<mpsc::Sender<NetworkJob>>,
 }
 
 impl WoWsDataMap {
     pub fn new(wows_dir: PathBuf, locale: String) -> Self {
-        Self { builds: Arc::new(RwLock::new(HashMap::new())), wows_dir, locale }
+        Self { builds: Arc::new(RwLock::new(HashMap::new())), wows_dir, locale, network_job_tx: None }
+    }
+
+    pub fn set_network_job_tx(&mut self, tx: mpsc::Sender<NetworkJob>) {
+        self.network_job_tx = Some(tx);
     }
 
     /// Insert data for a specific build number.
@@ -74,6 +81,7 @@ impl WoWsDataMap {
 
     /// Rebuild all loaded builds' data after constants have changed.
     /// Returns `true` if all builds rebuilt successfully, `false` if any failed.
+    #[instrument(skip(self))]
     pub fn rebuild_all_with_new_constants(&self) -> bool {
         let builds = self.builds.read();
         let mut all_ok = true;
@@ -89,6 +97,7 @@ impl WoWsDataMap {
     /// Resolve the correct game data for a replay's version.
     /// Checks the map first, then tries to lazy-load from disk.
     /// Returns None if the version's build data is unavailable.
+    #[instrument(skip(self))]
     pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
         let build = version.build;
 
@@ -113,6 +122,12 @@ impl WoWsDataMap {
 
         match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants) {
             Ok(wows_data) => {
+                // If we used fallback constants, request the correct version from the network
+                if !wows_data.replay_constants_exact_match
+                    && let Some(tx) = &self.network_job_tx
+                {
+                    let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+                }
                 let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
                 self.insert(build, Arc::clone(&shared));
                 Some(shared)
@@ -202,21 +217,27 @@ impl WorldOfWarshipsData {
     /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
     /// full_version, patch_version, build_number.
     /// Regenerates everything else (icons, game_constants, replay_constants, etc.).
-    /// Returns `false` if versioned constants could not be fetched (network/disk failure).
+    /// Returns `false` if versioned constants could not be found on disk.
+    #[instrument(skip(self), fields(build = self.build_number))]
     pub fn rebuild_with_new_constants(&mut self) -> bool {
         use crate::task::build_game_constants;
-        use crate::task::fetch_versioned_constants_with_fallback;
+        use crate::task::load_versioned_constants_from_disk_with_fallback;
 
         debug!("Rebuilding WorldOfWarshipsData for build {}", self.build_number);
 
-        // Reload version-matched replay constants
-        let (new_replay_constants, exact_match) = match fetch_versioned_constants_with_fallback(self.build_number) {
-            Some((data, exact)) => (data, exact),
-            None => {
-                warn!("Failed to fetch versioned constants for build {} during rebuild", self.build_number);
-                return false;
-            }
-        };
+        // Reload version-matched replay constants from disk only (no network I/O).
+        // If not on disk, use our current constants as fallback (better than failing).
+        let (new_replay_constants, exact_match) =
+            match load_versioned_constants_from_disk_with_fallback(self.build_number) {
+                Some((data, exact)) => (data, exact),
+                None => {
+                    debug!(
+                        "No cached versioned constants for build {} during rebuild, using current constants",
+                        self.build_number
+                    );
+                    (self.replay_constants.read().clone(), false)
+                }
+            };
 
         // Rebuild game constants from pkg files + new replay constants
         let new_game_constants =

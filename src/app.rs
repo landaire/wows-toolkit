@@ -1,5 +1,4 @@
 use crate::icon_str;
-use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -7,7 +6,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
-use std::time::Instant;
 
 use eframe::APP_KEY;
 use egui::Color32;
@@ -27,13 +25,13 @@ use egui_dock::DockState;
 use egui_dock::Style;
 use egui_dock::TabViewer;
 
-use http_body_util::BodyExt;
 use octocrab::models::repos::Release;
-use octocrab::params::repos::Reference;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
+use tracing::debug;
 use tracing::trace;
+use tracing::warn;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -47,10 +45,10 @@ use crate::icons;
 use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
+use crate::task::NetworkJob;
+use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -148,13 +146,19 @@ pub struct WowsToolkitApp {
     /// Whether a constants/game version mismatch has been detected.
     #[serde(skip)]
     constants_version_mismatch: bool,
-    /// Last time we checked for a constants update (throttled to 30 min).
-    #[serde(skip)]
-    last_constants_update_check: Option<Instant>,
     /// Whether we've already shown a network error for constants updates
     /// (to avoid spamming the user on repeated failures).
     #[serde(skip)]
     constants_update_error_shown: bool,
+
+    /// Receiver for results from the background networking thread.
+    #[serde(skip)]
+    pub(crate) network_result_rx: Option<std::sync::mpsc::Receiver<NetworkResult>>,
+
+    /// Guard for the non-blocking log writer. Dropping this flushes remaining logs.
+    #[cfg(feature = "logging")]
+    #[serde(skip)]
+    _log_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
 impl Default for WowsToolkitApp {
@@ -172,9 +176,11 @@ impl Default for WowsToolkitApp {
             show_error_window: false,
             error_to_show: None,
             constants_version_mismatch: false,
-            last_constants_update_check: None,
             constants_update_error_shown: false,
+            network_result_rx: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
+            #[cfg(feature = "logging")]
+            _log_guard: None,
         }
     }
 }
@@ -350,11 +356,65 @@ impl WowsToolkitApp {
             state.build_consent_window_open = true;
         }
 
+        // Initialize logging if the feature is enabled and the user hasn't disabled it
+        #[cfg(feature = "logging")]
+        if state.tab_state.settings.enable_logging {
+            state._log_guard = Self::init_logging();
+        }
+
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
         task::begin_startup_tasks(&mut state, rx);
 
         state
+    }
+
+    /// Initialize the tracing subscriber with file logging.
+    /// Only logs from `wows_toolkit`, `wows_replays`, and `wows_minimap_renderer` are captured.
+    #[cfg(feature = "logging")]
+    fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+        use tracing_appender::rolling::Rotation;
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::fmt;
+        use tracing_subscriber::fmt::time::LocalTime;
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let log_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| ".".into());
+        let file_appender = tracing_appender::rolling::Builder::new()
+            .rotation(Rotation::HOURLY)
+            .max_log_files(3)
+            .filename_prefix("wows_toolkit.log")
+            .build(&log_dir)
+            .ok()?;
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        let target_filter =
+            tracing_subscriber::filter::Targets::new().with_target("wows_toolkit", tracing::Level::DEBUG);
+
+        let subscriber = tracing_subscriber::registry().with(
+            fmt::Layer::new()
+                .with_writer(non_blocking)
+                .with_timer(LocalTime::rfc_3339())
+                .with_ansi(false)
+                .with_target(true)
+                .with_filter(target_filter),
+        );
+
+        // In debug builds, also log to the console
+        #[cfg(debug_assertions)]
+        let subscriber = {
+            let console_filter =
+                tracing_subscriber::filter::Targets::new().with_target("wows_toolkit", tracing::Level::DEBUG);
+
+            subscriber.with(fmt::Layer::new().with_ansi(true).with_target(true).with_filter(console_filter))
+        };
+
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        Some(guard)
     }
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
@@ -461,12 +521,22 @@ impl WowsToolkitApp {
                                     if let Some(map) = &self.tab_state.wows_data_map {
                                         map.insert(build_number, Arc::clone(wows_data_ref));
                                     } else {
-                                        let map = crate::wows_data::WoWsDataMap::new(
+                                        let mut map = crate::wows_data::WoWsDataMap::new(
                                             PathBuf::from(&new_dir),
                                             self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
                                         );
+                                        if let Some(tx) = self.tab_state.network_job_tx.clone() {
+                                            map.set_network_job_tx(tx);
+                                        }
                                         map.insert(build_number, Arc::clone(wows_data_ref));
                                         self.tab_state.wows_data_map = Some(map);
+                                    }
+
+                                    // If the initial build used fallback constants, request the correct version
+                                    if !wows_data_ref.read().replay_constants_exact_match {
+                                        self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants {
+                                            build: build_number,
+                                        });
                                     }
 
                                     self.tab_state.available_builds = available_builds;
@@ -621,42 +691,96 @@ impl WowsToolkitApp {
         });
     }
 
-    fn check_for_updates(&mut self) {
-        let app_updates = self
-            .runtime
-            .block_on(async { octocrab::instance().repos("landaire", "wows-toolkit").releases().get_latest().await });
-
-        if let Ok(latest_release) = app_updates
-            && let Ok(version) = semver::Version::parse(&latest_release.tag_name[1..])
-        {
-            let app_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-            if app_version < version {
-                self.update_window_open = true;
-                self.latest_release = Some(latest_release);
-            } else {
-                self.tab_state.toasts.lock().success("Application up-to-date");
-            }
-        } else {
-            self.tab_state.toasts.lock().error("Failed to check for app updates");
+    /// Send all startup network checks to the background networking thread (non-blocking).
+    fn request_update_checks(&mut self) {
+        self.tab_state.send_network_job(NetworkJob::CheckForAppUpdates);
+        self.tab_state.send_network_job(NetworkJob::FetchLatestConstants {
+            current_commit: self.tab_state.settings.constants_file_commit.clone(),
+        });
+        if crate::personal_rating::needs_update() {
+            self.tab_state.send_network_job(NetworkJob::FetchPersonalRatingData);
         }
-
-        if let Err(err) = self.fetch_and_update_constants() {
-            let context_text = format!(
-                "{} Failed to update replay config file. Replay data may be inaccurate. Check that WoWs Toolkit can access the internet.",
-                icons::X_CIRCLE
-            );
-            self.show_err_window(err.context(context_text).into());
-        }
-
-        // Check and update PR expected values
-        if crate::personal_rating::needs_update()
-            && let Ok(pr_data) = self.runtime.block_on(crate::personal_rating::fetch_expected_values())
-            && crate::personal_rating::save_expected_values(&pr_data).is_ok()
-        {
-            update_background_task!(self.tab_state.background_tasks, Some(task::load_personal_rating_data(pr_data)));
-        }
-
         self.checked_for_updates = true;
+    }
+
+    /// Poll the networking thread for results and handle them.
+    fn poll_network_results(&mut self) {
+        let Some(rx) = &self.network_result_rx else {
+            return;
+        };
+        while let Ok(result) = rx.try_recv() {
+            match result {
+                NetworkResult::AppUpdateAvailable(release) => {
+                    self.update_window_open = true;
+                    self.latest_release = Some(*release);
+                }
+                NetworkResult::AppUpToDate => {
+                    self.tab_state.toasts.lock().success("Application up-to-date");
+                }
+                NetworkResult::AppUpdateCheckFailed(msg) => {
+                    warn!("App update check failed: {}", msg);
+                    self.tab_state.toasts.lock().error("Failed to check for app updates");
+                }
+                NetworkResult::ConstantsFetched { data, commit } => {
+                    let mut constants_path = PathBuf::from("constants.json");
+                    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+                        constants_path = storage_dir.join(constants_path);
+                    }
+
+                    if std::fs::write(&constants_path, data.as_slice()).is_ok() {
+                        self.tab_state.settings.constants_file_commit = commit;
+                        update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(data)));
+                    }
+                }
+                NetworkResult::ConstantsUpToDate => {}
+                NetworkResult::ConstantsFetchFailed(msg) => {
+                    warn!("Constants fetch failed: {}", msg);
+                    if !self.constants_update_error_shown {
+                        self.constants_update_error_shown = true;
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .error("Failed to fetch updated replay data mapping. Will retry later.")
+                            .duration(None);
+                    }
+                }
+                NetworkResult::PersonalRatingDataFetched(data) => {
+                    if crate::personal_rating::save_expected_values(&data).is_ok() {
+                        update_background_task!(
+                            self.tab_state.background_tasks,
+                            Some(task::load_personal_rating_data(data))
+                        );
+                    }
+                }
+                NetworkResult::PersonalRatingDataFetchFailed(msg) => {
+                    warn!("PR data fetch failed: {}", msg);
+                }
+                NetworkResult::VersionedConstantsFetched { build } => {
+                    // Versioned constants were downloaded and saved to disk.
+                    // If we have this build loaded with inexact constants, rebuild it.
+                    if let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
+                        && let Some(data) = wows_data_map.get(build)
+                        && !data.read().replay_constants_exact_match
+                    {
+                        debug!("Rebuilding build {} with newly fetched versioned constants", build);
+                        if data.write().rebuild_with_new_constants() {
+                            // Invalidate cached reports so they rebuild with correct constants
+                            if let Some(replay_files) = &self.tab_state.replay_files {
+                                for replay in replay_files.values() {
+                                    replay.write().ui_report = None;
+                                }
+                            }
+                            if let Some(current) = &self.tab_state.current_replay {
+                                current.write().ui_report = None;
+                            }
+                        }
+                    }
+                }
+                NetworkResult::VersionedConstantsFetchFailed { build, msg } => {
+                    warn!("Versioned constants fetch failed for build {}: {}", build, msg);
+                }
+            }
+        }
     }
 
     fn ui_file_drag_and_drop(&mut self, ctx: &Context) {
@@ -738,8 +862,10 @@ impl WowsToolkitApp {
         self.tab_state.process_session_stats_reset();
 
         if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
-            self.check_for_updates();
+            self.request_update_checks();
         }
+
+        self.poll_network_results();
 
         if self.build_consent_window_open {
             egui::Window::new("Build Collection Consent").collapsible(false).show(ctx, |ui| {
@@ -998,104 +1124,16 @@ impl WowsToolkitApp {
         panic_log_path
     }
 
-    /// Fetch the latest constants from the server and load them if newer.
-    /// Returns `Err` with the underlying error if the fetch failed.
-    /// Returns `Ok(true)` if new constants were downloaded, `Ok(false)` if already up-to-date.
-    fn fetch_and_update_constants(&mut self) -> Result<bool, Report> {
-        use http_body::Body;
-
-        let current_constants_commit = &self.tab_state.settings.constants_file_commit;
-
-        let constants_updates = self.runtime.block_on(async {
-            let octocrab = octocrab::instance();
-
-            let latest_commit = octocrab
-                .repos("padtrack", "wows-constants")
-                .list_commits()
-                .per_page(1)
-                .send()
-                .await
-                .ok()
-                .and_then(|mut list| list.take_items().pop())
-                .map(|commit| commit.sha);
-
-            if current_constants_commit == &latest_commit || latest_commit.is_none() {
-                return Ok(None);
-            }
-
-            match octocrab
-                .repos("padtrack", "wows-constants")
-                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
-                .await
-            {
-                Ok(constants_updates) => {
-                    let mut body = constants_updates.into_body();
-                    let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
-
-                    while let Some(frame) = body.frame().await {
-                        match frame {
-                            Ok(frame) => {
-                                if let Some(data) = frame.data_ref() {
-                                    result.extend_from_slice(data);
-                                }
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-
-                    Ok(Some((result, latest_commit)))
-                }
-                Err(e) => Err(e),
-            }
-        });
-
-        match constants_updates {
-            Ok(Some((constants_updates, latest_commit))) => {
-                let mut constants_path = PathBuf::from("constants.json");
-                if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-                    constants_path = storage_dir.join(constants_path)
-                }
-
-                if std::fs::write(constants_path, constants_updates.as_slice()).is_ok() {
-                    self.tab_state.settings.constants_file_commit = latest_commit;
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        Some(task::load_constants(constants_updates))
-                    );
-                }
-                Ok(true)
-            }
-            Ok(None) => Ok(false),
-            Err(err) => Err(Report::new(err).into()),
-        }
-    }
-
-    /// If a constants/game version mismatch was detected, try to fetch updated
-    /// constants from the server. Throttled to once every 30 minutes.
+    /// If a constants/game version mismatch was detected, request updated
+    /// constants from the networking thread. The thread handles throttling internally.
     fn try_update_constants(&mut self) {
         if !self.constants_version_mismatch {
             return;
         }
 
-        let now = Instant::now();
-        if let Some(last_check) = self.last_constants_update_check
-            && now.duration_since(last_check).as_secs() < 30 * 60
-        {
-            return;
-        }
-        self.last_constants_update_check = Some(now);
-
-        if let Err(err) = self.fetch_and_update_constants() {
-            tracing::warn!("try_update_constants failed: {:?}", err);
-            if !self.constants_update_error_shown {
-                self.constants_update_error_shown = true;
-                self.tab_state
-                    .toasts
-                    .lock()
-                    .error("Failed to fetch updated replay data mapping. Will retry later.")
-                    .duration(None);
-            }
-        }
+        self.tab_state.send_network_job(NetworkJob::FetchLatestConstants {
+            current_commit: self.tab_state.settings.constants_file_commit.clone(),
+        });
     }
 
     fn check_constants_version_mismatch(&mut self) {

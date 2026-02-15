@@ -11,57 +11,6 @@ fn main() -> eframe::Result<()> {
     use std::path::Path;
     use std::sync::Once;
 
-    #[cfg(all(debug_assertions, feature = "logging"))]
-    {
-        // Janky hack to address https://github.com/tokio-rs/tracing/issues/1817
-        struct NewType(Pretty);
-
-        impl<'writer> FormatFields<'writer> for NewType {
-            fn format_fields<R: RecordFields>(&self, writer: Writer<'writer>, fields: R) -> core::fmt::Result {
-                self.0.format_fields(writer, fields)
-            }
-        }
-
-        // use tracing_appender::rolling::Rotation;
-        use tracing::level_filters::LevelFilter;
-        use tracing_appender::rolling::Rotation;
-        use tracing_subscriber::Layer;
-        use tracing_subscriber::field::RecordFields;
-        use tracing_subscriber::fmt;
-        use tracing_subscriber::fmt::FormatFields;
-        use tracing_subscriber::fmt::format::Pretty;
-        use tracing_subscriber::fmt::format::Writer;
-        use tracing_subscriber::fmt::time::LocalTime;
-        use tracing_subscriber::layer::SubscriberExt;
-
-        let file_appender = tracing_appender::rolling::Builder::new()
-            .rotation(Rotation::HOURLY)
-            .max_log_files(1)
-            .filename_prefix("wows_toolkit.log")
-            .build(".")
-            .expect("failed to build file appender");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        let subscriber = tracing_subscriber::registry()
-            .with(
-                fmt::Layer::new()
-                    .pretty()
-                    // .with_writer(std::io::stdout)
-                    // .with_timer(LocalTime::rfc_3339())
-                    .fmt_fields(NewType(Pretty::default()))
-                    .with_ansi(true)
-                    .with_filter(LevelFilter::DEBUG),
-            )
-            .with(
-                fmt::Layer::new()
-                    .with_writer(non_blocking)
-                    .with_timer(LocalTime::rfc_3339())
-                    .with_ansi(false)
-                    .with_filter(LevelFilter::DEBUG),
-            );
-        #[cfg(all(debug_assertions, feature = "logging"))]
-        tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-    }
-
     // Check to see if we need to delete the previous application
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 {

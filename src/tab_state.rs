@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -32,6 +30,7 @@ use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
+use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::UnpackerProgress;
@@ -261,6 +260,10 @@ pub struct TabState {
     /// Shared flag for "suppress GPU encoder warning" — synced from Settings on startup.
     #[serde(skip)]
     pub suppress_gpu_encoder_warning: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Sender for submitting jobs to the background networking thread.
+    #[serde(skip)]
+    pub network_job_tx: Option<Sender<NetworkJob>>,
 }
 
 impl Default for TabState {
@@ -314,6 +317,7 @@ impl Default for TabState {
             available_builds: Vec::new(),
             selected_browser_build: 0,
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            network_job_tx: None,
         }
     }
 }
@@ -329,6 +333,13 @@ impl TabState {
             background_task_sender: self.background_task_sender.clone(),
             is_debug_mode: self.settings.debug_mode,
         })
+    }
+
+    /// Send a job to the background networking thread.
+    pub fn send_network_job(&self, job: NetworkJob) {
+        if let Some(tx) = &self.network_job_tx {
+            let _ = tx.send(job);
+        }
     }
 
     pub(crate) fn send_replay_consent_changed(&self) {

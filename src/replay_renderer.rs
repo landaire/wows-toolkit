@@ -1186,9 +1186,7 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{
-        self,
-    };
+    use wows_minimap_renderer::advantage::{self};
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock: f32 = 0.0;
 

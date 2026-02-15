@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use serde::Deserialize;
 use serde::Serialize;
-use tracing::info;
+use tracing::instrument;
 use wows_replays::types::GameParamId;
 
 /// URL to fetch expected values from wows-numbers.com
@@ -262,17 +262,17 @@ pub fn needs_update() -> bool {
 }
 
 /// Fetch expected values from the API
+#[instrument]
 pub async fn fetch_expected_values() -> Result<Vec<u8>, reqwest::Error> {
-    info!("Fetching PR expected values from {}", EXPECTED_VALUES_URL);
     let response = reqwest::get(EXPECTED_VALUES_URL).await?;
     let bytes = response.bytes().await?;
     Ok(bytes.to_vec())
 }
 
 /// Save expected values to disk
+#[instrument(skip(data), fields(data_len = data.len()))]
 pub fn save_expected_values(data: &[u8]) -> std::io::Result<()> {
     let path = get_expected_values_path();
-    info!("Saving PR expected values to {:?}", path);
     fs::write(path, data)
 }
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tracing::debug;
+use tracing::instrument;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -31,6 +32,7 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
 }
 
 /// Remove ALL versioned game_params cache files (for schema changes).
+#[instrument]
 pub fn clear_all_game_params_caches() {
     let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
     let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));
@@ -44,6 +46,7 @@ pub fn clear_all_game_params_caches() {
 }
 
 /// Remove game_params cache files for builds that no longer exist in the game directory.
+#[instrument(skip(available_builds), fields(build_count = available_builds.len()))]
 pub fn cleanup_stale_caches(available_builds: &[u32]) {
     let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
 
@@ -75,13 +78,12 @@ pub fn cleanup_stale_caches(available_builds: &[u32]) {
     }
 }
 
+#[instrument(skip(file_tree, pkg_loader))]
 pub fn load_game_params(
     file_tree: &FileNode,
     pkg_loader: &PkgFileLoader,
     game_version: usize,
 ) -> Result<GameMetadataProvider, ToolkitError> {
-    debug!("loading game params for build {}", game_version);
-
     let cache_path = game_params_bin_path(game_version as u32);
 
     let start = Instant::now();

@@ -22,6 +22,8 @@ impl ToolkitTabViewer<'_> {
             ui.label("Application Settings");
             ui.group(|ui| {
                 ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
+                ui.checkbox(&mut self.tab_state.settings.enable_logging, "Enable Logging (takes effect on restart)")
+                    .on_hover_text("Write debug logs to a file in the application data directory. Useful for troubleshooting.");
                 if ui
                     .checkbox(
                         &mut self.tab_state.settings.send_replay_data,

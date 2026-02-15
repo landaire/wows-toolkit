@@ -237,6 +237,9 @@ pub struct Settings {
     /// If true, suppress the warning dialog when GPU video encoding is unavailable.
     #[serde(default)]
     pub suppress_gpu_encoder_warning: bool,
+    /// Enable file logging (takes effect on next app restart).
+    #[serde(default = "default_bool::<true>")]
+    pub enable_logging: bool,
 }
 
 impl Default for Settings {
@@ -268,6 +271,7 @@ impl Default for Settings {
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,
             suppress_gpu_encoder_warning: false,
+            enable_logging: true,
         }
     }
 }
