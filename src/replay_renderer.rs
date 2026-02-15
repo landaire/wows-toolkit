@@ -22,6 +22,8 @@ use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MinimapPos;
+use wows_minimap_renderer::RenderProgress;
+use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
@@ -517,15 +519,17 @@ pub struct SharedRendererState {
     /// Absolute game clock at which the battle started (after pre-battle countdown).
     /// Used to convert between absolute clock (used by seeking) and elapsed time (used by timeline).
     pub battle_start: f32,
+    /// Actual game duration from the last packet's clock (may differ from metadata duration).
+    pub actual_game_duration: Option<f32>,
 }
 
 /// The cloneable viewport handle stored in TabState.
 /// What kind of video export action is pending behind the GPU warning dialog.
 enum PendingVideoExport {
     /// Save to a user-chosen file path.
-    SaveToFile { output_path: String, options: RenderOptions },
+    SaveToFile { output_path: String, options: RenderOptions, prefer_cpu: bool, actual_game_duration: Option<f32> },
     /// Render to a temporary file and copy to clipboard.
-    CopyToClipboard { options: RenderOptions },
+    CopyToClipboard { options: RenderOptions, prefer_cpu: bool, actual_game_duration: Option<f32> },
 }
 
 /// State for the GPU encoder warning dialog.
@@ -548,6 +552,8 @@ pub struct ReplayRendererViewer {
     toasts: crate::tab_state::SharedToasts,
     /// Whether a video export is currently in progress.
     video_exporting: Arc<AtomicBool>,
+    /// Progress of the current video export, updated by the background thread.
+    video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     /// Data needed for video export (cloned from launch params).
     video_export_data: Arc<VideoExportData>,
     /// Zoom and pan state for the viewport. Persists across frames.
@@ -605,6 +611,7 @@ pub fn launch_replay_renderer(
         viewport_ctx: None,
         timeline_events: None,
         battle_start: 0.0,
+        actual_game_duration: None,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -628,6 +635,7 @@ pub fn launch_replay_renderer(
         pending_defaults_save: Arc::new(Mutex::new(None)),
         toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
         video_exporting: Arc::new(AtomicBool::new(false)),
+        video_export_progress: Arc::new(Mutex::new(None)),
         video_export_data,
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
         overlay_state: Arc::new(Mutex::new(OverlayState::default())),
@@ -800,6 +808,7 @@ fn playback_thread(
         let mut state = shared_state.lock();
         state.timeline_events = Some(timeline_events);
         state.battle_start = battle_start;
+        state.actual_game_duration = Some(actual_game_duration);
     }
 
     // Mark as ready
@@ -1573,9 +1582,13 @@ fn execute_video_export(
     video_export_data: &Arc<VideoExportData>,
     toasts: &crate::tab_state::SharedToasts,
     video_exporting: &Arc<AtomicBool>,
+    video_export_progress: &Arc<Mutex<Option<RenderProgress>>>,
 ) {
+    // Clear any stale progress from a previous export
+    *video_export_progress.lock() = None;
+
     match action {
-        PendingVideoExport::SaveToFile { output_path, options } => {
+        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, actual_game_duration } => {
             save_as_video(
                 output_path,
                 video_export_data.raw_meta.clone(),
@@ -1587,9 +1600,12 @@ fn execute_video_export(
                 Arc::clone(&video_export_data.asset_cache),
                 Arc::clone(toasts),
                 Arc::clone(video_exporting),
+                Arc::clone(video_export_progress),
+                prefer_cpu,
+                actual_game_duration,
             );
         }
-        PendingVideoExport::CopyToClipboard { options } => {
+        PendingVideoExport::CopyToClipboard { options, prefer_cpu, actual_game_duration } => {
             let file_name = format!("{}.mp4", video_export_data.replay_name);
             render_video_to_clipboard(
                 file_name,
@@ -1597,6 +1613,9 @@ fn execute_video_export(
                 options,
                 Arc::clone(toasts),
                 Arc::clone(video_exporting),
+                Arc::clone(video_export_progress),
+                prefer_cpu,
+                actual_game_duration,
             );
         }
     }
@@ -1616,9 +1635,11 @@ fn save_as_video(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
+    video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
+    prefer_cpu: bool,
+    actual_game_duration: Option<f32>,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
-    toasts.lock().info("Exporting video...");
 
     std::thread::spawn(move || {
         let result = render_video_blocking(
@@ -1630,6 +1651,9 @@ fn save_as_video(
             options,
             &wows_data,
             &asset_cache,
+            &video_export_progress,
+            prefer_cpu,
+            actual_game_duration,
         );
 
         match result {
@@ -1640,6 +1664,7 @@ fn save_as_video(
                 toasts.lock().error(format!("Video export failed: {}", e));
             }
         }
+        *video_export_progress.lock() = None;
         video_exporting.store(false, Ordering::Relaxed);
     });
 }
@@ -1652,15 +1677,18 @@ fn render_video_to_clipboard(
     options: RenderOptions,
     toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
+    video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
+    prefer_cpu: bool,
+    actual_game_duration: Option<f32>,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
-    toasts.lock().info("Rendering video to clipboard...");
 
     std::thread::spawn(move || {
         let temp_dir = match tempfile::tempdir() {
             Ok(d) => d,
             Err(e) => {
                 toasts.lock().error(format!("Failed to create temp dir: {}", e));
+                *video_export_progress.lock() = None;
                 video_exporting.store(false, Ordering::Relaxed);
                 return;
             }
@@ -1677,6 +1705,9 @@ fn render_video_to_clipboard(
             options,
             &export_data.wows_data,
             &export_data.asset_cache,
+            &video_export_progress,
+            prefer_cpu,
+            actual_game_duration,
         );
 
         match result {
@@ -1695,6 +1726,7 @@ fn render_video_to_clipboard(
                 toasts.lock().error(format!("Video export failed: {}", e));
             }
         }
+        *video_export_progress.lock() = None;
         video_exporting.store(false, Ordering::Relaxed);
     });
 }
@@ -1710,6 +1742,9 @@ fn render_video_blocking(
     options: RenderOptions,
     wows_data: &SharedWoWsData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+    progress: &Arc<Mutex<Option<RenderProgress>>>,
+    prefer_cpu: bool,
+    actual_game_duration: Option<f32>,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
@@ -1792,6 +1827,16 @@ fn render_video_blocking(
         powerup_icons,
     );
     let mut encoder = VideoEncoder::new(output_path, None, game_duration);
+    encoder.set_prefer_cpu(prefer_cpu);
+    if let Some(duration) = actual_game_duration {
+        encoder.set_battle_duration(GameClock(duration));
+    }
+    {
+        let progress = Arc::clone(progress);
+        encoder.set_progress_callback(move |p| {
+            *progress.lock() = Some(p);
+        });
+    }
 
     // Parse all packets, advancing the encoder at each clock tick
     let mut remaining = &replay_file.packet_data[..];
@@ -3624,6 +3669,7 @@ impl ReplayRendererViewer {
         let pending_save = self.pending_defaults_save.clone();
         let toasts = self.toasts.clone();
         let video_exporting = self.video_exporting.clone();
+        let video_export_progress = self.video_export_progress.clone();
         let video_export_data = self.video_export_data.clone();
         let zoom_pan_arc = self.zoom_pan.clone();
         let overlay_state_arc = self.overlay_state.clone();
@@ -3654,6 +3700,7 @@ impl ReplayRendererViewer {
                 let options = state.options.clone();
                 let show_dead_ships = state.show_dead_ships;
                 let battle_start = state.battle_start;
+                let actual_game_duration = state.actual_game_duration;
                 let frame_data =
                     state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock_seconds, f.game_duration));
                 drop(state);
@@ -5134,6 +5181,43 @@ impl ReplayRendererViewer {
 
                     // ─── Overlay controls (video-player style) ───────────────────
 
+                    // Video export progress bar overlay
+                    if video_exporting.load(Ordering::Relaxed) {
+                        let progress_text = if let Some(p) = video_export_progress.lock().clone() {
+                            let pct = if p.total > 0 { p.current as f32 / p.total as f32 } else { 0.0 };
+                            let label = match p.stage {
+                                RenderStage::Encoding => "Encoding",
+                                RenderStage::Muxing => "Muxing",
+                            };
+                            Some((pct, format!("{} ({}/{})", label, p.current, p.total)))
+                        } else {
+                            None
+                        };
+
+                        egui::Area::new(ui.id().with("video_export_progress"))
+                            .order(egui::Order::Foreground)
+                            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
+                            .interactable(false)
+                            .show(ctx, |ui| {
+                                egui::Frame::new()
+                                    .fill(Color32::from_rgba_unmultiplied(30, 30, 30, 200))
+                                    .corner_radius(CornerRadius::same(4))
+                                    .inner_margin(egui::Margin::symmetric(12, 6))
+                                    .show(ui, |ui| {
+                                        ui.set_width(300.0);
+                                        if let Some((pct, label)) = progress_text {
+                                            ui.add(egui::ProgressBar::new(pct).text(label));
+                                        } else {
+                                            ui.horizontal(|ui| {
+                                                ui.spinner();
+                                                ui.label("Preparing export...");
+                                            });
+                                        }
+                                    });
+                            });
+                        ctx.request_repaint();
+                    }
+
                     // Track mouse activity for fade
                     let now = ctx.input(|i| i.time);
                     let any_mouse_activity =
@@ -5412,13 +5496,16 @@ impl ReplayRendererViewer {
                                                         .add_filter("MP4 Video", &["mp4"])
                                                         .save_file()
                                                     {
+                                                        let status = wows_minimap_renderer::check_encoder();
+                                                        let prefer_cpu = !status.gpu_available;
                                                         let action = PendingVideoExport::SaveToFile {
                                                             output_path: path.to_string_lossy().to_string(),
                                                             options: opts,
+                                                            prefer_cpu,
+                                                            actual_game_duration,
                                                         };
-                                                        let status = wows_minimap_renderer::check_encoder();
                                                         if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                            execute_video_export(action, &video_export_data, &toasts, &video_exporting);
+                                                            execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                         } else {
                                                             *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
                                                                 pending_action: action,
@@ -5442,10 +5529,11 @@ impl ReplayRendererViewer {
                                                     ));
                                                 if btn.on_hover_text("Render Video to Clipboard").clicked() {
                                                     let opts = options.clone();
-                                                    let action = PendingVideoExport::CopyToClipboard { options: opts };
                                                     let status = wows_minimap_renderer::check_encoder();
+                                                    let prefer_cpu = !status.gpu_available;
+                                                    let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, actual_game_duration };
                                                     if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                        execute_video_export(action, &video_export_data, &toasts, &video_exporting);
+                                                        execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                     } else {
                                                         *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
                                                             pending_action: action,
@@ -5768,7 +5856,7 @@ impl ReplayRendererViewer {
                                     suppress_gpu_warning.store(true, Ordering::Relaxed);
                                 }
                                 if proceed {
-                                    execute_video_export(w.pending_action, &video_export_data, &toasts, &video_exporting);
+                                    execute_video_export(w.pending_action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
                                 }
                             }
                         }

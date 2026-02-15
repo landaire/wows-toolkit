@@ -662,7 +662,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
             }
         }
 
-        debug!("Beginning backgorund replay receive loop");
+        debug!("Beginning background replay receive loop");
         while let Ok(message) = data.rx.recv() {
             match message {
                 ReplayBackgroundParserThreadMessage::NewReplay(path) => {
