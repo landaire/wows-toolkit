@@ -264,6 +264,10 @@ pub struct TabState {
     /// Sender for submitting jobs to the background networking thread.
     #[serde(skip)]
     pub network_job_tx: Option<Sender<NetworkJob>>,
+
+    /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
+    #[serde(skip)]
+    pub settings_needs_attention: bool,
 }
 
 impl Default for TabState {
@@ -318,6 +322,7 @@ impl Default for TabState {
             selected_browser_build: 0,
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
+            settings_needs_attention: false,
         }
     }
 }

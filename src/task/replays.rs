@@ -199,24 +199,31 @@ pub fn load_wows_data_for_build(
 
     let mut idx_files = Vec::new();
     for file in read_dir(build_dir.join("idx")).context("failed to read idx directory")? {
-        let file = file.unwrap();
-        if file.file_type().unwrap().is_file() {
-            let file_data = std::fs::read(file.path()).unwrap();
-            let mut file = Cursor::new(file_data.as_slice());
-            idx_files.push(idx::parse(&mut file).unwrap());
+        let file = file.context("failed to read idx directory entry")?;
+        if file.file_type().context("failed to get file type for idx entry")?.is_file() {
+            let path = file.path();
+            let file_data =
+                std::fs::read(&path).context_with(|| format!("failed to read idx file {}", path.display()))?;
+            let mut cursor = Cursor::new(file_data.as_slice());
+            idx_files
+                .push(idx::parse(&mut cursor).context_with(|| format!("failed to parse idx file {}", path.display()))?);
         }
     }
 
     let pkgs_path = wows_directory.join("res_packages");
     if !pkgs_path.exists() {
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
+        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+            .context("res_packages directory not found")?;
     }
 
     let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
     let file_tree = idx::build_file_tree(idx_files.as_slice());
     let files = file_tree.paths();
 
-    let language_tag: LanguageTag = locale.parse().unwrap();
+    let language_tag: LanguageTag = locale
+        .parse()
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid locale: {locale}")))
+        .context_with(|| format!("failed to parse locale '{locale}'"))?;
     let attempted_dirs = [locale, language_tag.primary_language(), "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
@@ -224,8 +231,11 @@ pub fn load_wows_data_for_build(
         if !localization_path.exists() {
             continue;
         }
-        let global = File::open(localization_path).expect("failed to open localization file");
-        let catalog = Catalog::parse(global).expect("could not parse catalog");
+        let global = File::open(&localization_path)
+            .context_with(|| format!("failed to open localization file {}", localization_path.display()))?;
+        let catalog = Catalog::parse(global)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{e}")))
+            .context_with(|| format!("failed to parse localization catalog {}", localization_path.display()))?;
         found_catalog = Some(catalog);
         break;
     }
@@ -290,14 +300,17 @@ pub fn load_wows_files(
     let bin_dir = wows_directory.join("bin");
     if !wows_directory.exists() || !bin_dir.exists() {
         debug!("WoWs or WoWs bin directory does not exist");
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
+        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+            .context("World of Warships directory does not exist or is missing the bin/ folder")?;
     }
 
     // Discover all available builds
-    let available_builds = game_data::list_available_builds(&wows_directory).map_err(|e| Report::new(e))?;
+    let available_builds =
+        game_data::list_available_builds(&wows_directory).context("failed to list available game builds")?;
 
     if available_builds.is_empty() {
-        return Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()).into());
+        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+            .context("no game builds found in bin/ directory")?;
     }
 
     // Determine the latest build (from preferences or highest build number)
@@ -328,7 +341,8 @@ pub fn load_wows_files(
     }
 
     // Load data for the latest build
-    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants)?;
+    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants)
+        .context_with(|| format!("failed to load game data for build {latest_build}"))?;
     data.full_version = full_version;
     data.replays_dir = replays_dir.clone();
 

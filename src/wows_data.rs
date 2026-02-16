@@ -376,9 +376,9 @@ impl ReplayLoader {
 
             let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
                 error!("Failed to load game data for build {}", build);
-                let _ = tx.send(Err(
-                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path() }.into()
-                ));
+                let report: rootcause::Report =
+                    ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path() }.into();
+                let _ = tx.send(Err(report.attach("try installing the matching game client version")));
                 return;
             };
 

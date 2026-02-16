@@ -147,13 +147,16 @@ impl NetworkingThread {
                     }
                 }
                 Err(e) => {
-                    let _ = self
-                        .result_tx
-                        .send(NetworkResult::AppUpdateCheckFailed(format!("Failed to parse version: {e}")));
+                    let _ = self.result_tx.send(NetworkResult::AppUpdateCheckFailed(format!(
+                        "failed to parse release version '{}': {e}",
+                        latest_release.tag_name
+                    )));
                 }
             },
             Err(e) => {
-                let _ = self.result_tx.send(NetworkResult::AppUpdateCheckFailed(format!("{e}")));
+                let _ = self
+                    .result_tx
+                    .send(NetworkResult::AppUpdateCheckFailed(format!("failed to check GitHub releases: {e}")));
             }
         }
     }
@@ -202,13 +205,13 @@ impl NetworkingThread {
                                     data.extend_from_slice(chunk);
                                 }
                             }
-                            Err(e) => return Err(format!("{e}")),
+                            Err(e) => return Err(format!("failed to read constants response body: {e}")),
                         }
                     }
 
                     Ok(Some((data, latest_commit)))
                 }
-                Err(e) => Err(format!("{e}")),
+                Err(e) => Err(format!("failed to fetch constants from GitHub: {e}")),
             }
         });
 
@@ -234,7 +237,9 @@ impl NetworkingThread {
                 let _ = self.result_tx.send(NetworkResult::PersonalRatingDataFetched(data));
             }
             Err(e) => {
-                let _ = self.result_tx.send(NetworkResult::PersonalRatingDataFetchFailed(format!("{e}")));
+                let _ = self
+                    .result_tx
+                    .send(NetworkResult::PersonalRatingDataFetchFailed(format!("failed to fetch PR data: {e}")));
             }
         }
     }
@@ -494,8 +499,12 @@ async fn update_twitch_token(twitch_state: &RwLock<TwitchState>, token: &Token) 
         Ok(token) => {
             let mut state = twitch_state.write();
             state.token = Some(token);
+            state.token_validation_failed = false;
         }
-        Err(_e) => {}
+        Err(_e) => {
+            let mut state = twitch_state.write();
+            state.token_validation_failed = true;
+        }
     }
 }
 

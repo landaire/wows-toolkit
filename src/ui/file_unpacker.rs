@@ -328,13 +328,15 @@ impl ToolkitTabViewer<'_> {
                                                     ));
                                                 }
                                                 None => {
-                                                    let _ = tx.send(Err(
+                                                    let report: rootcause::Report =
                                                         crate::error::ToolkitError::ReplayBuildUnavailable {
                                                             build,
                                                             version: format!("{}", build),
                                                         }
-                                                        .into(),
-                                                    ));
+                                                        .into();
+                                                    let _ = tx
+                                                        .send(Err(report
+                                                            .attach("game data could not be loaded for this build")));
                                                 }
                                             });
                                             let _ = self.tab_state.background_task_sender.send(

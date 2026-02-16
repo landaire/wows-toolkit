@@ -23,6 +23,7 @@ use egui_commonmark::CommonMarkViewer;
 use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::Style;
+use egui_dock::TabStyle;
 use egui_dock::TabViewer;
 
 use octocrab::models::repos::Release;
@@ -30,6 +31,7 @@ use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
 use tracing::debug;
+use tracing::error;
 use tracing::trace;
 use tracing::warn;
 
@@ -106,6 +108,23 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ModManager => self.build_mod_manager_tab(ui),
         }
     }
+
+    fn tab_style_override(&self, tab: &Self::Tab, global_style: &TabStyle) -> Option<TabStyle> {
+        if matches!(tab, Tab::Settings) && self.tab_state.settings_needs_attention {
+            let mut style = global_style.clone();
+            let red = egui::Color32::from_rgb(255, 80, 80);
+            style.active.text_color = red;
+            style.inactive.text_color = red;
+            style.focused.text_color = red;
+            style.hovered.text_color = red;
+            style.active_with_kb_focus.text_color = red;
+            style.inactive_with_kb_focus.text_color = red;
+            style.focused_with_kb_focus.text_color = red;
+            Some(style)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Default)]
@@ -151,6 +170,10 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     constants_update_error_shown: bool,
 
+    /// Whether we've already shown a toast for an invalid twitch token.
+    #[serde(skip)]
+    shown_twitch_token_error: bool,
+
     /// Receiver for results from the background networking thread.
     #[serde(skip)]
     pub(crate) network_result_rx: Option<std::sync::mpsc::Receiver<NetworkResult>>,
@@ -177,6 +200,7 @@ impl Default for WowsToolkitApp {
             error_to_show: None,
             constants_version_mismatch: false,
             constants_update_error_shown: false,
+            shown_twitch_token_error: false,
             network_result_rx: None,
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
             #[cfg(feature = "logging")]
@@ -235,7 +259,7 @@ impl WowsToolkitApp {
                         if cfg!(debug_assertions) {
                             panic!("could not deserialize app state")
                         } else {
-                            eprintln!("could not deserialize app state -- using default");
+                            error!("could not deserialize app state -- using default");
                             Default::default()
                         }
                     }
@@ -604,6 +628,7 @@ impl WowsToolkitApp {
                                             std::process::exit(0);
                                         }
                                         Err(e) => {
+                                            error!("Update rename failed: {e:?}");
                                             self.show_err_window(e.into());
                                         }
                                     }
@@ -640,8 +665,8 @@ impl WowsToolkitApp {
                                 if e.downcast_current_context::<ToolkitError>()
                                     .is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
                             Err(e) => {
-                                eprintln!("Background task error: {e:?}");
-                                self.show_err_window(e);
+                                error!("Background task error: {e:?}");
+                                self.tab_state.toasts.lock().error(format!("{e}"));
                             }
                         }
                         true
@@ -873,6 +898,26 @@ impl WowsToolkitApp {
         }
 
         self.poll_network_results();
+
+        // Update settings_needs_attention based on WoWs directory validity and twitch token state
+        {
+            let wows_dir = Path::new(&self.tab_state.settings.wows_dir);
+            let wows_dir_invalid =
+                !self.tab_state.settings.wows_dir.is_empty() && !(wows_dir.exists() && wows_dir.join("bin").exists());
+
+            let twitch_token_failed = self.tab_state.settings.twitch_token.is_some()
+                && self.tab_state.twitch_state.read().token_validation_failed;
+
+            if twitch_token_failed && !self.shown_twitch_token_error {
+                self.shown_twitch_token_error = true;
+                error!("Twitch token is invalid or expired");
+                self.tab_state.toasts.lock().error("Twitch token is invalid or expired. Please update it in Settings.");
+            } else if !twitch_token_failed {
+                self.shown_twitch_token_error = false;
+            }
+
+            self.tab_state.settings_needs_attention = wows_dir_invalid || twitch_token_failed;
+        }
 
         if self.build_consent_window_open {
             egui::Window::new("Build Collection Consent").collapsible(false).show(ctx, |ui| {
@@ -1207,6 +1252,7 @@ impl WowsToolkitApp {
                     self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");
                 } else if !self.constants_update_error_shown {
                     self.constants_update_error_shown = true;
+                    warn!("Failed to fetch versioned constants during rebuild");
                     self.tab_state
                         .toasts
                         .lock()

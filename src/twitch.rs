@@ -100,6 +100,8 @@ pub struct TwitchState {
     client: HelixClient<'static, reqwest::Client>,
     pub token: Option<UserToken>,
     pub participants: ParticipantList,
+    /// Set to true when a token validation attempt fails.
+    pub token_validation_failed: bool,
 }
 
 impl TwitchState {
