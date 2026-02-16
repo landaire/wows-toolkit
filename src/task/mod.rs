@@ -88,6 +88,7 @@ pub struct BackgroundTask {
 
 pub enum BackgroundTaskKind {
     LoadingData,
+    LoadingBuildData(u32),
     LoadingReplay,
     // Updates only occur on Windows
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -141,6 +142,10 @@ impl BackgroundTask {
                     BackgroundTaskKind::LoadingData => {
                         ui.spinner();
                         ui.label("Loading game data...");
+                    }
+                    BackgroundTaskKind::LoadingBuildData(build) => {
+                        ui.spinner();
+                        ui.label(format!("Loading build {build}..."));
                     }
                     BackgroundTaskKind::LoadingReplay => {
                         ui.spinner();
@@ -243,6 +248,9 @@ pub enum BackgroundTaskCompletion {
         replays: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
         available_builds: Vec<u32>,
     },
+    BuildDataLoaded {
+        build: u32,
+    },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
         /// If true, don't update the current replay in the UI (used for batch session stats loading)
@@ -277,6 +285,7 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("replays", &"<...>")
                 .field("available_builds", available_builds)
                 .finish(),
+            Self::BuildDataLoaded { build } => f.debug_struct("BuildDataLoaded").field("build", build).finish(),
             Self::ReplayLoaded { replay: _, skip_ui_update, track_session_stats } => f
                 .debug_struct("ReplayLoaded")
                 .field("replay", &"<...>")

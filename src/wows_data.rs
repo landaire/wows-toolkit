@@ -69,11 +69,6 @@ impl WoWsDataMap {
         self.builds.read().get(&build).cloned()
     }
 
-    /// Returns all loaded build numbers.
-    pub fn loaded_builds(&self) -> Vec<u32> {
-        self.builds.read().keys().copied().collect()
-    }
-
     /// Iterate over loaded builds with a closure (avoids exposing the inner lock).
     pub fn with_builds<R>(&self, f: impl FnOnce(&HashMap<u32, SharedWoWsData>) -> R) -> R {
         f(&self.builds.read())
@@ -99,8 +94,14 @@ impl WoWsDataMap {
     /// Returns None if the version's build data is unavailable.
     #[instrument(skip(self))]
     pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
-        let build = version.build;
+        self.resolve_build(version.build)
+    }
 
+    /// Resolve game data for a specific build number.
+    /// Checks the map first, then tries to lazy-load from disk.
+    /// Returns None if the build data is unavailable.
+    #[instrument(skip(self))]
+    pub fn resolve_build(&self, build: u32) -> Option<SharedWoWsData> {
         // Check if already loaded
         if let Some(data) = self.get(build) {
             return Some(data);

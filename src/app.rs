@@ -460,6 +460,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::LoadingData => {
                                 self.tab_state.allow_changing_wows_dir();
                             }
+                            BackgroundTaskKind::LoadingBuildData(_) => {}
                             BackgroundTaskKind::LoadingReplay => {}
                             BackgroundTaskKind::Updating { rx: _rx, last_progress: _last_progress } => {}
                             BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {}
@@ -549,6 +550,12 @@ impl WowsToolkitApp {
 
                                     self.tab_state.toasts.lock().success("Successfully loaded game data");
                                     self.check_constants_version_mismatch();
+                                }
+                                BackgroundTaskCompletion::BuildDataLoaded { build } => {
+                                    self.tab_state.selected_browser_build = build;
+                                    self.tab_state.filtered_file_list = None;
+                                    self.tab_state.used_filter = None;
+                                    self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded {
                                     replay,

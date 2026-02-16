@@ -294,14 +294,11 @@ impl ToolkitTabViewer<'_> {
                 if self.tab_state.available_builds.len() > 1
                     && let Some(map) = &self.tab_state.wows_data_map
                 {
-                    let mut builds: Vec<u32> = map.loaded_builds();
+                    let mut builds = self.tab_state.available_builds.clone();
                     builds.sort();
                     builds.reverse();
 
-                    let selected_label = map
-                        .get(self.tab_state.selected_browser_build)
-                        .map(|d| d.read().version_label())
-                        .unwrap_or_else(|| format!("{}", self.tab_state.selected_browser_build));
+                    let selected_label = format!("{}", self.tab_state.selected_browser_build);
 
                     ui.horizontal(|ui| {
                         ui.label("Version:");
@@ -309,16 +306,44 @@ impl ToolkitTabViewer<'_> {
                             ui,
                             |ui| {
                                 for &build in &builds {
-                                    let label = map
-                                        .get(build)
-                                        .map(|d| d.read().version_label())
-                                        .unwrap_or_else(|| format!("{}", build));
+                                    let is_loaded = map.get(build).is_some();
+                                    let label = format!("{}", build);
                                     if ui
                                         .selectable_value(&mut self.tab_state.selected_browser_build, build, &label)
                                         .changed()
                                     {
                                         self.tab_state.filtered_file_list = None;
                                         self.tab_state.used_filter = None;
+
+                                        // Load build data on-demand if not already loaded
+                                        if !is_loaded {
+                                            let map = map.clone();
+                                            let (tx, rx) = std::sync::mpsc::channel();
+                                            std::thread::spawn(move || match map.resolve_build(build) {
+                                                Some(_) => {
+                                                    let _ = tx.send(Ok(
+                                                        crate::task::BackgroundTaskCompletion::BuildDataLoaded {
+                                                            build,
+                                                        },
+                                                    ));
+                                                }
+                                                None => {
+                                                    let _ = tx.send(Err(
+                                                        crate::error::ToolkitError::ReplayBuildUnavailable {
+                                                            build,
+                                                            version: format!("{}", build),
+                                                        }
+                                                        .into(),
+                                                    ));
+                                                }
+                                            });
+                                            let _ = self.tab_state.background_task_sender.send(
+                                                crate::task::BackgroundTask {
+                                                    receiver: Some(rx),
+                                                    kind: crate::task::BackgroundTaskKind::LoadingBuildData(build),
+                                                },
+                                            );
+                                        }
                                     }
                                 }
                             },
