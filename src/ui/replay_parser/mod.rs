@@ -1128,9 +1128,9 @@ impl UiReport {
 
                     // ALT: show % of attacker's total dealt damage; default: % of this player's received damage
                     let pct_text = if alt_held {
-                        format!("{}{}", icons::SWAP, &interaction.1.damage_received_inverse_percentage_text)
+                        &interaction.1.damage_received_inverse_percentage_text
                     } else {
-                        interaction.1.damage_received_percentage_text.clone()
+                        &interaction.1.damage_received_percentage_text
                     };
 
                     ui.label(format!(
@@ -1195,9 +1195,9 @@ impl UiReport {
 
                     // ALT: show % of victim's total received damage; default: % of this player's dealt damage
                     let pct_text = if alt_held {
-                        format!("{}{}", icons::SWAP, &interaction.1.damage_dealt_inverse_percentage_text)
+                        &interaction.1.damage_dealt_inverse_percentage_text
                     } else {
-                        interaction.1.damage_dealt_percentage_text.clone()
+                        &interaction.1.damage_dealt_percentage_text
                     };
 
                     ui.label(format!(
