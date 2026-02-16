@@ -2485,6 +2485,7 @@ fn draw_command_to_shapes(
     textures: &RendererTextures,
     ctx: &egui::Context,
     opts: &RenderOptions,
+    placed_labels: &mut Vec<Rect>,
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
     let ws = transform.window_scale;
@@ -2917,7 +2918,7 @@ fn draw_command_to_shapes(
                 color: [255, 200, 50],
                 subtitle_above: true,
             };
-            shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, opts));
+            shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, opts, placed_labels));
         }
 
         DrawCommand::TeamAdvantage { .. } => {
@@ -3255,16 +3256,63 @@ fn draw_command_to_shapes(
                 shapes.push(Shape::circle_stroke(center, screen_radius, stroke));
             }
 
-            // Draw label near the top of the circle
+            // Draw label around the circle, rotating to avoid overlapping previously placed labels
             if let Some(text) = label {
-                let label_pos = Pos2::new(center.x, center.y - screen_radius - 4.0);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), game_font(10.0), circle_color));
-                let text_width = galley.size().x;
-                shapes.push(Shape::galley(
-                    Pos2::new(label_pos.x - text_width / 2.0, label_pos.y - galley.size().y),
-                    galley,
-                    Color32::TRANSPARENT,
-                ));
+                let text_w = galley.size().x;
+                let text_h = galley.size().y;
+                let gap = 4.0;
+
+                // Try 8 positions around the circle (top, top-right, right, bottom-right, bottom, bottom-left, left, top-left)
+                // Starting from top (angle = -PI/2) going clockwise
+                let candidate_angles: [f32; 8] = [
+                    -std::f32::consts::FRAC_PI_2,       // top
+                    -std::f32::consts::FRAC_PI_4,       // top-right
+                    0.0,                                // right
+                    std::f32::consts::FRAC_PI_4,        // bottom-right
+                    std::f32::consts::FRAC_PI_2,        // bottom
+                    3.0 * std::f32::consts::FRAC_PI_4,  // bottom-left
+                    std::f32::consts::PI,               // left
+                    -3.0 * std::f32::consts::FRAC_PI_4, // top-left
+                ];
+
+                let compute_label_rect = |angle: f32| -> Rect {
+                    let anchor_x = center.x + (screen_radius + gap) * angle.cos();
+                    let anchor_y = center.y + (screen_radius + gap) * angle.sin();
+                    // Position text so it's centered on the anchor point,
+                    // biased outward from center
+                    let cos = angle.cos();
+                    let sin = angle.sin();
+                    let x = if cos < -0.3 {
+                        anchor_x - text_w // left side: right-align to anchor
+                    } else if cos > 0.3 {
+                        anchor_x // right side: left-align from anchor
+                    } else {
+                        anchor_x - text_w / 2.0 // top/bottom: center
+                    };
+                    let y = if sin < -0.3 {
+                        anchor_y - text_h // top side: above anchor
+                    } else if sin > 0.3 {
+                        anchor_y // bottom side: below anchor
+                    } else {
+                        anchor_y - text_h / 2.0 // left/right: vertically center
+                    };
+                    Rect::from_min_size(Pos2::new(x, y), egui::vec2(text_w, text_h))
+                };
+
+                // Find first non-overlapping position
+                let mut best_rect = compute_label_rect(candidate_angles[0]);
+                for &angle in &candidate_angles {
+                    let rect = compute_label_rect(angle);
+                    let overlaps = placed_labels.iter().any(|prev| prev.intersects(rect));
+                    if !overlaps {
+                        best_rect = rect;
+                        break;
+                    }
+                }
+
+                placed_labels.push(best_rect);
+                shapes.push(Shape::galley(best_rect.min, galley, Color32::TRANSPARENT));
             }
         }
 
@@ -4164,6 +4212,7 @@ impl ReplayRendererViewer {
                                 .collect();
 
                             // Separate HUD and map commands so HUD draws on unclipped painter
+                            let mut placed_labels: Vec<Rect> = Vec::new();
                             for cmd in &frame.commands {
                                 if !should_draw_command(cmd, &options, show_dead_ships) {
                                     continue;
@@ -4199,7 +4248,7 @@ impl ReplayRendererViewer {
                                         | DrawCommand::ChatOverlay { .. }
                                         | DrawCommand::TeamAdvantage { .. }
                                 );
-                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options);
+                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options, &mut placed_labels);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
                                     target_painter.add(shape);
