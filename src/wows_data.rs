@@ -301,7 +301,15 @@ impl ReplayDependencies {
         let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
-        let wows_data_for_build = self.wows_data_map.resolve(&replay_version)?;
+        let Some(wows_data_for_build) = self.wows_data_map.resolve(&replay_version) else {
+            let build = replay_version.build;
+            error!("Failed to load game data for build {}", build);
+            let report: rootcause::Report =
+                ToolkitError::ReplayBuildUnavailable { build, version: replay_version.to_path() }.into();
+            let (tx, rx) = mpsc::channel();
+            let _ = tx.send(Err(report.attach("try installing the matching game client version")));
+            return Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay });
+        };
 
         let (game_metadata, game_constants) = {
             let data = wows_data_for_build.read();
