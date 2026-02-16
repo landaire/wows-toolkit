@@ -27,7 +27,8 @@ use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_minimap_renderer::draw_command::{ShipConfigFilter, ShipConfigVisibility};
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
+use wows_minimap_renderer::draw_command::ShipConfigVisibility;
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -624,6 +625,7 @@ struct VideoExportData {
 ///
 /// The `asset_cache` is shared across renderer instances to avoid reloading
 /// ship/plane icons and map images from the game files on each launch.
+#[allow(clippy::too_many_arguments)]
 pub fn launch_replay_renderer(
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
@@ -1252,7 +1254,9 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{self};
+    use wows_minimap_renderer::advantage::{
+        self,
+    };
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock: f32 = 0.0;
 
@@ -1728,6 +1732,7 @@ fn save_as_video(
 
 /// Spawn a background thread that renders the replay to a temporary MP4 file,
 /// then copies it to the clipboard.
+#[allow(clippy::too_many_arguments)]
 fn render_video_to_clipboard(
     file_name: String,
     export_data: Arc<VideoExportData>,

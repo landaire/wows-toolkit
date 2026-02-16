@@ -6,7 +6,9 @@ use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +29,9 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{self};
+use wowsunpack::data::idx::{
+    self,
+};
 use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;

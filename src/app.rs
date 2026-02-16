@@ -50,7 +50,9 @@ use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -919,7 +921,7 @@ impl WowsToolkitApp {
         {
             let wows_dir = Path::new(&self.tab_state.settings.wows_dir);
             let wows_dir_invalid =
-                !self.tab_state.settings.wows_dir.is_empty() && !(wows_dir.exists() && wows_dir.join("bin").exists());
+                !(self.tab_state.settings.wows_dir.is_empty() || wows_dir.exists() && wows_dir.join("bin").exists());
 
             let twitch_token_failed = self.tab_state.settings.twitch_token.is_some()
                 && self.tab_state.twitch_state.read().token_validation_failed;

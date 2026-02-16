@@ -1,7 +1,9 @@
 use crate::icon_str;
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{self};
+use std::fs::{
+    self,
+};
 use std::io::BufWriter;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,7 +33,9 @@ use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{self};
+use crate::plaintext_viewer::{
+    self,
+};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {

@@ -253,7 +253,7 @@ impl UiReport {
 
         let locale = "en-US";
 
-        let player_reports = players.iter().filter_map(|player| {
+        let player_reports = players.iter().map(|player| {
             // Get the VehicleEntity for this player (may be None if they never spawned)
             let vehicle = player.vehicle_entity();
             let player_state = player.initial_state();
@@ -749,7 +749,7 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let report = PlayerReport {
+            PlayerReport {
                 player: Arc::clone(player),
                 color: player_color,
                 name_text,
@@ -801,9 +801,7 @@ impl UiReport {
                 ribbons,
                 personal_rating: None,
                 has_vehicle_entity: vehicle.is_some(),
-            };
-
-            Some(report)
+            }
         });
 
         let mut player_reports: Vec<PlayerReport> = player_reports.collect();
@@ -1890,7 +1888,7 @@ impl UiReport {
             let frags = report.kills.unwrap_or(0);
 
             let stats = crate::personal_rating::ShipBattleStats {
-                ship_id: ship_id,
+                ship_id,
                 battles: 1,
                 damage: actual_damage,
                 wins: if is_win { 1 } else { 0 },
@@ -2921,7 +2919,7 @@ impl ToolkitTabViewer<'_> {
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                copy_files_to_clipboard(&[path_clone.clone()]);
+                                copy_files_to_clipboard(std::slice::from_ref(&path_clone));
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
@@ -3186,7 +3184,7 @@ impl ToolkitTabViewer<'_> {
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                        copy_files_to_clipboard(&[path_clone.clone()]);
+                                        copy_files_to_clipboard(std::slice::from_ref(&path_clone));
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
@@ -3499,7 +3497,7 @@ impl ToolkitTabViewer<'_> {
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                        copy_files_to_clipboard(&[path_clone.clone()]);
+                                        copy_files_to_clipboard(std::slice::from_ref(&path_clone));
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
