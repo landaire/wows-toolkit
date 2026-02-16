@@ -5713,7 +5713,7 @@ impl ReplayRendererViewer {
                                             // ── Trail Settings ──
                                             ui.label(egui::RichText::new("Trail Settings").small().strong());
                                             ui.indent("trail_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_trails, "Trails").changed();
+                                                changed |= ui.checkbox(&mut opts.show_trails, "Heat Trail").changed();
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_speed_trails, "Speed Trails").changed();
                                                 changed |= ui
