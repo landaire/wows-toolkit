@@ -190,15 +190,21 @@ impl ToolkitTabViewer<'_> {
                     ui.ctx().open_url(OpenUrl::new_tab("https://chatterino.com/client_login"));
                 }
 
-                let text = if self.tab_state.twitch_state.read().token_is_valid() {
+                let text = if self.tab_state.settings.twitch_token.is_none() {
                     format!(
-                        "{} Paste Token (Current Token is Valid {})",
+                        "{} Paste Token (No Token Set {})",
+                        icons::CLIPBOARD_TEXT,
+                        icons::WARNING
+                    )
+                } else if self.tab_state.twitch_state.read().token_is_valid() {
+                    format!(
+                        "{} Paste Token (Token Valid {})",
                         icons::CLIPBOARD_TEXT,
                         icons::CHECK_CIRCLE
                     )
                 } else {
                     format!(
-                        "{} Paste Token (No Current Token / Invalid Token {})",
+                        "{} Paste Token (Token Invalid / Expired {})",
                         icons::CLIPBOARD_TEXT,
                         icons::X_CIRCLE
                     )
