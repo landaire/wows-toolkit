@@ -26,7 +26,7 @@ use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
+use wows_minimap_renderer::draw_command::{ShipConfigFilter, ShipConfigVisibility};
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
@@ -196,11 +196,13 @@ struct AnnotationState {
     dragging_rotation: bool,
     /// Ships whose trails are explicitly hidden (by player name).
     trail_hidden_ships: HashSet<String>,
-    /// Player name of ship nearest to right-click position (for context menu options).
-    context_menu_ship: Option<String>,
-    /// Per-ship range overrides. Maps player_name -> [det, mb, sec, radar, hydro].
+    /// Ship nearest to right-click position (entity_id, player_name) for context menu options.
+    context_menu_ship: Option<(EntityId, String)>,
+    /// Per-ship range overrides keyed by entity ID.
     /// When a ship is in this map, these flags override the global range toggles.
-    ship_range_overrides: HashMap<String, [bool; 5]>,
+    ship_range_overrides: HashMap<EntityId, ShipConfigFilter>,
+    /// Initial self range filter from saved settings, applied once self entity ID is known.
+    pending_self_range_filter: Option<ShipConfigFilter>,
 }
 
 impl Default for AnnotationState {
@@ -218,6 +220,7 @@ impl Default for AnnotationState {
             trail_hidden_ships: HashSet::new(),
             context_menu_ship: None,
             ship_range_overrides: HashMap::new(),
+            pending_self_range_filter: None,
         }
     }
 }
@@ -418,6 +421,8 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_chat: saved.show_chat,
         show_advantage: saved.show_advantage,
         show_score_timer: saved.show_score_timer,
+        // UI does its own per-ship filtering in the draw loop, so emit all circles
+        ship_config_visibility: ShipConfigVisibility::Filtered(Arc::new(|_| Some(ShipConfigFilter::all_enabled()))),
     }
 }
 
@@ -446,6 +451,12 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_battle_result: opts.show_battle_result,
         show_buffs: opts.show_buffs,
         show_ship_config: opts.show_ship_config,
+        // Range filter flags are persisted from annotation state at the call site
+        show_self_detection_range: false,
+        show_self_main_battery_range: false,
+        show_self_secondary_range: false,
+        show_self_radar_range: false,
+        show_self_hydro_range: false,
         show_chat: opts.show_chat,
         show_advantage: opts.show_advantage,
         show_score_timer: opts.show_score_timer,
@@ -521,6 +532,10 @@ pub struct SharedRendererState {
     pub battle_start: f32,
     /// Actual game duration from the last packet's clock (may differ from metadata duration).
     pub actual_game_duration: Option<f32>,
+    /// The replay owner's player name (from replay metadata).
+    pub self_player_name: Option<String>,
+    /// The replay owner's entity ID (resolved from draw commands).
+    pub self_entity_id: Option<EntityId>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -612,6 +627,8 @@ pub fn launch_replay_renderer(
         timeline_events: None,
         battle_start: 0.0,
         actual_game_duration: None,
+        self_player_name: None,
+        self_entity_id: None,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -639,7 +656,14 @@ pub fn launch_replay_renderer(
         video_export_data,
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
         overlay_state: Arc::new(Mutex::new(OverlayState::default())),
-        annotation_state: Arc::new(Mutex::new(AnnotationState::default())),
+        annotation_state: Arc::new(Mutex::new({
+            let mut ann = AnnotationState::default();
+            let filter = saved_options.self_range_filter();
+            if filter.any_enabled() {
+                ann.pending_self_range_filter = Some(filter);
+            }
+            ann
+        })),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
     };
@@ -809,6 +833,7 @@ fn playback_thread(
         state.timeline_events = Some(timeline_events);
         state.battle_start = battle_start;
         state.actual_game_duration = Some(actual_game_duration);
+        state.self_player_name = Some(replay_file.meta.playerName.clone());
     }
 
     // Mark as ready
@@ -2464,6 +2489,7 @@ fn draw_command_to_shapes(
             ship_name,
             is_detected_teammate,
             name_color,
+            ..
         } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
@@ -2515,7 +2541,7 @@ fn draw_command_to_shapes(
             draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, pn_color, &mut shapes);
         }
 
-        DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha } => {
+        DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
             let bar_w = transform.scale_distance(20.0);
             let bar_h = transform.scale_distance(3.0);
             let center = transform.minimap_to_screen(pos);
@@ -2536,7 +2562,7 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name } => {
+        DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name, .. } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
             if let Some(sp) = species {
@@ -2567,7 +2593,7 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::Plane { pos, icon_key } => {
+        DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
             let center = transform.minimap_to_screen(pos);
             if let Some(tex) = textures.plane_icons.get(icon_key) {
                 let size = tex.size();
@@ -2577,6 +2603,9 @@ fn draw_command_to_shapes(
             } else {
                 shapes.push(Shape::circle_filled(center, transform.scale_distance(3.0), Color32::YELLOW));
             }
+            let pname = if opts.show_player_names { player_name.as_deref() } else { None };
+            let sname = if opts.show_ship_names { ship_name.as_deref() } else { None };
+            draw_ship_labels(ctx, center, transform.scale_distance(1.0), pname, sname, None, &mut shapes);
         }
 
         DrawCommand::ScoreBar {
@@ -3093,7 +3122,7 @@ fn draw_command_to_shapes(
             shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
         }
 
-        DrawCommand::TurretDirection { pos, yaw, color, length } => {
+        DrawCommand::TurretDirection { pos, yaw, color, length, .. } => {
             let start = transform.minimap_to_screen(pos);
             // yaw is screen-space: 0 = east, PI/2 = north
             let dx = *length as f32 * yaw.cos();
@@ -3105,7 +3134,7 @@ fn draw_command_to_shapes(
             shapes.push(Shape::line_segment([start, end], Stroke::new(stroke_width, line_color)));
         }
 
-        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha } => {
+        DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
             let center = transform.minimap_to_screen(pos);
             let r = transform.scale_distance(*radius_px as f32);
             let fill_color = color_from_rgba(*color, *alpha);
@@ -3115,7 +3144,7 @@ fn draw_command_to_shapes(
             shapes.push(Shape::circle_stroke(center, r, Stroke::new(stroke_w, outline_color)));
         }
 
-        DrawCommand::PatrolRadius { pos, radius_px, color, alpha } => {
+        DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
             let center = transform.minimap_to_screen(pos);
             let r = transform.scale_distance(*radius_px as f32);
             let fill_color = color_from_rgba(*color, *alpha);
@@ -3688,7 +3717,7 @@ impl ReplayRendererViewer {
                     return;
                 }
 
-                let state = shared_state.lock();
+                let mut state = shared_state.lock();
                 let status_is_loading = matches!(state.status, RendererStatus::Loading);
                 let status_error = match &state.status {
                     RendererStatus::Error(e) => Some(e.clone()),
@@ -3703,7 +3732,38 @@ impl ReplayRendererViewer {
                 let actual_game_duration = state.actual_game_duration;
                 let frame_data =
                     state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock_seconds, f.game_duration));
+                // Resolve self entity ID from draw commands (once)
+                let self_entity_id = if state.self_entity_id.is_some() {
+                    state.self_entity_id
+                } else if let Some(ref frame) = state.frame {
+                    let eid = frame.commands.iter().find_map(|cmd| {
+                        if let DrawCommand::Ship { entity_id, is_self: true, .. } = cmd {
+                            Some(*entity_id)
+                        } else {
+                            None
+                        }
+                    });
+                    if eid.is_some() {
+                        state.self_entity_id = eid;
+                    }
+                    eid
+                } else {
+                    None
+                };
                 drop(state);
+
+                // Apply pending self range filter once self entity ID is known
+                if let Some(self_eid) = self_entity_id {
+                    let mut ann = annotation_arc.lock();
+                    if let Some(filter) = ann.pending_self_range_filter.take() {
+                        ann.ship_range_overrides.insert(self_eid, filter);
+                        // Ensure show_ship_config is enabled
+                        let mut state = shared_state.lock();
+                        if !state.options.show_ship_config {
+                            state.options.show_ship_config = true;
+                        }
+                    }
+                }
 
                 // Upload textures on first ready frame
                 {
@@ -4006,13 +4066,13 @@ impl ReplayRendererViewer {
                         };
                         let state = shared_state.lock();
                         if let Some(ref frame) = state.frame {
-                            // Collect alive ship names for filtering config circles
-                            let alive_ships: HashSet<&str> = frame
+                            // Collect alive ship entity IDs for filtering config circles
+                            let alive_ships: HashSet<EntityId> = frame
                                 .commands
                                 .iter()
                                 .filter_map(|cmd| {
-                                    if let DrawCommand::Ship { player_name: Some(name), .. } = cmd {
-                                        Some(name.as_str())
+                                    if let DrawCommand::Ship { entity_id, .. } = cmd {
+                                        Some(*entity_id)
                                     } else {
                                         None
                                     }
@@ -4031,19 +4091,12 @@ impl ReplayRendererViewer {
                                             continue;
                                         }
                                 // Apply per-ship config circle filter (only show if explicitly enabled via right-click, never for dead ships)
-                                if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = cmd {
-                                    if !alive_ships.contains(player_name.as_str()) {
+                                if let DrawCommand::ShipConfigCircle { entity_id, kind, .. } = cmd {
+                                    if !alive_ships.contains(entity_id) {
                                         continue;
                                     }
-                                    let enabled = if let Some(overrides) = ship_range_overrides.get(player_name) {
-                                        let kind_idx = match kind {
-                                            ShipConfigCircleKind::Detection => 0,
-                                            ShipConfigCircleKind::MainBattery => 1,
-                                            ShipConfigCircleKind::SecondaryBattery => 2,
-                                            ShipConfigCircleKind::Radar => 3,
-                                            ShipConfigCircleKind::Hydro => 4,
-                                        };
-                                        overrides[kind_idx]
+                                    let enabled = if let Some(filter) = ship_range_overrides.get(entity_id) {
+                                        filter.is_enabled(kind)
                                     } else {
                                         false // hidden by default; must enable per-ship via right-click
                                     };
@@ -4278,12 +4331,12 @@ impl ReplayRendererViewer {
                                 if let Some(ref frame) = state.frame {
                                     let mut best_dist = 30.0_f32; // max click distance in screen px
                                     for cmd in &frame.commands {
-                                        if let DrawCommand::Ship { pos, player_name: Some(name), .. } = cmd {
+                                        if let DrawCommand::Ship { pos, entity_id, player_name: Some(name), .. } = cmd {
                                             let screen_pos = transform.minimap_to_screen(pos);
                                             let dist = click_pos.distance(screen_pos);
                                             if dist < best_dist {
                                                 best_dist = dist;
-                                                ann.context_menu_ship = Some(name.clone());
+                                                ann.context_menu_ship = Some((*entity_id, name.clone()));
                                             }
                                         }
                                     }
@@ -4866,7 +4919,7 @@ impl ReplayRendererViewer {
                                         });
 
                                         // ── Ship-specific options (shown when right-clicking a ship) ──
-                                        if let Some(ref ship_name) = ann.context_menu_ship.clone() {
+                                        if let Some((ship_eid, ref ship_name)) = ann.context_menu_ship.clone() {
                                             ui.separator();
                                             ui.label(egui::RichText::new(ship_name.as_str()).small());
 
@@ -4928,32 +4981,32 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Per-type range toggles for this ship
-                                            let mut flags =
-                                                ann.ship_range_overrides.get(ship_name).copied().unwrap_or([false; 5]);
+                                            let mut filter =
+                                                ann.ship_range_overrides.get(&ship_eid).copied().unwrap_or_default();
                                             ui.label(egui::RichText::new("Ranges").small());
                                             let mut range_changed = false;
-                                            range_changed |= ui.checkbox(&mut flags[0], "Detection").changed();
-                                            range_changed |= ui.checkbox(&mut flags[1], "Main Battery").changed();
-                                            range_changed |= ui.checkbox(&mut flags[2], "Secondary").changed();
-                                            range_changed |= ui.checkbox(&mut flags[3], "Radar").changed();
-                                            range_changed |= ui.checkbox(&mut flags[4], "Hydro").changed();
-                                            let any_on = flags.iter().any(|&f| f);
-                                            let all_on = flags == [true; 5];
+                                            range_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
+                                            range_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
+                                            range_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
+                                            range_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
+                                            range_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
+                                            let any_on = filter.any_enabled();
+                                            let all_on = filter == ShipConfigFilter::all_enabled();
                                             if !all_on && ui.button("Enable All").clicked() {
-                                                flags = [true; 5];
+                                                filter = ShipConfigFilter::all_enabled();
                                                 range_changed = true;
                                             } else if all_on && ui.button("Disable All").clicked() {
-                                                flags = [false; 5];
+                                                filter = ShipConfigFilter::default();
                                                 range_changed = true;
                                             }
                                             if range_changed {
-                                                if flags == [false; 5] {
-                                                    ann.ship_range_overrides.remove(ship_name);
+                                                if !filter.any_enabled() {
+                                                    ann.ship_range_overrides.remove(&ship_eid);
                                                 } else {
-                                                    ann.ship_range_overrides.insert(ship_name.clone(), flags);
+                                                    ann.ship_range_overrides.insert(ship_eid, filter);
                                                 }
                                                 // Auto-enable global when turning on any range
-                                                if flags.iter().any(|&f| f) {
+                                                if filter.any_enabled() {
                                                     let mut state = shared_state.lock();
                                                     if !state.options.show_ship_config {
                                                         state.options.show_ship_config = true;
@@ -4971,11 +5024,11 @@ impl ReplayRendererViewer {
 
                                             // Disable all other ships' ranges
                                             if any_on && ui.button("Disable All Other Ranges").clicked() {
-                                                let keys: Vec<String> = ann
+                                                let keys: Vec<EntityId> = ann
                                                     .ship_range_overrides
                                                     .keys()
-                                                    .filter(|k| k.as_str() != ship_name)
-                                                    .cloned()
+                                                    .filter(|k| **k != ship_eid)
+                                                    .copied()
                                                     .collect();
                                                 for k in keys {
                                                     ann.ship_range_overrides.remove(&k);
@@ -4989,14 +5042,9 @@ impl ReplayRendererViewer {
                                                 let state = shared_state.lock();
                                                 if let Some(ref frame) = state.frame {
                                                     for cmd in &frame.commands {
-                                                        if let DrawCommand::Ship { player_name: Some(name), .. } = cmd {
+                                                        if let DrawCommand::Ship { entity_id, .. } = cmd {
                                                             ann.ship_range_overrides
-                                                                .entry(name.clone())
-                                                                .or_insert([true; 5]);
-                                                            // Set all flags to true for ships that already have entries
-                                                            if let Some(f) = ann.ship_range_overrides.get_mut(name) {
-                                                                *f = [true; 5];
-                                                            }
+                                                                .insert(*entity_id, ShipConfigFilter::all_enabled());
                                                         }
                                                     }
                                                 }
@@ -5489,7 +5537,14 @@ impl ReplayRendererViewer {
                                                         egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
                                                     ));
                                                 if btn.on_hover_text("Save as Video").clicked() {
-                                                    let opts = options.clone();
+                                                    let mut opts = options.clone();
+                                                    // Apply per-ship range overrides for video export
+                                                    let overrides = annotation_arc.lock().ship_range_overrides.clone();
+                                                    if !overrides.is_empty() {
+                                                        opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
+                                                            overrides.get(&eid).copied()
+                                                        }));
+                                                    }
                                                     let default_name = format!("{}.mp4", video_export_data.replay_name);
                                                     if let Some(path) = rfd::FileDialog::new()
                                                         .set_file_name(&default_name)
@@ -5528,7 +5583,14 @@ impl ReplayRendererViewer {
                                                         egui::RichText::new(icons::CLIPBOARD).size(18.0),
                                                     ));
                                                 if btn.on_hover_text("Render Video to Clipboard").clicked() {
-                                                    let opts = options.clone();
+                                                    let mut opts = options.clone();
+                                                    // Apply per-ship range overrides for video export
+                                                    let overrides = annotation_arc.lock().ship_range_overrides.clone();
+                                                    if !overrides.is_empty() {
+                                                        opts.ship_config_visibility = ShipConfigVisibility::Filtered(Arc::new(move |eid| {
+                                                            overrides.get(&eid).copied()
+                                                        }));
+                                                    }
                                                     let status = wows_minimap_renderer::check_encoder();
                                                     let prefer_cpu = !status.gpu_available;
                                                     let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, actual_game_duration };
@@ -5588,6 +5650,7 @@ impl ReplayRendererViewer {
                                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                         .show(|ui| {
                                             ui.set_min_width(180.0);
+                                            egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
                                             let mut opts = options.clone();
                                             let mut show_dead = show_dead_ships;
                                             let mut changed = false;
@@ -5605,6 +5668,41 @@ impl ReplayRendererViewer {
                                                     ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_ship_config, "Ship Ranges").changed();
+
+                                                // Self ship range toggles
+                                                if let Some(self_eid) = self_entity_id {
+                                                    let mut filter = annotation_arc.lock().ship_range_overrides
+                                                        .get(&self_eid).copied().unwrap_or_default();
+                                                    let mut self_changed = false;
+                                                    ui.indent("self_ranges", |ui| {
+                                                        ui.label(egui::RichText::new("Self Ship Ranges").small());
+                                                        self_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
+                                                        self_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
+                                                        self_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
+                                                        self_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
+                                                        self_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
+                                                    });
+                                                    if self_changed {
+                                                        let mut ann = annotation_arc.lock();
+                                                        if !filter.any_enabled() {
+                                                            ann.ship_range_overrides.remove(&self_eid);
+                                                        } else {
+                                                            ann.ship_range_overrides.insert(self_eid, filter);
+                                                        }
+                                                        // Auto-enable global show_ship_config when any range is on
+                                                        if filter.any_enabled() && !opts.show_ship_config {
+                                                            opts.show_ship_config = true;
+                                                            changed = true;
+                                                        }
+                                                        // Auto-disable global when no ship has any range enabled
+                                                        if ann.ship_range_overrides.is_empty() && opts.show_ship_config {
+                                                            opts.show_ship_config = false;
+                                                            changed = true;
+                                                        }
+                                                        ctx.request_repaint();
+                                                    }
+                                                }
+
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
                                                 changed |= ui
@@ -5665,8 +5763,16 @@ impl ReplayRendererViewer {
                                             if ui.button("Save Defaults").clicked() {
                                                 let mut saved = saved_from_render_options(&opts);
                                                 saved.show_dead_ships = show_dead;
+                                                // Persist self range flags from annotation overrides
+                                                if let Some(self_eid) = self_entity_id {
+                                                    let ann = annotation_arc.lock();
+                                                    let filter = ann.ship_range_overrides
+                                                        .get(&self_eid).copied().unwrap_or_default();
+                                                    saved.set_self_range_filter(&filter);
+                                                }
                                                 *pending_save.lock() = Some(saved);
                                             }
+                                            });
                                         });
 
                                     // Timeline popup

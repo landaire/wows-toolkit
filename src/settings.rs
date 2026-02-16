@@ -6,6 +6,8 @@ use parking_lot::RwLock;
 use serde::Deserialize;
 use serde::Serialize;
 
+use wows_minimap_renderer::ShipConfigFilter;
+
 use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::ui::player_tracker::PlayerTracker;
@@ -141,6 +143,16 @@ pub struct SavedRenderOptions {
     pub show_buffs: bool,
     #[serde(default)]
     pub show_ship_config: bool,
+    #[serde(default)]
+    pub show_self_detection_range: bool,
+    #[serde(default)]
+    pub show_self_main_battery_range: bool,
+    #[serde(default)]
+    pub show_self_secondary_range: bool,
+    #[serde(default)]
+    pub show_self_radar_range: bool,
+    #[serde(default)]
+    pub show_self_hydro_range: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_chat: bool,
     #[serde(default = "default_bool::<true>")]
@@ -168,17 +180,49 @@ impl Default for SavedRenderOptions {
             show_consumables: true,
             show_dead_ships: true,
             show_dead_ship_names: false,
-            show_armament: false,
+            show_armament: true,
             show_trails: false,
             show_dead_trails: false,
             show_speed_trails: false,
             show_battle_result: true,
             show_buffs: true,
             show_ship_config: false,
+            show_self_detection_range: false,
+            show_self_main_battery_range: false,
+            show_self_secondary_range: false,
+            show_self_radar_range: false,
+            show_self_hydro_range: false,
             show_chat: true,
             show_advantage: true,
             show_score_timer: true,
         }
+    }
+}
+
+impl SavedRenderOptions {
+    /// Get self ship range visibility as a `ShipConfigFilter`.
+    pub fn self_range_filter(&self) -> ShipConfigFilter {
+        ShipConfigFilter {
+            detection: self.show_self_detection_range,
+            main_battery: self.show_self_main_battery_range,
+            secondary_battery: self.show_self_secondary_range,
+            radar: self.show_self_radar_range,
+            hydro: self.show_self_hydro_range,
+        }
+    }
+
+    /// Update self ship range visibility from a `ShipConfigFilter`.
+    pub fn set_self_range_filter(&mut self, filter: &ShipConfigFilter) {
+        self.show_self_detection_range = filter.detection;
+        self.show_self_main_battery_range = filter.main_battery;
+        self.show_self_secondary_range = filter.secondary_battery;
+        self.show_self_radar_range = filter.radar;
+        self.show_self_hydro_range = filter.hydro;
+    }
+
+    /// Returns true if any self range is enabled.
+    pub fn any_self_range_enabled(&self) -> bool {
+        self.self_range_filter().any_enabled()
     }
 }
 
