@@ -2640,6 +2640,14 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
+                if !self.tab_state.settings.wows_dir.is_empty()
+                    && replay_file.source_path.is_some()
+                    && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
+                {
+                    let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
+                    let _ = std::process::Command::new(exe).arg(replay_file.source_path.as_ref().unwrap()).spawn();
+                }
+
                 if self.tab_state.wows_data_map.is_some()
                     && ui.button(icon_str!(icons::PLAY, "Render")).clicked()
                 {
@@ -2838,6 +2846,7 @@ impl ToolkitTabViewer<'_> {
 
                         let replay_weak = Arc::downgrade(&replay);
                         let path_clone = path.clone();
+                        let wows_dir = self.tab_state.settings.wows_dir.clone();
                         let label_response = ui
                             .add(Label::new(label_text).selectable(false).sense(Sense::click()))
                             .on_hover_text(label.as_str());
@@ -2853,6 +2862,13 @@ impl ToolkitTabViewer<'_> {
                             }
                             if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                 util::open_file_explorer(&path_clone);
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            if !wows_dir.is_empty()
+                                && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
+                            {
+                                let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
+                                let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
@@ -3071,6 +3087,7 @@ impl ToolkitTabViewer<'_> {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
                             let path_clone = path.clone();
+                            let wows_dir = self.tab_state.settings.wows_dir.clone();
                             let replay_weak = id_to_replay_weak.get(&id).cloned();
 
                             let replay_guard = id_to_replay.get(&id).unwrap().read();
@@ -3102,6 +3119,13 @@ impl ToolkitTabViewer<'_> {
                                     }
                                     if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                         util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if !wows_dir.is_empty()
+                                        && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
+                                    {
+                                        let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
+                                        let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
@@ -3370,6 +3394,7 @@ impl ToolkitTabViewer<'_> {
                         for (path, _replay) in replays {
                             let id = egui::Id::new(path);
                             let path_clone = path.clone();
+                            let wows_dir = self.tab_state.settings.wows_dir.clone();
                             let replay_weak = id_to_replay_weak.get(&id).cloned();
 
                             let replay_guard = id_to_replay.get(&id).unwrap().read();
@@ -3399,6 +3424,13 @@ impl ToolkitTabViewer<'_> {
                                     }
                                     if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
                                         util::open_file_explorer(&path_clone);
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    if !wows_dir.is_empty()
+                                        && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
+                                    {
+                                        let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
+                                        let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
