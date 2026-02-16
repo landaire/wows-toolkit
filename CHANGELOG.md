@@ -2,6 +2,113 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.47] - 2026-02-16
+
+### 🚀 Features
+
+- Add buttons for opening replays in game
+- Holding ALT on with expanded replay details will show inverse damage dealt details (fixes #24)
+- Show confirmation dialogs for destructive or annoying actions
+- *(renderer)* Use fonts from game and fix scaling + show torpedo ranegs
+
+### 🐛 Bug Fixes
+
+- Improve error message visibility in UI
+- Refactor updating WoWs game dir to ensure state is properly cleaned up
+- Ensure that unsupported game versions surface errors
+- *(renderer)* Make overlapping ship config labels rotate around their circle to avoid collisions
+
+### Resource_unpacker
+
+- Ensure builds are listed consistently and can load on-demand
+
+## [0.1.47-beta2] - 2026-02-16
+
+### 🚀 Features
+
+- Add progress callback for video export + ensure we can set prefer_cpu
+- *(renderer)* Refactor how ship range filters applied
+
+### 🐛 Bug Fixes
+
+- Refactor networking logic to occur in background thread and re-enable logging
+
+## [0.1.47-beta1] - 2026-02-14
+
+### 🚀 Features
+
+- *(renderer)* Add disable ship ranges button
+- *(renderer)* Add chat overlay + enhance window title
+- Show warning when GPU renderer cannot be used and fallback to CPU renderer
+
+### 🐛 Bug Fixes
+
+- *(renderer)* Fix smooth scrolling
+- *(renderer)* Fix ghost trails
+- Attempt to handle constants data updates better + surface errors better
+- Update bundled constants data
+- Mitigate against GPU mem leak when app is minimized
+
+### Renderer
+
+- Add advantage text, score timer, and improve event timeline
+
+## [0.1.47-alpha6] - 2026-02-14
+
+### 🚀 Features
+
+- *(renderer)* Add speed trails, improved score bar, and kill feed
+- *(renderer)* Add keyboard shortcuts and make the UI a bit prettier
+- *(renderer)* Add options for disabling end-of-battle text + buff counters
+
+## [0.1.47-alpha5] - 2026-02-13
+
+### 🐛 Bug Fixes
+
+- Performance improvements + hopefully fix deadlock causing app to crash
+
+## [0.1.47-alpha4] - 2026-02-13
+
+### 🚀 Features
+
+- Check for constants file updates when loading replays
+- *(renderer)* Add event timeline
+- Add cap capture events
+- Support multiple versions of the game, so long as they are installed
+
+### 🐛 Bug Fixes
+
+- Players that were never spotted now show on the replay results
+
+### 🚜 Refactor
+
+- Use egui_notify instead of my own timed message system
+- Clean up UiReport mapping code
+
+## [0.1.47-alpha2] - 2026-02-11
+
+### 🚀 Features
+
+- *(renderer)* Add right-click option + options for showing/hiding dead ship info
+
+### 🐛 Bug Fixes
+
+- If the app state cannot be deserialized, reset it
+
+## [0.1.47-alpha1] - 2026-02-11
+
+### 🚀 Features
+
+- Add achievement icons
+- Add option to limit session stats
+
+### Renderer
+
+- Support zooming/panning
+- Support overlay controls
+- Add basic annotation support
+- Show ship aim direction
+
 ## [0.1.46] - 2026-02-06
 
 ### 🚀 Features
