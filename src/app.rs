@@ -526,6 +526,15 @@ impl WowsToolkitApp {
                                     let replays_dir = wows_data.replays_dir.clone();
                                     let build_number = wows_data.build_number;
 
+                                    // Detect if the WoWs directory changed
+                                    let dir_changed =
+                                        self.tab_state.settings.wows_dir != new_dir.to_str().unwrap_or_default();
+
+                                    // Clear all stale game state when directory changes
+                                    if dir_changed {
+                                        self.tab_state.reset_game_state();
+                                    }
+
                                     if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
                                         *old_wows_data.write() = wows_data;
                                     } else {
@@ -541,7 +550,9 @@ impl WowsToolkitApp {
                                         );
                                     }
 
-                                    // Initialize or update the version data map
+                                    // Initialize or update the version data map.
+                                    // Always create a new map when the directory changed
+                                    // (reset_game_state sets wows_data_map to None).
                                     let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
                                     if let Some(map) = &self.tab_state.wows_data_map {
                                         map.insert(build_number, Arc::clone(wows_data_ref));

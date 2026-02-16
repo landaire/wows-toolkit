@@ -449,6 +449,26 @@ impl TabState {
         self.can_change_wows_dir = true;
     }
 
+    /// Clears all game-related state. Called when the WoWs directory changes
+    /// to ensure no stale data from the previous directory persists.
+    pub(crate) fn reset_game_state(&mut self) {
+        self.current_replay = None;
+        self.replay_files = None;
+        self.filtered_file_list = None;
+        self.used_filter = None;
+        self.session_stats.clear();
+        self.show_session_stats = false;
+        self.show_session_stats_chart = false;
+        self.session_stats_chart_config = Default::default();
+        self.replays_for_session_reset = None;
+        self.replay_parser_tab.lock().game_chat.clear();
+        self.file_viewer.lock().clear();
+        self.replay_renderers.lock().clear();
+        self.available_builds.clear();
+        self.selected_browser_build = 0;
+        self.wows_data_map = None;
+    }
+
     /// Process replays selected for session stats reset.
     /// Clears the current session stats and populates with the selected replays.
     /// If any replays haven't been parsed yet, they will be queued for parsing.
@@ -486,102 +506,100 @@ impl TabState {
     }
 
     pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
-        let watcher = if let Some(watcher) = self.file_watcher.as_mut() {
-            let old_replays_dir =
-                self.settings.replays_dir.as_ref().expect("watcher was created but replay dir was not assigned?");
-            let _ = watcher.unwatch(old_replays_dir);
-            watcher
-        } else {
-            debug!("creating filesystem watcher");
-            let (tx, rx) = mpsc::channel();
-            let (background_tx, background_rx) = mpsc::channel();
+        // Drop old watcher and background parser thread (if any).
+        // Dropping background_parser_tx closes the channel, causing the old
+        // parser thread to exit when its recv() returns Err.
+        self.file_watcher = None;
+        self.file_receiver = None;
+        self.background_parser_tx = None;
 
-            self.background_parser_tx = Some(background_tx.clone());
+        debug!("creating filesystem watcher");
+        let (tx, rx) = mpsc::channel();
+        let (background_tx, background_rx) = mpsc::channel();
 
-            if let Some(wows_data_map) = self.wows_data_map.clone() {
-                let background_thread_data = BackgroundParserThread {
-                    rx: background_rx,
-                    sent_replays: Arc::clone(&self.settings.sent_replays),
-                    wows_data_map,
-                    twitch_state: Arc::clone(&self.twitch_state),
-                    should_send_replays: self.settings.send_replay_data,
-                    data_export_settings: DataExportSettings {
-                        should_auto_export: self.settings.replay_settings.auto_export_data,
-                        export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
-                        export_format: self.settings.replay_settings.auto_export_format,
-                    },
+        self.background_parser_tx = Some(background_tx.clone());
 
-                    player_tracker: Arc::clone(&self.settings.player_tracker),
-                    is_debug: self.settings.debug_mode,
-                    parser_lock: Arc::clone(&self.parser_lock),
-                };
-                crate::task::start_background_parsing_thread(background_thread_data);
-            }
+        if let Some(wows_data_map) = self.wows_data_map.clone() {
+            let background_thread_data = BackgroundParserThread {
+                rx: background_rx,
+                sent_replays: Arc::clone(&self.settings.sent_replays),
+                wows_data_map,
+                twitch_state: Arc::clone(&self.twitch_state),
+                should_send_replays: self.settings.send_replay_data,
+                data_export_settings: DataExportSettings {
+                    should_auto_export: self.settings.replay_settings.auto_export_data,
+                    export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
+                    export_format: self.settings.replay_settings.auto_export_format,
+                },
 
-            let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-                Ok(event) => {
-                    // TODO: maybe properly handle moves?
-                    debug!("filesytem event: {:?}", event);
-                    match event.kind {
-                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
-                            for path in event.paths {
-                                if path.is_file() {
-                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                        && path.file_name().expect("path has no filename") != "temp.wowsreplay"
-                                    {
-                                        tx.send(NotifyFileEvent::Added(path.clone()))
-                                            .expect("failed to send file creation event");
-                                        // Send this path to the thread watching for replays in background
-                                        let _ = background_tx
-                                            .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
-                                    } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
-                                            .expect("failed to send file creation event");
-                                    }
-                                }
-                            }
-                        }
-                        EventKind::Modify(ModifyKind::Data(_)) => {
-                            for path in event.paths {
-                                if let Some(filename) = path.file_name()
-                                    && filename == "preferences.xml"
+                player_tracker: Arc::clone(&self.settings.player_tracker),
+                is_debug: self.settings.debug_mode,
+                parser_lock: Arc::clone(&self.parser_lock),
+            };
+            crate::task::start_background_parsing_thread(background_thread_data);
+        }
+
+        let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(event) => {
+                // TODO: maybe properly handle moves?
+                debug!("filesytem event: {:?}", event);
+                match event.kind {
+                    EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                        for path in event.paths {
+                            if path.is_file() {
+                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                    && path.file_name().expect("path has no filename") != "temp.wowsreplay"
                                 {
-                                    debug!("Sending preferences changed event");
-                                    tx.send(NotifyFileEvent::PreferencesChanged)
+                                    tx.send(NotifyFileEvent::Added(path.clone()))
+                                        .expect("failed to send file creation event");
+                                    // Send this path to the thread watching for replays in background
+                                    let _ = background_tx
+                                        .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
+                                } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
+                                    tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
                                         .expect("failed to send file creation event");
                                 }
-                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                    tx.send(NotifyFileEvent::Modified(path.clone()))
-                                        .expect("failed to send file modification event");
-                                    let _ = background_tx
-                                        .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
-                                }
                             }
-                        }
-                        EventKind::Remove(_) => {
-                            for path in event.paths {
-                                tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
-                            }
-                        }
-                        _ => {
-                            // TODO: handle RenameMode::From for proper file moves
                         }
                     }
+                    EventKind::Modify(ModifyKind::Data(_)) => {
+                        for path in event.paths {
+                            if let Some(filename) = path.file_name()
+                                && filename == "preferences.xml"
+                            {
+                                debug!("Sending preferences changed event");
+                                tx.send(NotifyFileEvent::PreferencesChanged)
+                                    .expect("failed to send file creation event");
+                            }
+                            if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                tx.send(NotifyFileEvent::Modified(path.clone()))
+                                    .expect("failed to send file modification event");
+                                let _ = background_tx
+                                    .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
+                            }
+                        }
+                    }
+                    EventKind::Remove(_) => {
+                        for path in event.paths {
+                            tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                        }
+                    }
+                    _ => {
+                        // TODO: handle RenameMode::From for proper file moves
+                    }
                 }
-                Err(e) => debug!("watch error: {:?}", e),
-            })
-            .expect("failed to create fs watcher for replays dir");
-            self.file_watcher = Some(watcher);
-            self.file_receiver = Some(rx);
-            self.file_watcher.as_mut().unwrap()
-        };
+            }
+            Err(e) => debug!("watch error: {:?}", e),
+        })
+        .expect("failed to create fs watcher for replays dir");
 
-        // Add a path to be watched. All files and directories at that path and
-        // below will be monitored for changes.
         watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
 
+        self.file_watcher = Some(watcher);
+        self.file_receiver = Some(rx);
+
         self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.settings.replays_dir = Some(replay_dir.to_owned())
+        self.settings.replays_dir = Some(replay_dir.to_owned());
     }
 
     #[must_use]
