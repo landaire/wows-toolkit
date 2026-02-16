@@ -323,6 +323,11 @@ impl WowsToolkitApp {
                 crate::game_params::clear_all_game_params_caches();
             }
 
+            if !saved_state.tab_state.settings.has_047_game_params_fix_for_torp_range {
+                saved_state.tab_state.settings.has_047_game_params_fix_for_torp_range = true;
+                crate::game_params::clear_all_game_params_caches();
+            }
+
             // Sync the GPU encoder warning flag from persisted settings
             saved_state.tab_state.suppress_gpu_encoder_warning.store(
                 saved_state.tab_state.settings.suppress_gpu_encoder_warning,

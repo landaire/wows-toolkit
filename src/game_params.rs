@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tracing::debug;
+use tracing::info;
 use tracing::instrument;
 use wowsunpack::data::idx::FileNode;
 use wowsunpack::data::pkg::PkgFileLoader;
@@ -34,6 +35,8 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
 /// Remove ALL versioned game_params cache files (for schema changes).
 #[instrument]
 pub fn clear_all_game_params_caches() {
+    info!("Clearing gameparams cache");
+
     let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
     let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));
     let Ok(entries) = std::fs::read_dir(&storage_dir) else { return };
@@ -48,6 +51,8 @@ pub fn clear_all_game_params_caches() {
 /// Remove game_params cache files for builds that no longer exist in the game directory.
 #[instrument(skip(available_builds), fields(build_count = available_builds.len()))]
 pub fn cleanup_stale_caches(available_builds: &[u32]) {
+    info!("Clearing stale caches");
+
     let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
 
     // Remove the old unversioned cache
@@ -99,6 +104,8 @@ pub fn load_game_params(
     let metadata_provider = if let Some(params) = params {
         GameMetadataProvider::from_params(params, file_tree, pkg_loader)?
     } else {
+        info!("Writing converted gameparams to cache");
+
         let metadata_provider = GameMetadataProvider::from_pkg(file_tree, pkg_loader)?;
         let params: Vec<Param> =
             metadata_provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();

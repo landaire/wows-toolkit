@@ -150,6 +150,8 @@ pub struct SavedRenderOptions {
     #[serde(default)]
     pub show_self_secondary_range: bool,
     #[serde(default)]
+    pub show_self_torpedo_range: bool,
+    #[serde(default)]
     pub show_self_radar_range: bool,
     #[serde(default)]
     pub show_self_hydro_range: bool,
@@ -190,6 +192,7 @@ impl Default for SavedRenderOptions {
             show_self_detection_range: false,
             show_self_main_battery_range: false,
             show_self_secondary_range: false,
+            show_self_torpedo_range: false,
             show_self_radar_range: false,
             show_self_hydro_range: false,
             show_chat: true,
@@ -206,6 +209,7 @@ impl SavedRenderOptions {
             detection: self.show_self_detection_range,
             main_battery: self.show_self_main_battery_range,
             secondary_battery: self.show_self_secondary_range,
+            torpedo: self.show_self_torpedo_range,
             radar: self.show_self_radar_range,
             hydro: self.show_self_hydro_range,
         }
@@ -216,6 +220,7 @@ impl SavedRenderOptions {
         self.show_self_detection_range = filter.detection;
         self.show_self_main_battery_range = filter.main_battery;
         self.show_self_secondary_range = filter.secondary_battery;
+        self.show_self_torpedo_range = filter.torpedo;
         self.show_self_radar_range = filter.radar;
         self.show_self_hydro_range = filter.hydro;
     }
@@ -258,6 +263,8 @@ pub struct Settings {
     pub has_047_ship_config_fix: bool,
     #[serde(default = "default_bool::<false>")]
     pub has_047_game_params_fix_for_buffs: bool,
+    #[serde(default = "default_bool::<false>")]
+    pub has_047_game_params_fix_for_torp_range: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -311,6 +318,7 @@ impl Default for Settings {
             has_047_game_params_fix: true,
             has_047_ship_config_fix: true,
             has_047_game_params_fix_for_buffs: true,
+            has_047_game_params_fix_for_torp_range: true,
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,

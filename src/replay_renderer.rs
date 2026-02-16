@@ -19,6 +19,7 @@ use egui::mutex::Mutex;
 
 use rootcause::report;
 use wows_minimap_renderer::CANVAS_HEIGHT;
+use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::MinimapPos;
@@ -63,6 +64,12 @@ use crate::wows_data::SharedWoWsData;
 const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const ICON_SIZE: f32 = assets::ICON_SIZE as f32;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
+
+/// Font ID using the game font family (Warhelios Bold + CJK fallbacks).
+/// Falls back to default proportional font if game fonts haven't been registered yet.
+fn game_font(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name("GameFont".into()))
+}
 
 // ─── Zoom/Pan State ─────────────────────────────────────────────────────────
 
@@ -258,6 +265,7 @@ pub struct RendererAssetCache {
     consumable_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     death_cause_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     powerup_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    game_fonts: Option<GameFonts>,
     maps: HashMap<String, CachedMapData>,
 }
 
@@ -372,6 +380,15 @@ impl RendererAssetCache {
         arc
     }
 
+    fn get_or_load_game_fonts(&mut self, file_tree: &FileNode, pkg_loader: &PkgFileLoader) -> GameFonts {
+        if let Some(ref cached) = self.game_fonts {
+            return cached.clone();
+        }
+        let fonts = assets::load_game_fonts(file_tree, pkg_loader);
+        self.game_fonts = Some(fonts.clone());
+        fonts
+    }
+
     fn get_or_load_map(
         &mut self,
         map_name: &str,
@@ -455,6 +472,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_self_detection_range: false,
         show_self_main_battery_range: false,
         show_self_secondary_range: false,
+        show_self_torpedo_range: false,
         show_self_radar_range: false,
         show_self_hydro_range: false,
         show_chat: opts.show_chat,
@@ -536,6 +554,10 @@ pub struct SharedRendererState {
     pub self_player_name: Option<String>,
     /// The replay owner's entity ID (resolved from draw commands).
     pub self_entity_id: Option<EntityId>,
+    /// Game fonts loaded from game files, set by the background thread.
+    pub game_fonts: Option<GameFonts>,
+    /// Whether game fonts have been registered with the egui context.
+    pub game_fonts_registered: bool,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -629,6 +651,8 @@ pub fn launch_replay_renderer(
         actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,
+        game_fonts: None,
+        game_fonts_registered: false,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -715,13 +739,14 @@ fn playback_thread(
     };
 
     // 2. Load visual assets (cached across renderer instances)
-    let map_info = {
+    let (map_info, game_fonts) = {
         let mut cache = asset_cache.lock();
         let ship_icons = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
         let plane_icons = cache.get_or_load_plane_icons(&file_tree, &pkg_loader);
         let consumable_icons = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
         let death_cause_icons = cache.get_or_load_death_cause_icons(&file_tree, &pkg_loader);
         let powerup_icons = cache.get_or_load_powerup_icons(&file_tree, &pkg_loader);
+        let game_fonts = cache.get_or_load_game_fonts(&file_tree, &pkg_loader);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &file_tree, &pkg_loader);
 
         shared_state.lock().assets = Some(ReplayRendererAssets {
@@ -733,8 +758,12 @@ fn playback_thread(
             powerup_icons,
         });
 
-        map_info
+        (map_info, game_fonts)
     };
+
+    // Store game fonts in shared state so the UI thread can register them with egui
+    shared_state.lock().game_fonts = Some(game_fonts.clone());
+
     // Drop references to file_tree/pkg_loader early — no longer needed
     drop(file_tree);
     drop(pkg_loader);
@@ -753,6 +782,7 @@ fn playback_thread(
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
+    renderer.set_fonts(game_fonts.clone());
 
     // Parse all packets, tracking frame boundaries
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
@@ -866,6 +896,7 @@ fn playback_thread(
     let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
+    live_renderer.set_fonts(game_fonts.clone());
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
@@ -956,6 +987,7 @@ fn playback_thread(
             live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
+            live_renderer.set_fonts(game_fonts.clone());
             parse_to_clock(
                 &live_replay,
                 &game_metadata,
@@ -1790,6 +1822,7 @@ fn render_video_blocking(
         death_cause_icons,
         powerup_icons,
         map_info,
+        game_fonts,
     ) = {
         let mut cache = asset_cache.lock();
         let ship_raw = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
@@ -1797,6 +1830,7 @@ fn render_video_blocking(
         let consumable_raw = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
         let death_cause_raw = cache.get_or_load_death_cause_icons(&file_tree, &pkg_loader);
         let powerup_raw = cache.get_or_load_powerup_icons(&file_tree, &pkg_loader);
+        let game_fonts = cache.get_or_load_game_fonts(&file_tree, &pkg_loader);
         let (map_raw, map_info) = cache.get_or_load_map(map_name, &file_tree, &pkg_loader);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
@@ -1832,7 +1866,7 @@ fn render_video_blocking(
             .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
             .collect();
 
-        (map_image, ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, map_info)
+        (map_image, ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, map_info, game_fonts)
     };
 
     // Build replay parser components
@@ -1843,8 +1877,10 @@ fn render_video_blocking(
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options);
+    renderer.set_fonts(game_fonts.clone());
     let mut target = ImageTarget::new(
         map_image_rgb,
+        game_fonts,
         ship_icons_rgba,
         plane_icons_rgba,
         consumable_icons_rgba,
@@ -1955,7 +1991,7 @@ fn draw_ship_labels(
     armament_color: Option<Color32>,
     shapes: &mut Vec<Shape>,
 ) {
-    let label_font = FontId::proportional(10.0 * scale);
+    let label_font = game_font(10.0 * scale);
     let line_height = 12.0 * scale;
     let label_color = Color32::WHITE;
     let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
@@ -2620,7 +2656,7 @@ fn draw_command_to_shapes(
             advantage_team,
         } => {
             let canvas_w = transform.screen_canvas_width();
-            let bar_height = 20.0 * ws;
+            let bar_height = HUD_HEIGHT as f32 * ws;
             let max_score = *max_score as f32;
             let half = canvas_w / 2.0;
             let center_gap = 2.0 * ws;
@@ -2659,9 +2695,9 @@ fn draw_command_to_shapes(
                 ));
             }
 
-            let score_font = FontId::proportional(14.0 * ws);
-            let timer_font = FontId::proportional(12.0 * ws);
-            let adv_font = FontId::proportional(11.0 * ws);
+            let score_font = game_font(14.0 * ws);
+            let timer_font = game_font(12.0 * ws);
+            let adv_font = game_font(11.0 * ws);
             let t0_text = format!("{}", team0);
             let t1_text = format!("{}", team1);
             let timer_color = Color32::from_rgb(200, 200, 200);
@@ -2701,28 +2737,29 @@ fn draw_command_to_shapes(
                 t0_total_w += 6.0 * ws + aw;
             }
 
+            // Pill vertically centered within bar
+            let pill_h = t0_score_h + pill_pad_y * 2.0;
+            let pill_y = bar_origin.y + (bar_height - pill_h) / 2.0;
+            let text_y = pill_y + pill_pad_y;
+
             // Draw team 0 pill + text
             let t0_pill_x = bar_origin.x + 8.0 * ws - pill_pad_x;
-            let t0_pill_y = bar_origin.y + 2.0 * ws - pill_pad_y;
             shapes.push(Shape::rect_filled(
-                Rect::from_min_size(
-                    Pos2::new(t0_pill_x, t0_pill_y),
-                    Vec2::new(t0_total_w + pill_pad_x * 2.0, t0_score_h + pill_pad_y * 2.0),
-                ),
+                Rect::from_min_size(Pos2::new(t0_pill_x, pill_y), Vec2::new(t0_total_w + pill_pad_x * 2.0, pill_h)),
                 pill_rounding,
                 pill_color,
             ));
 
             let mut t0_cursor = bar_origin.x + 8.0 * ws;
             let t0_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
-            shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 2.0 * ws), t0_score_galley, Color32::WHITE));
+            shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y), t0_score_galley, Color32::WHITE));
             t0_cursor += t0_score_w;
 
             if let Some(timer) = team0_timer {
                 t0_cursor += 4.0 * ws;
                 let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), timer_color));
                 let tw = tg.size().x;
-                shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 3.0 * ws), tg, timer_color));
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y + 1.0 * ws), tg, timer_color));
                 t0_cursor += tw;
             }
 
@@ -2731,13 +2768,13 @@ fn draw_command_to_shapes(
             if t0_adv_w.is_some() {
                 t0_cursor += 6.0 * ws;
                 let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
-                shapes.push(Shape::galley(Pos2::new(t0_cursor, bar_origin.y + 4.0 * ws), ag, Color32::WHITE));
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y + 2.0 * ws), ag, Color32::WHITE));
             }
 
             // ── Measure all team 1 elements ──
             let t1_score_g = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text.clone(), score_font.clone(), Color32::WHITE));
             let t1_score_w = t1_score_g.size().x;
-            let t1_score_h = t1_score_g.size().y;
+            let _t1_score_h = t1_score_g.size().y;
             drop(t1_score_g);
 
             let t1_timer_w = team1_timer.as_ref().map(|t| {
@@ -2765,14 +2802,10 @@ fn draw_command_to_shapes(
                 t1_total_w += 6.0 * ws + aw;
             }
 
-            // Draw team 1 pill + text (right-aligned)
+            // Draw team 1 pill + text (right-aligned), reuse pill_h/pill_y from team 0
             let t1_pill_x = bar_origin.x + canvas_w - 8.0 * ws - t1_total_w - pill_pad_x;
-            let t1_pill_y = bar_origin.y + 2.0 * ws - pill_pad_y;
             shapes.push(Shape::rect_filled(
-                Rect::from_min_size(
-                    Pos2::new(t1_pill_x, t1_pill_y),
-                    Vec2::new(t1_total_w + pill_pad_x * 2.0, t1_score_h + pill_pad_y * 2.0),
-                ),
+                Rect::from_min_size(Pos2::new(t1_pill_x, pill_y), Vec2::new(t1_total_w + pill_pad_x * 2.0, pill_h)),
                 pill_rounding,
                 pill_color,
             ));
@@ -2783,7 +2816,7 @@ fn draw_command_to_shapes(
             // Score (rightmost)
             t1_cursor -= t1_score_w;
             let t1_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
-            shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 2.0 * ws), t1_score_galley, Color32::WHITE));
+            shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y), t1_score_galley, Color32::WHITE));
             let _t1_score_x = t1_cursor;
 
             // Timer (left of score)
@@ -2791,7 +2824,7 @@ fn draw_command_to_shapes(
                 let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
                 let tw = tg.size().x;
                 t1_cursor -= 4.0 * ws + tw;
-                shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 3.0 * ws), tg, timer_color));
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y + 1.0 * ws), tg, timer_color));
             }
 
             let _t1_start_x = t1_cursor;
@@ -2800,65 +2833,74 @@ fn draw_command_to_shapes(
             if let Some(aw) = t1_adv_w {
                 t1_cursor -= 6.0 * ws + aw;
                 let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font, Color32::WHITE));
-                shapes.push(Shape::galley(Pos2::new(t1_cursor, bar_origin.y + 4.0 * ws), ag, Color32::WHITE));
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y + 2.0 * ws), ag, Color32::WHITE));
             }
         }
 
         DrawCommand::Timer { time_remaining, elapsed } => {
+            // Don't show until battle has started (pre-battle uses PreBattleCountdown)
+            if *elapsed <= 0.0 {
+                return shapes;
+            }
             let canvas_w = transform.screen_canvas_width();
-            let main_font = FontId::proportional(16.0 * ws);
+            let main_font = game_font(16.0 * ws);
             let pill_color = Color32::from_rgba_unmultiplied(0, 0, 0, 140);
             let pill_pad_x = 4.0 * ws;
             let pill_pad_y = 1.0 * ws;
             let pill_rounding = CornerRadius::same((3.0 * ws) as u8);
 
+            // Match video renderer: main timer at Y=2, elapsed at Y=18 (in HUD-logical coords)
+            let hud_h = HUD_HEIGHT as f32 * ws;
             if let Some(remaining) = time_remaining {
-                // Measure both lines to size a single pill
                 let r = (*remaining).max(0) as u32;
                 let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
-                let small_font = FontId::proportional(11.0 * ws);
+                let small_font = game_font(11.0 * ws);
                 let e = elapsed.max(0.0) as u32;
                 let elapsed_text = format!("+{:02}:{:02}", e / 60, e % 60);
                 let gray = Color32::from_rgb(180, 180, 180);
 
                 let rg = ctx.fonts_mut(|f| f.layout_no_wrap(remaining_text, main_font, Color32::WHITE));
                 let r_w = rg.size().x;
-                let r_h = rg.size().y;
                 let eg = ctx.fonts_mut(|f| f.layout_no_wrap(elapsed_text, small_font, gray));
                 let e_w = eg.size().x;
-                let e_h = eg.size().y;
 
+                let hud_origin = transform.hud_pos(0.0, 0.0);
+                let main_pos = transform.hud_pos(0.0, 2.0);
+                let elapsed_pos = transform.hud_pos(0.0, 18.0);
+
+                // Pill spans from main text to bottom of HUD, clamped
                 let pill_w = r_w.max(e_w);
-                let pill_h = r_h + e_h;
-                let pos = transform.hud_pos(0.0, 2.0);
-                let pill_x = pos.x + canvas_w / 2.0 - pill_w / 2.0 - pill_pad_x;
+                let pill_top = main_pos.y - pill_pad_y;
+                let pill_bottom = hud_origin.y + hud_h;
+                let pill_h = (pill_bottom - pill_top).max(0.0);
+                let pill_x = main_pos.x + canvas_w / 2.0 - pill_w / 2.0 - pill_pad_x;
                 shapes.push(Shape::rect_filled(
-                    Rect::from_min_size(
-                        Pos2::new(pill_x, pos.y - pill_pad_y),
-                        Vec2::new(pill_w + pill_pad_x * 2.0, pill_h + pill_pad_y * 2.0),
-                    ),
+                    Rect::from_min_size(Pos2::new(pill_x, pill_top), Vec2::new(pill_w + pill_pad_x * 2.0, pill_h)),
                     pill_rounding,
                     pill_color,
                 ));
 
-                let r_x = pos.x + canvas_w / 2.0 - r_w / 2.0;
-                shapes.push(Shape::galley(Pos2::new(r_x, pos.y), rg, Color32::WHITE));
+                let r_x = main_pos.x + canvas_w / 2.0 - r_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(r_x, main_pos.y), rg, Color32::WHITE));
 
-                let e_x = pos.x + canvas_w / 2.0 - e_w / 2.0;
-                shapes.push(Shape::galley(Pos2::new(e_x, pos.y + r_h), eg, gray));
+                let e_x = main_pos.x + canvas_w / 2.0 - e_w / 2.0;
+                shapes.push(Shape::galley(Pos2::new(e_x, elapsed_pos.y), eg, gray));
             } else {
                 // Fallback: just show elapsed time centered
                 let e = elapsed.max(0.0) as u32;
                 let text = format!("{:02}:{:02}", e / 60, e % 60);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::WHITE));
                 let text_w = galley.size().x;
-                let text_h = galley.size().y;
+                let hud_origin = transform.hud_pos(0.0, 0.0);
                 let pos = transform.hud_pos(0.0, 2.0);
                 let x = pos.x + canvas_w / 2.0 - text_w / 2.0;
+                let pill_top = pos.y - pill_pad_y;
+                let pill_bottom = hud_origin.y + hud_h;
+                let pill_h = (pill_bottom - pill_top).max(0.0);
                 shapes.push(Shape::rect_filled(
                     Rect::from_min_size(
-                        Pos2::new(x - pill_pad_x, pos.y - pill_pad_y),
-                        Vec2::new(text_w + pill_pad_x * 2.0, text_h + pill_pad_y * 2.0),
+                        Pos2::new(x - pill_pad_x, pill_top),
+                        Vec2::new(text_w + pill_pad_x * 2.0, pill_h),
                     ),
                     pill_rounding,
                     pill_color,
@@ -2868,11 +2910,12 @@ fn draw_command_to_shapes(
         }
 
         DrawCommand::PreBattleCountdown { seconds } => {
-            // Reuse the BattleResultOverlay rendering with gold color and subtitle
+            // Reuse the BattleResultOverlay rendering with gold color and subtitle above
             let overlay = DrawCommand::BattleResultOverlay {
                 text: format!("{}", seconds),
                 subtitle: Some("BATTLE STARTS IN".to_string()),
                 color: [255, 200, 50],
+                subtitle_above: true,
             };
             shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, opts));
         }
@@ -2885,13 +2928,13 @@ fn draw_command_to_shapes(
             use wows_replays::analyzer::decoder::DeathCause;
 
             let canvas_w = transform.screen_canvas_width();
-            let name_font = FontId::proportional(12.0 * ws);
+            let name_font = game_font(12.0 * ws);
             let line_h = 20.0 * ws;
             let icon_size = ICON_SIZE * ws;
             let cause_icon_size = icon_size;
             let gap = 2.0 * ws;
             let right_margin = 4.0 * ws;
-            let start = transform.hud_pos(0.0, 22.0);
+            let start = transform.hud_pos(0.0, HUD_HEIGHT as f32);
 
             for (i, entry) in entries.iter().take(5).enumerate() {
                 let y = start.y + i as f32 * line_h;
@@ -3104,7 +3147,7 @@ fn draw_command_to_shapes(
             shapes.push(Shape::circle_stroke(center, r, Stroke::new(transform.scale_stroke(1.5), outline_color)));
 
             if !label.is_empty() {
-                let font = FontId::proportional(11.0 * ws);
+                let font = game_font(11.0 * ws);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), font, Color32::WHITE));
                 let text_w = galley.size().x;
                 let text_h = galley.size().y;
@@ -3215,8 +3258,7 @@ fn draw_command_to_shapes(
             // Draw label near the top of the circle
             if let Some(text) = label {
                 let label_pos = Pos2::new(center.x, center.y - screen_radius - 4.0);
-                let galley =
-                    ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), egui::FontId::proportional(10.0), circle_color));
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), game_font(10.0), circle_color));
                 let text_width = galley.size().x;
                 shapes.push(Shape::galley(
                     Pos2::new(label_pos.x - text_width / 2.0, label_pos.y - galley.size().y),
@@ -3259,7 +3301,7 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::BattleResultOverlay { text, subtitle, color } => {
+        DrawCommand::BattleResultOverlay { text, subtitle, color, subtitle_above } => {
             let canvas_w = transform.screen_canvas_width();
             let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
             let center_x = transform.origin.x + canvas_w / 2.0;
@@ -3267,23 +3309,29 @@ fn draw_command_to_shapes(
 
             // Main text: 1/8 of canvas width as font size
             let font_size = canvas_w / 8.0;
-            let main_font = FontId::proportional(font_size);
+            let main_font = game_font(font_size);
             let main_galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), main_font, Color32::WHITE));
             let main_w = main_galley.size().x;
             let main_h = main_galley.size().y;
 
             // Subtitle: 1/4 of main font size
             let sub_galley = subtitle.as_ref().map(|s| {
-                let sub_font = FontId::proportional(font_size / 4.0);
+                let sub_font = game_font(font_size / 4.0);
                 ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), sub_font, Color32::from_gray(200)))
             });
             let sub_h = sub_galley.as_ref().map(|g| g.size().y).unwrap_or(0.0);
             let gap = if subtitle.is_some() { 8.0 * ws } else { 0.0 };
             let total_h = main_h + gap + sub_h;
 
-            // Centered position for main text
-            let text_x = center_x - main_w / 2.0;
-            let text_y = center_y - total_h / 2.0;
+            // Position main and subtitle based on subtitle_above flag
+            let block_top = center_y - total_h / 2.0;
+            let (text_x, text_y, sub_top) = if *subtitle_above {
+                // Subtitle above: [subtitle] [gap] [main]
+                (center_x - main_w / 2.0, block_top + sub_h + gap, block_top)
+            } else {
+                // Subtitle below: [main] [gap] [subtitle]
+                (center_x - main_w / 2.0, block_top, block_top + main_h + gap)
+            };
 
             // Text glow layers matching video renderer approach:
             // dark shadows for contrast, then colored glow, then white text
@@ -3304,7 +3352,7 @@ fn draw_command_to_shapes(
                     (c[2] as f32 * opacity) as u8,
                     (255.0 * opacity) as u8,
                 );
-                let glow_font = FontId::proportional(font_size);
+                let glow_font = game_font(font_size);
                 for &(dx, dy) in offsets {
                     let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), glow_font.clone(), layer_color));
                     shapes.push(Shape::galley(
@@ -3322,10 +3370,10 @@ fn draw_command_to_shapes(
             if let Some(sub_galley) = sub_galley {
                 let sub_w = sub_galley.size().x;
                 let sub_x = center_x - sub_w / 2.0;
-                let sub_y = text_y + main_h + gap;
+                let sub_y = sub_top;
 
                 // Subtitle dark outline
-                let sub_font = FontId::proportional(font_size / 4.0);
+                let sub_font = game_font(font_size / 4.0);
                 for &(dx, dy) in offsets {
                     let outline = ctx.fonts_mut(|f| {
                         f.layout_no_wrap(
@@ -3349,7 +3397,7 @@ fn draw_command_to_shapes(
             let canvas_w = transform.screen_canvas_width();
             let icon_size = 16.0 * ws;
             let gap = 2.0 * ws;
-            let buff_y = transform.hud_pos(0.0, 22.0).y;
+            let buff_y = transform.hud_pos(0.0, HUD_HEIGHT as f32).y;
             let origin_x = transform.hud_pos(0.0, 0.0).x;
 
             // Friendly buffs: left side
@@ -3367,7 +3415,7 @@ fn draw_command_to_shapes(
 
                     if *count > 1 {
                         let label = format!("{}", count);
-                        let font = FontId::proportional(10.0 * ws);
+                        let font = game_font(10.0 * ws);
                         let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font, Color32::WHITE));
                         let tw = galley.size().x;
                         shapes.push(Shape::galley(
@@ -3388,7 +3436,7 @@ fn draw_command_to_shapes(
                 if let Some(tex) = textures.powerup_icons.get(marker.as_str()) {
                     if *count > 1 {
                         let label = format!("{}", count);
-                        let font = FontId::proportional(10.0 * ws);
+                        let font = game_font(10.0 * ws);
                         let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label, font, Color32::WHITE));
                         let tw = galley.size().x;
                         x -= tw;
@@ -3414,8 +3462,8 @@ fn draw_command_to_shapes(
         DrawCommand::ChatOverlay { entries } => {
             let canvas_w = transform.screen_canvas_width();
             let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
-            let header_font = FontId::proportional(11.0 * ws);
-            let msg_font = FontId::proportional(11.0 * ws);
+            let header_font = game_font(11.0 * ws);
+            let msg_font = game_font(11.0 * ws);
             let line_h = 14.0 * ws;
             let icon_size = 12.0 * ws;
             let padding = 6.0 * ws;
@@ -3750,6 +3798,42 @@ impl ReplayRendererViewer {
                 } else {
                     None
                 };
+
+                // Register game fonts with egui (once, when available)
+                if !state.game_fonts_registered
+                    && let Some(ref fonts) = state.game_fonts
+                {
+                    let mut font_defs = egui::FontDefinitions::default();
+                    egui_phosphor::add_to_fonts(&mut font_defs, egui_phosphor::Variant::Regular);
+
+                    // Primary game font (no scale tweak — egui handles sizing via FontId)
+                    font_defs.font_data.insert(
+                        "game_font_primary".to_owned(),
+                        egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
+                    );
+
+                    let mut family_fonts = vec!["game_font_primary".to_owned()];
+
+                    // CJK fallback fonts
+                    let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
+                    for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
+                        let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
+                        font_defs.font_data.insert(
+                            name.clone(),
+                            egui::FontData::from_owned(bytes.clone()).into(),
+                        );
+                        family_fonts.push(name);
+                    }
+
+                    font_defs.families.insert(
+                        egui::FontFamily::Name("GameFont".into()),
+                        family_fonts,
+                    );
+
+                    ctx.set_fonts(font_defs);
+                    state.game_fonts_registered = true;
+                }
+
                 drop(state);
 
                 // Apply pending self range filter once self entity ID is known
@@ -4027,7 +4111,7 @@ impl ReplayRendererViewer {
                                 map_painter.add(Shape::LineSegment { points: [left, right], stroke: grid_stroke });
                             }
 
-                            let label_font = FontId::proportional(11.0 * window_scale);
+                            let label_font = game_font(11.0 * window_scale);
                             let label_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
                             for i in 0..10 {
                                 // Numbers 1-10 across the top
@@ -4138,13 +4222,13 @@ impl ReplayRendererViewer {
                                         break;
                                     }
                                     let canvas_w = transform.screen_canvas_width();
-                                    let bar_height = 20.0 * ws;
+                                    let bar_height = HUD_HEIGHT as f32 * ws;
                                     let bar_origin = transform.hud_pos(0.0, 0.0);
 
                                     // Recompute cursor positions matching ScoreBar rendering
-                                    let score_font = FontId::proportional(14.0 * ws);
-                                    let timer_font = FontId::proportional(12.0 * ws);
-                                    let adv_font = FontId::proportional(11.0 * ws);
+                                    let score_font = game_font(14.0 * ws);
+                                    let timer_font = game_font(12.0 * ws);
+                                    let adv_font = game_font(11.0 * ws);
                                     let adv_color = color_from_rgb(*color);
                                     let galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.clone(), adv_font, adv_color));
                                     let text_w = galley.size().x;
@@ -4988,9 +5072,9 @@ impl ReplayRendererViewer {
                                             range_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
                                             range_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
                                             range_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
+                                            range_changed |= ui.checkbox(&mut filter.torpedo, "Torpedo").changed();
                                             range_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
                                             range_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
-                                            let any_on = filter.any_enabled();
                                             let all_on = filter == ShipConfigFilter::all_enabled();
                                             if !all_on && ui.button("Enable All").clicked() {
                                                 filter = ShipConfigFilter::all_enabled();
@@ -5023,7 +5107,7 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Disable all other ships' ranges
-                                            if any_on && ui.button("Disable All Other Ranges").clicked() {
+                                            if ui.button("Disable All Other Ranges").clicked() {
                                                 let keys: Vec<EntityId> = ann
                                                     .ship_range_overrides
                                                     .keys()
@@ -5679,6 +5763,7 @@ impl ReplayRendererViewer {
                                                         self_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
                                                         self_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
                                                         self_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
+                                                        self_changed |= ui.checkbox(&mut filter.torpedo, "Torpedo").changed();
                                                         self_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
                                                         self_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
                                                     });
