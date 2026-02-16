@@ -2702,8 +2702,14 @@ impl ToolkitTabViewer<'_> {
                     && replay_file.source_path.is_some()
                     && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
                 {
-                    let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
-                    let _ = std::process::Command::new(exe).arg(replay_file.source_path.as_ref().unwrap()).spawn();
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new("pending_confirmation_request"),
+                            Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                replay_path: replay_file.source_path.clone().unwrap(),
+                            }),
+                        );
+                    });
                 }
 
                 if self.tab_state.wows_data_map.is_some()
@@ -2925,8 +2931,14 @@ impl ToolkitTabViewer<'_> {
                             if !wows_dir.is_empty()
                                 && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
                             {
-                                let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
-                                let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new("pending_confirmation_request"),
+                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                            replay_path: path_clone.to_path_buf(),
+                                        }),
+                                    );
+                                });
                                 ui.close_kind(UiKind::Menu);
                             }
                             if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
@@ -2939,8 +2951,10 @@ impl ToolkitTabViewer<'_> {
                             if ui.button("Set as Session Stats (1 replay)").clicked() {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(
-                                        egui::Id::new("session_stats_reset_replays"),
-                                        vec![replay_weak.clone()],
+                                        egui::Id::new("pending_confirmation_request"),
+                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                            replays: vec![replay_weak.clone()],
+                                        }),
                                     );
                                 });
                                 ui.close_kind(UiKind::Menu);
@@ -2955,13 +2969,6 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
-
-        // Check for session stats reset request from context menu
-        let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
-            ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
-        if let Some(replays) = reset_replays {
-            self.tab_state.replays_for_session_reset = Some(replays);
-        }
 
         self.handle_context_menu_render(ui);
 
@@ -3084,7 +3091,12 @@ impl ToolkitTabViewer<'_> {
                         };
                         if ui.button(label).clicked() {
                             ui.ctx().data_mut(|data| {
-                                data.insert_temp(egui::Id::new("session_stats_reset_replays"), selected_replays);
+                                data.insert_temp(
+                                    egui::Id::new("pending_confirmation_request"),
+                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                        replays: selected_replays,
+                                    }),
+                                );
                             });
                             ui.close_kind(UiKind::Menu);
                         }
@@ -3133,8 +3145,10 @@ impl ToolkitTabViewer<'_> {
                             if ui.button(label).clicked() {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(
-                                        egui::Id::new("session_stats_reset_replays"),
-                                        group_replays.clone(),
+                                        egui::Id::new("pending_confirmation_request"),
+                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                            replays: group_replays.clone(),
+                                        }),
                                     );
                                 });
                                 ui.close_kind(UiKind::Menu);
@@ -3182,8 +3196,14 @@ impl ToolkitTabViewer<'_> {
                                     if !wows_dir.is_empty()
                                         && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
                                     {
-                                        let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
-                                        let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(
+                                                egui::Id::new("pending_confirmation_request"),
+                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                                    replay_path: path_clone.to_path_buf(),
+                                                }),
+                                            );
+                                        });
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
@@ -3202,8 +3222,10 @@ impl ToolkitTabViewer<'_> {
                                         if let Some(replay_weak) = replay_weak.as_ref() {
                                             ui.ctx().data_mut(|data| {
                                                 data.insert_temp(
-                                                    egui::Id::new("session_stats_reset_replays"),
-                                                    vec![replay_weak.clone()],
+                                                    egui::Id::new("pending_confirmation_request"),
+                                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                                        replays: vec![replay_weak.clone()],
+                                                    }),
                                                 );
                                             });
                                         }
@@ -3216,13 +3238,6 @@ impl ToolkitTabViewer<'_> {
                     builder.close_dir();
                 }
             });
-
-            // Check for session stats reset request from context menu
-            let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
-                ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
-            if let Some(replays) = reset_replays {
-                self.tab_state.replays_for_session_reset = Some(replays);
-            }
 
             self.handle_context_menu_render(ui);
 
@@ -3391,7 +3406,12 @@ impl ToolkitTabViewer<'_> {
                         };
                         if ui.button(label).clicked() {
                             ui.ctx().data_mut(|data| {
-                                data.insert_temp(egui::Id::new("session_stats_reset_replays"), selected_replays);
+                                data.insert_temp(
+                                    egui::Id::new("pending_confirmation_request"),
+                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                        replays: selected_replays,
+                                    }),
+                                );
                             });
                             ui.close_kind(UiKind::Menu);
                         }
@@ -3440,8 +3460,10 @@ impl ToolkitTabViewer<'_> {
                             if ui.button(label).clicked() {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(
-                                        egui::Id::new("session_stats_reset_replays"),
-                                        group_replays.clone(),
+                                        egui::Id::new("pending_confirmation_request"),
+                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                            replays: group_replays.clone(),
+                                        }),
                                     );
                                 });
                                 ui.close_kind(UiKind::Menu);
@@ -3487,8 +3509,14 @@ impl ToolkitTabViewer<'_> {
                                     if !wows_dir.is_empty()
                                         && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
                                     {
-                                        let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
-                                        let _ = std::process::Command::new(exe).arg(&path_clone).spawn();
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(
+                                                egui::Id::new("pending_confirmation_request"),
+                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                                    replay_path: path_clone.to_path_buf(),
+                                                }),
+                                            );
+                                        });
                                         ui.close_kind(UiKind::Menu);
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
@@ -3507,8 +3535,10 @@ impl ToolkitTabViewer<'_> {
                                         if let Some(replay_weak) = replay_weak.as_ref() {
                                             ui.ctx().data_mut(|data| {
                                                 data.insert_temp(
-                                                    egui::Id::new("session_stats_reset_replays"),
-                                                    vec![replay_weak.clone()],
+                                                    egui::Id::new("pending_confirmation_request"),
+                                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                                                        replays: vec![replay_weak.clone()],
+                                                    }),
                                                 );
                                             });
                                         }
@@ -3521,13 +3551,6 @@ impl ToolkitTabViewer<'_> {
                     builder.close_dir();
                 }
             });
-
-            // Check for session stats reset request from context menu
-            let reset_replays: Option<Vec<Weak<RwLock<Replay>>>> =
-                ui.ctx().data_mut(|data| data.remove_temp(egui::Id::new("session_stats_reset_replays")));
-            if let Some(replays) = reset_replays {
-                self.tab_state.replays_for_session_reset = Some(replays);
-            }
 
             self.handle_context_menu_render(ui);
 
@@ -3666,6 +3689,7 @@ impl ToolkitTabViewer<'_> {
 
         self.show_session_stats_window(ui);
         self.show_session_stats_chart_window(ui);
+        self.show_confirmation_dialog(ui);
     }
 
     pub fn show_session_stats_window(&mut self, ui: &mut egui::Ui) {
@@ -3684,7 +3708,8 @@ impl ToolkitTabViewer<'_> {
                 ui.heading("Overall Stats");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(icon_str!(icons::ERASER, "Clear")).clicked() {
-                        self.tab_state.session_stats.clear();
+                        self.tab_state.pending_confirmation =
+                            Some(crate::tab_state::ConfirmableAction::ClearSessionStats);
                     }
                     if ui.button(icon_str!(icons::CHART_LINE, "Chart")).clicked() {
                         self.tab_state.show_session_stats_chart = true;
@@ -4169,6 +4194,68 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
             });
+    }
+
+    fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
+        if self.tab_state.pending_confirmation.is_none() {
+            let request: Option<Option<crate::tab_state::ConfirmableAction>> =
+                ctx.data_mut(|data| data.remove_temp(egui::Id::new("pending_confirmation_request")));
+            if let Some(Some(action)) = request {
+                self.tab_state.pending_confirmation = Some(action);
+            }
+        }
+    }
+
+    fn show_confirmation_dialog(&mut self, ui: &mut egui::Ui) {
+        self.pick_up_confirmation_request(ui.ctx());
+
+        let Some(action) = self.tab_state.pending_confirmation.clone() else {
+            return;
+        };
+
+        let message = action.confirmation_message();
+
+        let mut confirmed = false;
+        let mut dismissed = false;
+
+        egui::Window::new("Confirm")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                ui.label(message);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Yes").clicked() {
+                        confirmed = true;
+                    }
+                    if ui.button("No").clicked() {
+                        dismissed = true;
+                    }
+                });
+            });
+
+        if confirmed {
+            let action = self.tab_state.pending_confirmation.take().unwrap();
+            self.execute_confirmed_action(action);
+        } else if dismissed {
+            self.tab_state.pending_confirmation = None;
+        }
+    }
+
+    fn execute_confirmed_action(&mut self, action: crate::tab_state::ConfirmableAction) {
+        match action {
+            crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
+                let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
+                let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
+            }
+            crate::tab_state::ConfirmableAction::ClearSessionStats => {
+                self.tab_state.session_stats.clear();
+            }
+            crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
+                self.tab_state.replays_for_session_reset = Some(replays);
+            }
+        }
     }
 
     fn handle_context_menu_render(&mut self, ui: &mut egui::Ui) {

@@ -128,6 +128,27 @@ pub enum NotifyFileEvent {
 
 pub type PathFileNodePair = (Arc<PathBuf>, FileNode);
 
+/// An action that requires user confirmation before executing.
+#[derive(Clone)]
+pub enum ConfirmableAction {
+    /// Launch WorldOfWarships.exe with the given replay path.
+    OpenInGame { replay_path: PathBuf },
+    /// Clear all session stats.
+    ClearSessionStats,
+    /// Replace session stats with the given replays.
+    SetAsSessionStats { replays: Vec<std::sync::Weak<RwLock<Replay>>> },
+}
+
+impl ConfirmableAction {
+    pub fn confirmation_message(&self) -> &str {
+        match self {
+            ConfirmableAction::OpenInGame { .. } => "This will launch World of Warships. Continue?",
+            ConfirmableAction::ClearSessionStats => "This will clear all session stats. Continue?",
+            ConfirmableAction::SetAsSessionStats { .. } => "This will replace your current session stats. Continue?",
+        }
+    }
+}
+
 /// Main application state container
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -245,6 +266,10 @@ pub struct TabState {
     #[serde(skip)]
     pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
 
+    /// Pending action awaiting user confirmation.
+    #[serde(skip)]
+    pub pending_confirmation: Option<ConfirmableAction>,
+
     /// All loaded version data, keyed by build number.
     #[serde(skip)]
     pub wows_data_map: Option<WoWsDataMap>,
@@ -317,6 +342,7 @@ impl Default for TabState {
             session_stats_chart_config: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
+            pending_confirmation: None,
             wows_data_map: None,
             available_builds: Vec::new(),
             selected_browser_build: 0,
