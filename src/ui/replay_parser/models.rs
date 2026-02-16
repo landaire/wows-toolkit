@@ -172,12 +172,20 @@ impl TranslatedCrewSkill {
 pub struct DamageInteraction {
     pub damage_dealt: u64,
     pub damage_dealt_text: String,
+    /// % of this player's total dealt damage
     pub damage_dealt_percentage: f64,
     pub damage_dealt_percentage_text: String,
+    /// % of the victim's total received damage
+    pub damage_dealt_inverse_percentage: f64,
+    pub damage_dealt_inverse_percentage_text: String,
     pub damage_received: u64,
     pub damage_received_text: String,
+    /// % of this player's total received damage
     pub damage_received_percentage: f64,
     pub damage_received_percentage_text: String,
+    /// % of the attacker's total dealt damage
+    pub damage_received_inverse_percentage: f64,
+    pub damage_received_inverse_percentage_text: String,
 }
 
 impl DamageInteraction {

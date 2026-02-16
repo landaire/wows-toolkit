@@ -873,6 +873,48 @@ impl UiReport {
             }
         }
 
+        // Third pass: compute inverse percentages using the other player's totals.
+        // dealt_inverse = damage_dealt / victim's total received damage
+        // received_inverse = damage_received / attacker's total dealt damage
+        {
+            // Collect totals first to avoid borrow issues
+            let totals: HashMap<AccountId, (u64, u64)> = player_reports
+                .iter()
+                .map(|r| {
+                    let id = r.player().initial_state().db_id();
+                    let dealt = r.actual_damage().unwrap_or_default();
+                    let received = r.received_damage().unwrap_or_default();
+                    (id, (dealt, received))
+                })
+                .collect();
+
+            for report in &mut player_reports {
+                let Some(interactions) = report.damage_interactions.as_mut() else {
+                    continue;
+                };
+
+                for (other_id, interaction) in interactions.iter_mut() {
+                    let Some(&(other_dealt, other_received)) = totals.get(other_id) else {
+                        continue;
+                    };
+
+                    if other_received > 0 && interaction.damage_dealt > 0 {
+                        interaction.damage_dealt_inverse_percentage =
+                            (interaction.damage_dealt as f64 / other_received as f64) * 100.0;
+                        interaction.damage_dealt_inverse_percentage_text =
+                            format!("{:.0}%", interaction.damage_dealt_inverse_percentage);
+                    }
+
+                    if other_dealt > 0 && interaction.damage_received > 0 {
+                        interaction.damage_received_inverse_percentage =
+                            (interaction.damage_received as f64 / other_dealt as f64) * 100.0;
+                        interaction.damage_received_inverse_percentage_text =
+                            format!("{:.0}%", interaction.damage_received_inverse_percentage);
+                    }
+                }
+            }
+        }
+
         drop(constants_inner);
         drop(wows_data_inner);
 
@@ -1037,6 +1079,7 @@ impl UiReport {
 
     fn received_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
         let style = Style::default();
+        let alt_held = ui.input(|i| i.modifiers.alt);
 
         ui.vertical(|ui| {
             if let Some(received_hover_text) = report.received_damage_hover_text() {
@@ -1083,11 +1126,18 @@ impl UiReport {
                         egui::Align::Center,
                     );
 
+                    // ALT: show % of attacker's total dealt damage; default: % of this player's received damage
+                    let pct_text = if alt_held {
+                        format!("{}{}", icons::SWAP, &interaction.1.damage_received_inverse_percentage_text)
+                    } else {
+                        interaction.1.damage_received_percentage_text.clone()
+                    };
+
                     ui.label(format!(
                         "{}: {} ({})",
                         interaction_player.ship_name(),
                         interaction.1.damage_received_text,
-                        &interaction.1.damage_received_percentage_text
+                        pct_text
                     ))
                     .on_hover_text(hover_layout);
                 }
@@ -1097,6 +1147,7 @@ impl UiReport {
 
     fn dealt_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
         let style = Style::default();
+        let alt_held = ui.input(|i| i.modifiers.alt);
 
         ui.vertical(|ui| {
             if let Some(received_hover_text) = report.actual_damage_hover_text() {
@@ -1142,11 +1193,18 @@ impl UiReport {
                         egui::Align::Center,
                     );
 
+                    // ALT: show % of victim's total received damage; default: % of this player's dealt damage
+                    let pct_text = if alt_held {
+                        format!("{}{}", icons::SWAP, &interaction.1.damage_dealt_inverse_percentage_text)
+                    } else {
+                        interaction.1.damage_dealt_percentage_text.clone()
+                    };
+
                     ui.label(format!(
                         "{}: {} ({})",
                         interaction_player.ship_name(),
                         interaction.1.damage_dealt_text,
-                        &interaction.1.damage_dealt_percentage_text
+                        pct_text
                     ))
                     .on_hover_text(hover_layout);
                 }
