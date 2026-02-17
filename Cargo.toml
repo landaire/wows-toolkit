@@ -36,6 +36,7 @@ wowsunpack = { version = "0.17", default-features = false, features = [
     "cbor",
     "json",
     "rkyv",
+    "vfs",
 ] }
 wows_minimap_renderer = { version = "0.10.0", default-features = false, features = ["gpu", "cpu", "arc"] }
 rfd = "0.15"
@@ -119,9 +120,9 @@ debug = true
 [patch.crates-io]
 #pickled = { path = "../pickled" }
 #serde-pickle = { path = "../serde-pickle" } #git = "https://github.com/landaire/serde-pickle.git" }
-#wows_replays = { path = "../wows-replays/parser" }
-#wowsunpack = { path = "../wowsunpack" }
-#wows_minimap_renderer = { path = "../wows-replays/minimap-renderer" }
+wows_replays = { path = "../wows-replays/parser" }
+wowsunpack = { path = "../wowsunpack" }
+wows_minimap_renderer = { path = "../wows-replays/minimap-renderer" }
 
 # If you want to use the bleeding edge version of egui and eframe:
 # egui = { git = "https://github.com/emilk/egui", branch = "master" }

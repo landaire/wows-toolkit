@@ -5,11 +5,10 @@ use std::time::Instant;
 use tracing::debug;
 use tracing::info;
 use tracing::instrument;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
+use wowsunpack::vfs::VfsPath;
 
 use crate::error::ToolkitError;
 
@@ -83,12 +82,8 @@ pub fn cleanup_stale_caches(available_builds: &[u32]) {
     }
 }
 
-#[instrument(skip(file_tree, pkg_loader))]
-pub fn load_game_params(
-    file_tree: &FileNode,
-    pkg_loader: &PkgFileLoader,
-    game_version: usize,
-) -> Result<GameMetadataProvider, ToolkitError> {
+#[instrument(skip(vfs))]
+pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
     let cache_path = game_params_bin_path(game_version as u32);
 
     let start = Instant::now();
@@ -102,11 +97,11 @@ pub fn load_game_params(
         .flatten();
 
     let metadata_provider = if let Some(params) = params {
-        GameMetadataProvider::from_params(params, file_tree, pkg_loader)?
+        GameMetadataProvider::from_params_with_vfs(params, vfs)?
     } else {
         info!("Writing converted gameparams to cache");
 
-        let metadata_provider = GameMetadataProvider::from_pkg(file_tree, pkg_loader)?;
+        let metadata_provider = GameMetadataProvider::from_vfs(vfs)?;
         let params: Vec<Param> =
             metadata_provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
 

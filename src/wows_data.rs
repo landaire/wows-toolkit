@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,10 +14,9 @@ use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::vfs::VfsPath;
 
 use crate::error::ToolkitError;
 use crate::task::BackgroundTask;
@@ -142,11 +142,9 @@ impl WoWsDataMap {
 }
 
 pub struct WorldOfWarshipsData {
-    pub file_tree: FileNode,
+    pub vfs: VfsPath,
 
-    pub filtered_files: Vec<(wowsunpack::Rc<PathBuf>, FileNode)>,
-
-    pub pkg_loader: Arc<PkgFileLoader>,
+    pub filtered_files: Vec<(Arc<PathBuf>, VfsPath)>,
 
     /// We may fail to load game params
     pub game_metadata: Option<Arc<GameMetadataProvider>>,
@@ -198,11 +196,8 @@ impl WorldOfWarshipsData {
         }
 
         let path = wowsunpack::game_params::translations::achievement_icon_path(icon_key);
-        let icon_node = self.file_tree.find(&path).ok()?;
-        let file_info = icon_node.file_info()?;
-
-        let mut icon_data = Vec::with_capacity(file_info.unpacked_size as usize);
-        icon_node.read_file(&self.pkg_loader, &mut icon_data).ok()?;
+        let mut icon_data = Vec::new();
+        self.vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
 
         let asset = Arc::new(GameAsset { path, data: icon_data });
         self.achievement_icons.insert(icon_key.to_string(), asset.clone());
@@ -240,22 +235,15 @@ impl WorldOfWarshipsData {
                 }
             };
 
-        // Rebuild game constants from pkg files + new replay constants
-        let new_game_constants =
-            build_game_constants(&self.file_tree, &self.pkg_loader, &new_replay_constants, self.build_number);
+        // Rebuild game constants from VFS + new replay constants
+        let new_game_constants = build_game_constants(&self.vfs, &new_replay_constants, self.build_number);
 
         // Reload all icons from game files
-        let new_ship_icons = crate::task::load_ship_icons(self.file_tree.clone(), &self.pkg_loader);
-        let new_ribbon_icons = crate::task::load_ribbon_icons(
-            &self.file_tree,
-            &self.pkg_loader,
-            wowsunpack::game_params::translations::RIBBON_ICONS_DIR,
-        );
-        let new_subribbon_icons = crate::task::load_ribbon_icons(
-            &self.file_tree,
-            &self.pkg_loader,
-            wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR,
-        );
+        let new_ship_icons = crate::task::load_ship_icons(&self.vfs);
+        let new_ribbon_icons =
+            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
+        let new_subribbon_icons =
+            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
 
         // Apply all regenerated fields
         self.ship_icons = new_ship_icons;

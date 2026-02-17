@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -21,7 +19,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
 use wows_replays::ReplayFile;
-use wowsunpack::data::idx::FileNode;
+use wowsunpack::vfs::VfsPath;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::plaintext_viewer::PlaintextFileViewer;
@@ -128,7 +126,7 @@ pub enum NotifyFileEvent {
     TempArenaInfoCreated(PathBuf),
 }
 
-pub type PathFileNodePair = (Arc<PathBuf>, FileNode);
+pub type PathFileNodePair = (Arc<PathBuf>, VfsPath);
 
 /// An action that requires user confirmation before executing.
 #[derive(Clone)]
@@ -166,7 +164,7 @@ pub struct TabState {
     pub filtered_file_list: Option<Arc<Vec<PathFileNodePair>>>,
 
     #[serde(skip)]
-    pub items_to_extract: Mutex<Vec<FileNode>>,
+    pub items_to_extract: Mutex<Vec<VfsPath>>,
 
     pub settings: Settings,
 

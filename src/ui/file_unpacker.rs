@@ -1,10 +1,9 @@
 use crate::icon_str;
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{
-    self,
-};
+use std::fs::{self};
 use std::io::BufWriter;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,16 +25,13 @@ use pickled::HashableValue;
 use serde::Serialize;
 use serde_cbor::ser::IoWrite;
 use tracing::debug;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::vfs::VfsPath;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
+use crate::plaintext_viewer::{self};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -55,25 +51,18 @@ enum GameParamsFormat {
 }
 
 impl ToolkitTabViewer<'_> {
-    fn pkg_loader(&self) -> Option<Arc<PkgFileLoader>> {
-        self.selected_browser_data()
-            .or_else(|| self.tab_state.world_of_warships_data.clone())
-            .map(|wows_data| wows_data.read().pkg_loader.clone())
-    }
-
-    fn add_view_file_menu(&self, file_label: &Response, node: &FileNode) {
-        let is_plaintext_file = PLAINTEXT_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
-        let is_image_file = IMAGE_FILE_TYPES.iter().find(|extension| node.filename().ends_with(**extension));
+    fn add_view_file_menu(&self, file_label: &Response, node: &VfsPath) {
+        let filename = node.filename();
+        let is_plaintext_file = PLAINTEXT_FILE_TYPES.iter().find(|extension| filename.ends_with(**extension));
+        let is_image_file = IMAGE_FILE_TYPES.iter().find(|extension| filename.ends_with(**extension));
 
         if is_plaintext_file.is_some() || is_image_file.is_some() {
             file_label.context_menu(|ui| {
-                if let Some(pkg_loader) = self.pkg_loader()
-                    && ui.button("View Contents").clicked()
-                {
-                    let mut file_contents: Vec<u8> =
-                        Vec::with_capacity(node.file_info().unwrap().unpacked_size as usize);
-
-                    node.read_file(&pkg_loader, &mut file_contents).expect("failed to read file");
+                if ui.button("View Contents").clicked() {
+                    let mut file_contents = Vec::new();
+                    if let Ok(mut reader) = node.open_file() {
+                        let _ = reader.read_to_end(&mut file_contents);
+                    }
 
                     let file_type = match (is_plaintext_file, is_image_file) {
                         (Some(ext), None) => String::from_utf8(file_contents)
@@ -85,8 +74,9 @@ impl ToolkitTabViewer<'_> {
                     };
 
                     if let Some(file_type) = file_type {
+                        let path_str = node.as_str().trim_start_matches('/');
                         let viewer = plaintext_viewer::PlaintextFileViewer {
-                            title: Arc::new(Path::new("res").join(node.path().unwrap()).to_str().unwrap().to_string()),
+                            title: Arc::new(format!("res/{path_str}")),
                             file_info: Arc::new(Mutex::new(file_type)),
                             open: Arc::new(AtomicBool::new(true)),
                         };
@@ -99,14 +89,20 @@ impl ToolkitTabViewer<'_> {
             });
         }
     }
-    /// Builds a resource tree node from a [FileNode]
-    fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &FileNode) {
-        let header = CollapsingHeader::new(if file_tree.is_root() { "res" } else { file_tree.filename() })
-            .default_open(file_tree.is_root())
-            .show(ui, |ui| {
-                for (name, node) in file_tree.children() {
-                    if node.is_file() {
-                        let file_label = ui.add(Label::new(name).sense(Sense::click()));
+    /// Builds a resource tree node from a [VfsPath]
+    fn build_resource_tree_node(&self, ui: &mut egui::Ui, file_tree: &VfsPath) {
+        let label = if file_tree.is_root() { "res".to_string() } else { file_tree.filename() };
+        let header = CollapsingHeader::new(label).default_open(file_tree.is_root()).show(ui, |ui| {
+            if let Ok(entries) = file_tree.read_dir() {
+                let mut entries: Vec<VfsPath> = entries.collect();
+                entries.sort_by(|a, b| {
+                    let a_is_dir = a.is_dir().unwrap_or(false);
+                    let b_is_dir = b.is_dir().unwrap_or(false);
+                    b_is_dir.cmp(&a_is_dir).then_with(|| a.filename().cmp(&b.filename()))
+                });
+                for node in &entries {
+                    if node.is_file().unwrap_or(false) {
+                        let file_label = ui.add(Label::new(node.filename()).sense(Sense::click()));
                         self.add_view_file_menu(&file_label, node);
                         if file_label.double_clicked() {
                             self.tab_state.items_to_extract.lock().push(node.clone());
@@ -115,28 +111,29 @@ impl ToolkitTabViewer<'_> {
                         self.build_resource_tree_node(ui, node);
                     }
                 }
-            });
+            }
+        });
 
         if header.header_response.double_clicked() {
             self.tab_state.items_to_extract.lock().push(file_tree.clone());
         }
     }
 
-    /// Builds a flat list of resource files from a [FileNode] iterator.
+    /// Builds a flat list of resource files from a VfsPath iterator.
     fn build_file_list_from_array<'i, I>(&self, ui: &mut egui::Ui, files: I)
     where
-        I: IntoIterator<Item = &'i (wowsunpack::Rc<PathBuf>, FileNode)>,
+        I: IntoIterator<Item = &'i (Arc<PathBuf>, VfsPath)>,
     {
         egui::Grid::new("filtered_files_grid").num_columns(1).striped(true).show(ui, |ui| {
             let files = files.into_iter();
             for file in files {
-                let label = ui.add(
-                    Label::new(Path::new("res").join(&*file.0).to_string_lossy().into_owned()).sense(Sense::click()),
-                );
+                let display_path = format!("res/{}", file.0.display());
+                let label = ui.add(Label::new(display_path).sense(Sense::click()));
                 self.add_view_file_menu(&label, &file.1);
 
-                let text = if file.1.is_file() {
-                    format!("File ({})", humansize::format_size(file.1.file_info().unwrap().size, humansize::DECIMAL))
+                let text = if file.1.is_file().unwrap_or(false) {
+                    let size = file.1.metadata().map(|m| m.len).unwrap_or(0);
+                    format!("File ({})", humansize::format_size(size, humansize::DECIMAL))
                 } else {
                     "Folder".to_string()
                 };
@@ -151,54 +148,55 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[FileNode]) {
-        if let Some(pkg_loader) = self.pkg_loader() {
-            let (tx, rx) = mpsc::channel();
+    fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[VfsPath]) {
+        let (tx, rx) = mpsc::channel();
 
-            self.tab_state.unpacker_progress = Some(rx);
-            UNPACKER_STOP.store(false, Ordering::Relaxed);
+        self.tab_state.unpacker_progress = Some(rx);
+        UNPACKER_STOP.store(false, Ordering::Relaxed);
 
-            if !items_to_unpack.is_empty() {
-                let output_dir = output_dir.to_owned();
-                let mut file_queue = items_to_unpack.to_vec();
-                let _unpacker_thread = Some(std::thread::spawn(move || {
-                    #[allow(clippy::mutable_key_type)]
-                    let mut files_to_extract: HashSet<FileNode> = HashSet::default();
-                    let mut folders_created: HashSet<PathBuf> = HashSet::default();
-                    while let Some(file) = file_queue.pop() {
-                        if file.is_file() {
-                            files_to_extract.insert(file);
-                        } else {
-                            for child in file.children().values() {
-                                file_queue.push(child.clone());
-                            }
+        if !items_to_unpack.is_empty() {
+            let output_dir = output_dir.to_owned();
+            let mut file_queue = items_to_unpack.to_vec();
+            let _unpacker_thread = Some(std::thread::spawn(move || {
+                let mut files_to_extract: Vec<VfsPath> = Vec::new();
+                let mut folders_created: HashSet<PathBuf> = HashSet::default();
+                while let Some(file) = file_queue.pop() {
+                    if file.is_file().unwrap_or(false) {
+                        files_to_extract.push(file);
+                    } else if let Ok(entries) = file.read_dir() {
+                        for child in entries {
+                            file_queue.push(child);
                         }
                     }
-                    let file_count = files_to_extract.len();
+                }
+                let file_count = files_to_extract.len();
 
-                    for (files_written, file) in files_to_extract.iter().enumerate() {
-                        if UNPACKER_STOP.load(Ordering::Relaxed) {
-                            break;
-                        }
-
-                        let path = output_dir.join(file.parent().unwrap().path().unwrap());
-                        let file_path = path.join(file.filename());
-                        tx.send(UnpackerProgress {
-                            file_name: file_path.to_string_lossy().into(),
-                            progress: (files_written as f32) / (file_count as f32),
-                        })
-                        .unwrap();
-                        if !folders_created.contains(&path) {
-                            fs::create_dir_all(&path).expect("failed to create folder");
-                            folders_created.insert(path.clone());
-                        }
-
-                        let mut out_file = File::create(file_path).expect("failed to create output file");
-
-                        file.read_file(&pkg_loader, &mut out_file).expect("Failed to read file");
+                for (files_written, file) in files_to_extract.iter().enumerate() {
+                    if UNPACKER_STOP.load(Ordering::Relaxed) {
+                        break;
                     }
-                }));
-            }
+
+                    let vfs_path_str = file.as_str().trim_start_matches('/');
+                    let parent_path = Path::new(vfs_path_str).parent().unwrap_or(Path::new(""));
+                    let path = output_dir.join(parent_path);
+                    let file_path = path.join(file.filename());
+                    tx.send(UnpackerProgress {
+                        file_name: file_path.to_string_lossy().into(),
+                        progress: (files_written as f32) / (file_count as f32),
+                    })
+                    .unwrap();
+                    if !folders_created.contains(&path) {
+                        fs::create_dir_all(&path).expect("failed to create folder");
+                        folders_created.insert(path.clone());
+                    }
+
+                    let mut out_file = File::create(file_path).expect("failed to create output file");
+
+                    if let Ok(mut reader) = file.open_file() {
+                        std::io::copy(&mut reader, &mut out_file).expect("Failed to extract file");
+                    }
+                }
+            }));
         }
     }
 
@@ -210,76 +208,72 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat, base_params: bool) {
-        if let Some(pkg_loader) = self.pkg_loader() {
-            let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
 
-            self.tab_state.unpacker_progress = Some(rx);
-            UNPACKER_STOP.store(false, Ordering::Relaxed);
+        self.tab_state.unpacker_progress = Some(rx);
+        UNPACKER_STOP.store(false, Ordering::Relaxed);
 
-            // Find GameParams.json
-            if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
-                let wows_data = wows_data.read();
-                let metadata_provider = { wows_data.game_metadata.clone() };
+        if let Some(wows_data) = self.tab_state.world_of_warships_data.as_ref() {
+            let wows_data = wows_data.read();
+            let metadata_provider = { wows_data.game_metadata.clone() };
+            let vfs = wows_data.vfs.clone();
 
-                if let Ok(game_params_file) = wows_data.file_tree.find("content/GameParams.data") {
-                    let _unpacker_thread = Some(std::thread::spawn(move || {
-                        let mut game_params_data: Vec<u8> =
-                            Vec::with_capacity(game_params_file.file_info().unwrap().unpacked_size as usize);
+            let game_params_path = vfs.join("content/GameParams.data");
+            if let Ok(game_params_vfs) = game_params_path {
+                let _unpacker_thread = Some(std::thread::spawn(move || {
+                    let mut game_params_data = Vec::new();
 
-                        game_params_file
-                            .read_file(&pkg_loader, &mut game_params_data)
-                            .expect("failed to read GameParams");
+                    game_params_vfs
+                        .open_file()
+                        .and_then(|mut f| Ok(f.read_to_end(&mut game_params_data)?))
+                        .expect("failed to read GameParams");
 
-                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 })
-                            .unwrap();
+                    tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
 
-                        let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
-                        let params_dict = if base_params {
-                            match pickle {
-                                pickled::Value::Dict(params_dict) => params_dict
-                                    .inner()
-                                    .get(&HashableValue::String("".to_string().into()))
-                                    .expect("Could not find base game params with empty key")
-                                    .clone(),
-                                pickled::Value::List(params_list) => params_list.inner_mut().remove(0),
-                                _other => {
-                                    panic!("Unexpected GameParams root element type");
-                                }
-                            }
-                        } else {
-                            pickle
-                        };
-
-                        let file =
-                            BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
-                        match format {
-                            GameParamsFormat::Json => {
-                                let mut serializer = serde_json::Serializer::pretty(file);
-                                params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
-                            }
-                            GameParamsFormat::Cbor => {
-                                let file = IoWrite::new(file);
-                                let mut serializer = serde_cbor::Serializer::new(file);
-                                params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
-                            }
-                            GameParamsFormat::MinimalJson => {
-                                if let Some(metadata_provider) = metadata_provider {
-                                    serde_json::to_writer(file, &metadata_provider.params())
-                                        .expect("failed to write CBOR data");
-                                }
-                            }
-                            GameParamsFormat::MinimalCbor => {
-                                if let Some(metadata_provider) = metadata_provider {
-                                    serde_cbor::to_writer(file, &metadata_provider.params())
-                                        .expect("failed to write CBOR data");
-                                }
+                    let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
+                    let params_dict = if base_params {
+                        match pickle {
+                            pickled::Value::Dict(params_dict) => params_dict
+                                .inner()
+                                .get(&HashableValue::String("".to_string().into()))
+                                .expect("Could not find base game params with empty key")
+                                .clone(),
+                            pickled::Value::List(params_list) => params_list.inner_mut().remove(0),
+                            _other => {
+                                panic!("Unexpected GameParams root element type");
                             }
                         }
+                    } else {
+                        pickle
+                    };
 
-                        tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 })
-                            .unwrap();
-                    }));
-                }
+                    let file = BufWriter::new(File::create(&file_path).expect("failed to create GameParams.json file"));
+                    match format {
+                        GameParamsFormat::Json => {
+                            let mut serializer = serde_json::Serializer::pretty(file);
+                            params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
+                        }
+                        GameParamsFormat::Cbor => {
+                            let file = IoWrite::new(file);
+                            let mut serializer = serde_cbor::Serializer::new(file);
+                            params_dict.serialize(&mut serializer).expect("failed to write GameParams data");
+                        }
+                        GameParamsFormat::MinimalJson => {
+                            if let Some(metadata_provider) = metadata_provider {
+                                serde_json::to_writer(file, &metadata_provider.params())
+                                    .expect("failed to write CBOR data");
+                            }
+                        }
+                        GameParamsFormat::MinimalCbor => {
+                            if let Some(metadata_provider) = metadata_provider {
+                                serde_cbor::to_writer(file, &metadata_provider.params())
+                                    .expect("failed to write CBOR data");
+                            }
+                        }
+                    }
+
+                    tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 }).unwrap();
+                }));
             }
         }
     }
@@ -426,11 +420,11 @@ impl ToolkitTabViewer<'_> {
                                 self.selected_browser_data().or_else(|| self.tab_state.world_of_warships_data.clone())
                             {
                                 let wows_data = wows_data.read();
-                                let file_tree = &wows_data.file_tree;
+                                let vfs = &wows_data.vfs;
                                 if let Some(filtered_files) = &filter_list {
                                     self.build_file_list_from_array(ui, filtered_files.iter());
                                 } else {
-                                    self.build_resource_tree_node(ui, file_tree);
+                                    self.build_resource_tree_node(ui, vfs);
                                 }
                             }
                         });
@@ -452,14 +446,8 @@ impl ToolkitTabViewer<'_> {
                             let mut items = self.tab_state.items_to_extract.lock();
                             let mut remove_idx = None;
                             for (i, item) in items.iter().enumerate() {
-                                if ui
-                                    .add(
-                                        Label::new(
-                                            Path::new("res").join(item.path().unwrap()).to_string_lossy().into_owned(),
-                                        )
-                                        .sense(Sense::click()),
-                                    )
-                                    .double_clicked()
+                                let path_str = item.as_str().trim_start_matches('/');
+                                if ui.add(Label::new(format!("res/{path_str}")).sense(Sense::click())).double_clicked()
                                 {
                                     remove_idx = Some(i);
                                 }

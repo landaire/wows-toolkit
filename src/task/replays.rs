@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
 use std::fs::read_dir;
-use std::io::Cursor;
+use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
@@ -28,13 +26,12 @@ use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::idx::{
-    self,
-};
-use wowsunpack::data::pkg::PkgFileLoader;
+use wowsunpack::data::idx::{self, VfsEntry};
+use wowsunpack::data::idx_vfs::IdxVfs;
+use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::vfs::VfsPath;
 
 use crate::build_tracker;
 use crate::error::ToolkitError;
@@ -83,47 +80,29 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     }
 }
 
-#[instrument(skip(file_tree, pkg_loader))]
-pub fn load_ribbon_icons(
-    file_tree: &FileNode,
-    pkg_loader: &PkgFileLoader,
-    dir_path: &str,
-) -> HashMap<String, Arc<GameAsset>> {
+#[instrument(skip(vfs))]
+pub fn load_ribbon_icons(vfs: &VfsPath, dir_path: &str) -> HashMap<String, Arc<GameAsset>> {
     let mut icons = HashMap::new();
 
-    for (path, _) in file_tree.paths() {
-        let path_str = path.to_string_lossy().replace('\\', "/");
-        if !path_str.starts_with(dir_path) {
+    let Ok(dir) = vfs.join(dir_path) else { return icons };
+    let Ok(entries) = dir.read_dir() else { return icons };
+    for entry in entries {
+        let filename = entry.filename();
+        let file_stem = Path::new(&filename).file_stem().and_then(|s| s.to_str());
+        let Some(file_name) = file_stem else { continue };
+        let full_path = entry.as_str().trim_start_matches('/').to_string();
+        let mut icon_data = Vec::new();
+        if entry.open_file().and_then(|mut f| f.read_to_end(&mut icon_data).map_err(|e| e.into())).is_err() {
             continue;
         }
-
-        // Extract the filename without extension as the key
-        let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-
-        let Ok(icon_node) = file_tree.find(&*path_str) else {
-            continue;
-        };
-
-        let Some(file_info) = icon_node.file_info() else {
-            continue;
-        };
-
-        let mut icon_data = Vec::with_capacity(file_info.unpacked_size as usize);
-        if icon_node.read_file(pkg_loader, &mut icon_data).is_err() {
-            continue;
-        }
-
-        icons.insert(file_name.to_string(), Arc::new(GameAsset { path: path_str.to_string(), data: icon_data }));
+        icons.insert(file_name.to_string(), Arc::new(GameAsset { path: full_path, data: icon_data }));
     }
 
     icons
 }
 
 #[instrument(skip_all)]
-pub fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashMap<Species, Arc<GameAsset>> {
-    // Try loading ship icons
+pub fn load_ship_icons(vfs: &VfsPath) -> HashMap<Species, Arc<GameAsset>> {
     let species = [
         Species::AirCarrier,
         Species::Battleship,
@@ -133,18 +112,12 @@ pub fn load_ship_icons(file_tree: FileNode, pkg_loader: &PkgFileLoader) -> HashM
         Species::Auxiliary,
     ];
 
-    let icons: HashMap<Species, Arc<GameAsset>> = HashMap::from_iter(species.iter().map(|species| {
+    HashMap::from_iter(species.iter().filter_map(|species| {
         let path = wowsunpack::game_params::translations::ship_class_icon_path(species);
-
-        let icon_node = file_tree.find(&path).unwrap_or_else(|_| panic!("failed to find file {}", species.name()));
-
-        let mut icon_data = Vec::with_capacity(icon_node.file_info().unwrap().unpacked_size as usize);
-        icon_node.read_file(pkg_loader, &mut icon_data).expect("failed to read ship icon");
-
-        (*species, Arc::new(GameAsset { path, data: icon_data }))
-    }));
-
-    icons
+        let mut icon_data = Vec::new();
+        vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
+        Some((*species, Arc::new(GameAsset { path, data: icon_data })))
+    }))
 }
 
 fn current_build_from_preferences(path: &Path) -> Option<String> {
@@ -156,15 +129,10 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     Some(version_str.to_string())
 }
 
-/// Build `GameConstants` from pkg files and merge in replay constants (CONSUMABLE_IDS, BATTLE_STAGES).
-#[instrument(skip(file_tree, pkg_loader, replay_constants))]
-pub fn build_game_constants(
-    file_tree: &FileNode,
-    pkg_loader: &PkgFileLoader,
-    replay_constants: &serde_json::Value,
-    build: u32,
-) -> GameConstants {
-    let mut game_constants = GameConstants::from_pkg(file_tree, pkg_loader);
+/// Build `GameConstants` from VFS and merge in replay constants (CONSUMABLE_IDS, BATTLE_STAGES).
+#[instrument(skip(vfs, replay_constants))]
+pub fn build_game_constants(vfs: &VfsPath, replay_constants: &serde_json::Value, build: u32) -> GameConstants {
+    let mut game_constants = GameConstants::from_vfs(vfs);
     if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
         let types = game_constants.common_mut().consumable_types_mut();
         for (key, value) in consumable_ids {
@@ -201,6 +169,7 @@ pub fn load_wows_data_for_build(
 
     debug!("Loading game data for build {}", build);
 
+    // Parse IDX files and build VFS
     let mut idx_files = Vec::new();
     for file in read_dir(build_dir.join("idx")).context("failed to read idx directory")? {
         let file = file.context("failed to read idx directory entry")?;
@@ -208,9 +177,8 @@ pub fn load_wows_data_for_build(
             let path = file.path();
             let file_data =
                 std::fs::read(&path).context_with(|| format!("failed to read idx file {}", path.display()))?;
-            let mut cursor = Cursor::new(file_data.as_slice());
             idx_files
-                .push(idx::parse(&mut cursor).context_with(|| format!("failed to parse idx file {}", path.display()))?);
+                .push(idx::parse(&file_data).context_with(|| format!("failed to parse idx file {}", path.display()))?);
         }
     }
 
@@ -220,10 +188,22 @@ pub fn load_wows_data_for_build(
             .context("res_packages directory not found")?;
     }
 
-    let pkg_loader = Arc::new(PkgFileLoader::new(pkgs_path));
-    let file_tree = idx::build_file_tree(idx_files.as_slice());
-    let files = file_tree.paths();
+    let pkg_source = MmapPkgSource::new(&pkgs_path);
+    let idx_vfs = IdxVfs::new(pkg_source, &idx_files);
+    let vfs = VfsPath::new(idx_vfs);
 
+    // Build flat file list for the file browser
+    let file_map = idx::build_file_tree(&idx_files);
+    let filtered_files: Vec<(Arc<PathBuf>, VfsPath)> = file_map
+        .iter()
+        .filter(|(_, entry)| matches!(entry, VfsEntry::File { .. }))
+        .filter_map(|(path_str, _)| {
+            let vfs_path = vfs.join(path_str).ok()?;
+            Some((Arc::new(PathBuf::from(path_str)), vfs_path))
+        })
+        .collect();
+
+    // Load translations
     let language_tag: LanguageTag = locale
         .parse()
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid locale: {locale}")))
@@ -245,7 +225,7 @@ pub fn load_wows_data_for_build(
     }
 
     debug!("Loading GameParams for build {}", build);
-    let metadata_provider = load_game_params(&file_tree, &pkg_loader, game_patch).ok().map(|mut metadata_provider| {
+    let metadata_provider = load_game_params(&vfs, game_patch).ok().map(|mut metadata_provider| {
         if let Some(catalog) = found_catalog {
             metadata_provider.set_translations(catalog)
         }
@@ -253,11 +233,9 @@ pub fn load_wows_data_for_build(
     });
 
     debug!("Loading icons for build {}", build);
-    let icons = load_ship_icons(file_tree.clone(), &pkg_loader);
-    let ribbon_icons =
-        load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
-    let subribbon_icons =
-        load_ribbon_icons(&file_tree, &pkg_loader, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
+    let icons = load_ship_icons(&vfs);
+    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
+    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
 
     // Load version-matched constants from disk cache only (no network I/O).
     // If not cached, use fallback constants. The networking thread will fetch
@@ -269,7 +247,7 @@ pub fn load_wows_data_for_build(
         None => (fallback_constants.clone(), false),
     };
 
-    let game_constants = build_game_constants(&file_tree, &pkg_loader, &replay_constants, build);
+    let game_constants = build_game_constants(&vfs, &replay_constants, build);
     let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds
@@ -277,9 +255,8 @@ pub fn load_wows_data_for_build(
 
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,
-        file_tree,
-        pkg_loader,
-        filtered_files: files,
+        vfs,
+        filtered_files,
         patch_version: game_patch,
         full_version,
         build_number: build,

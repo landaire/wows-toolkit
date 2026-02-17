@@ -43,10 +43,9 @@ use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-use wowsunpack::data::idx::FileNode;
-use wowsunpack::data::pkg::PkgFileLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::recognized::Recognized;
+use wowsunpack::vfs::VfsPath;
 
 use egui_taffy::AsTuiBuilder as _;
 use egui_taffy::TuiBuilderLogic as _;
@@ -276,15 +275,11 @@ struct CachedMapData {
 }
 
 impl RendererAssetCache {
-    fn get_or_load_ship_icons(
-        &mut self,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> Arc<HashMap<String, RgbaAsset>> {
+    fn get_or_load_ship_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.ship_icons {
             return Arc::clone(cached);
         }
-        let raw = assets::load_ship_icons(file_tree, pkg_loader);
+        let raw = assets::load_ship_icons(vfs);
         let converted: HashMap<String, RgbaAsset> = raw
             .into_iter()
             .map(|(k, img)| {
@@ -297,15 +292,11 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_plane_icons(
-        &mut self,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> Arc<HashMap<String, RgbaAsset>> {
+    fn get_or_load_plane_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.plane_icons {
             return Arc::clone(cached);
         }
-        let raw = assets::load_plane_icons(file_tree, pkg_loader);
+        let raw = assets::load_plane_icons(vfs);
         let converted: HashMap<String, RgbaAsset> = raw
             .into_iter()
             .map(|(k, img)| {
@@ -318,15 +309,11 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_consumable_icons(
-        &mut self,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> Arc<HashMap<String, RgbaAsset>> {
+    fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.consumable_icons {
             return Arc::clone(cached);
         }
-        let raw = assets::load_consumable_icons(file_tree, pkg_loader);
+        let raw = assets::load_consumable_icons(vfs);
         let converted: HashMap<String, RgbaAsset> = raw
             .into_iter()
             .map(|(k, img)| {
@@ -339,15 +326,11 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_death_cause_icons(
-        &mut self,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> Arc<HashMap<String, RgbaAsset>> {
+    fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.death_cause_icons {
             return Arc::clone(cached);
         }
-        let raw = assets::load_death_cause_icons(file_tree, pkg_loader, 16);
+        let raw = assets::load_death_cause_icons(vfs, 16);
         let converted: HashMap<String, RgbaAsset> = raw
             .into_iter()
             .map(|(k, img)| {
@@ -360,15 +343,11 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_powerup_icons(
-        &mut self,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> Arc<HashMap<String, RgbaAsset>> {
+    fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.powerup_icons {
             return Arc::clone(cached);
         }
-        let raw = assets::load_powerup_icons(file_tree, pkg_loader, 16);
+        let raw = assets::load_powerup_icons(vfs, 16);
         let converted: HashMap<String, RgbaAsset> = raw
             .into_iter()
             .map(|(k, img)| {
@@ -381,30 +360,25 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_game_fonts(&mut self, file_tree: &FileNode, pkg_loader: &PkgFileLoader) -> GameFonts {
+    fn get_or_load_game_fonts(&mut self, vfs: &VfsPath) -> GameFonts {
         if let Some(ref cached) = self.game_fonts {
             return cached.clone();
         }
-        let fonts = assets::load_game_fonts(file_tree, pkg_loader);
+        let fonts = assets::load_game_fonts(vfs);
         self.game_fonts = Some(fonts.clone());
         fonts
     }
 
-    fn get_or_load_map(
-        &mut self,
-        map_name: &str,
-        file_tree: &FileNode,
-        pkg_loader: &PkgFileLoader,
-    ) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
+    fn get_or_load_map(&mut self, map_name: &str, vfs: &VfsPath) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
         if let Some(cached) = self.maps.get(map_name) {
             return (cached.image.clone(), cached.info.clone());
         }
-        let map_image = assets::load_map_image(map_name, file_tree, pkg_loader).map(|img| {
+        let map_image = assets::load_map_image(map_name, vfs).map(|img| {
             let rgba = image::DynamicImage::ImageRgb8(img).into_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
             Arc::new((rgba.into_raw(), w, h))
         });
-        let map_info = assets::load_map_info(map_name, file_tree, pkg_loader);
+        let map_info = assets::load_map_info(map_name, vfs);
         self.maps.insert(map_name.to_string(), CachedMapData { image: map_image.clone(), info: map_info.clone() });
         (map_image, map_info)
     }
@@ -727,8 +701,8 @@ fn playback_thread(
     command_rx: mpsc::Receiver<PlaybackCommand>,
     open: Arc<AtomicBool>,
 ) {
-    // 1. Get file tree, pkg loader, game metadata, and game constants from the app
-    let (file_tree, pkg_loader, game_metadata, game_constants) = {
+    // 1. Get VFS, game metadata, and game constants from the app
+    let (vfs, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -737,19 +711,19 @@ fn playback_thread(
                 return;
             }
         };
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, Arc::clone(&data.game_constants))
+        (data.vfs.clone(), gm, Arc::clone(&data.game_constants))
     };
 
     // 2. Load visual assets (cached across renderer instances)
     let (map_info, game_fonts) = {
         let mut cache = asset_cache.lock();
-        let ship_icons = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
-        let plane_icons = cache.get_or_load_plane_icons(&file_tree, &pkg_loader);
-        let consumable_icons = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
-        let death_cause_icons = cache.get_or_load_death_cause_icons(&file_tree, &pkg_loader);
-        let powerup_icons = cache.get_or_load_powerup_icons(&file_tree, &pkg_loader);
-        let game_fonts = cache.get_or_load_game_fonts(&file_tree, &pkg_loader);
-        let (map_image, map_info) = cache.get_or_load_map(&map_name, &file_tree, &pkg_loader);
+        let ship_icons = cache.get_or_load_ship_icons(&vfs);
+        let plane_icons = cache.get_or_load_plane_icons(&vfs);
+        let consumable_icons = cache.get_or_load_consumable_icons(&vfs);
+        let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs);
+        let powerup_icons = cache.get_or_load_powerup_icons(&vfs);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs);
+        let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs);
 
         shared_state.lock().assets = Some(ReplayRendererAssets {
             map_image,
@@ -766,9 +740,8 @@ fn playback_thread(
     // Store game fonts in shared state so the UI thread can register them with egui
     shared_state.lock().game_fonts = Some(game_fonts.clone());
 
-    // Drop references to file_tree/pkg_loader early — no longer needed
-    drop(file_tree);
-    drop(pkg_loader);
+    // Drop VFS early — no longer needed
+    drop(vfs);
 
     // 3. Parse replay file
     let replay_file = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
@@ -1254,9 +1227,7 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{
-        self,
-    };
+    use wows_minimap_renderer::advantage::{self};
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock: f32 = 0.0;
 
@@ -1450,6 +1421,11 @@ fn extract_timeline_events(
                                 ships_alive: 0,
                                 ships_total: 0,
                                 ships_known: 0,
+                                destroyers: Default::default(),
+                                cruisers: Default::default(),
+                                battleships: Default::default(),
+                                submarines: Default::default(),
+                                carriers: Default::default(),
                             },
                             TeamState {
                                 score: 0,
@@ -1459,6 +1435,11 @@ fn extract_timeline_events(
                                 ships_alive: 0,
                                 ships_total: 0,
                                 ships_known: 0,
+                                destroyers: Default::default(),
+                                cruisers: Default::default(),
+                                battleships: Default::default(),
+                                submarines: Default::default(),
+                                carriers: Default::default(),
                             },
                         ];
 
@@ -1812,10 +1793,10 @@ fn render_video_blocking(
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
-    let (file_tree, pkg_loader, game_metadata, game_constants) = {
+    let (vfs, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = data.game_metadata.clone().ok_or_else(|| report!("Game metadata not loaded"))?;
-        (data.file_tree.clone(), Arc::clone(&data.pkg_loader), gm, Arc::clone(&data.game_constants))
+        (data.vfs.clone(), gm, Arc::clone(&data.game_constants))
     };
 
     // Load assets — reuse cached raw RGBA data and convert to image types
@@ -1830,13 +1811,13 @@ fn render_video_blocking(
         game_fonts,
     ) = {
         let mut cache = asset_cache.lock();
-        let ship_raw = cache.get_or_load_ship_icons(&file_tree, &pkg_loader);
-        let plane_raw = cache.get_or_load_plane_icons(&file_tree, &pkg_loader);
-        let consumable_raw = cache.get_or_load_consumable_icons(&file_tree, &pkg_loader);
-        let death_cause_raw = cache.get_or_load_death_cause_icons(&file_tree, &pkg_loader);
-        let powerup_raw = cache.get_or_load_powerup_icons(&file_tree, &pkg_loader);
-        let game_fonts = cache.get_or_load_game_fonts(&file_tree, &pkg_loader);
-        let (map_raw, map_info) = cache.get_or_load_map(map_name, &file_tree, &pkg_loader);
+        let ship_raw = cache.get_or_load_ship_icons(&vfs);
+        let plane_raw = cache.get_or_load_plane_icons(&vfs);
+        let consumable_raw = cache.get_or_load_consumable_icons(&vfs);
+        let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs);
+        let powerup_raw = cache.get_or_load_powerup_icons(&vfs);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs);
+        let (map_raw, map_info) = cache.get_or_load_map(map_name, &vfs);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
         let ship_icons: HashMap<String, image::RgbaImage> = ship_raw
@@ -4324,49 +4305,36 @@ impl ReplayRendererViewer {
                                     );
                                     resp.on_hover_ui(|ui| {
                                         let bd = breakdown;
-                                        let fmt_contrib = |val: f64| -> String {
-                                            if val > 0.0 {
-                                                format!("+{:.1}", val)
-                                            } else if val < 0.0 {
-                                                format!("{:.1}", val)
+                                        let fmt_contrib = |val: (f32, f32)| -> String {
+                                            let diff = val.0 - val.1;
+                                            if diff > 0.0 {
+                                                format!("+{:.1}", diff)
+                                            } else if diff < 0.0 {
+                                                format!("{:.1}", diff)
                                             } else {
                                                 "0".to_string()
                                             }
                                         };
+                                        let is_nonzero = |val: (f32, f32)| val.0 != 0.0 || val.1 != 0.0;
                                         ui.label(egui::RichText::new("Advantage Breakdown").strong());
                                         ui.separator();
                                         if bd.team_eliminated {
                                             ui.label("A team has been eliminated");
                                         } else {
                                             egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
-                                                if bd.time_to_win != 0.0 {
-                                                    ui.label("Time to Win");
-                                                    ui.label(fmt_contrib(bd.time_to_win));
-                                                    ui.end_row();
-                                                }
-                                                if bd.score_gap != 0.0 {
-                                                    ui.label("Score Gap");
-                                                    ui.label(fmt_contrib(bd.score_gap));
-                                                    ui.end_row();
-                                                }
-                                                if bd.projection != 0.0 {
+                                                if is_nonzero(bd.score_projection) {
                                                     ui.label("Score Projection");
-                                                    ui.label(fmt_contrib(bd.projection));
+                                                    ui.label(fmt_contrib(bd.score_projection));
                                                     ui.end_row();
                                                 }
-                                                if bd.cap_control != 0.0 {
-                                                    ui.label("Cap Control");
-                                                    ui.label(fmt_contrib(bd.cap_control));
+                                                if is_nonzero(bd.fleet_power) {
+                                                    ui.label("Fleet Power");
+                                                    ui.label(fmt_contrib(bd.fleet_power));
                                                     ui.end_row();
                                                 }
-                                                if bd.hp != 0.0 {
-                                                    ui.label("HP Advantage");
-                                                    ui.label(fmt_contrib(bd.hp));
-                                                    ui.end_row();
-                                                }
-                                                if bd.ship_count != 0.0 {
-                                                    ui.label("Ship Count");
-                                                    ui.label(fmt_contrib(bd.ship_count));
+                                                if is_nonzero(bd.strategic_threat) {
+                                                    ui.label("Strategic Threat");
+                                                    ui.label(fmt_contrib(bd.strategic_threat));
                                                     ui.end_row();
                                                 }
                                                 ui.separator();
