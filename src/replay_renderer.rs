@@ -2729,7 +2729,6 @@ fn draw_command_to_shapes(
             // Pill vertically centered within bar
             let pill_h = t0_score_h + pill_pad_y * 2.0;
             let pill_y = bar_origin.y + (bar_height - pill_h) / 2.0;
-            let text_y = pill_y + pill_pad_y;
 
             // Draw team 0 pill + text
             let t0_pill_x = bar_origin.x + 8.0 * ws - pill_pad_x;
@@ -2739,16 +2738,22 @@ fn draw_command_to_shapes(
                 pill_color,
             ));
 
+            // Position score text centered in pill, then align timer/advantage
+            // to the same bottom edge so baselines visually match.
+            let pill_cy = pill_y + pill_h / 2.0;
+
             let mut t0_cursor = bar_origin.x + 8.0 * ws;
             let t0_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
-            shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y), t0_score_galley, Color32::WHITE));
+            let score_top = pill_cy - t0_score_galley.size().y / 2.0;
+            shapes.push(Shape::galley(Pos2::new(t0_cursor, score_top), t0_score_galley, Color32::WHITE));
             t0_cursor += t0_score_w;
 
             if let Some(timer) = team0_timer {
                 t0_cursor += 4.0 * ws;
                 let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font.clone(), timer_color));
                 let tw = tg.size().x;
-                shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y + 1.0 * ws), tg, timer_color));
+                let ty = score_top + (t0_score_h - tg.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, ty), tg, timer_color));
                 t0_cursor += tw;
             }
 
@@ -2757,7 +2762,8 @@ fn draw_command_to_shapes(
             if t0_adv_w.is_some() {
                 t0_cursor += 6.0 * ws;
                 let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
-                shapes.push(Shape::galley(Pos2::new(t0_cursor, text_y + 2.0 * ws), ag, Color32::WHITE));
+                let ay = score_top + (t0_score_h - ag.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t0_cursor, ay), ag, Color32::WHITE));
             }
 
             // ── Measure all team 1 elements ──
@@ -2805,7 +2811,8 @@ fn draw_command_to_shapes(
             // Score (rightmost)
             t1_cursor -= t1_score_w;
             let t1_score_galley = ctx.fonts_mut(|f| f.layout_no_wrap(t1_text, score_font, Color32::WHITE));
-            shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y), t1_score_galley, Color32::WHITE));
+            let t1_score_top = pill_cy - t1_score_galley.size().y / 2.0;
+            shapes.push(Shape::galley(Pos2::new(t1_cursor, t1_score_top), t1_score_galley, Color32::WHITE));
             let _t1_score_x = t1_cursor;
 
             // Timer (left of score)
@@ -2813,7 +2820,8 @@ fn draw_command_to_shapes(
                 let tg = ctx.fonts_mut(|f| f.layout_no_wrap(timer.clone(), timer_font, timer_color));
                 let tw = tg.size().x;
                 t1_cursor -= 4.0 * ws + tw;
-                shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y + 1.0 * ws), tg, timer_color));
+                let ty = t1_score_top + (_t1_score_h - tg.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, ty), tg, timer_color));
             }
 
             let _t1_start_x = t1_cursor;
@@ -2822,7 +2830,8 @@ fn draw_command_to_shapes(
             if let Some(aw) = t1_adv_w {
                 t1_cursor -= 6.0 * ws + aw;
                 let ag = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font, Color32::WHITE));
-                shapes.push(Shape::galley(Pos2::new(t1_cursor, text_y + 2.0 * ws), ag, Color32::WHITE));
+                let ay = t1_score_top + (_t1_score_h - ag.size().y) / 2.0;
+                shapes.push(Shape::galley(Pos2::new(t1_cursor, ay), ag, Color32::WHITE));
             }
         }
 
