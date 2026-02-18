@@ -1,6 +1,7 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![allow(clippy::blocks_in_conditions)]
 mod app;
+mod armor_viewer;
 mod build_tracker;
 mod consts;
 mod error;
@@ -18,6 +19,7 @@ mod task;
 mod twitch;
 mod ui;
 mod util;
+pub mod viewport_3d;
 mod wows_data;
 pub use app::WowsToolkitApp;
 pub const APP_NAME: &str = "WoWs Toolkit";

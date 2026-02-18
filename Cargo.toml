@@ -31,13 +31,15 @@ wgpu = { version = "27", default-features = true }
 tracing = "0.1"
 wows_replays = { version = "0.18.0", features = ["arc"] }
 serde = { version = "1", features = ["derive"] }
-wowsunpack = { version = "0.17", default-features = false, features = [
+wowsunpack = { version = "0.18.0-alpha1", default-features = false, features = [
     "arc",
     "cbor",
     "json",
+    "models",
     "rkyv",
     "vfs",
 ] }
+bytemuck = { version = "1", features = ["derive"] }
 wows_minimap_renderer = { version = "0.10.0", default-features = false, features = ["gpu", "cpu", "arc"] }
 rfd = "0.15"
 humansize = "2.1.3"

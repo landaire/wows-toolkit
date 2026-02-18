@@ -293,6 +293,14 @@ pub struct TabState {
     /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
     #[serde(skip)]
     pub settings_needs_attention: bool,
+
+    /// wgpu render state for 3D viewport rendering (captured at app init).
+    #[serde(skip)]
+    pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
+
+    /// State for the Armor Viewer tab.
+    #[serde(skip)]
+    pub armor_viewer: crate::armor_viewer::ArmorViewerState,
 }
 
 impl Default for TabState {
@@ -349,6 +357,8 @@ impl Default for TabState {
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
             settings_needs_attention: false,
+            wgpu_render_state: None,
+            armor_viewer: Default::default(),
         }
     }
 }

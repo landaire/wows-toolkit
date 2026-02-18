@@ -50,9 +50,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -73,6 +71,7 @@ pub enum Tab {
     Settings,
     PlayerTracker,
     ModManager,
+    ArmorViewer,
 }
 
 impl Tab {
@@ -83,6 +82,7 @@ impl Tab {
             Tab::ReplayParser => icon_str!(icons::MAGNIFYING_GLASS, "Replay Inspector"),
             Tab::PlayerTracker => icon_str!(icons::DETECTIVE, "Player Tracker"),
             Tab::ModManager => icon_str!(icons::WRENCH, "Mod Manager"),
+            Tab::ArmorViewer => icon_str!(icons::SHIELD, "Armor Viewer"),
         }
     }
 }
@@ -108,6 +108,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ReplayParser => self.build_replay_parser_tab(ui),
             Tab::PlayerTracker => self.build_player_tracker_tab(ui),
             Tab::ModManager => self.build_mod_manager_tab(ui),
+            Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
         }
     }
 
@@ -197,7 +198,9 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new([Tab::ReplayParser, Tab::PlayerTracker, Tab::Unpacker, Tab::Settings].to_vec()),
+            dock_state: DockState::new(
+                [Tab::ReplayParser, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings].to_vec(),
+            ),
             show_error_window: false,
             error_to_show: None,
             constants_version_mismatch: false,
@@ -392,6 +395,9 @@ impl WowsToolkitApp {
         if state.tab_state.settings.enable_logging {
             state._log_guard = Self::init_logging();
         }
+
+        // Capture wgpu render state for 3D viewport rendering
+        state.tab_state.wgpu_render_state = cc.wgpu_render_state.clone();
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
