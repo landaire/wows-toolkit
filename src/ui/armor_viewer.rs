@@ -284,21 +284,31 @@ impl ToolkitTabViewer<'_> {
 
                 let tree_id = sidebar_ui.make_persistent_id("armor_ship_tree");
 
-                // Auto-expand/collapse nodes based on search state.
-                if !search.is_empty() {
+                let searching = !search.is_empty();
+
+                // When search text changes, update node openness: expand matching, collapse non-matching.
+                if search != state.prev_selector_search {
                     sidebar_ui.ctx().data_mut(|data| {
                         let tree_state =
                             data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
                         for nation in &sorted_nations {
                             let nation_id = egui::Id::new(("armor_nation", &nation.nation));
-                            tree_state.set_openness(nation_id, true);
+                            let nation_has_match = searching
+                                && nation
+                                    .classes
+                                    .iter()
+                                    .any(|c| c.ships.iter().any(|s| s.search_name.contains(&search)));
+                            tree_state.set_openness(nation_id, searching && nation_has_match);
                             for class in &nation.classes {
                                 let class_id =
                                     egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
-                                tree_state.set_openness(class_id, true);
+                                let class_has_match =
+                                    searching && class.ships.iter().any(|s| s.search_name.contains(&search));
+                                tree_state.set_openness(class_id, searching && class_has_match);
                             }
                         }
                     });
+                    state.prev_selector_search = search.clone();
                 }
 
                 let tree = egui_ltreeview::TreeView::new(tree_id);
@@ -319,7 +329,7 @@ impl ToolkitTabViewer<'_> {
                             let flag_asset = nation_flags.get(&nation.nation).cloned();
                             let nation_display = translate_part_ref(&nation.nation);
                             let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
-                                .default_open(false)
+                                .default_open(searching)
                                 .icon(move |ui| {
                                     if let Some(ref flag) = flag_asset {
                                         ui.add(
@@ -346,7 +356,7 @@ impl ToolkitTabViewer<'_> {
                                         egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
                                     let icon_asset = ship_icons.get(&class.species).cloned();
                                     let class_dir = egui_ltreeview::NodeBuilder::dir(class_id)
-                                        .default_open(false)
+                                        .default_open(searching)
                                         .icon(move |ui| {
                                             if let Some(ref icon) = icon_asset {
                                                 ui.add(

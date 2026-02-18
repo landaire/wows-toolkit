@@ -50,6 +50,8 @@ pub struct ArmorViewerState {
     pub sync_options: bool,
     /// Shared ship selector search text (single sidebar).
     pub selector_search: String,
+    /// Previous frame's search text, used to detect changes.
+    pub prev_selector_search: String,
     /// ID of the pane that receives ship selections from the sidebar.
     pub active_pane_id: u64,
 }
@@ -66,6 +68,7 @@ impl Default for ArmorViewerState {
             mirror_cameras: false,
             sync_options: false,
             selector_search: String::new(),
+            prev_selector_search: String::new(),
             active_pane_id: 0,
         }
     }
