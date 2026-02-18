@@ -123,6 +123,10 @@ pub struct ArmorPane {
     pub selected_camo: Option<String>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
+    /// Hover highlight: subcomponent key and its overlay mesh.
+    pub hover_highlight: Option<((String, String), MeshId)>,
+    /// Pinned (clicked) highlights: subcomponent key -> overlay mesh ID.
+    pub pinned_highlights: HashMap<(String, String), MeshId>,
 }
 
 impl ArmorPane {
@@ -140,6 +144,8 @@ impl ArmorPane {
             show_hull: false,
             selected_camo: None,
             mesh_triangle_info: Vec::new(),
+            hover_highlight: None,
+            pinned_highlights: HashMap::new(),
         }
     }
 }

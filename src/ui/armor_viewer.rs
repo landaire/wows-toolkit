@@ -7,7 +7,7 @@ use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::split_pane::{CompareSettings, SplitAction};
 use crate::armor_viewer::state::{ArmorPane, ArmorTriangleTooltip, LoadedShipArmor, ShipAssetsState};
 use crate::icons;
-use crate::viewport_3d::{GpuPipeline, Vertex};
+use crate::viewport_3d::{GpuPipeline, MeshId, Vertex};
 
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
@@ -448,6 +448,8 @@ fn poll_pane_loads(
 fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     pane.viewport.clear();
     pane.mesh_triangle_info.clear();
+    pane.hover_highlight = None;
+    pane.pinned_highlights.clear();
 
     for mesh in &armor.meshes {
         let mut vertices: Vec<Vertex> = Vec::new();
@@ -760,7 +762,8 @@ fn render_armor_pane(
                     }
                 }
 
-                // Picking on hover
+                // Picking on hover / click / right-click
+                let mut hovered_key: Option<(String, String)> = None;
                 if response.hovered() {
                     if let Some(hover_pos) = response.hover_pos() {
                         if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
@@ -771,6 +774,7 @@ fn render_armor_pane(
                                 .and_then(|(_, infos)| infos.get(hit.triangle_index));
 
                             if let Some(tooltip) = tooltip {
+                                hovered_key = Some((tooltip.zone.clone(), tooltip.material_name.clone()));
                                 pane.hovered_info = Some(tooltip.clone());
                                 egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
                                     show_armor_tooltip(ui, tooltip, translate_part);
@@ -780,6 +784,85 @@ fn render_armor_pane(
                             }
                         } else {
                             pane.hovered_info = None;
+                        }
+                    }
+                }
+
+                // Click to toggle pinned highlight
+                if response.clicked() {
+                    if let Some(ref key) = hovered_key {
+                        if pane.pinned_highlights.contains_key(key) {
+                            // Unpin
+                            if let Some(mesh_id) = pane.pinned_highlights.remove(key) {
+                                pane.viewport.remove_mesh(mesh_id);
+                            }
+                        } else {
+                            // Pin with a distinct color
+                            if let Some(armor) = pane.loaded_armor.take() {
+                                let mesh_id = upload_subcomponent_highlight(
+                                    pane,
+                                    &armor,
+                                    key,
+                                    &render_state.device,
+                                    [0.2, 0.6, 1.0, 0.45],
+                                );
+                                pane.pinned_highlights.insert(key.clone(), mesh_id);
+                                pane.loaded_armor = Some(armor);
+                            }
+                        }
+                    }
+                }
+
+                // Right-click context menu
+                if let Some(ref key) = hovered_key {
+                    let ctx_key = key.clone();
+                    let ctx_name = translate_part(&ctx_key.1);
+                    response.context_menu(|ui| {
+                        if ui.button(format!("Disable {}", ctx_name)).clicked() {
+                            pane.part_visibility.insert(ctx_key.clone(), false);
+                            zone_changed = true;
+                            // Remove pinned highlight if present
+                            if let Some(mesh_id) = pane.pinned_highlights.remove(&ctx_key) {
+                                pane.viewport.remove_mesh(mesh_id);
+                            }
+                            ui.close();
+                        }
+                        if !pane.pinned_highlights.is_empty() {
+                            if ui.button("Disable all selected").clicked() {
+                                let keys: Vec<_> = pane.pinned_highlights.keys().cloned().collect();
+                                for k in &keys {
+                                    pane.part_visibility.insert(k.clone(), false);
+                                    if let Some(mesh_id) = pane.pinned_highlights.remove(k) {
+                                        pane.viewport.remove_mesh(mesh_id);
+                                    }
+                                }
+                                zone_changed = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+
+                // Update hover highlight overlay (skip if subcomponent is pinned)
+                let hover_key_for_highlight = hovered_key.filter(|k| !pane.pinned_highlights.contains_key(k));
+                let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
+                if hover_key_for_highlight != current_hover {
+                    // Remove old hover highlight
+                    if let Some((_, old_id)) = pane.hover_highlight.take() {
+                        pane.viewport.remove_mesh(old_id);
+                    }
+                    // Upload new hover highlight
+                    if let Some(ref key) = hover_key_for_highlight {
+                        if let Some(armor) = pane.loaded_armor.take() {
+                            let mesh_id = upload_subcomponent_highlight(
+                                pane,
+                                &armor,
+                                key,
+                                &render_state.device,
+                                [1.0, 1.0, 1.0, 0.35],
+                            );
+                            pane.hover_highlight = Some((key.clone(), mesh_id));
+                            pane.loaded_armor = Some(armor);
                         }
                     }
                 }
@@ -809,6 +892,8 @@ fn load_ship_for_pane(
     pane.viewport.clear();
     pane.mesh_triangle_info.clear();
     pane.hovered_info = None;
+    pane.hover_highlight = None;
+    pane.pinned_highlights.clear();
 
     let assets = ship_assets.clone();
     let index = param_index.to_string();
@@ -914,6 +999,64 @@ fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate:
     ui.label(format!("Zone: {}", &info.zone));
     ui.label(format!("Part: {}", translate(&info.material_name)));
     ui.label(format!("Model: {}  Tri: {}  Mat ID: {}", info.model_index, info.triangle_index, info.material_id,));
+}
+
+/// Upload a highlight overlay mesh for all triangles in the given (zone, material_name) subcomponent.
+/// Returns the MeshId of the uploaded highlight mesh.
+fn upload_subcomponent_highlight(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    key: &(String, String),
+    device: &wgpu::Device,
+    highlight_color: [f32; 4],
+) -> MeshId {
+    let normal_offset = 0.005; // slight offset along normal to avoid z-fighting
+
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if info.zone != key.0 || info.material_name != key.1 {
+                continue;
+            }
+
+            // Check part visibility (skip if this part is toggled off)
+            let part_key = (info.zone.clone(), info.material_name.clone());
+            if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+
+            let new_base = vertices.len() as u32;
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx < mesh.positions.len() {
+                    let mut pos = mesh.positions[orig_idx];
+                    let mut norm = mesh.normals[orig_idx];
+
+                    if let Some(t) = &mesh.transform {
+                        pos = transform_point(t, pos);
+                        norm = transform_normal(t, norm);
+                    }
+
+                    // Offset position along normal to render in front
+                    pos[0] += norm[0] * normal_offset;
+                    pos[1] += norm[1] * normal_offset;
+                    pos[2] += norm[2] * normal_offset;
+
+                    vertices.push(Vertex { position: pos, normal: norm, color: highlight_color });
+                }
+            }
+            indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
+        }
+    }
+
+    pane.viewport.add_overlay_mesh(device, &vertices, &indices)
 }
 
 /// Apply a column-major 4x4 transform to a point (position).
