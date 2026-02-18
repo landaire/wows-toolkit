@@ -93,7 +93,6 @@ pub struct ArmorTriangleTooltip {
 /// Data for a loaded ship's armor.
 #[allow(dead_code)]
 pub struct LoadedShipArmor {
-    pub ship_name: String,
     pub display_name: String,
     pub meshes: Vec<wowsunpack::export::gltf_export::InteractiveArmorMesh>,
     pub bounds: ([f32; 3], [f32; 3]),

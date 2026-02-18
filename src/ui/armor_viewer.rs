@@ -303,98 +303,102 @@ impl ToolkitTabViewer<'_> {
 
                 let tree = egui_ltreeview::TreeView::new(tree_id);
 
-                let (_response, actions) = tree.show(&mut sidebar_ui, |builder| {
-                    for nation in &sorted_nations {
-                        let has_match = search.is_empty()
-                            || nation
-                                .classes
-                                .iter()
-                                .any(|c| c.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search)));
-                        if !has_match {
-                            continue;
-                        }
-
-                        let nation_id = egui::Id::new(("armor_nation", &nation.nation));
-                        let flag_asset = nation_flags.get(&nation.nation).cloned();
-                        let nation_display = translate_part_ref(&nation.nation);
-                        let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
-                            .default_open(false)
-                            .icon(move |ui| {
-                                if let Some(ref flag) = flag_asset {
-                                    ui.add(
-                                        egui::Image::new(egui::ImageSource::Bytes {
-                                            uri: flag.path.clone().into(),
-                                            bytes: flag.data.clone().into(),
-                                        })
-                                        .fit_to_exact_size(egui::vec2(23.0, 16.0)),
-                                    );
-                                }
-                            })
-                            .label(nation_display);
-
-                        let is_open = builder.node(dir_node);
-                        if is_open {
-                            for class in &nation.classes {
-                                let has_class_match = search.is_empty()
-                                    || class.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search));
-                                if !has_class_match {
-                                    continue;
-                                }
-
-                                let class_id =
-                                    egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
-                                let icon_asset = ship_icons.get(&class.species).cloned();
-                                let class_dir = egui_ltreeview::NodeBuilder::dir(class_id)
-                                    .default_open(false)
-                                    .icon(move |ui| {
-                                        if let Some(ref icon) = icon_asset {
-                                            ui.add(
-                                                egui::Image::new(egui::ImageSource::Bytes {
-                                                    uri: icon.path.clone().into(),
-                                                    bytes: icon.data.clone().into(),
-                                                })
-                                                .fit_to_exact_size(egui::vec2(16.0, 16.0))
-                                                .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
-                                            );
-                                        }
-                                    })
-                                    .label(species_name(&class.species));
-
-                                let class_open = builder.node(class_dir);
-                                if class_open {
-                                    for ship in &class.ships {
-                                        if !search.is_empty() && !ship.display_name.to_lowercase().contains(&search) {
-                                            continue;
-                                        }
-
-                                        let ship_id = egui::Id::new(("armor_ship", &ship.param_index));
-                                        id_to_ship
-                                            .insert(ship_id, (ship.param_index.clone(), ship.display_name.clone()));
-
-                                        let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
-
-                                        let param_idx = ship.param_index.clone();
-                                        let display_name = ship.display_name.clone();
-
-                                        let leaf = egui_ltreeview::NodeBuilder::leaf(ship_id)
-                                            .label(label)
-                                            .context_menu(move |ui| {
-                                                if ui.button("Compare in new split").clicked() {
-                                                    deferred_compare_ref
-                                                        .set(Some((param_idx.clone(), display_name.clone())));
-                                                    ui.close();
-                                                }
-                                            });
-
-                                        builder.node(leaf);
-                                    }
-                                }
-                                builder.close_dir();
+                let scroll_out = egui::ScrollArea::both().show(&mut sidebar_ui, |ui| {
+                    tree.show(ui, |builder| {
+                        for nation in &sorted_nations {
+                            let has_match = search.is_empty()
+                                || nation
+                                    .classes
+                                    .iter()
+                                    .any(|c| c.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search)));
+                            if !has_match {
+                                continue;
                             }
+
+                            let nation_id = egui::Id::new(("armor_nation", &nation.nation));
+                            let flag_asset = nation_flags.get(&nation.nation).cloned();
+                            let nation_display = translate_part_ref(&nation.nation);
+                            let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
+                                .default_open(false)
+                                .icon(move |ui| {
+                                    if let Some(ref flag) = flag_asset {
+                                        ui.add(
+                                            egui::Image::new(egui::ImageSource::Bytes {
+                                                uri: flag.path.clone().into(),
+                                                bytes: flag.data.clone().into(),
+                                            })
+                                            .fit_to_exact_size(egui::vec2(23.0, 16.0)),
+                                        );
+                                    }
+                                })
+                                .label(nation_display);
+
+                            let is_open = builder.node(dir_node);
+                            if is_open {
+                                for class in &nation.classes {
+                                    let has_class_match = search.is_empty()
+                                        || class.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search));
+                                    if !has_class_match {
+                                        continue;
+                                    }
+
+                                    let class_id =
+                                        egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
+                                    let icon_asset = ship_icons.get(&class.species).cloned();
+                                    let class_dir = egui_ltreeview::NodeBuilder::dir(class_id)
+                                        .default_open(false)
+                                        .icon(move |ui| {
+                                            if let Some(ref icon) = icon_asset {
+                                                ui.add(
+                                                    egui::Image::new(egui::ImageSource::Bytes {
+                                                        uri: icon.path.clone().into(),
+                                                        bytes: icon.data.clone().into(),
+                                                    })
+                                                    .fit_to_exact_size(egui::vec2(16.0, 16.0))
+                                                    .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
+                                                );
+                                            }
+                                        })
+                                        .label(species_name(&class.species));
+
+                                    let class_open = builder.node(class_dir);
+                                    if class_open {
+                                        for ship in &class.ships {
+                                            if !search.is_empty() && !ship.display_name.to_lowercase().contains(&search)
+                                            {
+                                                continue;
+                                            }
+
+                                            let ship_id = egui::Id::new(("armor_ship", &ship.param_index));
+                                            id_to_ship
+                                                .insert(ship_id, (ship.param_index.clone(), ship.display_name.clone()));
+
+                                            let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
+
+                                            let param_idx = ship.param_index.clone();
+                                            let display_name = ship.display_name.clone();
+
+                                            let leaf = egui_ltreeview::NodeBuilder::leaf(ship_id)
+                                                .label(label)
+                                                .context_menu(move |ui| {
+                                                    if ui.button("Compare in new split").clicked() {
+                                                        deferred_compare_ref
+                                                            .set(Some((param_idx.clone(), display_name.clone())));
+                                                        ui.close();
+                                                    }
+                                                });
+
+                                            builder.node(leaf);
+                                        }
+                                    }
+                                    builder.close_dir();
+                                }
+                            }
+                            builder.close_dir();
                         }
-                        builder.close_dir();
-                    }
+                    })
                 });
+                let (_response, actions) = scroll_out.inner;
 
                 // Set selection to match the active pane's currently loaded ship.
                 if let Some(ref param) = selected_param {
@@ -1066,16 +1070,21 @@ fn load_ship_for_pane(
     pane.pinned_highlights.clear();
 
     let assets = ship_assets.clone();
-    let index = param_index.to_string();
     let ship_display_name = display_name.to_string();
     let (tx, rx) = mpsc::channel();
 
+    // Resolve the Vehicle from GameParams on the main thread so we can use
+    // load_ship_from_vehicle (avoids the fuzzy find_ship lookup entirely).
+    use wowsunpack::game_params::types::GameParamProvider;
+    let vehicle = ship_assets.metadata().game_param_by_index(param_index).and_then(|p| p.vehicle().cloned());
+
     std::thread::spawn(move || {
         let result = (|| {
+            let vehicle = vehicle.ok_or_else(|| format!("No vehicle found for param index"))?;
             let options =
                 wowsunpack::export::ship::ShipExportOptions { lod: 0, hull: None, textures: false, damaged: false };
 
-            let ctx = assets.load_ship(&index, &options).map_err(|e| format!("{e:?}"))?;
+            let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
 
             let meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
 
@@ -1130,7 +1139,6 @@ fn load_ship_for_pane(
             let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
             Ok(LoadedShipArmor {
-                ship_name: index,
                 display_name: ship_display_name,
                 meshes,
                 bounds: (min, max),
