@@ -5,9 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 
 use parking_lot::RwLock;
 use rootcause::Report;
@@ -41,6 +39,7 @@ pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
 pub use replays::ReplayExportFormat;
 pub use replays::build_game_constants;
+pub use replays::load_nation_flag;
 pub use replays::load_ribbon_icons;
 pub use replays::load_ship_icons;
 pub use replays::load_wows_data_for_build;

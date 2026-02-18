@@ -62,7 +62,16 @@ impl ToolkitTabViewer<'_> {
                         // not from assets.metadata() which has translations: None
                         let wd = wows_data.read();
                         if let Some(metadata) = wd.game_metadata.as_ref() {
-                            state.ship_catalog = Some(Arc::new(ShipCatalog::build(metadata)));
+                            let catalog = ShipCatalog::build(metadata);
+                            // Load nation flags for each nation in the catalog.
+                            for nation_group in &catalog.nations {
+                                if !state.nation_flag_textures.contains_key(&nation_group.nation) {
+                                    if let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation) {
+                                        state.nation_flag_textures.insert(nation_group.nation.clone(), asset);
+                                    }
+                                }
+                            }
+                            state.ship_catalog = Some(Arc::new(catalog));
                         }
                         state.ship_assets = ShipAssetsState::Loaded(assets);
                     }
@@ -109,6 +118,7 @@ impl ToolkitTabViewer<'_> {
             let wd = wows_data.read();
             wd.ship_icons.clone()
         };
+        let nation_flags = &state.nation_flag_textures;
 
         // Poll per-pane ship loading receivers
         poll_pane_loads(&mut state.split_tree, &render_state.device, &gpu_pipeline);
@@ -192,7 +202,15 @@ impl ToolkitTabViewer<'_> {
                 if let Some(catalog) = &ship_catalog {
                     let search = state.selector_search.to_lowercase();
 
-                    for nation in &catalog.nations {
+                    // Sort nations by translated display name.
+                    let mut sorted_nations: Vec<&_> = catalog.nations.iter().collect();
+                    sorted_nations.sort_by(|a, b| {
+                        let ta = translate_part_ref(&a.nation);
+                        let tb = translate_part_ref(&b.nation);
+                        ta.cmp(&tb)
+                    });
+
+                    for nation in sorted_nations {
                         let has_match = search.is_empty()
                             || nation
                                 .classes
@@ -203,9 +221,26 @@ impl ToolkitTabViewer<'_> {
                         }
 
                         let nation_id = ui.make_persistent_id(("nation_global", &nation.nation));
-                        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), nation_id, false)
+                        let mut nation_state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            nation_id,
+                            false,
+                        );
+                        if !search.is_empty() {
+                            nation_state.set_open(true);
+                        }
+                        nation_state
                             .show_header(ui, |ui| {
-                                ui.label(&nation.nation);
+                                if let Some(flag) = nation_flags.get(&nation.nation) {
+                                    ui.add(
+                                        egui::Image::new(egui::ImageSource::Bytes {
+                                            uri: flag.path.clone().into(),
+                                            bytes: flag.data.clone().into(),
+                                        })
+                                        .fit_to_exact_size(egui::vec2(23.0, 16.0)),
+                                    );
+                                }
+                                ui.label(translate_part_ref(&nation.nation));
                             })
                             .body(|ui| {
                                 for class in &nation.classes {
@@ -220,81 +255,89 @@ impl ToolkitTabViewer<'_> {
                                         &nation.nation,
                                         species_name(&class.species),
                                     ));
-                                    egui::collapsing_header::CollapsingState::load_with_default_open(
-                                        ui.ctx(),
-                                        class_id,
-                                        false,
-                                    )
-                                    .show_header(ui, |ui| {
-                                        if let Some(icon) = ship_icons.get(&class.species) {
-                                            ui.add(
-                                                egui::Image::new(egui::ImageSource::Bytes {
-                                                    uri: icon.path.clone().into(),
-                                                    bytes: icon.data.clone().into(),
-                                                })
-                                                .fit_to_exact_size(egui::vec2(16.0, 16.0))
-                                                .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
-                                            );
-                                        }
-                                        ui.label(species_name(&class.species));
-                                    })
-                                    .body(|ui| {
-                                        for ship in &class.ships {
-                                            if !search.is_empty() && !ship.display_name.to_lowercase().contains(&search)
-                                            {
-                                                continue;
+                                    let mut class_state =
+                                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                                            ui.ctx(),
+                                            class_id,
+                                            false,
+                                        );
+                                    if !search.is_empty() {
+                                        class_state.set_open(true);
+                                    }
+                                    class_state
+                                        .show_header(ui, |ui| {
+                                            if let Some(icon) = ship_icons.get(&class.species) {
+                                                ui.add(
+                                                    egui::Image::new(egui::ImageSource::Bytes {
+                                                        uri: icon.path.clone().into(),
+                                                        bytes: icon.data.clone().into(),
+                                                    })
+                                                    .fit_to_exact_size(egui::vec2(16.0, 16.0))
+                                                    .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
+                                                );
                                             }
-
-                                            let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
-                                            // Highlight if the active pane has this ship selected
-                                            let active_pane = state.split_tree.all_panes_mut();
-                                            let active = active_pane.iter().find(|p| p.id == current_active_id);
-                                            let is_selected = active.map_or(false, |p| {
-                                                p.selected_ship.as_deref() == Some(ship.param_index.as_str())
-                                            });
-
-                                            let response = ui.selectable_label(is_selected, &label);
-                                            if response.clicked() && !is_selected {
-                                                // Load into the active pane
-                                                let pane = state
-                                                    .split_tree
-                                                    .all_panes_mut()
-                                                    .into_iter()
-                                                    .find(|p| p.id == current_active_id);
-                                                if let Some(pane) = pane {
-                                                    load_ship_for_pane(
-                                                        pane,
-                                                        &ship.param_index,
-                                                        &ship.display_name,
-                                                        &ship_assets,
-                                                    );
+                                            ui.label(species_name(&class.species));
+                                        })
+                                        .body(|ui| {
+                                            for ship in &class.ships {
+                                                if !search.is_empty()
+                                                    && !ship.display_name.to_lowercase().contains(&search)
+                                                {
+                                                    continue;
                                                 }
-                                            }
-                                            // Right-click context menu: Compare
-                                            response.context_menu(|ui| {
-                                                if ui.button("Compare in new split").clicked() {
+
+                                                let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
+                                                // Highlight if the active pane has this ship selected
+                                                let active_pane = state.split_tree.all_panes_mut();
+                                                let active = active_pane.iter().find(|p| p.id == current_active_id);
+                                                let is_selected = active.map_or(false, |p| {
+                                                    p.selected_ship.as_deref() == Some(ship.param_index.as_str())
+                                                });
+
+                                                let response = ui.selectable_label(is_selected, &label);
+                                                if response.clicked() && !is_selected {
+                                                    // Load into the active pane
                                                     let pane = state
                                                         .split_tree
                                                         .all_panes_mut()
                                                         .into_iter()
                                                         .find(|p| p.id == current_active_id);
                                                     if let Some(pane) = pane {
-                                                        sidebar_action = Some(SplitAction::Compare(
-                                                            pane.id,
-                                                            CompareSettings {
-                                                                ship_param_index: ship.param_index.clone(),
-                                                                ship_display_name: ship.display_name.clone(),
-                                                                camera: pane.viewport.camera.clone(),
-                                                                part_visibility: pane.part_visibility.clone(),
-                                                                hull_visibility: pane.hull_visibility.clone(),
-                                                            },
-                                                        ));
+                                                        load_ship_for_pane(
+                                                            pane,
+                                                            &ship.param_index,
+                                                            &ship.display_name,
+                                                            &ship_assets,
+                                                        );
                                                     }
-                                                    ui.close();
                                                 }
-                                            });
-                                        }
-                                    });
+                                                // Right-click context menu: Compare
+                                                response.context_menu(|ui| {
+                                                    if ui.button("Compare in new split").clicked() {
+                                                        // Always split the rightmost pane so the new pane appears on the far right.
+                                                        let rightmost_id = state.split_tree.rightmost_leaf_id();
+                                                        let pane = state
+                                                            .split_tree
+                                                            .all_panes_mut()
+                                                            .into_iter()
+                                                            .find(|p| p.id == rightmost_id);
+                                                        if let Some(pane) = pane {
+                                                            sidebar_action = Some(SplitAction::Compare(
+                                                                pane.id,
+                                                                CompareSettings {
+                                                                    ship_param_index: ship.param_index.clone(),
+                                                                    ship_display_name: ship.display_name.clone(),
+                                                                    camera: pane.viewport.camera.clone(),
+                                                                    part_visibility: pane.part_visibility.clone(),
+                                                                    hull_visibility: pane.hull_visibility.clone(),
+                                                                },
+                                                            ));
+                                                        }
+                                                        ui.close();
+                                                    }
+                                                });
+                                            }
+                                        });
                                 }
                             });
                     }
@@ -549,8 +592,10 @@ fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &w
 
     // Hull parts default to not visible
     pane.hull_visibility.clear();
-    for name in &armor.hull_part_names {
-        pane.hull_visibility.insert(name.clone(), false);
+    for (_group, names) in &armor.hull_part_groups {
+        for name in names {
+            pane.hull_visibility.insert(name.clone(), false);
+        }
     }
 
     upload_armor_to_viewport(pane, armor, device);
@@ -663,13 +708,17 @@ fn render_armor_pane(
                         ui.add_space(4.0);
                     }
 
-                    // Hull render set toggles (popup, same pattern as armor zones)
-                    if !armor.hull_part_names.is_empty() {
+                    // Hull render set toggles, grouped by category.
+                    if !armor.hull_part_groups.is_empty() {
                         ui.separator();
 
-                        let hull_parts = &armor.hull_part_names;
-                        let all_on = hull_parts.iter().all(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
-                        let any_on = hull_parts.iter().any(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
+                        // Collect all hull part names for the master toggle.
+                        let all_hull_names: Vec<&String> =
+                            armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
+                        let all_on =
+                            all_hull_names.iter().all(|n| pane.hull_visibility.get(*n).copied().unwrap_or(false));
+                        let any_on =
+                            all_hull_names.iter().any(|n| pane.hull_visibility.get(*n).copied().unwrap_or(false));
 
                         let mut checked = all_on;
                         let cb_response = ui.checkbox(&mut checked, "");
@@ -681,38 +730,72 @@ fn render_armor_pane(
                             );
                         }
                         if cb_response.changed() {
-                            for name in hull_parts {
-                                pane.hull_visibility.insert(name.clone(), checked);
+                            for name in &all_hull_names {
+                                pane.hull_visibility.insert((*name).clone(), checked);
                             }
                             zone_changed = true;
                         }
 
-                        let label_response = ui.selectable_label(false, "Hull");
+                        let label_response = ui.selectable_label(false, "Hull Model");
                         egui::Popup::from_toggle_button_response(&label_response)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
                                 ui.horizontal(|ui| {
                                     if ui.small_button("All").clicked() {
-                                        for name in hull_parts {
-                                            pane.hull_visibility.insert(name.clone(), true);
+                                        for name in &all_hull_names {
+                                            pane.hull_visibility.insert((*name).clone(), true);
                                         }
                                         zone_changed = true;
                                     }
                                     if ui.small_button("None").clicked() {
-                                        for name in hull_parts {
-                                            pane.hull_visibility.insert(name.clone(), false);
+                                        for name in &all_hull_names {
+                                            pane.hull_visibility.insert((*name).clone(), false);
                                         }
                                         zone_changed = true;
                                     }
                                 });
                                 ui.separator();
-                                for name in hull_parts {
-                                    let mut visible = pane.hull_visibility.get(name).copied().unwrap_or(false);
-                                    if ui.checkbox(&mut visible, name).changed() {
-                                        pane.hull_visibility.insert(name.clone(), visible);
-                                        zone_changed = true;
+
+                                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                                    for (group, names) in &armor.hull_part_groups {
+                                        // Per-group header with toggle
+                                        let group_all_on =
+                                            names.iter().all(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
+                                        let group_any_on =
+                                            names.iter().any(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
+
+                                        ui.horizontal(|ui| {
+                                            let mut group_checked = group_all_on;
+                                            let gcb = ui.checkbox(&mut group_checked, "");
+                                            if group_any_on && !group_all_on {
+                                                let c = gcb.rect.center();
+                                                ui.painter().line_segment(
+                                                    [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
+                                                    egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                                                );
+                                            }
+                                            if gcb.changed() {
+                                                for name in names {
+                                                    pane.hull_visibility.insert(name.clone(), group_checked);
+                                                }
+                                                zone_changed = true;
+                                            }
+                                            ui.strong(group);
+                                        });
+
+                                        // Individual parts within the group
+                                        ui.indent(group, |ui| {
+                                            for name in names {
+                                                let mut visible =
+                                                    pane.hull_visibility.get(name).copied().unwrap_or(false);
+                                                if ui.checkbox(&mut visible, name).changed() {
+                                                    pane.hull_visibility.insert(name.clone(), visible);
+                                                    zone_changed = true;
+                                                }
+                                            }
+                                        });
                                     }
-                                }
+                                }); // ScrollArea
                             });
                     }
                 });
@@ -770,7 +853,8 @@ fn render_armor_pane(
 
                 // Picking on hover / click / right-click
                 let mut hovered_key: Option<(String, String)> = None;
-                let context_menu_open = egui::Popup::is_id_open(vp_ui.ctx(), response.id.with("__egui::context_menu"));
+                let context_menu_open =
+                    egui::Popup::is_id_open(vp_ui.ctx(), egui::Popup::default_response_id(&response));
                 if response.hovered() {
                     if let Some(hover_pos) = response.hover_pos() {
                         if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
@@ -822,9 +906,16 @@ fn render_armor_pane(
                     }
                 }
 
-                // Right-click context menu
-                if let Some(ref key) = hovered_key {
-                    let ctx_key = key.clone();
+                // Latch context menu key on right-click; clear when menu closes.
+                if response.secondary_clicked() {
+                    pane.context_menu_key = hovered_key.clone();
+                } else if !context_menu_open {
+                    pane.context_menu_key = None;
+                }
+
+                // Right-click context menu — always call to keep popup alive.
+                if let Some(ref ctx_key) = pane.context_menu_key.clone() {
+                    let ctx_key = ctx_key.clone();
                     let ctx_name = translate_part(&ctx_key.1);
                     response.context_menu(|ui| {
                         if ui.button(format!("Disable {}", ctx_name)).clicked() {
@@ -965,14 +1056,8 @@ fn load_ship_for_pane(
                 }
             }
 
-            // Collect unique hull part names
-            let mut hull_part_names: Vec<String> = hull_meshes
-                .iter()
-                .map(|m| m.name.clone())
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            hull_part_names.sort();
+            // Categorize hull parts into logical groups.
+            let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
             Ok(LoadedShipArmor {
                 ship_name: index,
@@ -982,7 +1067,7 @@ fn load_ship_for_pane(
                 zones,
                 zone_parts,
                 hull_meshes,
-                hull_part_names,
+                hull_part_groups,
             })
         })();
 
@@ -1023,7 +1108,7 @@ fn upload_subcomponent_highlight(
     device: &wgpu::Device,
     highlight_color: [f32; 4],
 ) -> MeshId {
-    let normal_offset = 0.03; // offset along normal to avoid z-fighting
+    let normal_offset = 0.01; // slight offset along normal to avoid z-fighting
 
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -1070,6 +1155,61 @@ fn upload_subcomponent_highlight(
     }
 
     pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+/// Categorize a hull mesh name into a display group.
+///
+/// Mounted parts have names like `"RenderSet [HP_AGM_1]"` — the HP_ prefix determines the group.
+/// Non-mounted hull render sets (no `[HP_...]` suffix) go into a group named after themselves
+/// (e.g. "Hull", "Superstructure", "DeckHouse").
+fn hull_part_group(name: &str) -> &'static str {
+    if let Some(start) = name.find("[HP_") {
+        let hp = &name[start + 1..name.len() - 1]; // strip brackets
+        if hp.starts_with("HP_AGM") {
+            "Main Battery"
+        } else if hp.starts_with("HP_AGS") {
+            "Secondary Battery"
+        } else if hp.starts_with("HP_AGA") {
+            "AA Guns"
+        } else if hp.starts_with("HP_ATB") || hp.starts_with("HP_AT_") {
+            "Torpedoes"
+        } else {
+            "Other"
+        }
+    } else {
+        "Hull"
+    }
+}
+
+/// Fixed display order for hull part groups.
+fn hull_group_order(group: &str) -> u32 {
+    match group {
+        "Hull" => 0,
+        "Main Battery" => 1,
+        "Secondary Battery" => 2,
+        "AA Guns" => 3,
+        "Torpedoes" => 4,
+        "Other" => 5,
+        _ => 6,
+    }
+}
+
+/// Build hull part groups from a list of hull meshes.
+fn build_hull_part_groups(
+    hull_meshes: &[wowsunpack::export::gltf_export::InteractiveHullMesh],
+) -> Vec<(String, Vec<String>)> {
+    use std::collections::{BTreeSet, HashMap};
+
+    let mut group_map: HashMap<&str, BTreeSet<String>> = HashMap::new();
+    for mesh in hull_meshes {
+        let group = hull_part_group(&mesh.name);
+        group_map.entry(group).or_default().insert(mesh.name.clone());
+    }
+
+    let mut groups: Vec<(String, Vec<String>)> =
+        group_map.into_iter().map(|(group, names)| (group.to_string(), names.into_iter().collect())).collect();
+    groups.sort_by_key(|(g, _)| hull_group_order(g));
+    groups
 }
 
 /// Apply a column-major 4x4 transform to a point (position).

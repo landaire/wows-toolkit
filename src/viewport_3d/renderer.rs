@@ -54,8 +54,10 @@ const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 pub struct GpuPipeline {
     /// Pipeline with depth writes enabled — used for opaque geometry (armor).
     pipeline: wgpu::RenderPipeline,
-    /// Pipeline without depth writes — used for transparent overlays (hull, highlights).
+    /// Pipeline without depth writes — used for transparent hull geometry.
     pipeline_no_depth_write: wgpu::RenderPipeline,
+    /// Pipeline that ignores depth — used for highlight overlays (always on top).
+    pipeline_overlay: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -130,12 +132,12 @@ impl GpuPipeline {
             cache: None,
         });
 
-        // Pipeline without depth writes (for transparent hull + overlays).
+        // Pipeline without depth writes (for transparent hull).
         let pipeline_no_depth_write = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("viewport_3d_pipeline_no_depth_write"),
             layout: Some(&pipeline_layout),
-            vertex: vertex_state,
-            fragment: Some(fragment_state),
+            vertex: vertex_state.clone(),
+            fragment: Some(fragment_state.clone()),
             primitive: primitive_state,
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
@@ -153,13 +155,33 @@ impl GpuPipeline {
             cache: None,
         });
 
-        Self { pipeline, pipeline_no_depth_write, uniform_bind_group_layout }
+        // Pipeline for overlays — ignores depth so highlights are always visible.
+        let pipeline_overlay = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport_3d_pipeline_overlay"),
+            layout: Some(&pipeline_layout),
+            vertex: vertex_state,
+            fragment: Some(fragment_state),
+            primitive: primitive_state,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        Self { pipeline, pipeline_no_depth_write, pipeline_overlay, uniform_bind_group_layout }
     }
 }
 
 /// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
-/// Layers <= LAYER_OPAQUE_MAX use the depth-writing pipeline; higher layers use the
-/// no-depth-write pipeline for correct transparent compositing.
+/// - Layers <= LAYER_OPAQUE_MAX: depth-writing pipeline (opaque armor).
+/// - LAYER_HULL: no-depth-write pipeline with depth test (transparent hull, behind armor).
+/// - LAYER_OVERLAY: no depth test at all (highlight overlays, always visible on top).
 pub const LAYER_DEFAULT: i32 = 0;
 pub const LAYER_HULL: i32 = 1;
 pub const LAYER_OVERLAY: i32 = 2;
@@ -451,18 +473,22 @@ impl Viewport3D {
             let mut sorted: Vec<&GpuMesh> = self.meshes.values().filter(|m| m.visible && m.index_count > 0).collect();
             sorted.sort_by_key(|m| m.layer);
 
-            let mut current_pipeline_is_opaque = true;
-            pass.set_pipeline(&pipeline.pipeline);
-
+            let mut current_layer_kind: i32 = -1; // force first set_pipeline
             for mesh in sorted {
-                let needs_opaque = mesh.layer <= LAYER_OPAQUE_MAX;
-                if needs_opaque != current_pipeline_is_opaque {
-                    if needs_opaque {
-                        pass.set_pipeline(&pipeline.pipeline);
-                    } else {
-                        pass.set_pipeline(&pipeline.pipeline_no_depth_write);
+                let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
+                    0 // opaque
+                } else if mesh.layer < LAYER_OVERLAY {
+                    1 // transparent (hull)
+                } else {
+                    2 // overlay (always on top)
+                };
+                if layer_kind != current_layer_kind {
+                    match layer_kind {
+                        0 => pass.set_pipeline(&pipeline.pipeline),
+                        1 => pass.set_pipeline(&pipeline.pipeline_no_depth_write),
+                        _ => pass.set_pipeline(&pipeline.pipeline_overlay),
                     }
-                    current_pipeline_is_opaque = needs_opaque;
+                    current_layer_kind = layer_kind;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

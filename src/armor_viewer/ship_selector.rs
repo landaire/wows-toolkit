@@ -98,8 +98,9 @@ impl ShipCatalog {
                 None => continue,
             };
 
-            // Skip test/NDA ships (group starts with "demo")
-            if vehicle.group().starts_with("demo") {
+            // Skip test/NDA ships, rentals, and disabled/unavailable ships.
+            let group = vehicle.group();
+            if group.starts_with("demo") || group == "clan" || group == "disabled" || group == "unavailable" {
                 continue;
             }
             let tier = vehicle.level();

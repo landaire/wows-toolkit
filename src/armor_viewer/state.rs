@@ -32,8 +32,8 @@ pub struct ArmorViewerState {
     pub gpu_pipeline: Option<Arc<GpuPipeline>>,
     /// Counter for generating unique pane IDs.
     pub next_pane_id: u64,
-    /// Cached nation flag textures.
-    pub nation_flag_textures: HashMap<String, egui::TextureHandle>,
+    /// Cached nation flag assets (raw PNG bytes), keyed by nation name.
+    pub nation_flag_textures: HashMap<String, Arc<crate::wows_data::GameAsset>>,
     /// When true, all split panes share the same camera.
     pub mirror_cameras: bool,
     /// When true, armor/hull visibility is synced across all panes.
@@ -92,8 +92,8 @@ pub struct LoadedShipArmor {
     pub zone_parts: Vec<(String, Vec<String>)>,
     /// Hull visual meshes (render sets) for optional overlay display.
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
-    /// Sorted unique hull render set names.
-    pub hull_part_names: Vec<String>,
+    /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
+    pub hull_part_groups: Vec<(String, Vec<String>)>,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -126,6 +126,8 @@ pub struct ArmorPane {
     pub hover_highlight: Option<((String, String), MeshId)>,
     /// Pinned (clicked) highlights: subcomponent key -> overlay mesh ID.
     pub pinned_highlights: HashMap<(String, String), MeshId>,
+    /// Persisted key for the right-click context menu (so menu stays open when mouse moves to it).
+    pub context_menu_key: Option<(String, String)>,
 }
 
 impl ArmorPane {
@@ -145,6 +147,7 @@ impl ArmorPane {
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
             pinned_highlights: HashMap::new(),
+            context_menu_key: None,
         }
     }
 }

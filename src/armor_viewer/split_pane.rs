@@ -54,6 +54,14 @@ impl SplitNode {
         }
     }
 
+    /// Return the ID of the rightmost leaf pane (follows `second` children in horizontal splits).
+    pub fn rightmost_leaf_id(&self) -> u64 {
+        match self {
+            SplitNode::Leaf(pane) => pane.id,
+            SplitNode::Split { second, .. } => second.rightmost_leaf_id(),
+        }
+    }
+
     /// Count total leaf panes.
     pub fn pane_count(&self) -> usize {
         match self {

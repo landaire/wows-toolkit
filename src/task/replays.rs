@@ -101,6 +101,17 @@ pub fn load_ribbon_icons(vfs: &VfsPath, dir_path: &str) -> HashMap<String, Arc<G
     icons
 }
 
+/// Load a single nation flag PNG from `gui/nation_flags/tiny/flag_{nation}.png`.
+pub fn load_nation_flag(vfs: &VfsPath, nation: &str) -> Option<Arc<GameAsset>> {
+    let path = format!("gui/nation_flags/tiny/flag_{nation}.png");
+    let mut data = Vec::new();
+    vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut data).ok()?;
+    if data.is_empty() {
+        return None;
+    }
+    Some(Arc::new(GameAsset { path, data }))
+}
+
 #[instrument(skip_all)]
 pub fn load_ship_icons(vfs: &VfsPath) -> HashMap<Species, Arc<GameAsset>> {
     let species = [
