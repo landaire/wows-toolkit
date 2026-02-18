@@ -415,6 +415,9 @@ fn parse_replay_data_in_background(
                                 if data.should_send_replays && is_valid_game_type_for_shipbuilds {
                                     // Send the replay builds to the remote server
                                     for player in report.players() {
+                                        let Some(realm) = player.initial_state().realm() else {
+                                            continue;
+                                        };
                                         #[cfg(not(feature = "shipbuilds_debugging"))]
                                         let url = "https://shipbuilds.com/api/ship_builds";
                                         #[cfg(feature = "shipbuilds_debugging")]
@@ -422,7 +425,7 @@ fn parse_replay_data_in_background(
 
                                         if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
                                             player,
-                                            player.initial_state().realm().to_string(),
+                                            realm.to_string(),
                                             report.version(),
                                             game_type.to_string(),
                                             &metadata_provider,

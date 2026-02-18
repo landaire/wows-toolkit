@@ -52,7 +52,8 @@ pub fn player_color_for_team_relation(relation: Relation) -> Color32 {
 
 pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
     let state = player.initial_state();
-    Some(format!("https://{}.wows-numbers.com/player/{},{}", state.realm(), state.db_id(), state.username()))
+    let realm = state.realm()?;
+    Some(format!("https://{}.wows-numbers.com/player/{},{}", realm, state.db_id(), state.username()))
 }
 
 pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {

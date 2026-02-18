@@ -2467,11 +2467,19 @@ impl ToolkitTabViewer<'_> {
             let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } =
                 message;
 
-            let translated_text = if sender_relation.is_none() {
-                self.metadata_provider().and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned))
-            } else {
-                None
-            };
+            let (translated_name, translated_text) =
+                if sender_relation.is_none() || player.as_ref().map(|player| player.is_bot()).unwrap_or_default() {
+                    let translated_user = self
+                        .metadata_provider()
+                        .and_then(|provider| provider.localized_name_from_id(sender_name).map(Cow::Owned));
+                    let translated_text = self
+                        .metadata_provider()
+                        .and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned));
+
+                    (translated_user, translated_text)
+                } else {
+                    (None, None)
+                };
 
             let message = if let Ok(decoded) = decode_html(message.as_str()) {
                 Cow::Owned(decoded)
@@ -2479,16 +2487,15 @@ impl ToolkitTabViewer<'_> {
                 Cow::Borrowed(message)
             };
 
+            let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
+            let message: Cow<'_, String> = translated_text.unwrap_or(message);
+
             let text = match player {
                 Some(player) if !player.initial_state().clan().is_empty() => {
-                    format!(
-                        "[{}] {sender_name} ({channel:?}): {}",
-                        player.initial_state().clan(),
-                        translated_text.as_ref().unwrap_or(&message)
-                    )
+                    format!("[{}] {sender_name} ({channel:?}): {message}", player.initial_state().clan(),)
                 }
                 _ => {
-                    format!("{sender_name} ({channel:?}): {}", translated_text.as_ref().unwrap_or(&message))
+                    format!("{sender_name} ({channel:?}): {message}")
                 }
             };
 
@@ -2517,11 +2524,7 @@ impl ToolkitTabViewer<'_> {
                 _ => Color32::ORANGE,
             };
 
-            job.append(
-                translated_text.as_ref().unwrap_or(&message),
-                0.0,
-                TextFormat { color: text_color, ..Default::default() },
-            );
+            job.append(message.as_str(), 0.0, TextFormat { color: text_color, ..Default::default() });
 
             if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                 ui.ctx().copy_text(text);
