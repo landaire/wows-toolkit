@@ -52,7 +52,10 @@ const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
+    /// Pipeline with depth writes enabled — used for opaque geometry (armor).
     pipeline: wgpu::RenderPipeline,
+    /// Pipeline without depth writes — used for transparent overlays (hull, highlights).
+    pipeline_no_depth_write: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -83,31 +86,38 @@ impl GpuPipeline {
             push_constant_ranges: &[],
         });
 
+        let vertex_state = wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Vertex::LAYOUT],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        };
+
+        let fragment_state = wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: COLOR_FORMAT,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        };
+
+        let primitive_state = wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None, // Double-sided
+            ..Default::default()
+        };
+
+        // Pipeline with depth writes (for opaque armor meshes).
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("viewport_3d_pipeline"),
             layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::LAYOUT],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: COLOR_FORMAT,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, // Double-sided
-                ..Default::default()
-            },
+            vertex: vertex_state.clone(),
+            fragment: Some(fragment_state.clone()),
+            primitive: primitive_state,
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: true,
@@ -120,9 +130,42 @@ impl GpuPipeline {
             cache: None,
         });
 
-        Self { pipeline, uniform_bind_group_layout }
+        // Pipeline without depth writes (for transparent hull + overlays).
+        let pipeline_no_depth_write = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport_3d_pipeline_no_depth_write"),
+            layout: Some(&pipeline_layout),
+            vertex: vertex_state,
+            fragment: Some(fragment_state),
+            primitive: primitive_state,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2, // push transparent geometry slightly behind opaque
+                    slope_scale: 1.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        Self { pipeline, pipeline_no_depth_write, uniform_bind_group_layout }
     }
 }
+
+/// Render layer constants. Lower values draw first (behind), higher values draw last (on top).
+/// Layers <= LAYER_OPAQUE_MAX use the depth-writing pipeline; higher layers use the
+/// no-depth-write pipeline for correct transparent compositing.
+pub const LAYER_DEFAULT: i32 = 0;
+pub const LAYER_HULL: i32 = 1;
+pub const LAYER_OVERLAY: i32 = 2;
+
+/// Layers at or below this value write to the depth buffer (opaque pass).
+const LAYER_OPAQUE_MAX: i32 = 0;
 
 /// Per-mesh GPU buffers.
 struct GpuMesh {
@@ -130,6 +173,7 @@ struct GpuMesh {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     visible: bool,
+    layer: i32,
 }
 
 /// Offscreen render target (color + depth).
@@ -180,7 +224,7 @@ impl Viewport3D {
     }
 
     /// Upload a mesh to the GPU. Returns a MeshId for later reference.
-    pub fn add_mesh(&mut self, device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> MeshId {
+    pub fn add_mesh(&mut self, device: &wgpu::Device, vertices: &[Vertex], indices: &[u32], layer: i32) -> MeshId {
         use wgpu::util::DeviceExt;
 
         let id = MeshId(self.next_mesh_id);
@@ -198,8 +242,10 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes
-            .insert(id, GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true });
+        self.meshes.insert(
+            id,
+            GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true, layer },
+        );
 
         // Keep CPU-side data for picking
         let positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
@@ -228,8 +274,16 @@ impl Viewport3D {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.meshes
-            .insert(id, GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true });
+        self.meshes.insert(
+            id,
+            GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer: LAYER_OVERLAY,
+            },
+        );
 
         // No pick_data entry — this mesh is invisible to picking
         self.needs_redraw = true;
@@ -391,12 +445,24 @@ impl Viewport3D {
                 ..Default::default()
             });
 
-            pass.set_pipeline(&pipeline.pipeline);
             pass.set_bind_group(0, self.uniform_bind_group.as_ref().unwrap(), &[]);
 
-            for mesh in self.meshes.values() {
-                if !mesh.visible || mesh.index_count == 0 {
-                    continue;
+            // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
+            let mut sorted: Vec<&GpuMesh> = self.meshes.values().filter(|m| m.visible && m.index_count > 0).collect();
+            sorted.sort_by_key(|m| m.layer);
+
+            let mut current_pipeline_is_opaque = true;
+            pass.set_pipeline(&pipeline.pipeline);
+
+            for mesh in sorted {
+                let needs_opaque = mesh.layer <= LAYER_OPAQUE_MAX;
+                if needs_opaque != current_pipeline_is_opaque {
+                    if needs_opaque {
+                        pass.set_pipeline(&pipeline.pipeline);
+                    } else {
+                        pass.set_pipeline(&pipeline.pipeline_no_depth_write);
+                    }
+                    current_pipeline_is_opaque = needs_opaque;
                 }
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

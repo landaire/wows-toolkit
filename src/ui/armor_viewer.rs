@@ -7,7 +7,7 @@ use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::split_pane::{CompareSettings, SplitAction};
 use crate::armor_viewer::state::{ArmorPane, ArmorTriangleTooltip, LoadedShipArmor, ShipAssetsState};
 use crate::icons;
-use crate::viewport_3d::{GpuPipeline, MeshId, Vertex};
+use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
 
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
@@ -487,18 +487,16 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
 
             tooltips.push(ArmorTriangleTooltip {
-                model_index: info.model_index,
-                triangle_index: info.triangle_index,
-                material_id: info.material_id,
                 material_name: info.material_name.clone(),
                 zone: info.zone.clone(),
                 thickness_mm: info.thickness_mm,
+                layers: info.layers.clone(),
                 color: info.color,
             });
         }
 
         if !indices.is_empty() {
-            let mesh_id = pane.viewport.add_mesh(device, &vertices, &indices);
+            let mesh_id = pane.viewport.add_mesh(device, &vertices, &indices, LAYER_DEFAULT);
             pane.mesh_triangle_info.push((mesh_id, tooltips));
         }
     }
@@ -510,7 +508,9 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
             continue;
         }
 
-        let hull_color: [f32; 4] = [0.6, 0.6, 0.65, 0.3];
+        let hull_alpha: f32 = 0.7;
+        let fallback_color: [f32; 4] = [0.6, 0.6, 0.65, hull_alpha];
+        let has_baked_colors = mesh.colors.len() == mesh.positions.len();
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
         for i in 0..mesh.positions.len() {
             let mut pos = mesh.positions[i];
@@ -521,11 +521,17 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
                 norm = transform_normal(t, norm);
             }
 
-            vertices.push(Vertex { position: pos, normal: norm, color: hull_color });
+            let color = if has_baked_colors {
+                let c = mesh.colors[i];
+                [c[0], c[1], c[2], hull_alpha]
+            } else {
+                fallback_color
+            };
+            vertices.push(Vertex { position: pos, normal: norm, color });
         }
 
         if !mesh.indices.is_empty() {
-            pane.viewport.add_mesh(device, &vertices, &mesh.indices);
+            pane.viewport.add_mesh(device, &vertices, &mesh.indices, LAYER_HULL);
         }
     }
 
@@ -764,6 +770,7 @@ fn render_armor_pane(
 
                 // Picking on hover / click / right-click
                 let mut hovered_key: Option<(String, String)> = None;
+                let context_menu_open = egui::Popup::is_id_open(vp_ui.ctx(), response.id.with("__egui::context_menu"));
                 if response.hovered() {
                     if let Some(hover_pos) = response.hover_pos() {
                         if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
@@ -776,9 +783,11 @@ fn render_armor_pane(
                             if let Some(tooltip) = tooltip {
                                 hovered_key = Some((tooltip.zone.clone(), tooltip.material_name.clone()));
                                 pane.hovered_info = Some(tooltip.clone());
-                                egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
-                                    show_armor_tooltip(ui, tooltip, translate_part);
-                                });
+                                if !context_menu_open {
+                                    egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
+                                        show_armor_tooltip(ui, tooltip, translate_part);
+                                    });
+                                }
                             } else {
                                 pane.hovered_info = None;
                             }
@@ -994,11 +1003,15 @@ fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate:
         );
         let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 2.0, color);
-        ui.label(format!("{:.0} mm", info.thickness_mm));
+        if info.layers.len() > 1 {
+            let layer_str: Vec<String> = info.layers.iter().map(|l| format!("{:.0}", l)).collect();
+            ui.label(format!("{:.0} mm ({})", info.thickness_mm, layer_str.join(" + ")));
+        } else {
+            ui.label(format!("{:.0} mm", info.thickness_mm));
+        }
     });
     ui.label(format!("Zone: {}", &info.zone));
     ui.label(format!("Part: {}", translate(&info.material_name)));
-    ui.label(format!("Model: {}  Tri: {}  Mat ID: {}", info.model_index, info.triangle_index, info.material_id,));
 }
 
 /// Upload a highlight overlay mesh for all triangles in the given (zone, material_name) subcomponent.
@@ -1010,7 +1023,7 @@ fn upload_subcomponent_highlight(
     device: &wgpu::Device,
     highlight_color: [f32; 4],
 ) -> MeshId {
-    let normal_offset = 0.005; // slight offset along normal to avoid z-fighting
+    let normal_offset = 0.03; // offset along normal to avoid z-fighting
 
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();

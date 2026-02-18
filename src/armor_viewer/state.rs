@@ -72,12 +72,11 @@ impl ArmorViewerState {
 /// Per-triangle metadata from the armor mesh, for tooltip display.
 #[derive(Clone, Debug)]
 pub struct ArmorTriangleTooltip {
-    pub model_index: u32,
-    pub triangle_index: u32,
-    pub material_id: u8,
     pub material_name: String,
     pub zone: String,
     pub thickness_mm: f32,
+    /// Per-layer thicknesses (ordered by model_index). Single-layer plates have one entry.
+    pub layers: Vec<f32>,
     pub color: [f32; 4],
 }
 

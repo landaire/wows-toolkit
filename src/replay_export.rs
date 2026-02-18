@@ -95,7 +95,7 @@ pub struct Player {
     /// WG database ID
     db_id: AccountId,
     /// Which server this player is on
-    realm: String,
+    realm: Option<String>,
     /// Player name
     name: String,
     clan: String,
@@ -116,7 +116,7 @@ impl From<&wows_replays::analyzer::battle_controller::Player> for Player {
         let clan_color = clan_color.as_i64().expect("clan color is not an i64") & 0xFFFFFF;
         Self {
             db_id: state.db_id(),
-            realm: state.realm().to_string(),
+            realm: state.realm().map(str::to_owned),
             name: state.username().to_string(),
             clan: state.clan().to_string(),
             clan_color_rgb: clan_color as u32,
@@ -164,7 +164,7 @@ pub struct FlattenedVehicle {
     player_name: String,
     player_clan: String,
     player_id: AccountId,
-    player_realm: String,
+    player_realm: Option<String>,
     /// Ship index that can be mapped to a GameParam
     index: String,
     /// Ship name from EN localization
