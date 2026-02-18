@@ -24,6 +24,8 @@ pub struct ClassGroup {
 pub struct ShipEntry {
     pub param_index: String,
     pub display_name: String,
+    /// Lowercased, ASCII-folded display name for search matching.
+    pub search_name: String,
     pub tier: u32,
 }
 
@@ -111,7 +113,8 @@ impl ShipCatalog {
                 .map(|s: &str| s.to_string())
                 .unwrap_or_else(|| param.name().to_string());
 
-            let entry = ShipEntry { param_index: param.index().to_string(), display_name, tier };
+            let search_name = unidecode::unidecode(&display_name).to_lowercase();
+            let entry = ShipEntry { param_index: param.index().to_string(), display_name, search_name, tier };
 
             nation_map.entry(nation).or_default().entry(species).or_default().push(entry);
         }

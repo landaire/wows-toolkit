@@ -8281,6 +8281,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "twitch_api",
+ "unidecode",
  "wgpu 27.0.1",
  "winresource",
  "wows_minimap_renderer",

@@ -257,7 +257,7 @@ impl ToolkitTabViewer<'_> {
 
             // Ship tree using egui_ltreeview
             if let Some(catalog) = &ship_catalog {
-                let search = state.selector_search.to_lowercase();
+                let search = unidecode::unidecode(&state.selector_search).to_lowercase();
 
                 // Sort nations by translated display name.
                 let mut sorted_nations: Vec<&_> = catalog.nations.iter().collect();
@@ -310,7 +310,7 @@ impl ToolkitTabViewer<'_> {
                                 || nation
                                     .classes
                                     .iter()
-                                    .any(|c| c.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search)));
+                                    .any(|c| c.ships.iter().any(|s| s.search_name.contains(&search)));
                             if !has_match {
                                 continue;
                             }
@@ -337,7 +337,7 @@ impl ToolkitTabViewer<'_> {
                             if is_open {
                                 for class in &nation.classes {
                                     let has_class_match = search.is_empty()
-                                        || class.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search));
+                                        || class.ships.iter().any(|s| s.search_name.contains(&search));
                                     if !has_class_match {
                                         continue;
                                     }
@@ -364,8 +364,7 @@ impl ToolkitTabViewer<'_> {
                                     let class_open = builder.node(class_dir);
                                     if class_open {
                                         for ship in &class.ships {
-                                            if !search.is_empty() && !ship.display_name.to_lowercase().contains(&search)
-                                            {
+                                            if !search.is_empty() && !ship.search_name.contains(&search) {
                                                 continue;
                                             }
 
