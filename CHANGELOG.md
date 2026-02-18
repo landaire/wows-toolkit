@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.48] - 2026-02-18
+
+### 🚀 Features
+
+- Armor viewer
+- *(armor)* Fix turret transform + sync options across panes
+- *(armor)* Allow clicking to select armor regions, right-click to disable
+- *(armor)* Show stacked plates
+
+### 🐛 Bug Fixes
+
+- Refactor to use Vfs
+- Operations now load
+- Game params are not reloaded when loading ShipAssets
+
+### Armor
+
+- Remove test / NDA ships
+- Load nation flags
+- Use egui_ltreeview
+- Refactor to use egui_dock
+
 ## [0.1.47] - 2026-02-16
 
 ### 🚀 Features
