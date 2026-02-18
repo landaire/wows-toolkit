@@ -2,10 +2,15 @@ on:
   release:
     types: [created]
 
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   release:
     name: Build and upload release
     runs-on: windows-latest
+    environment: release-signing
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +32,21 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign executable
+        uses: azure/trusted-signing-action@v1
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: wows-toolkit
+          certificate-profile-name: wows-toolkit
+          files: target/x86_64-pc-windows-msvc/release/wows_toolkit.exe
 
       - name: Create zip archive
         run: |
