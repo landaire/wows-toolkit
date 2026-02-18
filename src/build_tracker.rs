@@ -59,7 +59,7 @@ impl BuildTrackerPayload {
             captain: entity.captain().map(|capt| capt.index()).unwrap_or("PCW001").to_string(),
             skills: entity.commander_skills_raw(ship.species()?.known().cloned()?).to_vec(),
             consumables: indicies_to_index(config.abilities(), metadata_provider),
-            signals: indicies_to_index(config.signals(), metadata_provider),
+            signals: indicies_to_index(config.exteriors(), metadata_provider),
             game_type,
         })
     }

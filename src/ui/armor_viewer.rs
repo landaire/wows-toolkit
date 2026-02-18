@@ -682,6 +682,18 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
         }
     }
 
+    // Water plane at draft height.
+    // The model's Y=0 appears to be at the keel. The `draft` value (in the same units as
+    // the model) tells us how deep below the waterline the keel sits, so the waterline
+    // is at Y = draft. However, draft is in real-world meters while the model uses a
+    // smaller coordinate system. We estimate the scale from the model's vertical extent
+    // vs a typical hull depth (~draft * 1.3 as a rough approximation).
+    // For now, place the plane at Y=0 (which appears to be the waterline in BigWorld models).
+    if pane.show_waterline && armor.draft_meters.is_some() {
+        let (verts, indices) = create_water_plane(0.0, armor.bounds);
+        pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_HULL);
+    }
+
     pane.viewport.mark_dirty();
 }
 
@@ -878,6 +890,14 @@ fn render_armor_pane(
                                     }
                                 }); // ScrollArea
                             });
+                    }
+
+                    // Waterline toggle
+                    if armor.draft_meters.is_some() {
+                        ui.separator();
+                        if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
+                            zone_changed = true;
+                        }
                     }
                 });
                 vp_ui.separator();
@@ -1084,7 +1104,15 @@ fn load_ship_for_pane(
     // Resolve the Vehicle from GameParams on the main thread so we can use
     // load_ship_from_vehicle (avoids the fuzzy find_ship lookup entirely).
     use wowsunpack::game_params::types::GameParamProvider;
-    let vehicle = ship_assets.metadata().game_param_by_index(param_index).and_then(|p| p.vehicle().cloned());
+    let param = ship_assets.metadata().game_param_by_index(param_index);
+    let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
+    let draft_meters = param.as_ref().and_then(|p| {
+        p.vehicle()
+            .and_then(|v| v.hull_upgrades())
+            .and_then(|upgrades| upgrades.values().next())
+            .and_then(|config| config.draft())
+            .map(|m| m.value())
+    });
 
     std::thread::spawn(move || {
         let result = (|| {
@@ -1146,6 +1174,8 @@ fn load_ship_for_pane(
             // Categorize hull parts into logical groups.
             let hull_part_groups = build_hull_part_groups(&hull_meshes);
 
+            tracing::debug!("Ship loaded: draft={:?}, bounds Y=[{:.2}, {:.2}]", draft_meters, min[1], max[1]);
+
             Ok(LoadedShipArmor {
                 display_name: ship_display_name,
                 meshes,
@@ -1154,6 +1184,7 @@ fn load_ship_for_pane(
                 zone_parts,
                 hull_meshes,
                 hull_part_groups,
+                draft_meters,
             })
         })();
 
@@ -1296,6 +1327,28 @@ fn build_hull_part_groups(
         group_map.into_iter().map(|(group, names)| (group.to_string(), names.into_iter().collect())).collect();
     groups.sort_by_key(|(g, _)| hull_group_order(g));
     groups
+}
+
+/// Create a water plane quad at the given Y height, extending beyond the hull bounding box.
+/// Returns (vertices, indices) for a semi-transparent blue quad.
+fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3])) -> (Vec<Vertex>, Vec<u32>) {
+    let cx = (bounds.0[0] + bounds.1[0]) * 0.5;
+    let cz = (bounds.0[2] + bounds.1[2]) * 0.5;
+    let ex = (bounds.1[0] - bounds.0[0]) * 0.75;
+    let ez = (bounds.1[2] - bounds.0[2]) * 0.75;
+
+    let color = [0.1, 0.4, 0.8, 0.3];
+    let normal = [0.0, 1.0, 0.0];
+
+    let vertices = vec![
+        Vertex { position: [cx - ex, y, cz - ez], normal, color },
+        Vertex { position: [cx + ex, y, cz - ez], normal, color },
+        Vertex { position: [cx + ex, y, cz + ez], normal, color },
+        Vertex { position: [cx - ex, y, cz + ez], normal, color },
+    ];
+    let indices = vec![0, 1, 2, 0, 2, 3];
+
+    (vertices, indices)
 }
 
 /// Apply a column-major 4x4 transform to a point (position).

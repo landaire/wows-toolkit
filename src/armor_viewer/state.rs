@@ -103,6 +103,8 @@ pub struct LoadedShipArmor {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
     pub hull_part_groups: Vec<(String, Vec<String>)>,
+    /// Ship draft (depth below waterline) in meters, from the hull component.
+    pub draft_meters: Option<f32>,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -137,6 +139,8 @@ pub struct ArmorPane {
     pub pinned_highlights: HashMap<(String, String), MeshId>,
     /// Persisted key for the right-click context menu (so menu stays open when mouse moves to it).
     pub context_menu_key: Option<(String, String)>,
+    /// Whether to show the waterline plane.
+    pub show_waterline: bool,
 }
 
 impl ArmorPane {
@@ -157,6 +161,7 @@ impl ArmorPane {
             hover_highlight: None,
             pinned_highlights: HashMap::new(),
             context_menu_key: None,
+            show_waterline: true,
         }
     }
 }

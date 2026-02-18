@@ -400,6 +400,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_ship_names: saved.show_ship_names,
         show_capture_points: saved.show_capture_points,
         show_buildings: saved.show_buildings,
+        show_weather: saved.show_buildings, // TODO: add show_weather to SavedRenderOptions
         show_turret_direction: saved.show_turret_direction,
         show_consumables: saved.show_consumables,
         show_armament: saved.show_armament,
@@ -2047,6 +2048,7 @@ fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships:
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
         DrawCommand::ChatOverlay { .. } => opts.show_chat,
         DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
+        DrawCommand::WeatherZone { .. } => opts.show_weather,
     }
 }
 
@@ -2909,6 +2911,17 @@ fn draw_command_to_shapes(
 
         DrawCommand::TeamAdvantage { .. } => {
             // Rendering handled by ScoreBar; this command is kept for tooltip interaction only
+        }
+
+        DrawCommand::WeatherZone { pos, radius } => {
+            let center = transform.minimap_to_screen(pos);
+            let r = transform.scale_distance(*radius as f32);
+            shapes.push(Shape::circle_filled(center, r, Color32::from_rgba_unmultiplied(100, 100, 120, 40)));
+            shapes.push(Shape::circle_stroke(
+                center,
+                r,
+                Stroke::new(transform.scale_stroke(1.0), Color32::from_rgba_unmultiplied(120, 120, 150, 80)),
+            ));
         }
 
         DrawCommand::KillFeed { entries } => {

@@ -86,7 +86,7 @@ pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataPr
             Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
-        "Signals": config.signals().iter().filter_map(|id| {
+        "Signals": config.exteriors().iter().filter_map(|id| {
             Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
         }).collect::<Vec<_>>(),
 
@@ -147,7 +147,7 @@ pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMeta
 
     // Signals
     parts[6] = config
-        .signals()
+        .exteriors()
         .iter()
         .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
         .collect::<Vec<_>>()

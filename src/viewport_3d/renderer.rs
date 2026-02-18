@@ -277,6 +277,40 @@ impl Viewport3D {
         id
     }
 
+    /// Add a mesh that is rendered on a given layer but excluded from picking.
+    pub fn add_non_pickable_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+        layer: i32,
+    ) -> MeshId {
+        use wgpu::util::DeviceExt;
+
+        let id = MeshId(self.next_mesh_id);
+        self.next_mesh_id += 1;
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_np_vb_{}", id.0)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_np_ib_{}", id.0)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        self.meshes.insert(
+            id,
+            GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true, layer },
+        );
+
+        self.needs_redraw = true;
+        id
+    }
+
     /// Add a mesh that is rendered but excluded from picking (e.g. highlight overlays).
     pub fn add_overlay_mesh(&mut self, device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> MeshId {
         use wgpu::util::DeviceExt;
