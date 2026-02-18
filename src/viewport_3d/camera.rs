@@ -122,8 +122,8 @@ impl ArcballCamera {
         // Right direction (perpendicular to forward, horizontal)
         let rt = normalize([-fwd[2], 0.0, fwd[0]]);
 
-        let min_speed = self.far * 0.0004;
-        let speed = (self.distance * 0.02).max(min_speed);
+        let min_speed = self.far * 0.00005;
+        let speed = (self.distance * 0.0025).max(min_speed);
         self.target[0] += (fwd[0] * forward + rt[0] * right) * speed;
         self.target[1] += (fwd[1] * forward + rt[1] * right) * speed;
         self.target[2] += (fwd[2] * forward + rt[2] * right) * speed;
@@ -131,8 +131,8 @@ impl ArcballCamera {
 
     /// Move the camera target up/down (world Y axis).
     pub fn move_vertical(&mut self, amount: f32) {
-        let min_speed = self.far * 0.0004;
-        let speed = (self.distance * 0.02).max(min_speed);
+        let min_speed = self.far * 0.00005;
+        let speed = (self.distance * 0.0025).max(min_speed);
         self.target[1] += amount * speed;
     }
 
