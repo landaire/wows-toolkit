@@ -46,7 +46,8 @@ jobs:
           endpoint: https://eus.codesigning.azure.net/
           signing-account-name: wows-toolkit
           certificate-profile-name: wows-toolkit
-          files: target/x86_64-pc-windows-msvc/release/wows_toolkit.exe
+          files: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\wows_toolkit.exe
+          file-digest: SHA256
 
       - name: Create zip archive
         run: |
