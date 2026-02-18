@@ -1049,6 +1049,15 @@ fn render_armor_pane(
                 ui.label("Select a ship from the list");
             });
         }
+
+        // Re-upload after context menu changes (the check at the top of this function
+        // only catches zone-bar toggles; context menu sets zone_changed later).
+        if zone_changed {
+            if let Some(armor) = pane.loaded_armor.take() {
+                upload_armor_to_viewport(pane, &armor, &render_state.device);
+                pane.loaded_armor = Some(armor);
+            }
+        }
     }
 }
 
