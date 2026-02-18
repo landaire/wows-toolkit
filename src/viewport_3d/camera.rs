@@ -95,7 +95,7 @@ impl ArcballCamera {
     pub fn zoom(&mut self, scroll_delta: f32) {
         let factor = (-scroll_delta * 0.002).exp();
         self.distance *= factor;
-        self.distance = self.distance.clamp(self.near * 2.0, self.far * 0.5);
+        self.distance = self.distance.clamp(self.near * 0.1, self.far * 0.5);
     }
 
     /// Handle middle-mouse drag for panning.
@@ -115,17 +115,30 @@ impl ArcballCamera {
 
     /// Move the camera target using WASD-style keys.
     /// W/S move forward/backward along the camera's horizontal look direction.
-    /// A/D strafe left/right. Speed scales with distance from target.
+    /// A/D strafe left/right. Speed scales with distance but has a floor.
     pub fn wasd(&mut self, forward: f32, right: f32) {
         // Forward direction projected onto horizontal plane (Y-up)
         let fwd = normalize([-(self.azimuth.sin()), 0.0, -(self.azimuth.cos())]);
         // Right direction (perpendicular to forward, horizontal)
         let rt = normalize([-fwd[2], 0.0, fwd[0]]);
 
-        let speed = self.distance * 0.02;
+        let min_speed = self.far * 0.0004;
+        let speed = (self.distance * 0.02).max(min_speed);
         self.target[0] += (fwd[0] * forward + rt[0] * right) * speed;
         self.target[1] += (fwd[1] * forward + rt[1] * right) * speed;
         self.target[2] += (fwd[2] * forward + rt[2] * right) * speed;
+    }
+
+    /// Move the camera target up/down (world Y axis).
+    pub fn move_vertical(&mut self, amount: f32) {
+        let min_speed = self.far * 0.0004;
+        let speed = (self.distance * 0.02).max(min_speed);
+        self.target[1] += amount * speed;
+    }
+
+    /// Rotate the camera around the target (azimuth).
+    pub fn rotate_horizontal(&mut self, amount: f32) {
+        self.azimuth += amount * 0.03;
     }
 
     /// Handle standard 3D navigation input on a UI response.
@@ -173,6 +186,31 @@ impl ArcballCamera {
             });
             if fwd != 0.0 || rt != 0.0 {
                 self.wasd(fwd, rt);
+            }
+
+            // Arrow keys: Up/Down = move vertically, Left/Right = rotate around target
+            let (vert, rot) = response.ctx.input(|i| {
+                let mut v = 0.0_f32;
+                let mut r = 0.0_f32;
+                if i.key_down(egui::Key::ArrowUp) {
+                    v += 1.0;
+                }
+                if i.key_down(egui::Key::ArrowDown) {
+                    v -= 1.0;
+                }
+                if i.key_down(egui::Key::ArrowLeft) {
+                    r += 1.0;
+                }
+                if i.key_down(egui::Key::ArrowRight) {
+                    r -= 1.0;
+                }
+                (v, r)
+            });
+            if vert != 0.0 {
+                self.move_vertical(vert);
+            }
+            if rot != 0.0 {
+                self.rotate_horizontal(rot);
             }
         }
 

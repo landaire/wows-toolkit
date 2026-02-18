@@ -34,6 +34,14 @@ pub struct ArmorViewerState {
     pub next_pane_id: u64,
     /// Cached nation flag textures.
     pub nation_flag_textures: HashMap<String, egui::TextureHandle>,
+    /// When true, all split panes share the same camera.
+    pub mirror_cameras: bool,
+    /// When true, armor/hull visibility is synced across all panes.
+    pub sync_options: bool,
+    /// Shared ship selector search text (single sidebar).
+    pub selector_search: String,
+    /// ID of the pane that receives ship selections from the sidebar.
+    pub active_pane_id: u64,
 }
 
 impl Default for ArmorViewerState {
@@ -45,6 +53,10 @@ impl Default for ArmorViewerState {
             gpu_pipeline: None,
             next_pane_id: 1,
             nation_flag_textures: HashMap::new(),
+            mirror_cameras: false,
+            sync_options: false,
+            selector_search: String::new(),
+            active_pane_id: 0,
         }
     }
 }
@@ -60,6 +72,9 @@ impl ArmorViewerState {
 /// Per-triangle metadata from the armor mesh, for tooltip display.
 #[derive(Clone, Debug)]
 pub struct ArmorTriangleTooltip {
+    pub model_index: u32,
+    pub triangle_index: u32,
+    pub material_id: u8,
     pub material_name: String,
     pub zone: String,
     pub thickness_mm: f32,
@@ -76,6 +91,10 @@ pub struct LoadedShipArmor {
     pub zones: Vec<String>,
     /// Ordered mapping: zone name -> sorted list of unique material names in that zone.
     pub zone_parts: Vec<(String, Vec<String>)>,
+    /// Hull visual meshes (render sets) for optional overlay display.
+    pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
+    /// Sorted unique hull render set names.
+    pub hull_part_names: Vec<String>,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -96,14 +115,12 @@ pub struct ArmorPane {
     pub hovered_info: Option<ArmorTriangleTooltip>,
     /// Per-part visibility toggles, keyed by (zone, material_name).
     pub part_visibility: HashMap<(String, String), bool>,
-    /// When true, show only "hidden" armor plates (thickness == 0 mm).
-    pub show_only_hidden: bool,
+    /// Per hull render set visibility (name → visible). Defaults to all false.
+    pub hull_visibility: HashMap<String, bool>,
     /// Whether to show non-armor hull parts (future).
     pub show_hull: bool,
     /// Selected camouflage (future).
     pub selected_camo: Option<String>,
-    /// Ship selector search text.
-    pub selector_search: String,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
 }
@@ -119,10 +136,9 @@ impl ArmorPane {
             load_receiver: None,
             hovered_info: None,
             part_visibility: HashMap::new(),
-            show_only_hidden: false,
+            hull_visibility: HashMap::new(),
             show_hull: false,
             selected_camo: None,
-            selector_search: String::new(),
             mesh_triangle_info: Vec::new(),
         }
     }

@@ -16,7 +16,7 @@ pub struct CompareSettings {
     pub ship_display_name: String,
     pub camera: ArcballCamera,
     pub part_visibility: HashMap<(String, String), bool>,
-    pub show_only_hidden: bool,
+    pub hull_visibility: HashMap<String, bool>,
 }
 
 /// Action to apply to the split tree after rendering (deferred mutation).
@@ -42,6 +42,18 @@ pub enum SplitNode {
 }
 
 impl SplitNode {
+    /// Collect mutable references to all leaf panes.
+    pub fn all_panes_mut(&mut self) -> Vec<&mut ArmorPane> {
+        match self {
+            SplitNode::Leaf(pane) => vec![pane],
+            SplitNode::Split { first, second, .. } => {
+                let mut panes = first.all_panes_mut();
+                panes.extend(second.all_panes_mut());
+                panes
+            }
+        }
+    }
+
     /// Count total leaf panes.
     pub fn pane_count(&self) -> usize {
         match self {

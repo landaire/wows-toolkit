@@ -238,6 +238,11 @@ impl Viewport3D {
         self.needs_redraw = true;
     }
 
+    /// Whether the viewport needs a redraw.
+    pub fn is_dirty(&self) -> bool {
+        self.needs_redraw
+    }
+
     /// Returns true if the viewport has any meshes to render.
     pub fn has_meshes(&self) -> bool {
         !self.meshes.is_empty()
