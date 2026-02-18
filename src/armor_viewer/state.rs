@@ -6,6 +6,10 @@ use egui_dock::DockState;
 
 use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 
+/// Key identifying a specific plate: (zone, material_name, thickness in tenths of mm).
+/// The thickness discriminator ensures highlights stop at plate boundaries.
+pub type PlateKey = (String, String, i32);
+
 /// Loading state for ShipAssets.
 pub enum ShipAssetsState {
     NotLoaded,
@@ -136,14 +140,16 @@ pub struct ArmorPane {
     pub selected_camo: Option<String>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
-    /// Hover highlight: subcomponent key and its overlay mesh.
-    pub hover_highlight: Option<((String, String), MeshId)>,
-    /// Pinned (clicked) highlights: subcomponent key -> overlay mesh ID.
-    pub pinned_highlights: HashMap<(String, String), MeshId>,
+    /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
+    pub hover_highlight: Option<(PlateKey, MeshId)>,
+    /// Pinned (clicked) highlights: plate key -> overlay mesh ID.
+    pub pinned_highlights: HashMap<PlateKey, MeshId>,
     /// Persisted key for the right-click context menu (so menu stays open when mouse moves to it).
     pub context_menu_key: Option<(String, String)>,
     /// Whether to show the waterline plane.
     pub show_waterline: bool,
+    /// Whether to show black outlines at plate thickness boundaries.
+    pub show_plate_edges: bool,
 }
 
 impl ArmorPane {
@@ -165,6 +171,7 @@ impl ArmorPane {
             pinned_highlights: HashMap::new(),
             context_menu_key: None,
             show_waterline: true,
+            show_plate_edges: true,
         }
     }
 }

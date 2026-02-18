@@ -6,7 +6,9 @@ use egui_dock::{DockArea, DockState, TabViewer};
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
-use crate::armor_viewer::state::{ArmorPane, ArmorTriangleTooltip, CompareSettings, LoadedShipArmor, ShipAssetsState};
+use crate::armor_viewer::state::{
+    ArmorPane, ArmorTriangleTooltip, CompareSettings, LoadedShipArmor, PlateKey, ShipAssetsState,
+};
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
 
@@ -658,6 +660,11 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
         }
     }
 
+    // Upload plate boundary edge outlines
+    if pane.show_plate_edges {
+        upload_plate_boundary_edges(pane, armor, device);
+    }
+
     // Upload hull visual meshes (semi-transparent gray overlay)
     for mesh in &armor.hull_meshes {
         let visible = pane.hull_visibility.get(&mesh.name).copied().unwrap_or(false);
@@ -902,6 +909,12 @@ fn render_armor_pane(
                             });
                     }
 
+                    // Plate edges toggle
+                    ui.separator();
+                    if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
+                        zone_changed = true;
+                    }
+
                     // Waterline toggle
                     if armor.draft_meters.is_some() {
                         ui.separator();
@@ -957,7 +970,8 @@ fn render_armor_pane(
                 }
 
                 // Picking on hover / click / right-click
-                let mut hovered_key: Option<(String, String)> = None;
+                let mut hovered_plate_key: Option<PlateKey> = None;
+                let mut hovered_part_key: Option<(String, String)> = None;
                 let context_menu_open =
                     egui::Popup::is_id_open(vp_ui.ctx(), egui::Popup::default_response_id(&response));
                 if response.hovered() {
@@ -970,7 +984,10 @@ fn render_armor_pane(
                                 .and_then(|(_, infos)| infos.get(hit.triangle_index));
 
                             if let Some(tooltip) = tooltip {
-                                hovered_key = Some((tooltip.zone.clone(), tooltip.material_name.clone()));
+                                let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
+                                hovered_plate_key =
+                                    Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
+                                hovered_part_key = Some((tooltip.zone.clone(), tooltip.material_name.clone()));
                                 pane.hovered_info = Some(tooltip.clone());
                                 if !context_menu_open {
                                     egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
@@ -988,7 +1005,7 @@ fn render_armor_pane(
 
                 // Click to toggle pinned highlight
                 if response.clicked() {
-                    if let Some(ref key) = hovered_key {
+                    if let Some(ref key) = hovered_plate_key {
                         if pane.pinned_highlights.contains_key(key) {
                             // Unpin
                             if let Some(mesh_id) = pane.pinned_highlights.remove(key) {
@@ -997,7 +1014,7 @@ fn render_armor_pane(
                         } else {
                             // Pin with a distinct color
                             if let Some(armor) = pane.loaded_armor.take() {
-                                let mesh_id = upload_subcomponent_highlight(
+                                let mesh_id = upload_plate_highlight(
                                     pane,
                                     &armor,
                                     key,
@@ -1013,7 +1030,7 @@ fn render_armor_pane(
 
                 // Latch context menu key on right-click; clear when menu closes.
                 if response.secondary_clicked() {
-                    pane.context_menu_key = hovered_key.clone();
+                    pane.context_menu_key = hovered_part_key.clone();
                 } else if !context_menu_open {
                     pane.context_menu_key = None;
                 }
@@ -1026,9 +1043,17 @@ fn render_armor_pane(
                         if ui.button(format!("Disable {}", ctx_name)).clicked() {
                             pane.part_visibility.insert(ctx_key.clone(), false);
                             zone_changed = true;
-                            // Remove pinned highlight if present
-                            if let Some(mesh_id) = pane.pinned_highlights.remove(&ctx_key) {
-                                pane.viewport.remove_mesh(mesh_id);
+                            // Remove pinned highlights for this part
+                            let to_remove: Vec<PlateKey> = pane
+                                .pinned_highlights
+                                .keys()
+                                .filter(|k| k.0 == ctx_key.0 && k.1 == ctx_key.1)
+                                .cloned()
+                                .collect();
+                            for k in to_remove {
+                                if let Some(mesh_id) = pane.pinned_highlights.remove(&k) {
+                                    pane.viewport.remove_mesh(mesh_id);
+                                }
                             }
                             ui.close();
                         }
@@ -1036,7 +1061,7 @@ fn render_armor_pane(
                             if ui.button("Disable all selected").clicked() {
                                 let keys: Vec<_> = pane.pinned_highlights.keys().cloned().collect();
                                 for k in &keys {
-                                    pane.part_visibility.insert(k.clone(), false);
+                                    pane.part_visibility.insert((k.0.clone(), k.1.clone()), false);
                                     if let Some(mesh_id) = pane.pinned_highlights.remove(k) {
                                         pane.viewport.remove_mesh(mesh_id);
                                     }
@@ -1048,8 +1073,8 @@ fn render_armor_pane(
                     });
                 }
 
-                // Update hover highlight overlay (skip if subcomponent is pinned)
-                let hover_key_for_highlight = hovered_key.filter(|k| !pane.pinned_highlights.contains_key(k));
+                // Update hover highlight overlay (skip if plate is pinned)
+                let hover_key_for_highlight = hovered_plate_key.filter(|k| !pane.pinned_highlights.contains_key(k));
                 let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
                 if hover_key_for_highlight != current_hover {
                     // Remove old hover highlight
@@ -1059,13 +1084,8 @@ fn render_armor_pane(
                     // Upload new hover highlight
                     if let Some(ref key) = hover_key_for_highlight {
                         if let Some(armor) = pane.loaded_armor.take() {
-                            let mesh_id = upload_subcomponent_highlight(
-                                pane,
-                                &armor,
-                                key,
-                                &render_state.device,
-                                [1.0, 1.0, 1.0, 0.35],
-                            );
+                            let mesh_id =
+                                upload_plate_highlight(pane, &armor, key, &render_state.device, [1.0, 1.0, 1.0, 0.35]);
                             pane.hover_highlight = Some((key.clone(), mesh_id));
                             pane.loaded_armor = Some(armor);
                         }
@@ -1204,34 +1224,64 @@ fn load_ship_for_pane(
     pane.load_receiver = Some(rx);
 }
 
-/// Show tooltip for a hovered armor triangle.
-fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate: &dyn Fn(&str) -> String) {
-    ui.horizontal(|ui| {
-        let color = egui::Color32::from_rgba_unmultiplied(
-            (info.color[0] * 255.0) as u8,
-            (info.color[1] * 255.0) as u8,
-            (info.color[2] * 255.0) as u8,
-            255,
-        );
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 2.0, color);
-        if info.layers.len() > 1 {
-            let layer_str: Vec<String> = info.layers.iter().map(|l| format!("{:.0}", l)).collect();
-            ui.label(format!("{:.0} mm ({})", info.thickness_mm, layer_str.join(" + ")));
-        } else {
-            ui.label(format!("{:.0} mm", info.thickness_mm));
-        }
-    });
-    ui.label(format!("Zone: {}", &info.zone));
-    ui.label(format!("Part: {}", translate(&info.material_name)));
+/// Helper to create an egui Color32 from an [f32; 4] RGBA color.
+fn color32_from_f32(c: [f32; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 255)
 }
 
-/// Upload a highlight overlay mesh for all triangles in the given (zone, material_name) subcomponent.
-/// Returns the MeshId of the uploaded highlight mesh.
-fn upload_subcomponent_highlight(
+/// Paint a small color swatch rectangle inline.
+fn paint_swatch(ui: &mut egui::Ui, color: egui::Color32, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, color);
+}
+
+/// Show tooltip for a hovered armor triangle.
+fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate: &dyn Fn(&str) -> String) {
+    use wowsunpack::export::gltf_export::thickness_to_color;
+
+    // Main header: this plate's thickness with color swatch
+    ui.horizontal(|ui| {
+        paint_swatch(ui, color32_from_f32(info.color), 12.0);
+        ui.label(egui::RichText::new(format!("{:.0} mm", info.thickness_mm)).strong().size(14.0));
+    });
+
+    // Zone and part info
+    ui.label(format!("{} / {}", &info.zone, translate(&info.material_name)));
+
+    if info.layers.len() > 1 {
+        ui.separator();
+
+        // Total (sum of all layers)
+        let total: f32 = info.layers.iter().sum();
+        let total_color = thickness_to_color(total);
+        ui.horizontal(|ui| {
+            paint_swatch(ui, color32_from_f32(total_color), 10.0);
+            ui.label(format!("{:.0} mm total ({} plates)", total, info.layers.len()));
+        });
+
+        // Individual layers
+        for &layer_mm in &info.layers {
+            let layer_color = thickness_to_color(layer_mm);
+            let is_this = (layer_mm - info.thickness_mm).abs() < 0.1;
+            ui.horizontal(|ui| {
+                paint_swatch(ui, color32_from_f32(layer_color), 10.0);
+                let text = if is_this {
+                    egui::RichText::new(format!("{:.0} mm  <<", layer_mm)).strong()
+                } else {
+                    egui::RichText::new(format!("{:.0} mm", layer_mm))
+                };
+                ui.label(text);
+            });
+        }
+    }
+}
+
+/// Upload a highlight overlay mesh for all triangles matching the given plate key
+/// (zone, material_name, thickness). Returns the MeshId of the uploaded highlight mesh.
+fn upload_plate_highlight(
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
-    key: &(String, String),
+    key: &PlateKey,
     device: &wgpu::Device,
     highlight_color: [f32; 4],
 ) -> MeshId {
@@ -1242,7 +1292,8 @@ fn upload_subcomponent_highlight(
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            if info.zone != key.0 || info.material_name != key.1 {
+            let thickness_key = (info.thickness_mm * 10.0).round() as i32;
+            if info.zone != key.0 || info.material_name != key.1 || thickness_key != key.2 {
                 continue;
             }
 
@@ -1359,6 +1410,169 @@ fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3])) -> (Vec<Vertex>, Vec
     let indices = vec![0, 1, 2, 0, 2, 3];
 
     (vertices, indices)
+}
+
+/// Upload plate boundary edge outlines where adjacent triangles have different thickness values.
+/// These appear as thin black lines along edges where two plates of different thickness meet.
+fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+    use std::collections::HashMap;
+
+    let edge_half_width: f32 = 0.003; // half-width of the edge quad in world space
+    let normal_offset: f32 = 0.005; // offset to avoid z-fighting with the armor surface
+    let edge_color: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // black
+
+    // Quantize a float position to an integer key to avoid floating-point comparison issues.
+    fn quantize(v: [f32; 3]) -> [i32; 3] {
+        [(v[0] * 10000.0).round() as i32, (v[1] * 10000.0).round() as i32, (v[2] * 10000.0).round() as i32]
+    }
+
+    // Canonical edge key: sorted pair of quantized positions.
+    type EdgeKey = ([i32; 3], [i32; 3]);
+    fn make_edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
+        if a < b { (a, b) } else { (b, a) }
+    }
+
+    // For each edge, store the thickness and face normal from each side.
+    struct EdgeInfo {
+        thickness: f32,
+        normal: [f32; 3],
+        // Original (non-quantized) positions for rendering
+        p0: [f32; 3],
+        p1: [f32; 3],
+    }
+
+    let mut edge_map: HashMap<EdgeKey, Vec<EdgeInfo>> = HashMap::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            // Skip invisible parts
+            let key = (info.zone.clone(), info.material_name.clone());
+            if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+
+            // Get transformed positions for this triangle
+            let mut tri_pos = [[0.0_f32; 3]; 3];
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx >= mesh.positions.len() {
+                    continue;
+                }
+                let mut pos = mesh.positions[orig_idx];
+                if let Some(t) = &mesh.transform {
+                    pos = transform_point(t, pos);
+                }
+                tri_pos[k] = pos;
+            }
+
+            // Compute face normal
+            let e1 = [tri_pos[1][0] - tri_pos[0][0], tri_pos[1][1] - tri_pos[0][1], tri_pos[1][2] - tri_pos[0][2]];
+            let e2 = [tri_pos[2][0] - tri_pos[0][0], tri_pos[2][1] - tri_pos[0][1], tri_pos[2][2] - tri_pos[0][2]];
+            let nx = e1[1] * e2[2] - e1[2] * e2[1];
+            let ny = e1[2] * e2[0] - e1[0] * e2[2];
+            let nz = e1[0] * e2[1] - e1[1] * e2[0];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt();
+            let face_normal = if len > 1e-10 { [nx / len, ny / len, nz / len] } else { [0.0, 1.0, 0.0] };
+
+            // For each of the 3 edges of this triangle
+            let edges = [(0, 1), (1, 2), (2, 0)];
+            for (a, b) in edges {
+                let qa = quantize(tri_pos[a]);
+                let qb = quantize(tri_pos[b]);
+                let edge_key = make_edge_key(qa, qb);
+
+                edge_map.entry(edge_key).or_default().push(EdgeInfo {
+                    thickness: info.thickness_mm,
+                    normal: face_normal,
+                    p0: tri_pos[a],
+                    p1: tri_pos[b],
+                });
+            }
+        }
+    }
+
+    // Now find boundary edges: edges shared by triangles with different thickness values
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for (_edge_key, infos) in &edge_map {
+        if infos.len() < 2 {
+            continue; // boundary edge of mesh, not a plate boundary
+        }
+
+        // Check if there are different thickness values on this edge
+        let first_thickness = infos[0].thickness;
+        let has_boundary = infos.iter().any(|i| (i.thickness - first_thickness).abs() > 0.1);
+        if !has_boundary {
+            continue;
+        }
+
+        // Use the first info's positions and average normal from all sides
+        let p0 = infos[0].p0;
+        let p1 = infos[0].p1;
+
+        // Average normal of all adjacent faces
+        let mut avg_normal = [0.0_f32; 3];
+        for info in infos {
+            avg_normal[0] += info.normal[0];
+            avg_normal[1] += info.normal[1];
+            avg_normal[2] += info.normal[2];
+        }
+        let n_len =
+            (avg_normal[0] * avg_normal[0] + avg_normal[1] * avg_normal[1] + avg_normal[2] * avg_normal[2]).sqrt();
+        if n_len < 1e-10 {
+            continue;
+        }
+        avg_normal[0] /= n_len;
+        avg_normal[1] /= n_len;
+        avg_normal[2] /= n_len;
+
+        // Edge direction
+        let edge_dir = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let edge_len = (edge_dir[0] * edge_dir[0] + edge_dir[1] * edge_dir[1] + edge_dir[2] * edge_dir[2]).sqrt();
+        if edge_len < 1e-10 {
+            continue;
+        }
+
+        // Tangent perpendicular to edge, in the surface plane
+        // tangent = normalize(cross(edge_dir, avg_normal))
+        let tx = edge_dir[1] * avg_normal[2] - edge_dir[2] * avg_normal[1];
+        let ty = edge_dir[2] * avg_normal[0] - edge_dir[0] * avg_normal[2];
+        let tz = edge_dir[0] * avg_normal[1] - edge_dir[1] * avg_normal[0];
+        let t_len = (tx * tx + ty * ty + tz * tz).sqrt();
+        if t_len < 1e-10 {
+            continue;
+        }
+        let tangent = [tx / t_len, ty / t_len, tz / t_len];
+
+        // Build a thin quad: 4 vertices offset along tangent and normal
+        let base = vertices.len() as u32;
+        for &p in &[p0, p1] {
+            // Two vertices per endpoint, offset ±tangent and +normal
+            for &sign in &[-1.0_f32, 1.0] {
+                vertices.push(Vertex {
+                    position: [
+                        p[0] + tangent[0] * edge_half_width * sign + avg_normal[0] * normal_offset,
+                        p[1] + tangent[1] * edge_half_width * sign + avg_normal[1] * normal_offset,
+                        p[2] + tangent[2] * edge_half_width * sign + avg_normal[2] * normal_offset,
+                    ],
+                    normal: avg_normal,
+                    color: edge_color,
+                });
+            }
+        }
+        // Two triangles forming the quad: (0,1,2), (1,3,2)
+        indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
+    }
+
+    if !indices.is_empty() {
+        pane.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_DEFAULT);
+    }
 }
 
 /// Apply a column-major 4x4 transform to a point (position).
