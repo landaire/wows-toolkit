@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.50] - 2026-02-18
+
+### 🚀 Features
+
+- Sign the toolkit binary
+
+### 🐛 Bug Fixes
+
+- Make it so searching doesn't make all nodes expanded when not searching
+
+### Armor_renderer
+
+- Fix right-clicking to disable a zone/part name
+- Add waterline
+- Slow camera movement down
+
+### Armor_viewer
+
+- Fix searching for ship names with special characters
+
+### Replays
+
+- Adjust score timer position in live renderer
+
+## [0.1.49] - 2026-02-18
+
+### 🐛 Bug Fixes
+
+- Armor viewer nation list was not scrollable + broke armor viewer
+
 ## [0.1.48] - 2026-02-18
 
 ### 🚀 Features
