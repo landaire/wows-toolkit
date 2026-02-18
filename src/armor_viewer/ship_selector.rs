@@ -93,11 +93,15 @@ impl ShipCatalog {
                 None => continue,
             };
 
-            if param.vehicle().is_none() {
+            let vehicle = match param.vehicle() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            // Skip test/NDA ships (group starts with "demo")
+            if vehicle.group().starts_with("demo") {
                 continue;
             }
-
-            let vehicle = param.vehicle().unwrap();
             let tier = vehicle.level();
             let nation = param.nation().to_string();
 
