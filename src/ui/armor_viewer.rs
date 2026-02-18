@@ -94,11 +94,18 @@ impl ToolkitTabViewer<'_> {
 
         // Initialize ShipAssets on background thread (catalog is built when loading completes)
         if matches!(&state.ship_assets, ShipAssetsState::NotLoaded) {
-            let vfs = wows_data.read().vfs.clone();
+            let wd = wows_data.read();
+            let vfs = wd.vfs.clone();
+            let game_metadata = wd.game_metadata.clone();
+            drop(wd);
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
-                let result =
-                    wowsunpack::export::ship::ShipAssets::load(&vfs).map(Arc::new).map_err(|e| format!("{e:?}"));
+                let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
+                    let metadata = game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
+                    let assets = wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, metadata)
+                        .map_err(|e| format!("{e:?}"))?;
+                    Ok(Arc::new(assets))
+                })();
                 let _ = tx.send(result);
             });
             state.ship_assets = ShipAssetsState::Loading(rx);

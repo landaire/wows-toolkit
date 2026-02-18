@@ -8194,7 +8194,9 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.10.0"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e78e11339235b5c68802a57f0370289afc3e6a9903081799e8bb1326a68f78d1"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -8218,7 +8220,9 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.18.0"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8a8da11e72d51d937e3006c4ef6c8f2829fb8ef818b808f88607908c245652b"
 dependencies = [
  "bitreader",
  "bon",
@@ -8307,7 +8311,9 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.18.0-alpha1"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f881a2bf8e751c7399ee06122a06bda6d431f2ddc62a8e1c194f5b6f75c340d"
 dependencies = [
  "bon",
  "byteorder",

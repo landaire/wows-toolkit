@@ -84,7 +84,7 @@ pub fn cleanup_stale_caches(available_builds: &[u32]) {
 
 #[instrument(skip(vfs))]
 pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
-    debug!("Loading gameparams from game fiels"):
+    debug!("Loading gameparams");
 
     let cache_path = game_params_bin_path(game_version as u32);
 
@@ -94,6 +94,7 @@ pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetada
         .then(|| {
             let cache_data = std::fs::read(&cache_path).ok()?;
             let params: Vec<Param> = rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&cache_data).ok()?;
+            debug!("Loaded params from disk");
             Some(params)
         })
         .flatten();
@@ -101,7 +102,7 @@ pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetada
     let metadata_provider = if let Some(params) = params {
         GameMetadataProvider::from_params_with_vfs(params, vfs)?
     } else {
-        info!("Writing converted gameparams to cache");
+        info!("Loading gameparams from game files");
 
         let metadata_provider = GameMetadataProvider::from_vfs(vfs)?;
         let params: Vec<Param> =
