@@ -197,20 +197,55 @@ impl ToolkitTabViewer<'_> {
             });
             sidebar_ui.separator();
 
-            // Ship tree
-            egui::ScrollArea::vertical().id_salt("armor_tree_scroll_global").show(&mut sidebar_ui, |ui| {
-                if let Some(catalog) = &ship_catalog {
-                    let search = state.selector_search.to_lowercase();
+            // Ship tree using egui_ltreeview
+            if let Some(catalog) = &ship_catalog {
+                let search = state.selector_search.to_lowercase();
 
-                    // Sort nations by translated display name.
-                    let mut sorted_nations: Vec<&_> = catalog.nations.iter().collect();
-                    sorted_nations.sort_by(|a, b| {
-                        let ta = translate_part_ref(&a.nation);
-                        let tb = translate_part_ref(&b.nation);
-                        ta.cmp(&tb)
+                // Sort nations by translated display name.
+                let mut sorted_nations: Vec<&_> = catalog.nations.iter().collect();
+                sorted_nations.sort_by(|a, b| {
+                    let ta = translate_part_ref(&a.nation);
+                    let tb = translate_part_ref(&b.nation);
+                    ta.cmp(&tb)
+                });
+
+                // Build ID-to-ship mapping for action handling.
+                let mut id_to_ship: std::collections::HashMap<egui::Id, (String, String)> =
+                    std::collections::HashMap::new();
+
+                // Find the currently selected ship in the active pane.
+                let selected_param = {
+                    let active_pane = state.split_tree.all_panes_mut();
+                    active_pane.iter().find(|p| p.id == current_active_id).and_then(|p| p.selected_ship.clone())
+                };
+
+                // Deferred compare action from context menu (needs Cell since the closure is FnMut).
+                let deferred_compare: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
+                let deferred_compare_ref = &deferred_compare;
+
+                let tree_id = sidebar_ui.make_persistent_id("armor_ship_tree");
+
+                // Auto-expand/collapse nodes based on search state.
+                if !search.is_empty() {
+                    sidebar_ui.ctx().data_mut(|data| {
+                        let tree_state =
+                            data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                        for nation in &sorted_nations {
+                            let nation_id = egui::Id::new(("armor_nation", &nation.nation));
+                            tree_state.set_openness(nation_id, true);
+                            for class in &nation.classes {
+                                let class_id =
+                                    egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
+                                tree_state.set_openness(class_id, true);
+                            }
+                        }
                     });
+                }
 
-                    for nation in sorted_nations {
+                let tree = egui_ltreeview::TreeView::new(tree_id);
+
+                let (_response, actions) = tree.show(&mut sidebar_ui, |builder| {
+                    for nation in &sorted_nations {
                         let has_match = search.is_empty()
                             || nation
                                 .classes
@@ -220,18 +255,13 @@ impl ToolkitTabViewer<'_> {
                             continue;
                         }
 
-                        let nation_id = ui.make_persistent_id(("nation_global", &nation.nation));
-                        let mut nation_state = egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            nation_id,
-                            false,
-                        );
-                        if !search.is_empty() {
-                            nation_state.set_open(true);
-                        }
-                        nation_state
-                            .show_header(ui, |ui| {
-                                if let Some(flag) = nation_flags.get(&nation.nation) {
+                        let nation_id = egui::Id::new(("armor_nation", &nation.nation));
+                        let flag_asset = nation_flags.get(&nation.nation).cloned();
+                        let nation_display = translate_part_ref(&nation.nation);
+                        let dir_node = egui_ltreeview::NodeBuilder::dir(nation_id)
+                            .default_open(false)
+                            .icon(move |ui| {
+                                if let Some(ref flag) = flag_asset {
                                     ui.add(
                                         egui::Image::new(egui::ImageSource::Bytes {
                                             uri: flag.path.clone().into(),
@@ -240,109 +270,145 @@ impl ToolkitTabViewer<'_> {
                                         .fit_to_exact_size(egui::vec2(23.0, 16.0)),
                                     );
                                 }
-                                ui.label(translate_part_ref(&nation.nation));
                             })
-                            .body(|ui| {
-                                for class in &nation.classes {
-                                    let has_class_match = search.is_empty()
-                                        || class.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search));
-                                    if !has_class_match {
-                                        continue;
-                                    }
+                            .label(nation_display);
 
-                                    let class_id = ui.make_persistent_id((
-                                        "class_global",
-                                        &nation.nation,
-                                        species_name(&class.species),
-                                    ));
-                                    let mut class_state =
-                                        egui::collapsing_header::CollapsingState::load_with_default_open(
-                                            ui.ctx(),
-                                            class_id,
-                                            false,
-                                        );
-                                    if !search.is_empty() {
-                                        class_state.set_open(true);
-                                    }
-                                    class_state
-                                        .show_header(ui, |ui| {
-                                            if let Some(icon) = ship_icons.get(&class.species) {
-                                                ui.add(
-                                                    egui::Image::new(egui::ImageSource::Bytes {
-                                                        uri: icon.path.clone().into(),
-                                                        bytes: icon.data.clone().into(),
-                                                    })
-                                                    .fit_to_exact_size(egui::vec2(16.0, 16.0))
-                                                    .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
-                                                );
-                                            }
-                                            ui.label(species_name(&class.species));
-                                        })
-                                        .body(|ui| {
-                                            for ship in &class.ships {
-                                                if !search.is_empty()
-                                                    && !ship.display_name.to_lowercase().contains(&search)
-                                                {
-                                                    continue;
-                                                }
-
-                                                let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
-                                                // Highlight if the active pane has this ship selected
-                                                let active_pane = state.split_tree.all_panes_mut();
-                                                let active = active_pane.iter().find(|p| p.id == current_active_id);
-                                                let is_selected = active.map_or(false, |p| {
-                                                    p.selected_ship.as_deref() == Some(ship.param_index.as_str())
-                                                });
-
-                                                let response = ui.selectable_label(is_selected, &label);
-                                                if response.clicked() && !is_selected {
-                                                    // Load into the active pane
-                                                    let pane = state
-                                                        .split_tree
-                                                        .all_panes_mut()
-                                                        .into_iter()
-                                                        .find(|p| p.id == current_active_id);
-                                                    if let Some(pane) = pane {
-                                                        load_ship_for_pane(
-                                                            pane,
-                                                            &ship.param_index,
-                                                            &ship.display_name,
-                                                            &ship_assets,
-                                                        );
-                                                    }
-                                                }
-                                                // Right-click context menu: Compare
-                                                response.context_menu(|ui| {
-                                                    if ui.button("Compare in new split").clicked() {
-                                                        // Always split the rightmost pane so the new pane appears on the far right.
-                                                        let rightmost_id = state.split_tree.rightmost_leaf_id();
-                                                        let pane = state
-                                                            .split_tree
-                                                            .all_panes_mut()
-                                                            .into_iter()
-                                                            .find(|p| p.id == rightmost_id);
-                                                        if let Some(pane) = pane {
-                                                            sidebar_action = Some(SplitAction::Compare(
-                                                                pane.id,
-                                                                CompareSettings {
-                                                                    ship_param_index: ship.param_index.clone(),
-                                                                    ship_display_name: ship.display_name.clone(),
-                                                                    camera: pane.viewport.camera.clone(),
-                                                                    part_visibility: pane.part_visibility.clone(),
-                                                                    hull_visibility: pane.hull_visibility.clone(),
-                                                                },
-                                                            ));
-                                                        }
-                                                        ui.close();
-                                                    }
-                                                });
-                                            }
-                                        });
+                        let is_open = builder.node(dir_node);
+                        if is_open {
+                            for class in &nation.classes {
+                                let has_class_match = search.is_empty()
+                                    || class.ships.iter().any(|s| s.display_name.to_lowercase().contains(&search));
+                                if !has_class_match {
+                                    continue;
                                 }
-                            });
+
+                                let class_id =
+                                    egui::Id::new(("armor_class", &nation.nation, species_name(&class.species)));
+                                let icon_asset = ship_icons.get(&class.species).cloned();
+                                let class_dir = egui_ltreeview::NodeBuilder::dir(class_id)
+                                    .default_open(false)
+                                    .icon(move |ui| {
+                                        if let Some(ref icon) = icon_asset {
+                                            ui.add(
+                                                egui::Image::new(egui::ImageSource::Bytes {
+                                                    uri: icon.path.clone().into(),
+                                                    bytes: icon.data.clone().into(),
+                                                })
+                                                .fit_to_exact_size(egui::vec2(16.0, 16.0))
+                                                .rotate(90.0_f32.to_radians(), egui::Vec2::splat(0.5)),
+                                            );
+                                        }
+                                    })
+                                    .label(species_name(&class.species));
+
+                                let class_open = builder.node(class_dir);
+                                if class_open {
+                                    for ship in &class.ships {
+                                        if !search.is_empty() && !ship.display_name.to_lowercase().contains(&search) {
+                                            continue;
+                                        }
+
+                                        let ship_id = egui::Id::new(("armor_ship", &ship.param_index));
+                                        id_to_ship
+                                            .insert(ship_id, (ship.param_index.clone(), ship.display_name.clone()));
+
+                                        let label = format!("{} {}", tier_roman(ship.tier), ship.display_name);
+
+                                        let param_idx = ship.param_index.clone();
+                                        let display_name = ship.display_name.clone();
+
+                                        let leaf = egui_ltreeview::NodeBuilder::leaf(ship_id)
+                                            .label(label)
+                                            .context_menu(move |ui| {
+                                                if ui.button("Compare in new split").clicked() {
+                                                    deferred_compare_ref
+                                                        .set(Some((param_idx.clone(), display_name.clone())));
+                                                    ui.close();
+                                                }
+                                            });
+
+                                        builder.node(leaf);
+                                    }
+                                }
+                                builder.close_dir();
+                            }
+                        }
+                        builder.close_dir();
+                    }
+                });
+
+                // Set selection to match the active pane's currently loaded ship.
+                if let Some(ref param) = selected_param {
+                    let selected_id = egui::Id::new(("armor_ship", param));
+                    sidebar_ui.ctx().data_mut(|data| {
+                        let tree_state =
+                            data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                        if tree_state.selected() != &vec![selected_id] {
+                            tree_state.set_selected(vec![selected_id]);
+                        }
+                    });
+                }
+
+                // Handle tree actions.
+                for action in actions {
+                    match action {
+                        egui_ltreeview::Action::SetSelected(selected_ids) => {
+                            // Single-click on a leaf: load the ship into the active pane.
+                            for id in &selected_ids {
+                                if let Some((param_index, display_name)) = id_to_ship.get(id) {
+                                    let already_selected = selected_param.as_deref() == Some(param_index.as_str());
+                                    if !already_selected {
+                                        let pane = state
+                                            .split_tree
+                                            .all_panes_mut()
+                                            .into_iter()
+                                            .find(|p| p.id == current_active_id);
+                                        if let Some(pane) = pane {
+                                            load_ship_for_pane(pane, param_index, display_name, &ship_assets);
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        egui_ltreeview::Action::Activate(activate) => {
+                            // Double-click: also load the ship.
+                            for id in &activate.selected {
+                                if let Some((param_index, display_name)) = id_to_ship.get(id) {
+                                    let pane = state
+                                        .split_tree
+                                        .all_panes_mut()
+                                        .into_iter()
+                                        .find(|p| p.id == current_active_id);
+                                    if let Some(pane) = pane {
+                                        load_ship_for_pane(pane, param_index, display_name, &ship_assets);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
-            });
+
+                // Handle deferred compare action from context menu.
+                if let Some((param_index, display_name)) = deferred_compare.take() {
+                    let rightmost_id = state.split_tree.rightmost_leaf_id();
+                    let pane = state.split_tree.all_panes_mut().into_iter().find(|p| p.id == rightmost_id);
+                    if let Some(pane) = pane {
+                        sidebar_action = Some(SplitAction::Compare(
+                            pane.id,
+                            CompareSettings {
+                                ship_param_index: param_index,
+                                ship_display_name: display_name,
+                                camera: pane.viewport.camera.clone(),
+                                part_visibility: pane.part_visibility.clone(),
+                                hull_visibility: pane.hull_visibility.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
         }
 
         // Render split tree (viewports only, no sidebars)
