@@ -1,13 +1,64 @@
 use std::sync::Arc;
 use std::sync::mpsc;
 
+use egui_dock::{DockArea, DockState, TabViewer};
+
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
-use crate::armor_viewer::split_pane::{CompareSettings, SplitAction};
-use crate::armor_viewer::state::{ArmorPane, ArmorTriangleTooltip, LoadedShipArmor, ShipAssetsState};
+use crate::armor_viewer::state::{ArmorPane, ArmorTriangleTooltip, CompareSettings, LoadedShipArmor, ShipAssetsState};
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
+
+/// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
+struct ArmorPaneViewer<'a> {
+    render_state: &'a eframe::egui_wgpu::RenderState,
+    gpu_pipeline: &'a GpuPipeline,
+    mirror_camera_signal: &'a std::cell::Cell<Option<u64>>,
+    active_pane_signal: &'a std::cell::Cell<Option<u64>>,
+    translate_part: &'a dyn Fn(&str) -> String,
+    tab_count: usize,
+}
+
+impl TabViewer for ArmorPaneViewer<'_> {
+    type Tab = ArmorPane;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(("armor_pane", tab.id))
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        tab.loaded_armor.as_ref().map(|a| a.display_name.as_str()).unwrap_or("Empty").into()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        render_armor_pane(
+            ui,
+            tab,
+            self.render_state,
+            self.gpu_pipeline,
+            self.mirror_camera_signal,
+            self.active_pane_signal,
+            self.translate_part,
+        );
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        [false, false]
+    }
+
+    fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
+        false
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        self.tab_count > 1
+    }
+
+    fn clear_background(&self, _tab: &Self::Tab) -> bool {
+        false
+    }
+}
 
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
@@ -121,10 +172,10 @@ impl ToolkitTabViewer<'_> {
         let nation_flags = &state.nation_flag_textures;
 
         // Poll per-pane ship loading receivers
-        poll_pane_loads(&mut state.split_tree, &render_state.device, &gpu_pipeline);
+        poll_pane_loads(&mut state.dock_state, &render_state.device, &gpu_pipeline);
 
         // Multi-pane toolbar (only shown when multiple panes exist)
-        let pane_count = state.split_tree.pane_count();
+        let pane_count = state.dock_state.main_surface().num_tabs();
         if pane_count > 1 {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut state.mirror_cameras, "Mirror cameras");
@@ -179,14 +230,14 @@ impl ToolkitTabViewer<'_> {
 
         // Determine which pane is "active" for ship selection.
         // Default to the first pane if the stored active_pane_id doesn't match any existing pane.
-        let all_pane_ids: Vec<u64> = state.split_tree.all_panes_mut().iter().map(|p| p.id).collect();
+        let all_pane_ids: Vec<u64> = state.dock_state.iter_all_tabs().map(|(_, tab)| tab.id).collect();
         if !all_pane_ids.contains(&state.active_pane_id) {
             state.active_pane_id = all_pane_ids.first().copied().unwrap_or(0);
         }
         let current_active_id = state.active_pane_id;
 
         // Ship selector sidebar (rendered once)
-        let mut sidebar_action: Option<SplitAction> = None;
+        let mut sidebar_compare: Option<CompareSettings> = None;
         {
             let mut sidebar_ui =
                 ui.new_child(egui::UiBuilder::new().max_rect(sidebar_rect).id_salt("armor_sidebar_global"));
@@ -214,10 +265,11 @@ impl ToolkitTabViewer<'_> {
                     std::collections::HashMap::new();
 
                 // Find the currently selected ship in the active pane.
-                let selected_param = {
-                    let active_pane = state.split_tree.all_panes_mut();
-                    active_pane.iter().find(|p| p.id == current_active_id).and_then(|p| p.selected_ship.clone())
-                };
+                let selected_param = state
+                    .dock_state
+                    .iter_all_tabs()
+                    .find(|(_, tab)| tab.id == current_active_id)
+                    .and_then(|(_, tab)| tab.selected_ship.clone());
 
                 // Deferred compare action from context menu (needs Cell since the closure is FnMut).
                 let deferred_compare: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
@@ -359,10 +411,10 @@ impl ToolkitTabViewer<'_> {
                                     let already_selected = selected_param.as_deref() == Some(param_index.as_str());
                                     if !already_selected {
                                         let pane = state
-                                            .split_tree
-                                            .all_panes_mut()
-                                            .into_iter()
-                                            .find(|p| p.id == current_active_id);
+                                            .dock_state
+                                            .iter_all_tabs_mut()
+                                            .find(|(_, tab)| tab.id == current_active_id)
+                                            .map(|(_, tab)| tab);
                                         if let Some(pane) = pane {
                                             load_ship_for_pane(pane, param_index, display_name, &ship_assets);
                                         }
@@ -376,10 +428,10 @@ impl ToolkitTabViewer<'_> {
                             for id in &activate.selected {
                                 if let Some((param_index, display_name)) = id_to_ship.get(id) {
                                     let pane = state
-                                        .split_tree
-                                        .all_panes_mut()
-                                        .into_iter()
-                                        .find(|p| p.id == current_active_id);
+                                        .dock_state
+                                        .iter_all_tabs_mut()
+                                        .find(|(_, tab)| tab.id == current_active_id)
+                                        .map(|(_, tab)| tab);
                                     if let Some(pane) = pane {
                                         load_ship_for_pane(pane, param_index, display_name, &ship_assets);
                                     }
@@ -393,50 +445,48 @@ impl ToolkitTabViewer<'_> {
 
                 // Handle deferred compare action from context menu.
                 if let Some((param_index, display_name)) = deferred_compare.take() {
-                    let rightmost_id = state.split_tree.rightmost_leaf_id();
-                    let pane = state.split_tree.all_panes_mut().into_iter().find(|p| p.id == rightmost_id);
-                    if let Some(pane) = pane {
-                        sidebar_action = Some(SplitAction::Compare(
-                            pane.id,
-                            CompareSettings {
+                    // Find the focused pane (or first pane) to clone settings from.
+                    let source_settings =
+                        state.dock_state.iter_all_tabs().find(|(_, tab)| tab.id == current_active_id).map(
+                            |(_, tab)| CompareSettings {
                                 ship_param_index: param_index,
                                 ship_display_name: display_name,
-                                camera: pane.viewport.camera.clone(),
-                                part_visibility: pane.part_visibility.clone(),
-                                hull_visibility: pane.hull_visibility.clone(),
+                                camera: tab.viewport.camera.clone(),
+                                part_visibility: tab.part_visibility.clone(),
+                                hull_visibility: tab.hull_visibility.clone(),
                             },
-                        ));
+                        );
+                    if let Some(settings) = source_settings {
+                        sidebar_compare = Some(settings);
                     }
                 }
             }
         }
 
-        // Render split tree (viewports only, no sidebars)
-        let action;
-        let render_state_ref = &render_state;
-        let gpu_pipeline_ref = &gpu_pipeline;
-
+        // Render dock area with armor panes
         {
+            let tab_count = state.dock_state.main_surface().num_tabs();
+            let mut viewer = ArmorPaneViewer {
+                render_state: &render_state,
+                gpu_pipeline: &gpu_pipeline,
+                mirror_camera_signal: if mirror_cameras { active_camera_ref } else { &std::cell::Cell::new(None) },
+                active_pane_signal: active_pane_ref,
+                translate_part: translate_part_ref,
+                tab_count,
+            };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
-            action = state.split_tree.show(&mut content_ui, &mut |ui, pane| {
-                render_armor_pane(
-                    ui,
-                    pane,
-                    render_state_ref,
-                    gpu_pipeline_ref,
-                    pane_count,
-                    if mirror_cameras { Some(active_camera_ref) } else { None },
-                    Some(active_pane_ref),
-                    translate_part_ref,
-                )
-            });
+            DockArea::new(&mut state.dock_state)
+                .id(egui::Id::new("armor_dock"))
+                .style(egui_dock::Style::from_egui(content_ui.style().as_ref()))
+                .allowed_splits(egui_dock::AllowedSplits::All)
+                .show_close_buttons(true)
+                .show_leaf_collapse_buttons(false)
+                .show_leaf_close_all_buttons(false)
+                .show_inside(&mut content_ui, &mut viewer);
         }
 
-        // Merge sidebar action with split tree action
-        let action = action.or(sidebar_action);
-
         // Global armor thickness legend (shown once, not per-pane)
-        let any_ship_loaded = state.split_tree.all_panes_mut().iter().any(|p| p.loaded_armor.is_some());
+        let any_ship_loaded = state.dock_state.iter_all_tabs().any(|(_, tab)| tab.loaded_armor.is_some());
         if any_ship_loaded {
             egui::Window::new("Armor Thickness")
                 .id(egui::Id::new("armor_legend_global"))
@@ -452,16 +502,15 @@ impl ToolkitTabViewer<'_> {
         if mirror_cameras {
             if let Some(active_id) = active_camera_pane.get() {
                 let cam = state
-                    .split_tree
-                    .all_panes_mut()
-                    .iter()
-                    .find(|p| p.id == active_id)
-                    .map(|p| p.viewport.camera.clone());
+                    .dock_state
+                    .iter_all_tabs()
+                    .find(|(_, tab)| tab.id == active_id)
+                    .map(|(_, tab)| tab.viewport.camera.clone());
                 if let Some(cam) = cam {
-                    for p in state.split_tree.all_panes_mut() {
-                        if p.id != active_id {
-                            p.viewport.camera = cam.clone();
-                            p.viewport.mark_dirty();
+                    for (_, tab) in state.dock_state.iter_all_tabs_mut() {
+                        if tab.id != active_id {
+                            tab.viewport.camera = cam.clone();
+                            tab.viewport.mark_dirty();
                         }
                     }
                 }
@@ -476,78 +525,57 @@ impl ToolkitTabViewer<'_> {
         // Sync options: broadcast visibility from active pane to all others each frame
         if state.sync_options {
             let active_id = state.active_pane_id;
-            let panes = state.split_tree.all_panes_mut();
-            let source = panes.iter().find(|p| p.id == active_id);
-            if let Some(source) = source {
-                let part_vis = source.part_visibility.clone();
-                let hull_vis = source.hull_visibility.clone();
-                drop(panes);
-                for p in state.split_tree.all_panes_mut() {
-                    if p.id != active_id && (p.part_visibility != part_vis || p.hull_visibility != hull_vis) {
-                        p.part_visibility = part_vis.clone();
-                        p.hull_visibility = hull_vis.clone();
-                        if let Some(armor) = p.loaded_armor.take() {
-                            upload_armor_to_viewport(p, &armor, &render_state.device);
-                            p.loaded_armor = Some(armor);
+            let source_vis = state
+                .dock_state
+                .iter_all_tabs()
+                .find(|(_, tab)| tab.id == active_id)
+                .map(|(_, tab)| (tab.part_visibility.clone(), tab.hull_visibility.clone()));
+            if let Some((part_vis, hull_vis)) = source_vis {
+                for (_, tab) in state.dock_state.iter_all_tabs_mut() {
+                    if tab.id != active_id && (tab.part_visibility != part_vis || tab.hull_visibility != hull_vis) {
+                        tab.part_visibility = part_vis.clone();
+                        tab.hull_visibility = hull_vis.clone();
+                        if let Some(armor) = tab.loaded_armor.take() {
+                            upload_armor_to_viewport(tab, &armor, &render_state.device);
+                            tab.loaded_armor = Some(armor);
                         }
                     }
                 }
             }
         }
 
-        // Apply deferred action
-        if let Some(ref action) = action {
+        // Apply deferred compare action from sidebar
+        if let Some(settings) = sidebar_compare {
             let next_id = state.allocate_pane_id();
-
-            // For Compare, create a pane with cloned settings and trigger ship load
-            let compare_settings = if let SplitAction::Compare(_, settings) = action { Some(settings) } else { None };
-
-            state.split_tree.apply_action(action, &mut || {
-                let mut new_pane = ArmorPane::empty(next_id);
-                if let Some(settings) = compare_settings {
-                    new_pane.viewport.camera = settings.camera.clone();
-                    new_pane.part_visibility = settings.part_visibility.clone();
-                    new_pane.hull_visibility = settings.hull_visibility.clone();
-                    load_ship_for_pane(
-                        &mut new_pane,
-                        &settings.ship_param_index,
-                        &settings.ship_display_name,
-                        &ship_assets,
-                    );
-                }
-                new_pane
-            });
+            let mut new_pane = ArmorPane::empty(next_id);
+            new_pane.viewport.camera = settings.camera.clone();
+            new_pane.part_visibility = settings.part_visibility.clone();
+            new_pane.hull_visibility = settings.hull_visibility.clone();
+            load_ship_for_pane(&mut new_pane, &settings.ship_param_index, &settings.ship_display_name, &ship_assets);
+            let tree = state.dock_state.main_surface_mut();
+            let target = tree.focused_leaf().unwrap_or(egui_dock::NodeIndex::root());
+            tree.split_right(target, 0.5, vec![new_pane]);
         }
     }
 }
 
 /// Poll all panes for completed ship loads.
-fn poll_pane_loads(
-    node: &mut crate::armor_viewer::split_pane::SplitNode,
-    device: &wgpu::Device,
-    pipeline: &GpuPipeline,
-) {
-    match node {
-        crate::armor_viewer::split_pane::SplitNode::Leaf(pane) => {
-            if let Some(rx) = &pane.load_receiver {
-                if let Ok(result) = rx.try_recv() {
-                    match result {
-                        Ok(armor) => {
-                            init_armor_viewport(pane, &armor, device);
-                            pane.loaded_armor = Some(armor);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to load ship armor: {e}");
-                        }
+fn poll_pane_loads(dock_state: &mut DockState<ArmorPane>, device: &wgpu::Device, _pipeline: &GpuPipeline) {
+    for (_, pane) in dock_state.iter_all_tabs_mut() {
+        if let Some(rx) = &pane.load_receiver {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(armor) => {
+                        init_armor_viewport(pane, &armor, device);
+                        pane.loaded_armor = Some(armor);
                     }
-                    pane.loading = false;
-                    pane.load_receiver = None;
+                    Err(e) => {
+                        tracing::error!("Failed to load ship armor: {e}");
+                    }
                 }
+                pane.loading = false;
+                pane.load_receiver = None;
             }
-        }
-        crate::armor_viewer::split_pane::SplitNode::Split { first, second, .. } => {
-            poll_pane_loads(first, device, pipeline);
-            poll_pane_loads(second, device, pipeline);
         }
     }
 }
@@ -677,34 +705,11 @@ fn render_armor_pane(
     pane: &mut ArmorPane,
     render_state: &eframe::egui_wgpu::RenderState,
     gpu_pipeline: &GpuPipeline,
-    total_pane_count: usize,
-    mirror_camera_signal: Option<&std::cell::Cell<Option<u64>>>,
-    active_pane_signal: Option<&std::cell::Cell<Option<u64>>>,
+    mirror_camera_signal: &std::cell::Cell<Option<u64>>,
+    active_pane_signal: &std::cell::Cell<Option<u64>>,
     translate_part: &dyn Fn(&str) -> String,
-) -> Option<SplitAction> {
-    let mut action = None;
-
+) {
     let pane_id = pane.id;
-    let ship_name = pane.loaded_armor.as_ref().map(|a| a.display_name.as_str()).unwrap_or("No ship selected");
-
-    // Toolbar
-    ui.horizontal(|ui| {
-        ui.strong(ship_name);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Close button (only if more than 1 pane)
-            if total_pane_count > 1 && ui.small_button(icons::X).clicked() {
-                action = Some(SplitAction::Close(pane_id));
-            }
-            if ui.small_button(icons::SPLIT_VERTICAL).on_hover_text("Split Vertical").clicked() {
-                action = Some(SplitAction::SplitVertical(pane_id));
-            }
-            if ui.small_button(icons::SPLIT_HORIZONTAL).on_hover_text("Split Horizontal").clicked() {
-                action = Some(SplitAction::SplitHorizontal(pane_id));
-            }
-        });
-    });
-
-    ui.separator();
 
     // Full viewport area (no sidebar)
     {
@@ -902,19 +907,13 @@ fn render_armor_pane(
                 // Camera interaction
                 if pane.viewport.handle_input(&response, bounds) {
                     vp_ui.ctx().request_repaint();
-                    if let Some(signal) = mirror_camera_signal {
-                        signal.set(Some(pane_id));
-                    }
-                    if let Some(signal) = active_pane_signal {
-                        signal.set(Some(pane_id));
-                    }
+                    mirror_camera_signal.set(Some(pane_id));
+                    active_pane_signal.set(Some(pane_id));
                 }
 
                 // Clicking on the viewport also makes this the active pane
                 if response.clicked() || response.drag_started() {
-                    if let Some(signal) = active_pane_signal {
-                        signal.set(Some(pane_id));
-                    }
+                    active_pane_signal.set(Some(pane_id));
                 }
 
                 // Picking on hover / click / right-click
@@ -1041,8 +1040,6 @@ fn render_armor_pane(
             });
         }
     }
-
-    action
 }
 
 /// Spawn a background thread to load a ship's armor data.

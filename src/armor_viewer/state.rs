@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use crate::armor_viewer::split_pane::SplitNode;
-use crate::viewport_3d::{GpuPipeline, MeshId, Viewport3D};
+use egui_dock::DockState;
+
+use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 
 /// Loading state for ShipAssets.
 pub enum ShipAssetsState {
@@ -19,11 +20,20 @@ impl Default for ShipAssetsState {
     }
 }
 
+/// Settings to clone into a new pane for comparison.
+pub struct CompareSettings {
+    pub ship_param_index: String,
+    pub ship_display_name: String,
+    pub camera: ArcballCamera,
+    pub part_visibility: HashMap<(String, String), bool>,
+    pub hull_visibility: HashMap<String, bool>,
+}
+
 /// Top-level state for the Armor Viewer tab.
 #[allow(dead_code)]
 pub struct ArmorViewerState {
-    /// The recursive split-pane tree. Each leaf is a single armor pane.
-    pub split_tree: SplitNode,
+    /// Dock state managing split panes. Each tab is an ArmorPane.
+    pub dock_state: DockState<ArmorPane>,
     /// Cached ship catalog, built once from GameParams.
     pub ship_catalog: Option<Arc<crate::armor_viewer::ship_selector::ShipCatalog>>,
     /// Shared ShipAssets handle (expensive, created once on first use).
@@ -47,7 +57,7 @@ pub struct ArmorViewerState {
 impl Default for ArmorViewerState {
     fn default() -> Self {
         Self {
-            split_tree: SplitNode::Leaf(ArmorPane::empty(0)),
+            dock_state: DockState::new(vec![ArmorPane::empty(0)]),
             ship_catalog: None,
             ship_assets: ShipAssetsState::default(),
             gpu_pipeline: None,

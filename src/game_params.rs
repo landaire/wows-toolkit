@@ -84,6 +84,8 @@ pub fn cleanup_stale_caches(available_builds: &[u32]) {
 
 #[instrument(skip(vfs))]
 pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetadataProvider, ToolkitError> {
+    debug!("Loading gameparams from game fiels"):
+
     let cache_path = game_params_bin_path(game_version as u32);
 
     let start = Instant::now();
