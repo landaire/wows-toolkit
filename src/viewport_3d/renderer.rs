@@ -616,6 +616,26 @@ impl Viewport3D {
         picking::pick_meshes(screen_pos, viewport_rect, &self.camera, &mesh_refs)
     }
 
+    /// Unproject a screen position to a world-space ray (origin, direction).
+    pub fn screen_to_ray(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Option<([f32; 3], [f32; 3])> {
+        picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)
+    }
+
+    /// Perform CPU picking that returns ALL hits along the ray, sorted by distance.
+    /// Each hit includes the triangle normal for impact angle calculations.
+    pub fn pick_all(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Vec<(HitResult, [f32; 3])> {
+        let mesh_refs: Vec<(MeshId, &PickableMesh, bool)> = self
+            .pick_data
+            .iter()
+            .map(|(id, mesh)| {
+                let visible = self.meshes.get(id).is_some_and(|m| m.visible);
+                (*id, mesh, visible)
+            })
+            .collect();
+
+        picking::pick_all_meshes(screen_pos, viewport_rect, &self.camera, &mesh_refs)
+    }
+
     /// Handle standard 3D navigation input on a UI response.
     /// Left-drag = orbit, scroll = zoom, middle-drag = pan, double-click = reset.
     /// Returns true if the camera changed.

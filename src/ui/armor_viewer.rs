@@ -12,7 +12,7 @@ use crate::armor_viewer::state::{
 };
 use crate::icon_str;
 use crate::icons;
-use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
+use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, LAYER_OVERLAY, MeshId, Vertex};
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
 struct ArmorPaneViewer<'a> {
@@ -22,6 +22,9 @@ struct ArmorPaneViewer<'a> {
     active_pane_signal: &'a std::cell::Cell<Option<u64>>,
     save_defaults_signal: &'a std::cell::Cell<Option<ArmorViewerDefaults>>,
     export_signal: &'a std::cell::Cell<Option<(String, String)>>,
+    pen_check_toggle: &'a std::cell::Cell<bool>,
+    comparison_ships: &'a [crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
     translate_part: &'a dyn Fn(&str) -> String,
     tab_count: usize,
 }
@@ -47,6 +50,9 @@ impl TabViewer for ArmorPaneViewer<'_> {
             self.active_pane_signal,
             self.save_defaults_signal,
             self.export_signal,
+            self.pen_check_toggle,
+            self.comparison_ships,
+            self.ifhe_enabled,
             self.translate_part,
         );
     }
@@ -517,6 +523,10 @@ impl ToolkitTabViewer<'_> {
         let save_defaults_ref = &save_defaults_cell;
         let export_cell: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
         let export_ref = &export_cell;
+        let pen_check_toggle_cell: std::cell::Cell<bool> = std::cell::Cell::new(false);
+        let pen_check_toggle_ref = &pen_check_toggle_cell;
+        let comparison_ships_snapshot = &state.comparison_ships;
+        let ifhe_snapshot = state.ifhe_enabled;
         {
             let tab_count = state.dock_state.main_surface().num_tabs();
             let mut viewer = ArmorPaneViewer {
@@ -526,6 +536,9 @@ impl ToolkitTabViewer<'_> {
                 active_pane_signal: active_pane_ref,
                 save_defaults_signal: save_defaults_ref,
                 export_signal: export_ref,
+                pen_check_toggle: pen_check_toggle_ref,
+                comparison_ships: comparison_ships_snapshot,
+                ifhe_enabled: ifhe_snapshot,
                 translate_part: translate_part_ref,
                 tab_count,
             };
@@ -620,6 +633,158 @@ impl ToolkitTabViewer<'_> {
         // Handle export signal from toolbar button
         if let Some(export_req) = export_cell.take() {
             state.export_confirm = Some(export_req);
+        }
+
+        // Handle pen check toggle from toolbar button
+        if pen_check_toggle_cell.get() {
+            state.show_comparison_panel = !state.show_comparison_panel;
+        }
+
+        // ── Penetration Comparison floating window ──
+        if state.show_comparison_panel {
+            let mut open = state.show_comparison_panel;
+            egui::Window::new(format!("{} Penetration Check", icons::CROSSHAIR))
+                .id(egui::Id::new("pen_check_panel"))
+                .open(&mut open)
+                .collapsible(true)
+                .resizable(true)
+                .default_width(280.0)
+                .show(ui.ctx(), |ui| {
+                    // IFHE toggle
+                    ui.checkbox(&mut state.ifhe_enabled, "IFHE (+25% HE penetration)");
+                    ui.separator();
+
+                    // Search bar
+                    ui.horizontal(|ui| {
+                        ui.label(icons::MAGNIFYING_GLASS);
+                        ui.text_edit_singleline(&mut state.comparison_search);
+                    });
+
+                    // Search results
+                    if !state.comparison_search.is_empty() {
+                        if let Some(catalog) = &ship_catalog {
+                            let search = unidecode::unidecode(&state.comparison_search).to_lowercase();
+                            let already_added: std::collections::HashSet<&str> =
+                                state.comparison_ships.iter().map(|s| s.param_index.as_str()).collect();
+
+                            let mut results = Vec::new();
+                            for nation in &catalog.nations {
+                                for class in &nation.classes {
+                                    for ship in &class.ships {
+                                        if ship.search_name.contains(&search)
+                                            && !already_added.contains(ship.param_index.as_str())
+                                        {
+                                            results.push(ship.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            results.truncate(10);
+
+                            if !results.is_empty() {
+                                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
+                                    // Collect indices to add
+                                    let mut to_add: Vec<String> = Vec::new();
+                                    for ship in &results {
+                                        let label = format!(
+                                            "{} {}",
+                                            crate::armor_viewer::ship_selector::tier_roman(ship.tier),
+                                            &ship.display_name
+                                        );
+                                        if ui.button(label).clicked() {
+                                            to_add.push(ship.param_index.clone());
+                                            state.comparison_search.clear();
+                                        }
+                                    }
+                                    // Process additions outside immutable borrow scope
+                                    for param_idx in to_add {
+                                        let wd = wows_data.read();
+                                        if let Some(metadata) = wd.game_metadata.as_ref() {
+                                            if let Some(comp_ship) =
+                                                crate::armor_viewer::penetration::resolve_ship_shells(
+                                                    metadata, &param_idx,
+                                                )
+                                            {
+                                                state.comparison_ships.push(comp_ship);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    ui.separator();
+
+                    // Added ships list
+                    if state.comparison_ships.is_empty() {
+                        ui.label(
+                            egui::RichText::new("Search and add ships above to compare penetration")
+                                .small()
+                                .color(egui::Color32::GRAY),
+                        );
+                    } else {
+                        let mut remove_idx: Option<usize> = None;
+                        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                            for (i, ship) in state.comparison_ships.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    if ui.small_button(icons::X).clicked() {
+                                        remove_idx = Some(i);
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} {}",
+                                            crate::armor_viewer::ship_selector::tier_roman(ship.tier),
+                                            &ship.display_name
+                                        ))
+                                        .strong(),
+                                    );
+                                });
+                                for shell in &ship.shells {
+                                    let pen_text = match shell.ammo_type.as_str() {
+                                        "HE" => {
+                                            let pen = shell.he_pen_mm.unwrap_or(0.0);
+                                            format!(
+                                                "  {} {:.0}mm — {:.0}mm pen",
+                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.caliber_mm,
+                                                pen
+                                            )
+                                        }
+                                        "CS" => {
+                                            let pen = shell.sap_pen_mm.unwrap_or(0.0);
+                                            format!(
+                                                "  {} {:.0}mm — {:.0}mm pen",
+                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.caliber_mm,
+                                                pen
+                                            )
+                                        }
+                                        "AP" => {
+                                            format!(
+                                                "  {} {:.0}mm — {:.0} krupp",
+                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.caliber_mm,
+                                                shell.krupp
+                                            )
+                                        }
+                                        _ => String::new(),
+                                    };
+                                    ui.label(egui::RichText::new(pen_text).small());
+                                }
+                                ui.add_space(4.0);
+                            }
+                        });
+                        if let Some(idx) = remove_idx {
+                            state.comparison_ships.remove(idx);
+                        }
+
+                        if ui.button("Clear all").clicked() {
+                            state.comparison_ships.clear();
+                        }
+                    }
+                });
+            state.show_comparison_panel = open;
         }
 
         // ── Export confirmation dialog ──
@@ -795,6 +960,13 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
         upload_plate_boundary_edges(pane, armor, device);
     }
 
+    // Upload gap detection overlay
+    if pane.show_gaps {
+        pane.gap_count = upload_gap_edges(pane, armor, device);
+    } else {
+        pane.gap_count = 0;
+    }
+
     // Upload hull visual meshes (semi-transparent gray overlay)
     for mesh in &armor.hull_meshes {
         let visible = pane.hull_visibility.get(&mesh.name).copied().unwrap_or(false);
@@ -880,6 +1052,9 @@ fn render_armor_pane(
     active_pane_signal: &std::cell::Cell<Option<u64>>,
     save_defaults_signal: &std::cell::Cell<Option<ArmorViewerDefaults>>,
     export_signal: &std::cell::Cell<Option<(String, String)>>,
+    pen_check_toggle: &std::cell::Cell<bool>,
+    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
     translate_part: &dyn Fn(&str) -> String,
 ) {
     let pane_id = pane.id;
@@ -976,12 +1151,21 @@ fn render_armor_pane(
                                     ui.set_width(ui.available_width());
                                     let show_zero = pane.show_zero_mm;
                                     for (zone, parts_with_plates) in &armor.zone_part_plates {
-                                        // Zone-level: check if all parts in zone are on
-                                        let zone_all_on = parts_with_plates.iter().all(|(p, _)| {
-                                            pane.part_visibility
+                                        // Zone-level: "all on" only if every part is enabled
+                                        // AND no plates within any part are explicitly hidden.
+                                        let zone_all_on = parts_with_plates.iter().all(|(p, plates)| {
+                                            let part_on = pane
+                                                .part_visibility
                                                 .get(&(zone.clone(), p.clone()))
                                                 .copied()
-                                                .unwrap_or(true)
+                                                .unwrap_or(true);
+                                            if !part_on {
+                                                return false;
+                                            }
+                                            !plates.iter().filter(|&&t| show_zero || t != 0).any(|&t| {
+                                                let pk: PlateKey = (zone.clone(), p.clone(), t);
+                                                pane.plate_visibility.get(&pk).copied() == Some(false)
+                                            })
                                         });
                                         let zone_any_on = parts_with_plates.iter().any(|(p, _)| {
                                             pane.part_visibility
@@ -1231,6 +1415,36 @@ fn render_armor_pane(
                         zone_changed = true;
                     }
 
+                    // ── Gap Detection toggle ──
+                    {
+                        let gap_label = if pane.show_gaps && pane.gap_count > 0 {
+                            format!("{} Gaps ({})", icons::WARNING, pane.gap_count)
+                        } else if pane.show_gaps {
+                            format!("{} Gaps (0)", icons::CHECK)
+                        } else {
+                            format!("{} Gaps", icons::WARNING)
+                        };
+                        let gap_color = if pane.show_gaps && pane.gap_count > 0 {
+                            Some(egui::Color32::from_rgb(255, 100, 100))
+                        } else if pane.show_gaps {
+                            Some(egui::Color32::from_rgb(100, 200, 100))
+                        } else {
+                            None
+                        };
+                        let mut label = egui::RichText::new(gap_label);
+                        if let Some(c) = gap_color {
+                            label = label.color(c);
+                        }
+                        if ui
+                            .selectable_label(pane.show_gaps, label)
+                            .on_hover_text("Highlight boundary edges where armor panels don't connect (potential gaps)")
+                            .clicked()
+                        {
+                            pane.show_gaps = !pane.show_gaps;
+                            zone_changed = true;
+                        }
+                    }
+
                     // ── Display settings button with popover ──
                     let display_btn = ui.button(format!("{} Display", icons::GEAR_FINE));
                     egui::Popup::from_toggle_button_response(&display_btn)
@@ -1275,6 +1489,29 @@ fn render_armor_pane(
                             export_signal.set(Some((param_index.clone(), display_name)));
                         }
                     }
+
+                    // ── Penetration Check toggle ──
+                    {
+                        let label = if comparison_ships.is_empty() {
+                            icon_str!(icons::CROSSHAIR, "Pen Check").to_string()
+                        } else {
+                            format!("{} Pen Check ({})", icons::CROSSHAIR, comparison_ships.len())
+                        };
+                        if ui.button(label).clicked() {
+                            pen_check_toggle.set(true);
+                        }
+                    }
+
+                    // ── Trajectory mode toggle ──
+                    {
+                        let traj_label = if pane.trajectory_mode { "Trajectory [ON]" } else { "Trajectory" };
+                        let btn = egui::Button::new(traj_label);
+                        let btn =
+                            if pane.trajectory_mode { btn.fill(egui::Color32::from_rgb(80, 60, 20)) } else { btn };
+                        if ui.add(btn).clicked() {
+                            pane.trajectory_mode = !pane.trajectory_mode;
+                        }
+                    }
                 });
                 vp_ui.separator();
             }
@@ -1283,6 +1520,13 @@ fn render_armor_pane(
             if let Some(armor) = pane.loaded_armor.take() {
                 upload_armor_to_viewport(pane, &armor, &render_state.device);
                 pane.loaded_armor = Some(armor);
+            }
+            // Re-upload trajectory visualization (viewport.clear() destroyed it)
+            if let Some(result) = &pane.trajectory_result {
+                let result = result.clone();
+                pane.trajectory_mesh = None; // old mesh already gone from clear()
+                let mesh_id = upload_trajectory_visualization(pane, &result, &render_state.device);
+                pane.trajectory_mesh = Some(mesh_id);
             }
         }
 
@@ -1342,7 +1586,7 @@ fn render_armor_pane(
                                 pane.hovered_info = Some(tooltip.clone());
                                 if !context_menu_open {
                                     egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
-                                        show_armor_tooltip(ui, tooltip, translate_part);
+                                        show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, translate_part);
                                     });
                                 }
                             } else {
@@ -1354,8 +1598,64 @@ fn render_armor_pane(
                     }
                 }
 
-                // Single click: toggle plate visibility (hide/show)
-                if response.clicked() {
+                // Trajectory mode: click to cast ray through model
+                if pane.trajectory_mode && response.clicked() {
+                    if let Some(click_pos) = response.interact_pointer_pos() {
+                        let all_hits = pane.viewport.pick_all(click_pos, response.rect);
+                        let ray_info = pane.viewport.screen_to_ray(click_pos, response.rect);
+
+                        // Remove old trajectory mesh
+                        if let Some(mesh_id) = pane.trajectory_mesh.take() {
+                            pane.viewport.remove_mesh(mesh_id);
+                        }
+
+                        if !all_hits.is_empty() {
+                            if let Some((origin, direction)) = ray_info {
+                                // Build trajectory result from hits
+                                let mut traj_hits = Vec::new();
+                                let first_dist = all_hits[0].0.distance;
+                                for (hit, normal) in &all_hits {
+                                    let tooltip = pane
+                                        .mesh_triangle_info
+                                        .iter()
+                                        .find(|(id, _)| *id == hit.mesh_id)
+                                        .and_then(|(_, infos)| infos.get(hit.triangle_index));
+
+                                    if let Some(info) = tooltip {
+                                        let angle =
+                                            crate::armor_viewer::penetration::impact_angle_deg(&direction, normal);
+                                        traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
+                                            position: hit.world_position,
+                                            thickness_mm: info.thickness_mm,
+                                            zone: info.zone.clone(),
+                                            material: info.material_name.clone(),
+                                            angle_deg: angle,
+                                            distance_from_start: hit.distance - first_dist,
+                                        });
+                                    }
+                                }
+
+                                let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+                                let result = crate::armor_viewer::penetration::TrajectoryResult {
+                                    origin,
+                                    direction,
+                                    hits: traj_hits,
+                                    total_armor_mm: total_armor,
+                                };
+
+                                // Upload trajectory visualization mesh
+                                let mesh_id = upload_trajectory_visualization(pane, &result, &render_state.device);
+                                pane.trajectory_mesh = Some(mesh_id);
+                                pane.trajectory_result = Some(result);
+                            }
+                        } else {
+                            pane.trajectory_result = None;
+                        }
+                    }
+                }
+
+                // Single click: toggle plate visibility (hide/show) — skip in trajectory mode
+                if !pane.trajectory_mode && response.clicked() {
                     if let Some(ref key) = hovered_plate_key {
                         pane.undo_stack.push(VisibilitySnapshot {
                             part_visibility: pane.part_visibility.clone(),
@@ -1427,6 +1727,173 @@ fn render_armor_pane(
                     });
                 }
 
+                // ── Trajectory results floating panel (visible whenever result exists) ──
+                let clear_traj = std::cell::Cell::new(false);
+                if let Some(result) = &pane.trajectory_result {
+                    {
+                        let traj_id = egui::Id::new(("trajectory_results", pane_id));
+                        egui::Window::new("Trajectory Analysis")
+                            .id(traj_id)
+                            .collapsible(true)
+                            .resizable(true)
+                            .default_width(300.0)
+                            .default_pos(egui::pos2(
+                                response.rect.right() - 310.0,
+                                response.rect.top() + 40.0,
+                            ))
+                            .show(vp_ui.ctx(), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} hits — {:.0} mm total armor",
+                                        result.hits.len(),
+                                        result.total_armor_mm
+                                    ))
+                                    .strong(),
+                                );
+                                ui.separator();
+
+                                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                                    // Track per-shell stopping state: (ship_idx, shell_idx) -> stopped
+                                    let mut shell_stopped: std::collections::HashSet<(usize, usize)> =
+                                        std::collections::HashSet::new();
+
+                                    for (i, hit) in result.hits.iter().enumerate() {
+                                        let color = if hit.angle_deg > 70.0 {
+                                            egui::Color32::from_rgb(220, 100, 100)
+                                        } else if hit.angle_deg > 45.0 {
+                                            egui::Color32::from_rgb(220, 180, 80)
+                                        } else {
+                                            egui::Color32::from_rgb(100, 220, 100)
+                                        };
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("#{}", i + 1))
+                                                    .small()
+                                                    .color(egui::Color32::GRAY),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(format!("{:.0} mm", hit.thickness_mm))
+                                                    .strong()
+                                                    .color(color),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(format!("{:.1}°", hit.angle_deg))
+                                                    .small()
+                                                    .color(color),
+                                            );
+                                        });
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "  {} / {}",
+                                                &hit.zone,
+                                                translate_part(&hit.material)
+                                            ))
+                                            .small()
+                                            .color(egui::Color32::GRAY),
+                                        );
+
+                                        // Per-shell pen check with stopping behavior
+                                        for (si, ship) in comparison_ships.iter().enumerate() {
+                                            for (ji, shell) in ship.shells.iter().enumerate() {
+                                                let key = (si, ji);
+
+                                                // Skip shells already stopped by a previous hit
+                                                if shell_stopped.contains(&key) {
+                                                    continue;
+                                                }
+
+                                                let (icon, detail, stops) = match shell.ammo_type.as_str() {
+                                                    "AP" => {
+                                                        if shell.caliber_mm > hit.thickness_mm * 14.3 {
+                                                            // Overmatch: always pen, shell continues
+                                                            ("\u{2705}", "overmatch".to_string(), false)
+                                                        } else if hit.angle_deg >= shell.always_ricochet_angle {
+                                                            // Guaranteed ricochet: shell stops
+                                                            ("\u{274C}", "ricochet".to_string(), true)
+                                                        } else if hit.angle_deg >= shell.ricochet_angle {
+                                                            // Ricochet chance: show warning, shell might continue
+                                                            ("\u{2796}", format!("ricochet chance @ {:.0}°", hit.angle_deg), false)
+                                                        } else {
+                                                            // Clean pen, shell continues
+                                                            ("\u{2705}", format!("pen @ {:.0}°", hit.angle_deg), false)
+                                                        }
+                                                    }
+                                                    "HE" | "CS" => {
+                                                        // HE/SAP: check pen on first hit, then always stop
+                                                        let base_result = crate::armor_viewer::penetration::check_penetration(
+                                                            shell,
+                                                            hit.thickness_mm,
+                                                            ifhe_enabled,
+                                                        );
+                                                        let icon = match base_result {
+                                                            crate::armor_viewer::penetration::PenResult::Penetrates => "\u{2705}",
+                                                            crate::armor_viewer::penetration::PenResult::Bounces => "\u{274C}",
+                                                            crate::armor_viewer::penetration::PenResult::AngleDependent => "\u{2796}",
+                                                        };
+                                                        let pen_val = match shell.ammo_type.as_str() {
+                                                            "HE" => {
+                                                                let p = if ifhe_enabled {
+                                                                    shell.he_pen_mm.unwrap_or(0.0) * 1.25
+                                                                } else {
+                                                                    shell.he_pen_mm.unwrap_or(0.0)
+                                                                };
+                                                                format!("{:.0}mm pen — detonates", p)
+                                                            }
+                                                            "CS" => format!("{:.0}mm pen — detonates", shell.sap_pen_mm.unwrap_or(0.0)),
+                                                            _ => String::new(),
+                                                        };
+                                                        // HE/SAP always detonates on contact
+                                                        (icon, pen_val, true)
+                                                    }
+                                                    _ => {
+                                                        ("\u{2796}", "unknown".to_string(), true)
+                                                    }
+                                                };
+
+                                                if stops {
+                                                    shell_stopped.insert(key);
+                                                }
+
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(12.0);
+                                                    ui.label(egui::RichText::new(icon));
+                                                    ui.label(
+                                                        egui::RichText::new(format!(
+                                                            "{} {} {:.0}mm — {}",
+                                                            &ship.display_name,
+                                                            crate::armor_viewer::penetration::ammo_type_display(
+                                                                &shell.ammo_type
+                                                            ),
+                                                            shell.caliber_mm,
+                                                            detail,
+                                                        ))
+                                                        .small(),
+                                                    );
+                                                });
+                                            }
+                                        }
+
+                                        if i + 1 < result.hits.len() {
+                                            ui.separator();
+                                        }
+                                    }
+                                });
+
+                                ui.separator();
+                                if ui.button("Clear").clicked() {
+                                    clear_traj.set(true);
+                                }
+                            });
+                    }
+                }
+                if clear_traj.get() {
+                    if let Some(mesh_id) = pane.trajectory_mesh.take() {
+                        pane.viewport.remove_mesh(mesh_id);
+                    }
+                    pane.trajectory_result = None;
+                }
+
                 // Update hover highlight overlay
                 let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
                 if hovered_plate_key != current_hover {
@@ -1459,6 +1926,13 @@ fn render_armor_pane(
             if let Some(armor) = pane.loaded_armor.take() {
                 upload_armor_to_viewport(pane, &armor, &render_state.device);
                 pane.loaded_armor = Some(armor);
+            }
+            // Re-upload trajectory visualization (viewport.clear() destroyed it)
+            if let Some(result) = &pane.trajectory_result {
+                let result = result.clone();
+                pane.trajectory_mesh = None;
+                let mesh_id = upload_trajectory_visualization(pane, &result, &render_state.device);
+                pane.trajectory_mesh = Some(mesh_id);
             }
         }
     }
@@ -1620,7 +2094,14 @@ fn paint_swatch(ui: &mut egui::Ui, color: egui::Color32, size: f32) {
 }
 
 /// Show tooltip for a hovered armor triangle.
-fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate: &dyn Fn(&str) -> String) {
+fn show_armor_tooltip(
+    ui: &mut egui::Ui,
+    info: &ArmorTriangleTooltip,
+    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
+    translate: &dyn Fn(&str) -> String,
+) {
+    use crate::armor_viewer::penetration::{PenResult, ammo_type_display, check_penetration};
     use wowsunpack::export::gltf_export::thickness_to_color;
 
     // Main header: this plate's thickness with color swatch
@@ -1653,6 +2134,68 @@ fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate:
                 };
                 ui.label(text);
             });
+        }
+    }
+
+    // Penetration check results
+    if !comparison_ships.is_empty() {
+        ui.separator();
+        ui.label(egui::RichText::new("Penetration Check").small().strong());
+        if ifhe_enabled {
+            ui.label(egui::RichText::new("IFHE active (+25% HE pen)").small().color(egui::Color32::YELLOW));
+        }
+
+        for ship in comparison_ships {
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} {}",
+                    crate::armor_viewer::ship_selector::tier_roman(ship.tier),
+                    &ship.display_name
+                ))
+                .small()
+                .strong(),
+            );
+            for shell in &ship.shells {
+                let result = check_penetration(shell, info.thickness_mm, ifhe_enabled);
+                let (icon, color) = match result {
+                    PenResult::Penetrates => ("\u{2705}", egui::Color32::from_rgb(100, 220, 100)),
+                    PenResult::Bounces => ("\u{274C}", egui::Color32::from_rgb(220, 100, 100)),
+                    PenResult::AngleDependent => ("\u{2796}", egui::Color32::GRAY),
+                };
+                let pen_info = match shell.ammo_type.as_str() {
+                    "HE" => {
+                        let pen = if ifhe_enabled {
+                            shell.he_pen_mm.unwrap_or(0.0) * 1.25
+                        } else {
+                            shell.he_pen_mm.unwrap_or(0.0)
+                        };
+                        format!("{:.0}mm pen", pen)
+                    }
+                    "CS" => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
+                    "AP" => {
+                        if shell.caliber_mm > info.thickness_mm * 14.3 {
+                            "overmatch".to_string()
+                        } else {
+                            "angle-dependent".to_string()
+                        }
+                    }
+                    _ => String::new(),
+                };
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {:.0}mm ({})",
+                            ammo_type_display(&shell.ammo_type),
+                            shell.caliber_mm,
+                            pen_info,
+                        ))
+                        .color(color)
+                        .small(),
+                    );
+                });
+            }
         }
     }
 }
@@ -1721,6 +2264,155 @@ fn upload_plate_highlight(
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
         }
+    }
+
+    pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+/// Add a line segment as two cross-shaped quads into the vertex/index buffers.
+fn traj_line_segment(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    p0: [f32; 3],
+    p1: [f32; 3],
+    color: [f32; 4],
+    perp1: [f32; 3],
+    perp2: [f32; 3],
+    line_width: f32,
+) {
+    use crate::viewport_3d::camera::{add, scale, sub};
+    let offset1 = scale(perp1, line_width * 0.5);
+    let offset2 = scale(perp2, line_width * 0.5);
+
+    for offset in [offset1, offset2] {
+        let b = vertices.len() as u32;
+        vertices.push(Vertex { position: sub(p0, offset), normal: perp1, color });
+        vertices.push(Vertex { position: add(p0, offset), normal: perp1, color });
+        vertices.push(Vertex { position: add(p1, offset), normal: perp1, color });
+        vertices.push(Vertex { position: sub(p1, offset), normal: perp1, color });
+        indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+    }
+}
+
+/// Add a diamond-shaped marker at a point into the vertex/index buffers.
+fn traj_marker(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+    pos: [f32; 3],
+    color: [f32; 4],
+    size: f32,
+    dir: [f32; 3],
+    perp1: [f32; 3],
+    perp2: [f32; 3],
+) {
+    use crate::viewport_3d::camera::{add, scale, sub};
+    let base = vertices.len() as u32;
+    let o1 = scale(perp1, size);
+    let o2 = scale(perp2, size);
+    let od = scale(dir, size);
+
+    let top = add(pos, od);
+    let bottom = sub(pos, od);
+    let left = sub(pos, o1);
+    let right = add(pos, o1);
+    let front = add(pos, o2);
+    let back = sub(pos, o2);
+
+    let n = [0.0, 1.0, 0.0];
+    for &[a, b, c] in &[
+        [top, right, front],
+        [top, front, left],
+        [top, left, back],
+        [top, back, right],
+        [bottom, front, right],
+        [bottom, left, front],
+        [bottom, back, left],
+        [bottom, right, back],
+    ] {
+        vertices.push(Vertex { position: a, normal: n, color });
+        vertices.push(Vertex { position: b, normal: n, color });
+        vertices.push(Vertex { position: c, normal: n, color });
+    }
+
+    for i in 0..24 {
+        indices.push(base + i);
+    }
+}
+
+/// Upload a trajectory visualization as colored line segments on the overlay layer.
+fn upload_trajectory_visualization(
+    pane: &mut ArmorPane,
+    result: &crate::armor_viewer::penetration::TrajectoryResult,
+    device: &wgpu::Device,
+) -> MeshId {
+    use crate::viewport_3d::camera::{add, cross, normalize, scale, sub};
+
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let dir = result.direction;
+    let line_width = 0.05;
+
+    let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
+    let perp1 = normalize(cross(dir, arbitrary));
+    let perp2 = normalize(cross(dir, perp1));
+
+    if !result.hits.is_empty() {
+        // Leading segment: from before first hit to first hit
+        let first_pos = result.hits[0].position;
+        let lead_start = sub(first_pos, scale(dir, 2.0));
+        traj_line_segment(
+            &mut vertices,
+            &mut indices,
+            lead_start,
+            first_pos,
+            [1.0, 1.0, 0.0, 0.9],
+            perp1,
+            perp2,
+            line_width,
+        );
+
+        for i in 0..result.hits.len() {
+            let hit = &result.hits[i];
+
+            let color = if hit.angle_deg > 70.0 {
+                [0.9, 0.3, 0.3, 1.0]
+            } else if hit.angle_deg > 45.0 {
+                [0.9, 0.7, 0.2, 1.0]
+            } else {
+                [0.3, 0.9, 0.3, 1.0]
+            };
+
+            traj_marker(&mut vertices, &mut indices, hit.position, color, 0.15, dir, perp1, perp2);
+
+            if i + 1 < result.hits.len() {
+                let next_pos = result.hits[i + 1].position;
+                traj_line_segment(
+                    &mut vertices,
+                    &mut indices,
+                    hit.position,
+                    next_pos,
+                    [1.0, 1.0, 0.0, 0.9],
+                    perp1,
+                    perp2,
+                    line_width,
+                );
+            }
+        }
+
+        // Trailing segment: from last hit outward
+        let last_pos = result.hits.last().unwrap().position;
+        let trail_end = add(last_pos, scale(dir, 2.0));
+        traj_line_segment(
+            &mut vertices,
+            &mut indices,
+            last_pos,
+            trail_end,
+            [1.0, 1.0, 0.0, 0.5],
+            perp1,
+            perp2,
+            line_width,
+        );
     }
 
     pane.viewport.add_overlay_mesh(device, &vertices, &indices)
@@ -1982,6 +2674,162 @@ fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, de
     if !indices.is_empty() {
         pane.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_DEFAULT);
     }
+}
+
+/// Detect and render gap edges (boundary edges shared by only 1 triangle) in the armor mesh.
+/// Returns the number of gap edges found.
+fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) -> usize {
+    use std::collections::HashMap;
+
+    let edge_half_width: f32 = 0.006;
+    let normal_offset: f32 = 0.008;
+    let gap_color: [f32; 4] = [1.0, 0.15, 0.1, 1.0]; // red
+    let max_edge_length: f32 = 5.0; // filter out very long edges (mesh outer boundaries)
+
+    fn quantize(v: [f32; 3]) -> [i32; 3] {
+        [(v[0] * 10000.0).round() as i32, (v[1] * 10000.0).round() as i32, (v[2] * 10000.0).round() as i32]
+    }
+
+    type EdgeKey = ([i32; 3], [i32; 3]);
+    fn make_edge_key(a: [i32; 3], b: [i32; 3]) -> EdgeKey {
+        if a < b { (a, b) } else { (b, a) }
+    }
+
+    struct EdgeData {
+        p0: [f32; 3],
+        p1: [f32; 3],
+        normal: [f32; 3],
+    }
+
+    // Count how many triangles share each edge, and store position/normal data.
+    let mut edge_count: HashMap<EdgeKey, (usize, EdgeData)> = HashMap::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if !pane.show_zero_mm && info.thickness_mm.abs() < 0.05 {
+                continue;
+            }
+            if pane.show_hidden_only && !info.hidden {
+                continue;
+            }
+            let key = (info.zone.clone(), info.material_name.clone());
+            if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
+                continue;
+            }
+            let plate_key: PlateKey =
+                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+            if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+
+            let mut tri_pos = [[0.0_f32; 3]; 3];
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx >= mesh.positions.len() {
+                    continue;
+                }
+                let mut pos = mesh.positions[orig_idx];
+                if let Some(t) = &mesh.transform {
+                    pos = transform_point(t, pos);
+                }
+                tri_pos[k] = pos;
+            }
+
+            // Face normal
+            let e1 = [tri_pos[1][0] - tri_pos[0][0], tri_pos[1][1] - tri_pos[0][1], tri_pos[1][2] - tri_pos[0][2]];
+            let e2 = [tri_pos[2][0] - tri_pos[0][0], tri_pos[2][1] - tri_pos[0][1], tri_pos[2][2] - tri_pos[0][2]];
+            let nx = e1[1] * e2[2] - e1[2] * e2[1];
+            let ny = e1[2] * e2[0] - e1[0] * e2[2];
+            let nz = e1[0] * e2[1] - e1[1] * e2[0];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt();
+            let face_normal = if len > 1e-10 { [nx / len, ny / len, nz / len] } else { [0.0, 1.0, 0.0] };
+
+            let edges = [(0, 1), (1, 2), (2, 0)];
+            for (a, b) in edges {
+                let qa = quantize(tri_pos[a]);
+                let qb = quantize(tri_pos[b]);
+                let ek = make_edge_key(qa, qb);
+
+                edge_count
+                    .entry(ek)
+                    .and_modify(|(count, _)| *count += 1)
+                    .or_insert((1, EdgeData { p0: tri_pos[a], p1: tri_pos[b], normal: face_normal }));
+            }
+        }
+    }
+
+    // Boundary edges: shared by exactly 1 triangle
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut gap_count = 0;
+
+    for (_ek, (count, data)) in &edge_count {
+        if *count != 1 {
+            continue;
+        }
+
+        let p0 = data.p0;
+        let p1 = data.p1;
+
+        // Filter out very long edges (likely outer mesh boundaries, not gaps)
+        let dx = p1[0] - p0[0];
+        let dy = p1[1] - p0[1];
+        let dz = p1[2] - p0[2];
+        let edge_len = (dx * dx + dy * dy + dz * dz).sqrt();
+        if edge_len > max_edge_length || edge_len < 1e-6 {
+            continue;
+        }
+
+        gap_count += 1;
+
+        let avg_normal = data.normal;
+        let edge_dir = [dx, dy, dz];
+
+        // Tangent perpendicular to edge in the surface plane
+        let tx = edge_dir[1] * avg_normal[2] - edge_dir[2] * avg_normal[1];
+        let ty = edge_dir[2] * avg_normal[0] - edge_dir[0] * avg_normal[2];
+        let tz = edge_dir[0] * avg_normal[1] - edge_dir[1] * avg_normal[0];
+        let t_len = (tx * tx + ty * ty + tz * tz).sqrt();
+        if t_len < 1e-10 {
+            continue;
+        }
+        let tangent = [tx / t_len, ty / t_len, tz / t_len];
+
+        for &n_sign in &[1.0_f32, -1.0] {
+            let base = vertices.len() as u32;
+            let offset = [
+                avg_normal[0] * normal_offset * n_sign,
+                avg_normal[1] * normal_offset * n_sign,
+                avg_normal[2] * normal_offset * n_sign,
+            ];
+            let vert_normal = [avg_normal[0] * n_sign, avg_normal[1] * n_sign, avg_normal[2] * n_sign];
+            for &p in &[p0, p1] {
+                for &sign in &[-1.0_f32, 1.0] {
+                    vertices.push(Vertex {
+                        position: [
+                            p[0] + tangent[0] * edge_half_width * sign + offset[0],
+                            p[1] + tangent[1] * edge_half_width * sign + offset[1],
+                            p[2] + tangent[2] * edge_half_width * sign + offset[2],
+                        ],
+                        normal: vert_normal,
+                        color: gap_color,
+                    });
+                }
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
+        }
+    }
+
+    if !indices.is_empty() {
+        pane.viewport.add_non_pickable_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+    }
+
+    gap_count
 }
 
 /// Apply a column-major 4x4 transform to a point (position).

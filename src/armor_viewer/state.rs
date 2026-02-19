@@ -127,6 +127,14 @@ pub struct ArmorViewerState {
     pub prev_selector_search: String,
     /// ID of the pane that receives ship selections from the sidebar.
     pub active_pane_id: u64,
+    /// Ships added to the penetration comparison list.
+    pub comparison_ships: Vec<crate::armor_viewer::penetration::ComparisonShip>,
+    /// Search text for the penetration comparison panel.
+    pub comparison_search: String,
+    /// Whether the penetration comparison floating window is open.
+    pub show_comparison_panel: bool,
+    /// Whether IFHE (Inertia Fuse for HE Shells) modifier is enabled (+25% HE pen).
+    pub ifhe_enabled: bool,
 }
 
 impl Default for ArmorViewerState {
@@ -144,6 +152,10 @@ impl Default for ArmorViewerState {
             selector_search: String::new(),
             prev_selector_search: String::new(),
             active_pane_id: 0,
+            comparison_ships: Vec::new(),
+            comparison_search: String::new(),
+            show_comparison_panel: false,
+            ifhe_enabled: false,
         }
     }
 }
@@ -240,6 +252,16 @@ pub struct ArmorPane {
     pub show_hidden_only: bool,
     /// Undo/redo stack for visibility changes.
     pub undo_stack: VisibilityUndoStack,
+    /// Whether to show gap (boundary edge) overlay.
+    pub show_gaps: bool,
+    /// Number of gap edges found in the last analysis.
+    pub gap_count: usize,
+    /// Whether trajectory analysis mode is active (click to cast ray).
+    pub trajectory_mode: bool,
+    /// Cached trajectory analysis result.
+    pub trajectory_result: Option<crate::armor_viewer::penetration::TrajectoryResult>,
+    /// Mesh ID for the trajectory visualization overlay.
+    pub trajectory_mesh: Option<MeshId>,
 }
 
 impl ArmorPane {
@@ -270,6 +292,11 @@ impl ArmorPane {
             armor_opacity: defaults.armor_opacity,
             show_hidden_only: false,
             undo_stack: VisibilityUndoStack::default(),
+            show_gaps: false,
+            gap_count: 0,
+            trajectory_mode: false,
+            trajectory_result: None,
+            trajectory_mesh: None,
         }
     }
 }
