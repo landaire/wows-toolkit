@@ -24,6 +24,7 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) normal_vs: vec3<f32>,
+    @location(2) position_vs: vec3<f32>,
 };
 
 @vertex
@@ -31,24 +32,51 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = uniforms.mvp * vec4(in.position, 1.0);
     out.normal_vs = (uniforms.model_view * vec4(in.normal, 0.0)).xyz;
+    out.position_vs = (uniforms.model_view * vec4(in.position, 1.0)).xyz;
     out.color = in.color;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let ambient = 0.3;
-    let n = normalize(in.normal_vs);
+    // View direction (camera is at origin in view space)
+    let V = normalize(-in.position_vs);
+
+    // Double-sided normal: flip toward camera
+    var n = normalize(in.normal_vs);
+    if (dot(n, V) < 0.0) {
+        n = -n;
+    }
+
+    // Key light
     let l = normalize(uniforms.light_dir.xyz);
-    // Double-sided lighting: use abs(dot) so back-faces are also lit
-    let diffuse = abs(dot(n, l)) * 0.7;
-    let brightness = ambient + diffuse;
-    return vec4(in.color.rgb * brightness, in.color.a);
+    let NdotL = max(dot(n, l), 0.0);
+    let diffuse1 = NdotL * 0.7;
+
+    // Fill light (opposite side, dimmer)
+    let l2 = normalize(vec3(-0.4, -0.3, -0.6));
+    let diffuse2 = max(dot(n, l2), 0.0) * 0.2;
+
+    // Blinn-Phong specular (key light only)
+    let H = normalize(l + V);
+    let spec = pow(max(dot(n, H), 0.0), 32.0) * 0.3;
+
+    // Hemisphere ambient (sky=0.35, ground=0.15)
+    let ambient = mix(0.15, 0.35, n.y * 0.5 + 0.5);
+
+    // Rim/fresnel glow
+    let rim = pow(1.0 - max(dot(n, V), 0.0), 3.0) * 0.15;
+
+    let brightness = ambient + diffuse1 + diffuse2 + rim;
+    let color = in.color.rgb * brightness + vec3(spec);
+
+    return vec4(color, in.color.a);
 }
 "#;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const MSAA_SAMPLE_COUNT: u32 = 4;
 
 /// Shared GPU resources (created once, reusable across viewports).
 pub struct GpuPipeline {
@@ -127,7 +155,11 @@ impl GpuPipeline {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -150,7 +182,11 @@ impl GpuPipeline {
                     clamp: 0.0,
                 },
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -169,7 +205,11 @@ impl GpuPipeline {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -198,9 +238,13 @@ struct GpuMesh {
     layer: i32,
 }
 
-/// Offscreen render target (color + depth).
+/// Offscreen render target (MSAA color + resolve color + depth).
 #[allow(dead_code)]
 struct OffscreenTarget {
+    /// MSAA color texture — render target for the multisampled pass.
+    msaa_color_texture: wgpu::Texture,
+    msaa_color_view: wgpu::TextureView,
+    /// Resolve color texture (1x) — the resolved output registered with egui.
     color_texture: wgpu::Texture,
     color_view: wgpu::TextureView,
     depth_texture: wgpu::Texture,
@@ -403,6 +447,20 @@ impl Viewport3D {
         // Create or resize offscreen target
         let needs_resize = self.offscreen.as_ref().is_none_or(|t| t.size != size);
         if needs_resize {
+            // MSAA color texture — multisampled render target
+            let msaa_color_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewport_3d_msaa_color"),
+                size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: MSAA_SAMPLE_COUNT,
+                dimension: wgpu::TextureDimension::D2,
+                format: COLOR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let msaa_color_view = msaa_color_texture.create_view(&Default::default());
+
+            // Resolve color texture (1x) — registered with egui for display
             let color_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("viewport_3d_color"),
                 size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
@@ -415,11 +473,12 @@ impl Viewport3D {
             });
             let color_view = color_texture.create_view(&Default::default());
 
+            // Depth texture — multisampled to match MSAA color
             let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("viewport_3d_depth"),
                 size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
                 mip_level_count: 1,
-                sample_count: 1,
+                sample_count: MSAA_SAMPLE_COUNT,
                 dimension: wgpu::TextureDimension::D2,
                 format: DEPTH_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -427,7 +486,7 @@ impl Viewport3D {
             });
             let depth_view = depth_texture.create_view(&Default::default());
 
-            // Register or update egui texture
+            // Register or update egui texture (uses resolved 1x color)
             let egui_texture_id = if let Some(old) = self.offscreen.take() {
                 if let Some(id) = old.egui_texture_id {
                     let mut renderer = render_state.renderer.write();
@@ -442,8 +501,16 @@ impl Viewport3D {
                 Some(renderer.register_native_texture(device, &color_view, wgpu::FilterMode::Linear))
             };
 
-            self.offscreen =
-                Some(OffscreenTarget { color_texture, color_view, depth_texture, depth_view, egui_texture_id, size });
+            self.offscreen = Some(OffscreenTarget {
+                msaa_color_texture,
+                msaa_color_view,
+                color_texture,
+                color_view,
+                depth_texture,
+                depth_view,
+                egui_texture_id,
+                size,
+            });
             self.needs_redraw = true;
         }
 
@@ -488,8 +555,8 @@ impl Viewport3D {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport_3d_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &offscreen.color_view,
-                    resolve_target: None,
+                    view: &offscreen.msaa_color_view,
+                    resolve_target: Some(&offscreen.color_view),
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear_color), store: wgpu::StoreOp::Store },
                     depth_slice: None,
                 })],

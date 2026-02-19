@@ -1953,24 +1953,30 @@ fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, de
         }
         let tangent = [tx / t_len, ty / t_len, tz / t_len];
 
-        // Build a thin quad: 4 vertices offset along tangent and normal
-        let base = vertices.len() as u32;
-        for &p in &[p0, p1] {
-            // Two vertices per endpoint, offset ±tangent and +normal
-            for &sign in &[-1.0_f32, 1.0] {
-                vertices.push(Vertex {
-                    position: [
-                        p[0] + tangent[0] * edge_half_width * sign + avg_normal[0] * normal_offset,
-                        p[1] + tangent[1] * edge_half_width * sign + avg_normal[1] * normal_offset,
-                        p[2] + tangent[2] * edge_half_width * sign + avg_normal[2] * normal_offset,
-                    ],
-                    normal: avg_normal,
-                    color: edge_color,
-                });
+        // Build two thin quads: one offset +normal (front), one -normal (back)
+        for &n_sign in &[1.0_f32, -1.0] {
+            let base = vertices.len() as u32;
+            let offset_normal = [
+                avg_normal[0] * normal_offset * n_sign,
+                avg_normal[1] * normal_offset * n_sign,
+                avg_normal[2] * normal_offset * n_sign,
+            ];
+            let vert_normal = [avg_normal[0] * n_sign, avg_normal[1] * n_sign, avg_normal[2] * n_sign];
+            for &p in &[p0, p1] {
+                for &sign in &[-1.0_f32, 1.0] {
+                    vertices.push(Vertex {
+                        position: [
+                            p[0] + tangent[0] * edge_half_width * sign + offset_normal[0],
+                            p[1] + tangent[1] * edge_half_width * sign + offset_normal[1],
+                            p[2] + tangent[2] * edge_half_width * sign + offset_normal[2],
+                        ],
+                        normal: vert_normal,
+                        color: edge_color,
+                    });
+                }
             }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
         }
-        // Two triangles forming the quad: (0,1,2), (1,3,2)
-        indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
     }
 
     if !indices.is_empty() {
