@@ -51,6 +51,7 @@ struct ArmorPaneViewer<'a> {
     ifhe_enabled: bool,
     translate_part: &'a dyn Fn(&str) -> String,
     tab_count: usize,
+    comparison_ships_version: u64,
 }
 
 impl TabViewer for ArmorPaneViewer<'_> {
@@ -78,6 +79,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
             self.comparison_ships,
             self.ifhe_enabled,
             self.translate_part,
+            self.comparison_ships_version,
         );
     }
 
@@ -565,6 +567,7 @@ impl ToolkitTabViewer<'_> {
                 ifhe_enabled: ifhe_snapshot,
                 translate_part: translate_part_ref,
                 tab_count,
+                comparison_ships_version: state.comparison_ships_version,
             };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
             DockArea::new(&mut state.dock_state)
@@ -733,6 +736,7 @@ impl ToolkitTabViewer<'_> {
                                                     )
                                                 {
                                                     state.comparison_ships.push(comp_ship);
+                                                    state.comparison_ships_version += 1;
                                                 }
                                             }
                                         }
@@ -804,10 +808,12 @@ impl ToolkitTabViewer<'_> {
                         });
                         if let Some(idx) = remove_idx {
                             state.comparison_ships.remove(idx);
+                            state.comparison_ships_version += 1;
                         }
 
                         if ui.button("Clear all").clicked() {
                             state.comparison_ships.clear();
+                            state.comparison_ships_version += 1;
                         }
                     }
                 });
@@ -1083,6 +1089,7 @@ fn render_armor_pane(
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
     translate_part: &dyn Fn(&str) -> String,
+    comparison_ships_version: u64,
 ) {
     let pane_id = pane.id;
 
@@ -1815,47 +1822,62 @@ fn render_armor_pane(
                                 }
                             }
 
-                            // Generate 3D arc points if we have ballistic data
-                            let arc_points_3d = if let Some(ref impact) = ballistic_impact {
-                                if let Some(shell) = first_shell {
-                                    let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                                    let (arc_2d, height_ratio) = crate::armor_viewer::ballistics::simulate_arc_points(
-                                        &params,
-                                        impact.launch_angle,
-                                        60,
-                                    );
-                                    let model_extent = pane
-                                        .loaded_armor
-                                        .as_ref()
-                                        .map(|a| {
-                                            let dx = a.bounds.1[0] - a.bounds.0[0];
-                                            let dz = a.bounds.1[2] - a.bounds.0[2];
-                                            dx.max(dz)
-                                        })
-                                        .unwrap_or(10.0);
-                                    let arc_horiz_extent = model_extent * 2.0;
-                                    // Use real height ratio with a minimum so flat arcs are still visible
-                                    let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                                    let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(click_point);
-                                    arc_2d
+                            // Generate per-ship 3D arc points
+                            let model_extent = pane
+                                .loaded_armor
+                                .as_ref()
+                                .map(|a| {
+                                    let dx = a.bounds.1[0] - a.bounds.0[0];
+                                    let dz = a.bounds.1[2] - a.bounds.0[2];
+                                    dx.max(dz)
+                                })
+                                .unwrap_or(10.0);
+                            let arc_horiz_extent = model_extent * 2.0;
+                            let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(click_point);
+
+                            let mut ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
+                            if range_m > 0.0 {
+                                for (ship_idx, ship) in comparison_ships.iter().enumerate() {
+                                    let shell = ship
+                                        .shells
                                         .iter()
-                                        .map(|(xf, yf)| {
-                                            let xf = *xf as f32;
-                                            let yf = *yf as f32;
-                                            let along = (1.0 - xf) * arc_horiz_extent;
-                                            [
-                                                first_hit_pos[0] - approach_xz[0] * along,
-                                                first_hit_pos[1] + yf * arc_height_extent,
-                                                first_hit_pos[2] - approach_xz[2] * along,
-                                            ]
-                                        })
-                                        .collect()
-                                } else {
-                                    Vec::new()
+                                        .find(|s| s.ammo_type == "AP")
+                                        .or_else(|| ship.shells.first());
+                                    if let Some(shell) = shell {
+                                        let params =
+                                            crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                        if let Some(impact) =
+                                            crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
+                                        {
+                                            let (arc_2d, height_ratio) =
+                                                crate::armor_viewer::ballistics::simulate_arc_points(
+                                                    &params,
+                                                    impact.launch_angle,
+                                                    60,
+                                                );
+                                            let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
+                                            let arc_points_3d: Vec<[f32; 3]> = arc_2d
+                                                .iter()
+                                                .map(|(xf, yf)| {
+                                                    let xf = *xf as f32;
+                                                    let yf = *yf as f32;
+                                                    let along = (1.0 - xf) * arc_horiz_extent;
+                                                    [
+                                                        first_hit_pos[0] - approach_xz[0] * along,
+                                                        first_hit_pos[1] + yf * arc_height_extent,
+                                                        first_hit_pos[2] - approach_xz[2] * along,
+                                                    ]
+                                                })
+                                                .collect();
+                                            ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                                                ship_index: ship_idx,
+                                                arc_points_3d,
+                                                ballistic_impact: Some(impact),
+                                            });
+                                        }
+                                    }
                                 }
-                            } else {
-                                Vec::new()
-                            };
+                            }
 
                             let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
 
@@ -1905,8 +1927,7 @@ fn render_armor_pane(
                                 direction: shell_dir,
                                 hits: traj_hits,
                                 total_armor_mm: total_armor,
-                                arc_points_3d,
-                                ballistic_impact,
+                                ship_arcs,
                                 detonation_points,
                             };
 
@@ -1938,7 +1959,6 @@ fn render_armor_pane(
                                     id: traj_id,
                                     color_index,
                                     range_km: pane.ballistic_range_km,
-                                    range_locked: true,
                                 },
                                 result,
                                 mesh_id: Some(mesh_id),
@@ -2031,14 +2051,30 @@ fn render_armor_pane(
                     });
                 }
 
+                // Recompute all trajectory arcs if comparison ships changed
+                if pane.comparison_ships_version != comparison_ships_version && !pane.trajectories.is_empty() {
+                    pane.comparison_ships_version = comparison_ships_version;
+                    let cam_dist = pane.viewport.camera.distance;
+                    let mo = pane.marker_opacity;
+                    for ti in 0..pane.trajectories.len() {
+                        recompute_trajectory_for_range(
+                            &mut pane.trajectories[ti],
+                            comparison_ships,
+                            &mut pane.viewport,
+                            pane.loaded_armor.as_ref(),
+                            &render_state.device,
+                            cam_dist,
+                            mo,
+                        );
+                    }
+                }
+                pane.comparison_ships_version = comparison_ships_version;
+
                 // ── Trajectory results floating panel ──
                 let clear_traj = std::cell::Cell::new(false);
                 let delete_traj_id: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
                 let range_km_cell = std::cell::Cell::new(pane.ballistic_range_km);
-                // Collect per-trajectory range changes: (traj_index, new_range_km, force_locked: Option<bool>)
-                // force_locked = Some(true/false) from checkbox toggle, None from slider drag
-                let traj_range_changes: std::cell::RefCell<Vec<(usize, f32, Option<bool>)>> =
-                    std::cell::RefCell::new(Vec::new());
+                let traj_range_changes: std::cell::RefCell<Vec<(usize, f32)>> = std::cell::RefCell::new(Vec::new());
                 let show_all_hit_plates = std::cell::Cell::new(false);
                 let show_all_hit_zones = std::cell::Cell::new(false);
                 // Per-arc plate/zone isolation toggles: (arc_index, new_active_state)
@@ -2054,6 +2090,7 @@ fn render_armor_pane(
                         .collapsible(true)
                         .resizable(true)
                         .default_width(window_width)
+                        .default_height(500.0)
                         .default_pos(egui::pos2(
                             response.rect.right() - window_width - 10.0,
                             response.rect.top() + 40.0,
@@ -2137,49 +2174,66 @@ fn render_armor_pane(
                                         );
                                     });
 
-                                    // Per-trajectory range control
+                                    // Toolbar: delete + isolation toggles
                                     ui.horizontal(|ui| {
-                                        let mut locked = traj.meta.range_locked;
-                                        if ui.checkbox(&mut locked, "").changed() {
-                                            traj_range_changes.borrow_mut().push((
-                                                ti,
-                                                if locked { range_km_cell.get() } else { traj.meta.range_km },
-                                                Some(locked),
-                                            ));
+                                        if ui.button(icons::TRASH).on_hover_text("Delete this arc").clicked() {
+                                            delete_traj_id.set(Some(traj.meta.id));
                                         }
-                                        if locked {
-                                            ui.label(
-                                                egui::RichText::new(format!("{:.1} km", traj.meta.range_km))
-                                                    .small()
-                                                    .color(egui::Color32::GRAY),
-                                            );
-                                        } else {
-                                            let mut rng = traj.meta.range_km;
-                                            let resp = ui.add(
-                                                egui::Slider::new(&mut rng, 0.0..=30.0)
-                                                    .suffix(" km")
-                                                    .step_by(0.5)
-                                                    .max_decimals(1)
-                                                    .text(""),
-                                            );
-                                            if resp.changed() {
-                                                traj_range_changes.borrow_mut().push((ti, rng, None));
-                                            }
+                                        if ui.selectable_label(traj.show_plates_active, "Isolate Plates")
+                                            .on_hover_text("Show only plates hit by this arc")
+                                            .clicked()
+                                        {
+                                            arc_plate_toggles.borrow_mut().push((ti, !traj.show_plates_active));
+                                        }
+                                        if ui.selectable_label(traj.show_zones_active, "Isolate Zones")
+                                            .on_hover_text("Show entire zones hit by this arc")
+                                            .clicked()
+                                        {
+                                            arc_zone_toggles.borrow_mut().push((ti, !traj.show_zones_active));
                                         }
                                     });
 
-                                    // Ballistic impact info
-                                    if let Some(ref impact) = result.ballistic_impact {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "v={:.0} m/s  t={:.1}s  fall={:.1}\u{00B0}",
-                                                impact.impact_velocity,
-                                                impact.time_to_target,
-                                                impact.impact_angle_horizontal.to_degrees(),
-                                            ))
-                                            .small()
-                                            .color(egui::Color32::from_rgb(180, 180, 220)),
+                                    // Per-trajectory range slider
+                                    {
+                                        let mut rng = traj.meta.range_km;
+                                        let resp = ui.add(
+                                            egui::Slider::new(&mut rng, 0.0..=30.0)
+                                                .suffix(" km")
+                                                .step_by(0.5)
+                                                .max_decimals(1)
+                                                .text(""),
                                         );
+                                        if resp.changed() {
+                                            traj_range_changes.borrow_mut().push((ti, rng));
+                                        }
+                                    }
+
+                                    // Ballistic impact info (per-ship)
+                                    for arc_data in &result.ship_arcs {
+                                        if let Some(ref impact) = arc_data.ballistic_impact {
+                                            let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
+                                            ui.horizontal(|ui| {
+                                                if result.ship_arcs.len() > 1 {
+                                                    ui.label(egui::RichText::new("\u{25CF}").color(
+                                                        egui::Color32::from_rgb(
+                                                            (sc[0] * 255.0) as u8,
+                                                            (sc[1] * 255.0) as u8,
+                                                            (sc[2] * 255.0) as u8,
+                                                        ),
+                                                    ));
+                                                }
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "v={:.0} m/s  t={:.1}s  fall={:.1}\u{00B0}",
+                                                        impact.impact_velocity,
+                                                        impact.time_to_target,
+                                                        impact.impact_angle_horizontal.to_degrees(),
+                                                    ))
+                                                    .small()
+                                                    .color(egui::Color32::from_rgb(180, 180, 220)),
+                                                );
+                                            });
+                                        }
                                     }
 
                                     // Compute shell simulations for this trajectory
@@ -2249,23 +2303,14 @@ fn render_armor_pane(
                                             use crate::armor_viewer::penetration::PlateOutcome;
                                             let (icon, badge_color, outcome_text) =
                                                 if let Some(det_idx) = sim.detonated_at {
-                                                    // Shell detonated — show which plate
-                                                    let plate_desc = result
-                                                        .hits
-                                                        .get(det_idx)
-                                                        .map(|h| {
-                                                            format!(
-                                                                "#{} {:.0}mm {}",
-                                                                det_idx + 1,
-                                                                h.thickness_mm,
-                                                                translate_part(&h.material)
-                                                            )
-                                                        })
-                                                        .unwrap_or_default();
+                                                    // Shell detonated — describe the enclosing volume
+                                                    let volume_desc = crate::armor_viewer::penetration::enclosing_zone(
+                                                        &result.hits, det_idx,
+                                                    );
                                                     (
                                                         icons::BOMB,
                                                         egui::Color32::from_rgb(255, 140, 40),
-                                                        format!("detonation @ {}", plate_desc),
+                                                        format!("detonation inside {}", volume_desc),
                                                     )
                                                 } else if let Some(stop_idx) = sim.stopped_at {
                                                     // Shell stopped — show which plate and why
@@ -2396,7 +2441,7 @@ fn render_armor_pane(
                                                                 egui::Color32::from_rgb(100, 220, 100),
                                                                 format!(
                                                                     "overmatch \u{2014} {:.0}mm pen, v={:.0} m/s",
-                                                                    plate.raw_pen_before_mm, plate.velocity_after
+                                                                    plate.raw_pen_before_mm, plate.velocity_before
                                                                 ),
                                                             ),
                                                             PlateOutcome::Penetrate => (
@@ -2406,7 +2451,7 @@ fn render_armor_pane(
                                                                     "{:.0}/{:.0}mm eff \u{2014} v={:.0} m/s",
                                                                     plate.raw_pen_before_mm,
                                                                     plate.effective_thickness_mm,
-                                                                    plate.velocity_after
+                                                                    plate.velocity_before
                                                                 ),
                                                             ),
                                                             PlateOutcome::Ricochet => (
@@ -2559,13 +2604,17 @@ fn render_armor_pane(
                                                                 egui::RichText::new(icons::BOMB)
                                                                     .color(egui::Color32::from_rgb(255, 140, 40)),
                                                             );
+                                                            let volume_desc = crate::armor_viewer::penetration::enclosing_zone(
+                                                                &result.hits, i,
+                                                            );
                                                             ui.label(
                                                                 egui::RichText::new(format!(
-                                                                    "{} {} detonates \u{2014} {:.1}m after plate #{}",
+                                                                    "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",
                                                                     &ss.ship_name,
                                                                     crate::armor_viewer::penetration::ammo_type_display(
                                                                         &ss.shell.ammo_type
                                                                     ),
+                                                                    volume_desc,
                                                                     det.travel_distance,
                                                                     det.armed_at_hit + 1,
                                                                 ))
@@ -2584,37 +2633,10 @@ fn render_armor_pane(
                                         }
                                     }
 
-                                    ui.separator();
-                                    ui.horizontal(|ui| {
-                                        if ui.button("Delete").clicked() {
-                                            delete_traj_id.set(Some(traj.meta.id));
-                                        }
-                                        let btn_label = if traj.show_plates_active {
-                                            egui::RichText::new("Isolate Plates").color(egui::Color32::from_rgb(100, 220, 100))
-                                        } else {
-                                            egui::RichText::new("Isolate Plates")
-                                        };
-                                        if ui.button(btn_label)
-                                            .on_hover_text("Toggle: show only plates hit by this arc")
-                                            .clicked()
-                                        {
-                                            arc_plate_toggles.borrow_mut().push((ti, !traj.show_plates_active));
-                                        }
-                                        let zone_label = if traj.show_zones_active {
-                                            egui::RichText::new("Isolate Zones").color(egui::Color32::from_rgb(100, 220, 100))
-                                        } else {
-                                            egui::RichText::new("Isolate Zones")
-                                        };
-                                        if ui.button(zone_label)
-                                            .on_hover_text("Toggle: show entire zones hit by this arc")
-                                            .clicked()
-                                        {
-                                            arc_zone_toggles.borrow_mut().push((ti, !traj.show_zones_active));
-                                        }
-                                    });
+
                                 };
 
-                            egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).max_height(500.0).show(
+                            egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).show(
                                 ui,
                                 |ui| {
                                     ui.horizontal_top(|ui| {
@@ -2635,20 +2657,15 @@ fn render_armor_pane(
                         });
                 }
 
-                // Apply per-trajectory range changes and lock toggling
+                // Apply per-trajectory range changes
                 {
                     let cam_dist_for_recompute = pane.viewport.camera.distance;
                     let mo = pane.marker_opacity;
                     let changes = traj_range_changes.into_inner();
-                    for (ti, new_range, force_locked) in &changes {
+                    for (ti, new_range) in &changes {
                         if *ti < pane.trajectories.len() {
-                            let range_changed = (pane.trajectories[*ti].meta.range_km - *new_range).abs() > 0.01;
-                            let lock_changed = force_locked.is_some();
-                            if range_changed || lock_changed {
+                            if (pane.trajectories[*ti].meta.range_km - *new_range).abs() > 0.01 {
                                 pane.trajectories[*ti].meta.range_km = *new_range;
-                                if let Some(locked) = force_locked {
-                                    pane.trajectories[*ti].meta.range_locked = *locked;
-                                }
                                 recompute_trajectory_for_range(
                                     &mut pane.trajectories[*ti],
                                     comparison_ships,
@@ -2663,29 +2680,8 @@ fn render_armor_pane(
                     }
                 }
 
-                // Write back shared range slider and recompute locked trajectories
-                let new_range_km = range_km_cell.get();
-                if (new_range_km - pane.ballistic_range_km).abs() > 0.01 {
-                    pane.ballistic_range_km = new_range_km;
-                    let cam_dist = pane.viewport.camera.distance;
-                    let mo = pane.marker_opacity;
-                    for ti in 0..pane.trajectories.len() {
-                        if pane.trajectories[ti].meta.range_locked {
-                            pane.trajectories[ti].meta.range_km = new_range_km;
-                            recompute_trajectory_for_range(
-                                &mut pane.trajectories[ti],
-                                comparison_ships,
-                                &mut pane.viewport,
-                                pane.loaded_armor.as_ref(),
-                                &render_state.device,
-                                cam_dist,
-                                mo,
-                            );
-                        }
-                    }
-                } else {
-                    pane.ballistic_range_km = new_range_km;
-                }
+                // Write back shared range slider (only affects future arcs)
+                pane.ballistic_range_km = range_km_cell.get();
 
                 // Handle delete single trajectory
                 if let Some(del_id) = delete_traj_id.get() {
@@ -2922,6 +2918,8 @@ fn load_ship_for_pane(
     pane.hovered_info = None;
     pane.hover_highlight = None;
     pane.plate_visibility.clear();
+    pane.part_visibility.clear();
+    pane.trajectories.clear();
 
     let assets = ship_assets.clone();
     let ship_display_name = display_name.to_string();
@@ -3328,66 +3326,70 @@ fn recompute_trajectory_for_range(
     let horiz_len = (dir[0] * dir[0] + dir[2] * dir[2]).sqrt();
     let approach_xz = if horiz_len > 1e-6 { [dir[0] / horiz_len, 0.0, dir[2] / horiz_len] } else { [0.0, 0.0, -1.0] };
 
-    // Get first AP shell for ballistic arc computation
+    // Get first AP shell for shell direction (shared ray direction)
     let first_shell = comparison_ships
         .iter()
         .flat_map(|s| s.shells.iter())
         .find(|s| s.ammo_type == "AP")
         .or_else(|| comparison_ships.iter().flat_map(|s| s.shells.iter()).next());
 
-    // Recompute ballistic impact
-    let ballistic_impact = if range_m > 0.0 {
-        first_shell.and_then(|shell| {
+    // Update shell direction from first shell's impact angle
+    if let Some(shell) = first_shell {
+        if range_m > 0.0 {
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
-        })
-    } else {
-        None
-    };
-
-    // Update shell direction from new impact angle
-    if let Some(ref impact) = ballistic_impact {
-        let horiz_angle = impact.impact_angle_horizontal as f32;
-        let cos_h = horiz_angle.cos();
-        let sin_h = horiz_angle.sin();
-        result.direction = normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h]);
+            if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_m) {
+                let horiz_angle = impact.impact_angle_horizontal as f32;
+                let cos_h = horiz_angle.cos();
+                let sin_h = horiz_angle.sin();
+                result.direction = normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h]);
+            }
+        }
     }
 
-    // Recompute arc points
-    result.arc_points_3d = if let Some(ref impact) = ballistic_impact {
-        if let Some(shell) = first_shell {
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            let (arc_2d, height_ratio) =
-                crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
-            let model_extent = loaded_armor
-                .map(|a| {
-                    let dx = a.bounds.1[0] - a.bounds.0[0];
-                    let dz = a.bounds.1[2] - a.bounds.0[2];
-                    dx.max(dz)
-                })
-                .unwrap_or(10.0);
-            let arc_horiz_extent = model_extent * 2.0;
-            let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-            let first_hit_pos = result.hits.first().map(|h| h.position).unwrap_or(result.origin);
-            arc_2d
-                .iter()
-                .map(|(xf, yf)| {
-                    let xf = *xf as f32;
-                    let yf = *yf as f32;
-                    let along = (1.0 - xf) * arc_horiz_extent;
-                    [
-                        first_hit_pos[0] - approach_xz[0] * along,
-                        first_hit_pos[1] + yf * arc_height_extent,
-                        first_hit_pos[2] - approach_xz[2] * along,
-                    ]
-                })
-                .collect()
-        } else {
-            Vec::new()
+    // Recompute per-ship arcs
+    let model_extent = loaded_armor
+        .map(|a| {
+            let dx = a.bounds.1[0] - a.bounds.0[0];
+            let dz = a.bounds.1[2] - a.bounds.0[2];
+            dx.max(dz)
+        })
+        .unwrap_or(10.0);
+    let arc_horiz_extent = model_extent * 2.0;
+    let first_hit_pos = result.hits.first().map(|h| h.position).unwrap_or(result.origin);
+
+    let mut new_ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
+    if range_m > 0.0 {
+        for (ship_idx, ship) in comparison_ships.iter().enumerate() {
+            let shell = ship.shells.iter().find(|s| s.ammo_type == "AP").or_else(|| ship.shells.first());
+            if let Some(shell) = shell {
+                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_m) {
+                    let (arc_2d, height_ratio) =
+                        crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
+                    let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
+                    let arc_points_3d: Vec<[f32; 3]> = arc_2d
+                        .iter()
+                        .map(|(xf, yf)| {
+                            let xf = *xf as f32;
+                            let yf = *yf as f32;
+                            let along = (1.0 - xf) * arc_horiz_extent;
+                            [
+                                first_hit_pos[0] - approach_xz[0] * along,
+                                first_hit_pos[1] + yf * arc_height_extent,
+                                first_hit_pos[2] - approach_xz[2] * along,
+                            ]
+                        })
+                        .collect();
+                    new_ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                        ship_index: ship_idx,
+                        arc_points_3d,
+                        ballistic_impact: Some(impact),
+                    });
+                }
+            }
         }
-    } else {
-        Vec::new()
-    };
+    }
+    result.ship_arcs = new_ship_arcs;
 
     // Recompute detonation points and last visible hit
     // Each shell gets its own ballistic solve (different velocity/angle at range)
@@ -3425,7 +3427,6 @@ fn recompute_trajectory_for_range(
         }
     }
     result.detonation_points = new_detonation_points;
-    result.ballistic_impact = ballistic_impact;
     traj.last_visible_hit = new_last_visible;
 
     // Remove old mesh and upload new one
@@ -3474,7 +3475,7 @@ fn upload_trajectory_visualization(
     let dir = result.direction;
     // Scale markers and line width with camera distance so they shrink when zoomed in
     let scale_factor = (cam_distance / 200.0).clamp(0.15, 3.0);
-    let line_width = 0.05 * scale_factor;
+    let line_width = 0.12 * scale_factor;
 
     let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
     let perp1 = normalize(cross(dir, arbitrary));
@@ -3483,33 +3484,39 @@ fn upload_trajectory_visualization(
     if !result.hits.is_empty() {
         let first_pos = result.hits[0].position;
 
-        if result.arc_points_3d.len() >= 2 {
-            // Draw the ballistic arc as connected line segments
-            let arc = &result.arc_points_3d;
-            for i in 0..arc.len() - 1 {
-                let seg_dir_raw = sub(arc[i + 1], arc[i]);
-                let len = (seg_dir_raw[0] * seg_dir_raw[0]
-                    + seg_dir_raw[1] * seg_dir_raw[1]
-                    + seg_dir_raw[2] * seg_dir_raw[2])
-                    .sqrt();
-                if len < 1e-6 {
+        let has_any_arc = result.ship_arcs.iter().any(|a| a.arc_points_3d.len() >= 2);
+        if has_any_arc {
+            // Draw per-ship ballistic arcs in ship colors
+            for arc_data in &result.ship_arcs {
+                if arc_data.arc_points_3d.len() < 2 {
                     continue;
                 }
-                let seg_dir = [seg_dir_raw[0] / len, seg_dir_raw[1] / len, seg_dir_raw[2] / len];
-                let (sp1, sp2) = segment_perps(seg_dir);
-                // Fade in: more opaque closer to the ship
-                let frac = i as f32 / (arc.len() - 1) as f32;
-                let alpha = 0.3 + 0.6 * frac; // 0.3 at start → 0.9 at impact
-                traj_line_segment(
-                    &mut vertices,
-                    &mut indices,
-                    arc[i],
-                    arc[i + 1],
-                    [traj_color[0], traj_color[1], traj_color[2], alpha],
-                    sp1,
-                    sp2,
-                    line_width,
-                );
+                let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
+                let arc = &arc_data.arc_points_3d;
+                for i in 0..arc.len() - 1 {
+                    let seg_dir_raw = sub(arc[i + 1], arc[i]);
+                    let len = (seg_dir_raw[0] * seg_dir_raw[0]
+                        + seg_dir_raw[1] * seg_dir_raw[1]
+                        + seg_dir_raw[2] * seg_dir_raw[2])
+                        .sqrt();
+                    if len < 1e-6 {
+                        continue;
+                    }
+                    let seg_dir = [seg_dir_raw[0] / len, seg_dir_raw[1] / len, seg_dir_raw[2] / len];
+                    let (sp1, sp2) = segment_perps(seg_dir);
+                    let frac = i as f32 / (arc.len() - 1) as f32;
+                    let alpha = 0.7 + 0.3 * frac;
+                    traj_line_segment(
+                        &mut vertices,
+                        &mut indices,
+                        arc[i],
+                        arc[i + 1],
+                        [sc[0], sc[1], sc[2], alpha],
+                        sp1,
+                        sp2,
+                        line_width,
+                    );
+                }
             }
         } else {
             // No arc: draw flat leading segment (point-blank mode)

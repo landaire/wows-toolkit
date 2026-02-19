@@ -142,6 +142,8 @@ pub struct ArmorViewerState {
     pub show_comparison_panel: bool,
     /// Whether IFHE (Inertia Fuse for HE Shells) modifier is enabled (+25% HE pen).
     pub ifhe_enabled: bool,
+    /// Incremented whenever comparison_ships changes; panes check this to recompute arcs.
+    pub comparison_ships_version: u64,
 }
 
 impl Default for ArmorViewerState {
@@ -163,6 +165,7 @@ impl Default for ArmorViewerState {
             comparison_search: String::new(),
             show_comparison_panel: false,
             ifhe_enabled: false,
+            comparison_ships_version: 0,
         }
     }
 }
@@ -285,13 +288,14 @@ pub struct ArmorPane {
     pub trajectories: Vec<StoredTrajectory>,
     /// Counter for assigning unique trajectory IDs.
     pub next_trajectory_id: u64,
-    /// Shared ballistic range for penetration calculations (km).
-    /// Trajectories with `range_locked == true` follow this value.
+    /// Default ballistic range for new trajectories (km).
     pub ballistic_range_km: f32,
     /// Waterline plane opacity (0.0–1.0).
     pub waterline_opacity: f32,
     /// Trajectory impact marker opacity (0.0–1.0).
     pub marker_opacity: f32,
+    /// Last comparison_ships_version this pane recomputed arcs for.
+    pub comparison_ships_version: u64,
 }
 
 impl ArmorPane {
@@ -330,6 +334,7 @@ impl ArmorPane {
             ballistic_range_km: 10.0,
             waterline_opacity: defaults.waterline_opacity,
             marker_opacity: 1.0,
+            comparison_ships_version: 0,
         }
     }
 }

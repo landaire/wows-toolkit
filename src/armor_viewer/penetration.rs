@@ -164,12 +164,47 @@ pub struct TrajectoryResult {
     pub direction: [f32; 3],
     pub hits: Vec<TrajectoryHit>,
     pub total_armor_mm: f32,
-    /// 3D arc points from firing position to first hit (empty if range=0 / point-blank).
-    pub arc_points_3d: Vec<[f32; 3]>,
-    /// Ballistic impact data at the selected range (None if range=0).
-    pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
+    /// Per-ship ballistic arcs (each ship gets its own arc shape + impact data).
+    pub ship_arcs: Vec<ShipArc>,
     /// Where AP shells detonate (one per comparison shell that has a fuse event).
     pub detonation_points: Vec<DetonationMarker>,
+}
+
+/// Determine which zone volume the shell is inside after passing through plates `0..=last_plate_idx`.
+///
+/// Each plate crossing toggles whether the shell is inside that plate's zone. Zones with an
+/// odd crossing count are "entered". The innermost (most recently entered) zone is returned.
+pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate_idx: usize) -> String {
+    use std::collections::HashMap;
+    let mut zone_crossings: HashMap<&str, usize> = HashMap::new();
+    let mut last_entered = None;
+    for (i, hit) in hits.iter().enumerate() {
+        if i > last_plate_idx {
+            break;
+        }
+        let count = zone_crossings.entry(&hit.zone).or_insert(0);
+        *count += 1;
+        if *count % 2 == 1 {
+            // Odd crossing = just entered this zone
+            last_entered = Some(hit.zone.as_str());
+        }
+    }
+    // Return the innermost zone (last one entered with odd count), or fall back
+    if let Some(zone) = last_entered {
+        if *zone_crossings.get(zone).unwrap_or(&0) % 2 == 1 {
+            return zone.to_string();
+        }
+    }
+    // Fallback: any zone with odd crossing count (last one in iteration order)
+    for (i, hit) in hits.iter().enumerate().rev() {
+        if i > last_plate_idx {
+            continue;
+        }
+        if *zone_crossings.get(hit.zone.as_str()).unwrap_or(&0) % 2 == 1 {
+            return hit.zone.clone();
+        }
+    }
+    "past all armor".to_string()
 }
 
 /// Compute the impact angle between a ray direction and a triangle normal (in degrees).
@@ -221,6 +256,14 @@ pub struct PlateResult {
 pub struct DetonationMarker {
     pub position: [f32; 3],
     pub ship_index: usize,
+}
+
+/// Per-ship ballistic arc data for a trajectory.
+#[derive(Clone, Debug)]
+pub struct ShipArc {
+    pub ship_index: usize,
+    pub arc_points_3d: Vec<[f32; 3]>,
+    pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
 }
 
 /// Where the AP shell detonates (fuse activation + travel).
@@ -417,8 +460,6 @@ pub struct TrajectoryMeta {
     pub color_index: usize,
     /// Per-trajectory ballistic range (km).
     pub range_km: f32,
-    /// When true, this trajectory's range follows the shared slider.
-    pub range_locked: bool,
 }
 
 /// Euclidean distance between two 3D points.
