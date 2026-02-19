@@ -233,6 +233,8 @@ pub struct ArmorPane {
     pub show_zero_mm: bool,
     /// Armor plate opacity (0.0–1.0).
     pub armor_opacity: f32,
+    /// When true, only plates the in-game viewer hides ("Hull" zone) are rendered.
+    pub show_hidden_only: bool,
     /// Undo/redo stack for visibility changes.
     pub undo_stack: VisibilityUndoStack,
 }
@@ -263,6 +265,7 @@ impl ArmorPane {
             show_plate_edges: defaults.show_plate_edges,
             show_zero_mm: defaults.show_zero_mm,
             armor_opacity: defaults.armor_opacity,
+            show_hidden_only: false,
             undo_stack: VisibilityUndoStack::default(),
         }
     }
