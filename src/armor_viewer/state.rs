@@ -115,6 +115,8 @@ pub struct ArmorViewerState {
     pub next_pane_id: u64,
     /// Cached nation flag assets (raw PNG bytes), keyed by nation name.
     pub nation_flag_textures: HashMap<String, Arc<crate::wows_data::GameAsset>>,
+    /// Pending export confirmation: (param_index, display_name).
+    pub export_confirm: Option<(String, String)>,
     /// When true, all split panes share the same camera.
     pub mirror_cameras: bool,
     /// When true, armor/hull visibility is synced across all panes.
@@ -136,6 +138,7 @@ impl Default for ArmorViewerState {
             gpu_pipeline: None,
             next_pane_id: 1,
             nation_flag_textures: HashMap::new(),
+            export_confirm: None,
             mirror_cameras: false,
             sync_options: false,
             selector_search: String::new(),

@@ -10,6 +10,7 @@ use crate::armor_viewer::state::{
     ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, CompareSettings, LoadedShipArmor, PlateKey, ShipAssetsState,
     VisibilitySnapshot,
 };
+use crate::icon_str;
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
 
@@ -20,6 +21,7 @@ struct ArmorPaneViewer<'a> {
     mirror_camera_signal: &'a std::cell::Cell<Option<u64>>,
     active_pane_signal: &'a std::cell::Cell<Option<u64>>,
     save_defaults_signal: &'a std::cell::Cell<Option<ArmorViewerDefaults>>,
+    export_signal: &'a std::cell::Cell<Option<(String, String)>>,
     translate_part: &'a dyn Fn(&str) -> String,
     tab_count: usize,
 }
@@ -44,6 +46,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
             self.mirror_camera_signal,
             self.active_pane_signal,
             self.save_defaults_signal,
+            self.export_signal,
             self.translate_part,
         );
     }
@@ -287,6 +290,9 @@ impl ToolkitTabViewer<'_> {
                 // Deferred compare action from context menu (needs Cell since the closure is FnMut).
                 let deferred_compare: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
                 let deferred_compare_ref = &deferred_compare;
+                // Deferred export action from context menu.
+                let deferred_export: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
+                let deferred_export_ref = &deferred_export;
 
                 let tree_id = sidebar_ui.make_persistent_id("armor_ship_tree");
 
@@ -392,6 +398,8 @@ impl ToolkitTabViewer<'_> {
 
                                             let param_idx = ship.param_index.clone();
                                             let display_name = ship.display_name.clone();
+                                            let export_param_idx = ship.param_index.clone();
+                                            let export_display_name = ship.display_name.clone();
 
                                             let leaf = egui_ltreeview::NodeBuilder::leaf(ship_id)
                                                 .label(label)
@@ -399,6 +407,16 @@ impl ToolkitTabViewer<'_> {
                                                     if ui.button("Compare in new split").clicked() {
                                                         deferred_compare_ref
                                                             .set(Some((param_idx.clone(), display_name.clone())));
+                                                        ui.close();
+                                                    }
+                                                    if ui
+                                                        .button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export Ship Model"))
+                                                        .clicked()
+                                                    {
+                                                        deferred_export_ref.set(Some((
+                                                            export_param_idx.clone(),
+                                                            export_display_name.clone(),
+                                                        )));
                                                         ui.close();
                                                     }
                                                 });
@@ -486,12 +504,19 @@ impl ToolkitTabViewer<'_> {
                         sidebar_compare = Some(settings);
                     }
                 }
+
+                // Handle deferred export from context menu
+                if let Some(export_req) = deferred_export.take() {
+                    state.export_confirm = Some(export_req);
+                }
             }
         }
 
         // Render dock area with armor panes
         let save_defaults_cell: std::cell::Cell<Option<ArmorViewerDefaults>> = std::cell::Cell::new(None);
         let save_defaults_ref = &save_defaults_cell;
+        let export_cell: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
+        let export_ref = &export_cell;
         {
             let tab_count = state.dock_state.main_surface().num_tabs();
             let mut viewer = ArmorPaneViewer {
@@ -500,6 +525,7 @@ impl ToolkitTabViewer<'_> {
                 mirror_camera_signal: if mirror_cameras { active_camera_ref } else { &std::cell::Cell::new(None) },
                 active_pane_signal: active_pane_ref,
                 save_defaults_signal: save_defaults_ref,
+                export_signal: export_ref,
                 translate_part: translate_part_ref,
                 tab_count,
             };
@@ -589,6 +615,80 @@ impl ToolkitTabViewer<'_> {
         // Apply saved defaults from Display popover (signal set inside render_armor_pane)
         if let Some(new_defaults) = save_defaults_cell.take() {
             self.tab_state.armor_viewer_defaults = new_defaults;
+        }
+
+        // Handle export signal from toolbar button
+        if let Some(export_req) = export_cell.take() {
+            state.export_confirm = Some(export_req);
+        }
+
+        // ── Export confirmation dialog ──
+        let mut close_export_dialog = false;
+        if let Some((ref param_index, ref display_name)) = state.export_confirm {
+            let param_index = param_index.clone();
+            let display_name = display_name.clone();
+            egui::Window::new("Export Ship Model")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label("These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws.");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Export").clicked() {
+                            let default_filename = format!("{}.glb", display_name);
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name(&default_filename)
+                                .add_filter("GLB", &["glb"])
+                                .save_file()
+                            {
+                                let assets = ship_assets.clone();
+                                let toasts = self.tab_state.toasts.clone();
+                                let ship_name = display_name.clone();
+                                let param_idx = param_index.clone();
+                                std::thread::spawn(move || {
+                                    let result = (|| -> Result<(), String> {
+                                        use wowsunpack::game_params::types::GameParamProvider;
+                                        let param = assets.metadata().game_param_by_index(&param_idx);
+                                        let vehicle = param
+                                            .as_ref()
+                                            .and_then(|p| p.vehicle().cloned())
+                                            .ok_or_else(|| "Vehicle not found".to_string())?;
+                                        let options = wowsunpack::export::ship::ShipExportOptions {
+                                            lod: 0,
+                                            hull: None,
+                                            textures: true,
+                                            damaged: false,
+                                        };
+                                        let ctx = assets
+                                            .load_ship_from_vehicle(&vehicle, &options)
+                                            .map_err(|e| format!("{e:?}"))?;
+                                        let mut file = std::fs::File::create(&path)
+                                            .map_err(|e| format!("Failed to create file: {e}"))?;
+                                        ctx.export_glb(&mut file)
+                                            .map_err(|e| format!("Export failed: {e:?}"))?;
+                                        Ok(())
+                                    })();
+                                    match result {
+                                        Ok(()) => {
+                                            toasts.lock().success(format!("Exported {}", ship_name));
+                                        }
+                                        Err(e) => {
+                                            toasts.lock().error(format!("Export failed: {e}"));
+                                        }
+                                    }
+                                });
+                            }
+                            close_export_dialog = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_export_dialog = true;
+                        }
+                    });
+                });
+        }
+        if close_export_dialog {
+            state.export_confirm = None;
         }
     }
 }
@@ -785,6 +885,7 @@ fn render_armor_pane(
     mirror_camera_signal: &std::cell::Cell<Option<u64>>,
     active_pane_signal: &std::cell::Cell<Option<u64>>,
     save_defaults_signal: &std::cell::Cell<Option<ArmorViewerDefaults>>,
+    export_signal: &std::cell::Cell<Option<(String, String)>>,
     translate_part: &dyn Fn(&str) -> String,
 ) {
     let pane_id = pane.id;
@@ -1169,6 +1270,14 @@ fn render_armor_pane(
                                 }));
                             }
                         });
+
+                    // ── Export Ship Model button ──
+                    if let Some(param_index) = &pane.selected_ship {
+                        if ui.button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export")).clicked() {
+                            let display_name = armor.display_name.clone();
+                            export_signal.set(Some((param_index.clone(), display_name)));
+                        }
+                    }
                 });
                 vp_ui.separator();
             }
