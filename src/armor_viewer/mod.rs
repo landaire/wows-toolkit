@@ -1,3 +1,4 @@
+pub mod ballistics;
 pub mod legend;
 pub mod penetration;
 pub mod ship_selector;

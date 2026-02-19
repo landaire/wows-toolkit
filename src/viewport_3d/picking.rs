@@ -179,6 +179,52 @@ pub(crate) fn pick_all_meshes(
     hits
 }
 
+/// Pick ALL triangles hit by a ray from an arbitrary origin and direction, sorted by distance.
+/// Each result includes the triangle normal.
+pub(crate) fn pick_all_ray(
+    origin: [f32; 3],
+    dir: [f32; 3],
+    meshes: &[(MeshId, &PickableMesh, bool)],
+) -> Vec<(HitResult, [f32; 3])> {
+    let mut hits: Vec<(HitResult, [f32; 3])> = Vec::new();
+
+    for (mesh_id, mesh, visible) in meshes {
+        if !visible {
+            continue;
+        }
+
+        let num_triangles = mesh.indices.len() / 3;
+        for tri_idx in 0..num_triangles {
+            let i0 = mesh.indices[tri_idx * 3] as usize;
+            let i1 = mesh.indices[tri_idx * 3 + 1] as usize;
+            let i2 = mesh.indices[tri_idx * 3 + 2] as usize;
+
+            if i0 >= mesh.positions.len() || i1 >= mesh.positions.len() || i2 >= mesh.positions.len() {
+                continue;
+            }
+
+            let v0 = &mesh.positions[i0];
+            let v1 = &mesh.positions[i1];
+            let v2 = &mesh.positions[i2];
+
+            if let Some(t) = ray_triangle_intersect(&origin, &dir, v0, v1, v2) {
+                let world_pos = add(origin, scale(dir, t));
+                let edge1 = sub(*v1, *v0);
+                let edge2 = sub(*v2, *v0);
+                let normal = normalize(cross(edge1, edge2));
+
+                hits.push((
+                    HitResult { mesh_id: *mesh_id, triangle_index: tri_idx, distance: t, world_position: world_pos },
+                    normal,
+                ));
+            }
+        }
+    }
+
+    hits.sort_by(|a, b| a.0.distance.partial_cmp(&b.0.distance).unwrap_or(std::cmp::Ordering::Equal));
+    hits
+}
+
 /// Multiply a 4x4 matrix by a 4-component vector.
 fn mat4_mul_vec4(m: [[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
     [

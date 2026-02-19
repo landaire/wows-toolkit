@@ -18,11 +18,18 @@ pub struct ArmorViewerDefaults {
     pub show_waterline: bool,
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
+    pub waterline_opacity: f32,
 }
 
 impl Default for ArmorViewerDefaults {
     fn default() -> Self {
-        Self { show_plate_edges: true, show_waterline: true, show_zero_mm: false, armor_opacity: 1.0 }
+        Self {
+            show_plate_edges: true,
+            show_waterline: true,
+            show_zero_mm: false,
+            armor_opacity: 1.0,
+            waterline_opacity: 0.3,
+        }
     }
 }
 
@@ -258,10 +265,14 @@ pub struct ArmorPane {
     pub gap_count: usize,
     /// Whether trajectory analysis mode is active (click to cast ray).
     pub trajectory_mode: bool,
-    /// Cached trajectory analysis result.
-    pub trajectory_result: Option<crate::armor_viewer::penetration::TrajectoryResult>,
-    /// Mesh ID for the trajectory visualization overlay.
-    pub trajectory_mesh: Option<MeshId>,
+    /// Cached trajectory analysis results (multiple via shift-click).
+    pub trajectory_results: Vec<crate::armor_viewer::penetration::TrajectoryResult>,
+    /// Mesh IDs for the trajectory visualization overlays.
+    pub trajectory_meshes: Vec<MeshId>,
+    /// Ballistic range for penetration calculations (km).
+    pub ballistic_range_km: f32,
+    /// Waterline plane opacity (0.0–1.0).
+    pub waterline_opacity: f32,
 }
 
 impl ArmorPane {
@@ -295,8 +306,10 @@ impl ArmorPane {
             show_gaps: false,
             gap_count: 0,
             trajectory_mode: false,
-            trajectory_result: None,
-            trajectory_mesh: None,
+            trajectory_results: Vec::new(),
+            trajectory_meshes: Vec::new(),
+            ballistic_range_km: 10.0,
+            waterline_opacity: defaults.waterline_opacity,
         }
     }
 }

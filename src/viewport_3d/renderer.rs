@@ -636,6 +636,21 @@ impl Viewport3D {
         picking::pick_all_meshes(screen_pos, viewport_rect, &self.camera, &mesh_refs)
     }
 
+    /// Pick ALL triangles hit by an arbitrary world-space ray, sorted by distance.
+    /// Each hit includes the triangle normal for angle calculations.
+    pub fn pick_all_ray(&self, origin: [f32; 3], direction: [f32; 3]) -> Vec<(HitResult, [f32; 3])> {
+        let mesh_refs: Vec<(MeshId, &PickableMesh, bool)> = self
+            .pick_data
+            .iter()
+            .map(|(id, mesh)| {
+                let visible = self.meshes.get(id).is_some_and(|m| m.visible);
+                (*id, mesh, visible)
+            })
+            .collect();
+
+        picking::pick_all_ray(origin, direction, &mesh_refs)
+    }
+
     /// Handle standard 3D navigation input on a UI response.
     /// Left-drag = orbit, scroll = zoom, middle-drag = pan, double-click = reset.
     /// Returns true if the camera changed.

@@ -23,6 +23,7 @@ pub struct ShellInfo {
     pub fuse_threshold: f32,
     pub burn_prob: f32,
     pub air_drag: f32,
+    pub normalization: f32,
 }
 
 /// A ship added to the comparison list.
@@ -113,6 +114,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
             fuse_threshold: projectile.bullet_detonator_threshold().unwrap_or(0.0),
             burn_prob: projectile.burn_prob().unwrap_or(-0.5),
             air_drag: projectile.bullet_air_drag().unwrap_or(0.0),
+            normalization: projectile.bullet_cap_normalize_max_angle().unwrap_or(0.0),
         });
     }
 
@@ -162,6 +164,10 @@ pub struct TrajectoryResult {
     pub direction: [f32; 3],
     pub hits: Vec<TrajectoryHit>,
     pub total_armor_mm: f32,
+    /// 3D arc points from firing position to first hit (empty if range=0 / point-blank).
+    pub arc_points_3d: Vec<[f32; 3]>,
+    /// Ballistic impact data at the selected range (None if range=0).
+    pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
 }
 
 /// Compute the impact angle between a ray direction and a triangle normal (in degrees).
