@@ -168,8 +168,8 @@ pub struct TrajectoryResult {
     pub arc_points_3d: Vec<[f32; 3]>,
     /// Ballistic impact data at the selected range (None if range=0).
     pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
-    /// 3D positions where AP shells detonate (one per comparison shell that has a fuse event).
-    pub detonation_points: Vec<[f32; 3]>,
+    /// Where AP shells detonate (one per comparison shell that has a fuse event).
+    pub detonation_points: Vec<DetonationMarker>,
 }
 
 /// Compute the impact angle between a ray direction and a triangle normal (in degrees).
@@ -214,6 +214,13 @@ pub struct PlateResult {
     pub velocity_after: f32,
     /// Whether this plate armed the fuse.
     pub fuse_armed_here: bool,
+}
+
+/// A detonation point in 3D space, tagged with which comparison ship produced it.
+#[derive(Clone, Debug)]
+pub struct DetonationMarker {
+    pub position: [f32; 3],
+    pub ship_index: usize,
 }
 
 /// Where the AP shell detonates (fuse activation + travel).

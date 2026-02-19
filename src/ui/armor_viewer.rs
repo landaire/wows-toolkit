@@ -26,6 +26,18 @@ const TRAJECTORY_PALETTE: [[f32; 4]; 8] = [
     [0.7, 0.5, 1.0, 1.0], // lavender
 ];
 
+/// Color palette for distinguishing comparison ships in detonation markers and UI labels.
+const SHIP_COLORS: [[f32; 3]; 8] = [
+    [1.0, 0.5, 0.1], // orange
+    [0.3, 0.6, 1.0], // blue
+    [1.0, 0.3, 0.5], // pink
+    [0.3, 0.9, 0.4], // green
+    [0.9, 0.3, 0.9], // magenta
+    [1.0, 0.9, 0.2], // yellow
+    [0.2, 0.9, 0.8], // teal
+    [0.8, 0.5, 1.0], // purple
+];
+
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
 struct ArmorPaneViewer<'a> {
     render_state: &'a eframe::egui_wgpu::RenderState,
@@ -694,34 +706,37 @@ impl ToolkitTabViewer<'_> {
                             results.truncate(10);
 
                             if !results.is_empty() {
-                                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
-                                    // Collect indices to add
-                                    let mut to_add: Vec<String> = Vec::new();
-                                    for ship in &results {
-                                        let label = format!(
-                                            "{} {}",
-                                            crate::armor_viewer::ship_selector::tier_roman(ship.tier),
-                                            &ship.display_name
-                                        );
-                                        if ui.button(label).clicked() {
-                                            to_add.push(ship.param_index.clone());
-                                            state.comparison_search.clear();
-                                        }
-                                    }
-                                    // Process additions outside immutable borrow scope
-                                    for param_idx in to_add {
-                                        let wd = wows_data.read();
-                                        if let Some(metadata) = wd.game_metadata.as_ref() {
-                                            if let Some(comp_ship) =
-                                                crate::armor_viewer::penetration::resolve_ship_shells(
-                                                    metadata, &param_idx,
-                                                )
-                                            {
-                                                state.comparison_ships.push(comp_ship);
+                                egui::ScrollArea::vertical()
+                                    .id_salt("pen_check_search_results")
+                                    .max_height(150.0)
+                                    .show(ui, |ui| {
+                                        // Collect indices to add
+                                        let mut to_add: Vec<String> = Vec::new();
+                                        for ship in &results {
+                                            let label = format!(
+                                                "{} {}",
+                                                crate::armor_viewer::ship_selector::tier_roman(ship.tier),
+                                                &ship.display_name
+                                            );
+                                            if ui.button(label).clicked() {
+                                                to_add.push(ship.param_index.clone());
+                                                state.comparison_search.clear();
                                             }
                                         }
-                                    }
-                                });
+                                        // Process additions outside immutable borrow scope
+                                        for param_idx in to_add {
+                                            let wd = wows_data.read();
+                                            if let Some(metadata) = wd.game_metadata.as_ref() {
+                                                if let Some(comp_ship) =
+                                                    crate::armor_viewer::penetration::resolve_ship_shells(
+                                                        metadata, &param_idx,
+                                                    )
+                                                {
+                                                    state.comparison_ships.push(comp_ship);
+                                                }
+                                            }
+                                        }
+                                    });
                             }
                         }
                     }
@@ -737,7 +752,7 @@ impl ToolkitTabViewer<'_> {
                         );
                     } else {
                         let mut remove_idx: Option<usize> = None;
-                        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        egui::ScrollArea::vertical().id_salt("pen_check_ships_list").max_height(300.0).show(ui, |ui| {
                             for (i, ship) in state.comparison_ships.iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     if ui.small_button(icons::X).clicked() {
@@ -1845,31 +1860,42 @@ fn render_armor_pane(
                             let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
 
                             // Compute detonation points and last visible hit for AP shells
-                            let mut detonation_points: Vec<[f32; 3]> = Vec::new();
+                            // Each shell gets its own ballistic solve (different velocity/angle at range)
+                            let mut detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> =
+                                Vec::new();
                             let mut last_visible_hit: Option<usize> = None;
-                            if let Some(ref impact) = ballistic_impact {
-                                for shell in comparison_ships
-                                    .iter()
-                                    .flat_map(|ship| ship.shells.iter())
-                                    .filter(|s| s.ammo_type == "AP")
-                                {
+                            let range_m_f64 = pane.ballistic_range_km as f64 * 1000.0;
+                            for (ship_idx, ship) in comparison_ships.iter().enumerate() {
+                                for shell in ship.shells.iter().filter(|s| s.ammo_type == "AP") {
                                     let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                                    let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
-                                        &params, impact, &traj_hits, &shell_dir,
-                                    );
-                                    if let Some(pos) = sim.detonation.map(|d| d.position) {
-                                        detonation_points.push(pos);
-                                    }
-                                    // Earliest terminating event: detonation or ricochet/shatter
-                                    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                                        (Some(d), Some(s)) => Some(d.min(s)),
-                                        (Some(d), None) => Some(d),
-                                        (None, Some(s)) => Some(s),
-                                        (None, None) => None,
+                                    let shell_impact = if range_m_f64 > 0.0 {
+                                        crate::armor_viewer::ballistics::solve_for_range(&params, range_m_f64)
+                                    } else {
+                                        None
                                     };
-                                    if let Some(idx) = shell_stop {
-                                        last_visible_hit =
-                                            Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+                                    if let Some(ref impact) = shell_impact {
+                                        let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                                            &params, impact, &traj_hits, &shell_dir,
+                                        );
+                                        if let Some(det) = sim.detonation {
+                                            detonation_points.push(
+                                                crate::armor_viewer::penetration::DetonationMarker {
+                                                    position: det.position,
+                                                    ship_index: ship_idx,
+                                                },
+                                            );
+                                        }
+                                        // Earliest terminating event: detonation or ricochet/shatter
+                                        let shell_stop = match (sim.detonated_at, sim.stopped_at) {
+                                            (Some(d), Some(s)) => Some(d.min(s)),
+                                            (Some(d), None) => Some(d),
+                                            (None, Some(s)) => Some(s),
+                                            (None, None) => None,
+                                        };
+                                        if let Some(idx) = shell_stop {
+                                            last_visible_hit =
+                                                Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+                                        }
                                     }
                                 }
                             }
@@ -1918,6 +1944,8 @@ fn render_armor_pane(
                                 mesh_id: Some(mesh_id),
                                 last_visible_hit,
                                 marker_cam_dist: cam_dist,
+                                show_plates_active: false,
+                                show_zones_active: false,
                             });
                         } else if !shift_held {
                             // Clicked empty space without shift: clear all
@@ -2011,6 +2039,11 @@ fn render_armor_pane(
                 // force_locked = Some(true/false) from checkbox toggle, None from slider drag
                 let traj_range_changes: std::cell::RefCell<Vec<(usize, f32, Option<bool>)>> =
                     std::cell::RefCell::new(Vec::new());
+                let show_all_hit_plates = std::cell::Cell::new(false);
+                let show_all_hit_zones = std::cell::Cell::new(false);
+                // Per-arc plate/zone isolation toggles: (arc_index, new_active_state)
+                let arc_plate_toggles: std::cell::RefCell<Vec<(usize, bool)>> = std::cell::RefCell::new(Vec::new());
+                let arc_zone_toggles: std::cell::RefCell<Vec<(usize, bool)>> = std::cell::RefCell::new(Vec::new());
 
                 if !pane.trajectories.is_empty() {
                     let traj_id = egui::Id::new(("trajectory_results", pane_id));
@@ -2054,6 +2087,12 @@ fn render_armor_pane(
                                 if ui.button("Clear All").clicked() {
                                     clear_traj.set(true);
                                 }
+                                if ui.button("Show Hit Plates").on_hover_text("Isolate only armor plates hit by all trajectories").clicked() {
+                                    show_all_hit_plates.set(true);
+                                }
+                                if ui.button("Show Hit Zones").on_hover_text("Isolate entire armor zones hit by all trajectories").clicked() {
+                                    show_all_hit_zones.set(true);
+                                }
                                 // Angle color legend
                                 ui.add_space(8.0);
                                 ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(100, 220, 100)));
@@ -2084,7 +2123,7 @@ fn render_armor_pane(
                                     // Header line with color swatch
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new(format!("#{}", ti + 1)).strong().color(header_color),
+                                            egui::RichText::new(format!("Arc {}", ti + 1)).strong().color(header_color),
                                         );
                                         ui.label(
                                             egui::RichText::new(format!(
@@ -2148,13 +2187,15 @@ fn render_armor_pane(
 
                                     struct ShellSim {
                                         ship_name: String,
+                                        ship_index: usize,
                                         shell: crate::armor_viewer::penetration::ShellInfo,
                                         sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
                                     }
 
                                     let shell_sims: Vec<ShellSim> = comparison_ships
                                         .iter()
-                                        .flat_map(|ship| {
+                                        .enumerate()
+                                        .flat_map(|(si, ship)| {
                                             ship.shells.iter().map(move |shell| {
                                                 let params =
                                                     crate::armor_viewer::ballistics::ShellParams::from_shell_info(
@@ -2177,6 +2218,7 @@ fn render_armor_pane(
                                                     };
                                                 ShellSim {
                                                     ship_name: ship.display_name.clone(),
+                                                    ship_index: si,
                                                     shell: shell.clone(),
                                                     sim,
                                                 }
@@ -2274,6 +2316,11 @@ fn render_armor_pane(
                                                 };
 
                                             ui.horizontal(|ui| {
+                                                let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                                                let ship_dot_color = egui::Color32::from_rgb(
+                                                    (sc[0] * 255.0) as u8, (sc[1] * 255.0) as u8, (sc[2] * 255.0) as u8,
+                                                );
+                                                ui.label(egui::RichText::new("\u{25CF}").color(ship_dot_color));
                                                 ui.label(egui::RichText::new(icon).color(badge_color));
                                                 ui.label(
                                                     egui::RichText::new(format!("{} — {}", shell_label, outcome_text))
@@ -2289,6 +2336,16 @@ fn render_armor_pane(
 
                                     for (i, hit) in result.hits.iter().enumerate() {
                                         let is_post_detonation = last_visible_hit.map_or(false, |lv| i > lv);
+
+                                        // Skip ghost plates that have no detonation event on them
+                                        if is_post_detonation {
+                                            let has_detonation_here = shell_sims.iter().any(|ss| {
+                                                ss.sim.as_ref().map_or(false, |sim| sim.detonated_at == Some(i))
+                                            });
+                                            if !has_detonation_here {
+                                                continue;
+                                            }
+                                        }
 
                                         let color = if is_post_detonation {
                                             egui::Color32::from_rgb(100, 100, 100)
@@ -2316,13 +2373,7 @@ fn render_armor_pane(
                                                     .small()
                                                     .color(color),
                                             );
-                                            if is_post_detonation {
-                                                ui.label(
-                                                    egui::RichText::new("(ghost)")
-                                                        .small()
-                                                        .color(egui::Color32::from_rgb(120, 120, 120)),
-                                                );
-                                            }
+
                                         });
                                         ui.label(
                                             egui::RichText::new(format!(
@@ -2376,6 +2427,12 @@ fn render_armor_pane(
 
                                                         ui.horizontal(|ui| {
                                                             ui.add_space(12.0);
+                                                            let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                                                            ui.label(egui::RichText::new("\u{25CF}").color(
+                                                                egui::Color32::from_rgb(
+                                                                    (sc[0] * 255.0) as u8, (sc[1] * 255.0) as u8, (sc[2] * 255.0) as u8,
+                                                                ),
+                                                            ));
                                                             ui.label(egui::RichText::new(icon));
                                                             let mut label_text = format!(
                                                                 "{} {} {:.0}mm",
@@ -2453,6 +2510,12 @@ fn render_armor_pane(
                                                     };
                                                     ui.horizontal(|ui| {
                                                         ui.add_space(12.0);
+                                                        let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                                                        ui.label(egui::RichText::new("\u{25CF}").color(
+                                                            egui::Color32::from_rgb(
+                                                                (sc[0] * 255.0) as u8, (sc[1] * 255.0) as u8, (sc[2] * 255.0) as u8,
+                                                            ),
+                                                        ));
                                                         ui.label(egui::RichText::new(icon).color(detail_color));
                                                         ui.label(
                                                             egui::RichText::new(format!(
@@ -2486,13 +2549,19 @@ fn render_armor_pane(
                                                     if let Some(ref det) = sim.detonation {
                                                         ui.horizontal(|ui| {
                                                             ui.add_space(8.0);
+                                                            let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                                                            ui.label(egui::RichText::new("\u{25CF}").color(
+                                                                egui::Color32::from_rgb(
+                                                                    (sc[0] * 255.0) as u8, (sc[1] * 255.0) as u8, (sc[2] * 255.0) as u8,
+                                                                ),
+                                                            ));
                                                             ui.label(
                                                                 egui::RichText::new(icons::BOMB)
                                                                     .color(egui::Color32::from_rgb(255, 140, 40)),
                                                             );
                                                             ui.label(
                                                                 egui::RichText::new(format!(
-                                                                    "{} {} detonates \u{2014} {:.1}m after #{}",
+                                                                    "{} {} detonates \u{2014} {:.1}m after plate #{}",
                                                                     &ss.ship_name,
                                                                     crate::armor_viewer::penetration::ammo_type_display(
                                                                         &ss.shell.ammo_type
@@ -2516,9 +2585,33 @@ fn render_armor_pane(
                                     }
 
                                     ui.separator();
-                                    if ui.button("Delete").clicked() {
-                                        delete_traj_id.set(Some(traj.meta.id));
-                                    }
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Delete").clicked() {
+                                            delete_traj_id.set(Some(traj.meta.id));
+                                        }
+                                        let btn_label = if traj.show_plates_active {
+                                            egui::RichText::new("Isolate Plates").color(egui::Color32::from_rgb(100, 220, 100))
+                                        } else {
+                                            egui::RichText::new("Isolate Plates")
+                                        };
+                                        if ui.button(btn_label)
+                                            .on_hover_text("Toggle: show only plates hit by this arc")
+                                            .clicked()
+                                        {
+                                            arc_plate_toggles.borrow_mut().push((ti, !traj.show_plates_active));
+                                        }
+                                        let zone_label = if traj.show_zones_active {
+                                            egui::RichText::new("Isolate Zones").color(egui::Color32::from_rgb(100, 220, 100))
+                                        } else {
+                                            egui::RichText::new("Isolate Zones")
+                                        };
+                                        if ui.button(zone_label)
+                                            .on_hover_text("Toggle: show entire zones hit by this arc")
+                                            .clicked()
+                                        {
+                                            arc_zone_toggles.borrow_mut().push((ti, !traj.show_zones_active));
+                                        }
+                                    });
                                 };
 
                             egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).max_height(500.0).show(
@@ -2596,21 +2689,146 @@ fn render_armor_pane(
 
                 // Handle delete single trajectory
                 if let Some(del_id) = delete_traj_id.get() {
+                    let had_active = pane.trajectories.iter().any(|t| t.show_plates_active || t.show_zones_active);
                     if let Some(pos) = pane.trajectories.iter().position(|t| t.meta.id == del_id) {
                         let removed = pane.trajectories.remove(pos);
                         if let Some(mid) = removed.mesh_id {
                             pane.viewport.remove_mesh(mid);
                         }
                     }
+                    // If removed arc was active and no others remain active, restore visibility
+                    if had_active && !pane.trajectories.iter().any(|t| t.show_plates_active || t.show_zones_active) {
+                        pane.part_visibility.clear();
+                        pane.plate_visibility.clear();
+                        zone_changed = true;
+                    }
                 }
 
                 // Handle clear all
                 if clear_traj.get() {
+                    let had_active = pane.trajectories.iter().any(|t| t.show_plates_active || t.show_zones_active);
                     for traj in pane.trajectories.drain(..) {
                         if let Some(mid) = traj.mesh_id {
                             pane.viewport.remove_mesh(mid);
                         }
                     }
+                    if had_active {
+                        pane.part_visibility.clear();
+                        pane.plate_visibility.clear();
+                        zone_changed = true;
+                    }
+                }
+
+                // Handle per-arc plate isolation toggles
+                for (ti, new_state) in arc_plate_toggles.borrow().iter() {
+                    if let Some(traj) = pane.trajectories.get_mut(*ti) {
+                        traj.show_plates_active = *new_state;
+                        if *new_state {
+                            traj.show_zones_active = false;
+                        } // mutually exclusive
+                    }
+                }
+
+                // Handle per-arc zone isolation toggles
+                for (ti, new_state) in arc_zone_toggles.borrow().iter() {
+                    if let Some(traj) = pane.trajectories.get_mut(*ti) {
+                        traj.show_zones_active = *new_state;
+                        if *new_state {
+                            traj.show_plates_active = false;
+                        } // mutually exclusive
+                    }
+                }
+
+                // Handle global "Show Hit Plates" — activate all arcs
+                if show_all_hit_plates.get() {
+                    for traj in &mut pane.trajectories {
+                        traj.show_plates_active = true;
+                        traj.show_zones_active = false;
+                    }
+                }
+
+                // Handle global "Show Hit Zones" — activate all arcs
+                if show_all_hit_zones.get() {
+                    for traj in &mut pane.trajectories {
+                        traj.show_zones_active = true;
+                        traj.show_plates_active = false;
+                    }
+                }
+
+                let any_isolation_changed = !arc_plate_toggles.borrow().is_empty()
+                    || !arc_zone_toggles.borrow().is_empty()
+                    || show_all_hit_plates.get()
+                    || show_all_hit_zones.get();
+
+                // Apply plate/zone isolation
+                if any_isolation_changed {
+                    pane.undo_stack.push(VisibilitySnapshot {
+                        part_visibility: pane.part_visibility.clone(),
+                        plate_visibility: pane.plate_visibility.clone(),
+                    });
+
+                    let any_plates = pane.trajectories.iter().any(|t| t.show_plates_active);
+                    let any_zones = pane.trajectories.iter().any(|t| t.show_zones_active);
+
+                    if any_plates || any_zones {
+                        // Collect hit zones and plate keys from active arcs
+                        let mut hit_zones: std::collections::HashSet<String> = std::collections::HashSet::new();
+                        let mut hit_plates: std::collections::HashSet<PlateKey> = std::collections::HashSet::new();
+                        for traj in &pane.trajectories {
+                            if traj.show_zones_active {
+                                for hit in &traj.result.hits {
+                                    hit_zones.insert(hit.zone.clone());
+                                }
+                            }
+                            if traj.show_plates_active {
+                                for hit in &traj.result.hits {
+                                    hit_plates.insert((
+                                        hit.zone.clone(),
+                                        hit.material.clone(),
+                                        (hit.thickness_mm * 10.0).round() as i32,
+                                    ));
+                                }
+                            }
+                        }
+
+                        // Apply visibility: iterate all parts, show if zone matches or plate matches
+                        if let Some(ref armor) = pane.loaded_armor {
+                            pane.plate_visibility.clear();
+                            for (zone, parts_with_plates) in &armor.zone_part_plates {
+                                let zone_hit = hit_zones.contains(zone);
+                                for (part, thicknesses) in parts_with_plates {
+                                    let part_key = (zone.clone(), part.clone());
+                                    if zone_hit {
+                                        // Entire zone is visible
+                                        pane.part_visibility.insert(part_key, true);
+                                    } else {
+                                        // Check plate-level hits
+                                        let part_has_hit = thicknesses
+                                            .iter()
+                                            .any(|&t| hit_plates.contains(&(zone.clone(), part.clone(), t)));
+                                        if part_has_hit {
+                                            pane.part_visibility.insert(part_key, true);
+                                            for &t in thicknesses {
+                                                let pk: PlateKey = (zone.clone(), part.clone(), t);
+                                                if hit_plates.contains(&pk) {
+                                                    pane.plate_visibility.remove(&pk);
+                                                } else {
+                                                    pane.plate_visibility.insert(pk, false);
+                                                }
+                                            }
+                                        } else {
+                                            pane.part_visibility.insert(part_key, false);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // No arcs active — restore all visibility
+                        pane.part_visibility.clear();
+                        pane.plate_visibility.clear();
+                    }
+                    zone_changed = true;
                 }
 
                 // Handle marker opacity change — re-upload all trajectory meshes
@@ -3172,29 +3390,37 @@ fn recompute_trajectory_for_range(
     };
 
     // Recompute detonation points and last visible hit
-    let mut new_detonation_points: Vec<[f32; 3]> = Vec::new();
+    // Each shell gets its own ballistic solve (different velocity/angle at range)
+    let mut new_detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> = Vec::new();
     let mut new_last_visible: Option<usize> = None;
-    if let Some(ref impact) = ballistic_impact {
-        for shell in comparison_ships.iter().flat_map(|ship| ship.shells.iter()).filter(|s| s.ammo_type == "AP") {
+    for (ship_idx, ship) in comparison_ships.iter().enumerate() {
+        for shell in ship.shells.iter().filter(|s| s.ammo_type == "AP") {
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
-                &params,
-                impact,
-                &result.hits,
-                &result.direction,
-            );
-            if let Some(pos) = sim.detonation.map(|d| d.position) {
-                new_detonation_points.push(pos);
-            }
-            // Earliest terminating event: detonation or ricochet/shatter
-            let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                (Some(d), Some(s)) => Some(d.min(s)),
-                (Some(d), None) => Some(d),
-                (None, Some(s)) => Some(s),
-                (None, None) => None,
-            };
-            if let Some(idx) = shell_stop {
-                new_last_visible = Some(new_last_visible.map_or(idx, |prev: usize| prev.min(idx)));
+            let shell_impact =
+                if range_m > 0.0 { crate::armor_viewer::ballistics::solve_for_range(&params, range_m) } else { None };
+            if let Some(ref impact) = shell_impact {
+                let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                    &params,
+                    impact,
+                    &result.hits,
+                    &result.direction,
+                );
+                if let Some(det) = sim.detonation {
+                    new_detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
+                        position: det.position,
+                        ship_index: ship_idx,
+                    });
+                }
+                // Earliest terminating event: detonation or ricochet/shatter
+                let shell_stop = match (sim.detonated_at, sim.stopped_at) {
+                    (Some(d), Some(s)) => Some(d.min(s)),
+                    (Some(d), None) => Some(d),
+                    (None, Some(s)) => Some(s),
+                    (None, None) => None,
+                };
+                if let Some(idx) = shell_stop {
+                    new_last_visible = Some(new_last_visible.map_or(idx, |prev: usize| prev.min(idx)));
+                }
             }
         }
     }
@@ -3247,7 +3473,7 @@ fn upload_trajectory_visualization(
 
     let dir = result.direction;
     // Scale markers and line width with camera distance so they shrink when zoomed in
-    let scale_factor = (cam_distance / 15.0).clamp(0.15, 3.0);
+    let scale_factor = (cam_distance / 200.0).clamp(0.15, 3.0);
     let line_width = 0.05 * scale_factor;
 
     let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
@@ -3352,18 +3578,23 @@ fn upload_trajectory_visualization(
             );
         }
 
-        // Detonation markers — larger diamond shapes in brightened trajectory color
-        for det_pos in &result.detonation_points {
-            // Draw a larger "burst" marker (diamond)
+        // Detonation markers — diamond shapes tinted per-ship color
+        let num_dets = result.detonation_points.len();
+        for (di, det) in result.detonation_points.iter().enumerate() {
+            // Offset each marker sideways so overlapping detonations are visible
+            let lateral_offset = if num_dets > 1 {
+                let spread = 0.4 * scale_factor;
+                let t = if num_dets == 1 { 0.0 } else { (di as f32 / (num_dets - 1) as f32) - 0.5 };
+                scale(perp1, t * spread)
+            } else {
+                [0.0, 0.0, 0.0]
+            };
+            let det_pos = add(det.position, lateral_offset);
             let burst_size = 0.25 * scale_factor;
-            let burst_color = [
-                (traj_color[0] * 0.5 + 0.5).min(1.0),
-                (traj_color[1] * 0.3 + 0.1).min(1.0),
-                (traj_color[2] * 0.2).min(1.0),
-                marker_opacity,
-            ]; // warm/bright tint of trajectory color
+            let sc = SHIP_COLORS[det.ship_index % SHIP_COLORS.len()];
+            let burst_color = [sc[0], sc[1], sc[2], marker_opacity];
 
-            // Diamond: 6 points along each axis
+            // Octahedron diamond: 6 tip points along each axis
             let base_idx = vertices.len() as u32;
             let offsets = [
                 scale(perp1, burst_size),
@@ -3375,10 +3606,10 @@ fn upload_trajectory_visualization(
             ];
 
             // Center vertex
-            vertices.push(Vertex { position: *det_pos, normal: [0.0, 1.0, 0.0], color: burst_color });
+            vertices.push(Vertex { position: det_pos, normal: [0.0, 1.0, 0.0], color: burst_color });
 
             for offset in &offsets {
-                vertices.push(Vertex { position: add(*det_pos, *offset), normal: [0.0, 1.0, 0.0], color: burst_color });
+                vertices.push(Vertex { position: add(det_pos, *offset), normal: [0.0, 1.0, 0.0], color: burst_color });
             }
 
             // 8 triangular faces of the octahedron

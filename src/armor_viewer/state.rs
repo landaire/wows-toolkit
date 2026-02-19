@@ -225,6 +225,10 @@ pub struct StoredTrajectory {
     pub last_visible_hit: Option<usize>,
     /// Camera distance at the time markers were last uploaded (for scaling).
     pub marker_cam_dist: f32,
+    /// Whether this arc's hit plates are isolated in the visibility filter.
+    pub show_plates_active: bool,
+    /// Whether this arc's hit zones are isolated in the visibility filter.
+    pub show_zones_active: bool,
 }
 
 /// State for a single armor viewer pane within the split tree.
