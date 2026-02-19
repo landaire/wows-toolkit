@@ -8174,7 +8174,7 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -8198,7 +8198,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "bitreader",
  "bon",
@@ -8288,7 +8288,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "bon",
  "byteorder",
