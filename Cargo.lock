@@ -8228,7 +8228,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "arboard",
  "bytemuck",

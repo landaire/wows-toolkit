@@ -732,15 +732,9 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
                 continue;
             }
 
-            // Filter by in-game hidden flag
-            if pane.show_hidden_only {
-                if !info.hidden {
-                    continue;
-                }
-            } else {
-                if info.hidden {
-                    continue;
-                }
+            // Show Hidden mode: only show plates the in-game viewer hides
+            if pane.show_hidden_only && !info.hidden {
+                continue;
             }
 
             let key = (info.zone.clone(), info.material_name.clone());
@@ -1228,7 +1222,10 @@ fn render_armor_pane(
                     }
 
                     // ── Show Hidden Plates toggle ──
-                    if ui.selectable_label(pane.show_hidden_only, format!("{} Show Hidden", icons::EYE_SLASH)).clicked()
+                    if ui
+                        .selectable_label(pane.show_hidden_only, icon_str!(icons::EYE_SLASH, "Show Hidden"))
+                        .on_hover_text("Toggle (possibly) hidden panel visibility")
+                        .clicked()
                     {
                         pane.show_hidden_only = !pane.show_hidden_only;
                         zone_changed = true;
@@ -1685,15 +1682,9 @@ fn upload_plate_highlight(
                 continue;
             }
 
-            // Filter by in-game hidden flag
-            if pane.show_hidden_only {
-                if !info.hidden {
-                    continue;
-                }
-            } else {
-                if info.hidden {
-                    continue;
-                }
+            // Show Hidden mode: only show plates the in-game viewer hides
+            if pane.show_hidden_only && !info.hidden {
+                continue;
             }
             let part_key = (info.zone.clone(), info.material_name.clone());
             if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
@@ -1849,15 +1840,9 @@ fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, de
             if !pane.show_zero_mm && info.thickness_mm.abs() < 0.05 {
                 continue;
             }
-            // Filter by in-game hidden flag
-            if pane.show_hidden_only {
-                if !info.hidden {
-                    continue;
-                }
-            } else {
-                if info.hidden {
-                    continue;
-                }
+            // Show Hidden mode: only show plates the in-game viewer hides
+            if pane.show_hidden_only && !info.hidden {
+                continue;
             }
             let key = (info.zone.clone(), info.material_name.clone());
             if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
