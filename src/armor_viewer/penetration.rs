@@ -230,12 +230,15 @@ pub struct FuseDetonation {
 /// Complete shell simulation through all hit plates.
 #[derive(Clone, Debug)]
 pub struct ShellSimResult {
-    /// Per-plate results, one for each input hit.
+    /// Per-plate results, one for each hit the shell actually reached.
     pub plates: Vec<PlateResult>,
     /// Where the fuse detonates (None if fuse never armed or HE/SAP).
     pub detonation: Option<FuseDetonation>,
-    /// Hit index where the shell stopped (None = overpen / exited).
+    /// Hit index where the shell stopped due to ricochet/shatter/zero velocity (None if not stopped).
     pub stopped_at: Option<usize>,
+    /// Hit index of the last plate the shell reached before fuse detonation.
+    /// The shell explodes between this hit and the next. Distinct from `stopped_at`.
+    pub detonated_at: Option<usize>,
 }
 
 /// Simulate a shell passing through a sequence of armor plates.
@@ -245,32 +248,68 @@ pub struct ShellSimResult {
 ///   normalized_angle = max(0, angle_from_normal - normalization)
 ///   effective_thickness = thickness / cos(normalized_angle)
 ///   post_pen_velocity = velocity * (1 - exp(1 - raw_pen / effective_thickness))
+///
+/// Fuse detonation is tracked inline: once armed, the shell accumulates travel
+/// distance and stops processing further plates when the fuse distance is exceeded.
 pub fn simulate_shell_through_hits(
     params: &ShellParams,
     impact: &ImpactResult,
     hits: &[TrajectoryHit],
     shell_dir: &[f32; 3],
 ) -> ShellSimResult {
+    use wowsunpack::game_params::types::Meters;
+
     let mut velocity = impact.impact_velocity as f32;
     let caliber_mm = (params.caliber * 1000.0) as f32;
     let normalization_rad = params.normalization as f32;
-    let ricochet1_rad = params.ricochet1 as f32; // guaranteed ricochet angle (from normal)
+    let ricochet1_rad = params.ricochet1 as f32;
     let fuse_threshold_mm = params.threshold as f32;
     let fuse_time = params.fuse_time as f32;
     let p_ppc = params.p_ppc as f32;
 
     let mut plates = Vec::with_capacity(hits.len());
     let mut stopped_at: Option<usize> = None;
+    let mut detonated_at: Option<usize> = None;
+
+    // Fuse tracking
     let mut fuse_armed = false;
-    let mut fuse_arm_position: [f32; 3] = [0.0; 3];
     let mut fuse_arm_velocity: f32 = 0.0;
-    let mut _fuse_arm_distance: f32 = 0.0; // distance_from_start at arming hit
+    let mut fuse_distance_model: f32 = 0.0;
+    let mut fuse_accumulated: f32 = 0.0; // distance traveled since arming (model units)
+    let mut prev_position: [f32; 3] = [0.0; 3]; // last hit position (for distance accumulation)
+
+    // Precompute shell direction unit vector for detonation fallback
+    let dir_len =
+        (shell_dir[0] * shell_dir[0] + shell_dir[1] * shell_dir[1] + shell_dir[2] * shell_dir[2]).sqrt().max(1e-9);
+    let dir_norm = [shell_dir[0] / dir_len, shell_dir[1] / dir_len, shell_dir[2] / dir_len];
+
+    let mut detonation: Option<FuseDetonation> = None;
 
     for (i, hit) in hits.iter().enumerate() {
+        // If fuse is armed, check if detonation occurs before reaching this plate
+        if fuse_armed && detonation.is_none() {
+            let seg_dist = distance_3d(&prev_position, &hit.position);
+            let remaining = fuse_distance_model - fuse_accumulated;
+            if seg_dist >= remaining && remaining > 0.0 {
+                // Shell detonates before reaching this plate
+                let t = remaining / seg_dist.max(1e-9);
+                let det_pos = [
+                    prev_position[0] + (hit.position[0] - prev_position[0]) * t,
+                    prev_position[1] + (hit.position[1] - prev_position[1]) * t,
+                    prev_position[2] + (hit.position[2] - prev_position[2]) * t,
+                ];
+                let arm_idx = plates.iter().position(|p: &PlateResult| p.fuse_armed_here).unwrap_or(0);
+                let fuse_real_m = fuse_arm_velocity * fuse_time;
+                detonation =
+                    Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
+                detonated_at = Some(i.saturating_sub(1)); // last plate before detonation
+                break;
+            }
+            fuse_accumulated += seg_dist;
+        }
+
         let raw_pen = p_ppc * velocity.powf(1.38);
         let angle_from_normal_rad = hit.angle_deg.to_radians();
-
-        // Check overmatch: caliber > 14.3 * thickness
         let is_overmatch = caliber_mm > hit.thickness_mm * 14.3;
 
         // Check ricochet (only if not overmatch)
@@ -287,13 +326,8 @@ pub fn simulate_shell_through_hits(
             break;
         }
 
-        // Apply normalization (reduce angle from normal, i.e. shell straightens out)
-        let norm_angle = if is_overmatch {
-            0.0 // overmatch ignores angle entirely
-        } else {
-            (angle_from_normal_rad - normalization_rad).max(0.0)
-        };
-
+        // Apply normalization
+        let norm_angle = if is_overmatch { 0.0 } else { (angle_from_normal_rad - normalization_rad).max(0.0) };
         let effective_thickness = hit.thickness_mm / norm_angle.cos().max(0.001);
 
         // Check penetration
@@ -310,10 +344,8 @@ pub fn simulate_shell_through_hits(
             break;
         }
 
-        // Shell penetrates this plate
+        // Shell penetrates
         let outcome = if is_overmatch { PlateOutcome::Overmatch } else { PlateOutcome::Penetrate };
-
-        // Post-penetration velocity: v_after = v * (1 - exp(1 - raw_pen / eff_thickness))
         let pen_ratio = raw_pen / effective_thickness.max(0.001);
         let post_pen_velocity = velocity * (1.0 - (1.0 - pen_ratio).exp());
 
@@ -321,9 +353,11 @@ pub fn simulate_shell_through_hits(
         let armed_here = !fuse_armed && hit.thickness_mm >= fuse_threshold_mm;
         if armed_here {
             fuse_armed = true;
-            fuse_arm_position = hit.position;
+
             fuse_arm_velocity = post_pen_velocity;
-            _fuse_arm_distance = hit.distance_from_start;
+            let fuse_real_m = post_pen_velocity * fuse_time;
+            fuse_distance_model = Meters::from(fuse_real_m).to_bigworld().value();
+            fuse_accumulated = 0.0;
         }
 
         plates.push(PlateResult {
@@ -335,67 +369,43 @@ pub fn simulate_shell_through_hits(
             fuse_armed_here: armed_here,
         });
 
+        prev_position = hit.position;
         velocity = post_pen_velocity;
 
-        // If velocity drops to near zero, shell is effectively stopped
         if velocity < 1.0 {
             stopped_at = Some(i);
             break;
         }
     }
 
-    // Compute fuse detonation point if fuse was armed
-    let detonation = if fuse_armed {
-        // Fuse travel distance in real meters, converted to BigWorld model units
-        use wowsunpack::game_params::types::Meters;
-        let fuse_distance_real_m = fuse_arm_velocity * fuse_time;
-        let fuse_distance_model = Meters::from(fuse_distance_real_m).to_bigworld().value();
-
-        let dir_len =
-            (shell_dir[0] * shell_dir[0] + shell_dir[1] * shell_dir[1] + shell_dir[2] * shell_dir[2]).sqrt().max(1e-9);
-        let dir_norm = [shell_dir[0] / dir_len, shell_dir[1] / dir_len, shell_dir[2] / dir_len];
-
-        // Walk from the arming point along shell_dir
-        let mut remaining = fuse_distance_model;
-        let mut det_pos = fuse_arm_position;
-        let mut found = false;
-
-        // Walk through subsequent hits after the arming hit
+    // If fuse armed but detonation didn't happen between hits, it detonates past the last hit
+    if fuse_armed && detonation.is_none() {
+        let remaining = fuse_distance_model - fuse_accumulated;
+        let det_pos = [
+            prev_position[0] + dir_norm[0] * remaining.max(0.0),
+            prev_position[1] + dir_norm[1] * remaining.max(0.0),
+            prev_position[2] + dir_norm[2] * remaining.max(0.0),
+        ];
         let arm_idx = plates.iter().position(|p| p.fuse_armed_here).unwrap_or(0);
-        let mut prev_pos = fuse_arm_position;
+        let fuse_real_m = fuse_arm_velocity * fuse_time;
+        detonation = Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
+        // detonated_at stays None — shell exited before detonating (overpen with armed fuse)
+    }
 
-        for hit in hits.iter().skip(arm_idx + 1) {
-            let seg_dist = distance_3d(&prev_pos, &hit.position);
-            if seg_dist >= remaining {
-                // Detonation falls within this segment
-                let t = remaining / seg_dist.max(1e-9);
-                det_pos = [
-                    prev_pos[0] + (hit.position[0] - prev_pos[0]) * t,
-                    prev_pos[1] + (hit.position[1] - prev_pos[1]) * t,
-                    prev_pos[2] + (hit.position[2] - prev_pos[2]) * t,
-                ];
-                found = true;
-                break;
-            }
-            remaining -= seg_dist;
-            prev_pos = hit.position;
-        }
+    ShellSimResult { plates, detonation, stopped_at, detonated_at }
+}
 
-        if !found {
-            // Detonation is past the last hit — shell exits, place marker along ray
-            det_pos = [
-                prev_pos[0] + dir_norm[0] * remaining,
-                prev_pos[1] + dir_norm[1] * remaining,
-                prev_pos[2] + dir_norm[2] * remaining,
-            ];
-        }
-
-        Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_distance_real_m })
-    } else {
-        None
-    };
-
-    ShellSimResult { plates, detonation, stopped_at }
+/// Metadata for a stored trajectory (non-simulation display data).
+#[derive(Clone, Debug)]
+pub struct TrajectoryMeta {
+    /// Unique monotonically increasing ID for stable UI references.
+    pub id: u64,
+    /// Index into the trajectory color palette.
+    pub color_index: usize,
+    /// Per-trajectory ballistic range (km).
+    pub range_km: f32,
+    /// When true, this trajectory's range follows the shared slider.
+    pub range_locked: bool,
 }
 
 /// Euclidean distance between two 3D points.

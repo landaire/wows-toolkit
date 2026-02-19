@@ -215,6 +215,16 @@ pub struct LoadedShipArmor {
     pub draft_meters: Option<f32>,
 }
 
+/// A trajectory with its metadata and visualization mesh.
+pub struct StoredTrajectory {
+    pub meta: crate::armor_viewer::penetration::TrajectoryMeta,
+    pub result: crate::armor_viewer::penetration::TrajectoryResult,
+    pub mesh_id: Option<MeshId>,
+    /// Last hit index visible before shell detonation (earliest across all shells).
+    /// `None` means no shell detonates — all hits are visible.
+    pub last_visible_hit: Option<usize>,
+}
+
 /// State for a single armor viewer pane within the split tree.
 #[allow(dead_code)]
 pub struct ArmorPane {
@@ -265,11 +275,12 @@ pub struct ArmorPane {
     pub gap_count: usize,
     /// Whether trajectory analysis mode is active (click to cast ray).
     pub trajectory_mode: bool,
-    /// Cached trajectory analysis results (multiple via shift-click).
-    pub trajectory_results: Vec<crate::armor_viewer::penetration::TrajectoryResult>,
-    /// Mesh IDs for the trajectory visualization overlays.
-    pub trajectory_meshes: Vec<MeshId>,
-    /// Ballistic range for penetration calculations (km).
+    /// Stored trajectories with per-trajectory metadata and mesh IDs.
+    pub trajectories: Vec<StoredTrajectory>,
+    /// Counter for assigning unique trajectory IDs.
+    pub next_trajectory_id: u64,
+    /// Shared ballistic range for penetration calculations (km).
+    /// Trajectories with `range_locked == true` follow this value.
     pub ballistic_range_km: f32,
     /// Waterline plane opacity (0.0–1.0).
     pub waterline_opacity: f32,
@@ -306,8 +317,8 @@ impl ArmorPane {
             show_gaps: false,
             gap_count: 0,
             trajectory_mode: false,
-            trajectory_results: Vec::new(),
-            trajectory_meshes: Vec::new(),
+            trajectories: Vec::new(),
+            next_trajectory_id: 0,
             ballistic_range_km: 10.0,
             waterline_opacity: defaults.waterline_opacity,
         }
