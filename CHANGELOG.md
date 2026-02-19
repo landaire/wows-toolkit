@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.51] - 2026-02-19
+
+### Armor_renderer
+
+- Show proper plate thickness according to the game + better describe multiple plates
+- Big improvements to armor viewer UX / accuracy
+- Turret rotation + opacity slider + reworked toggles
+- Classify hidden plates
+
+### Armor_viewer
+
+- Add 3d model export
+
 ## [0.1.50] - 2026-02-18
 
 ### 🚀 Features
