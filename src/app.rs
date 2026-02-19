@@ -333,6 +333,10 @@ impl WowsToolkitApp {
                 crate::game_params::clear_all_game_params_caches();
             }
 
+            // Apply persisted armor viewer defaults to the initial pane
+            // (ArmorViewerState is #[serde(skip)] so it gets Default on load)
+            saved_state.tab_state.armor_viewer.apply_defaults(&saved_state.tab_state.armor_viewer_defaults);
+
             // Sync the GPU encoder warning flag from persisted settings
             saved_state.tab_state.suppress_gpu_encoder_warning.store(
                 saved_state.tab_state.settings.suppress_gpu_encoder_warning,

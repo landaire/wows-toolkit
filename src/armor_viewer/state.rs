@@ -16,11 +16,64 @@ pub type PlateKey = (String, String, i32);
 pub struct ArmorViewerDefaults {
     pub show_plate_edges: bool,
     pub show_waterline: bool,
+    pub show_zero_mm: bool,
+    pub armor_opacity: f32,
 }
 
 impl Default for ArmorViewerDefaults {
     fn default() -> Self {
-        Self { show_plate_edges: true, show_waterline: true }
+        Self { show_plate_edges: true, show_waterline: true, show_zero_mm: false, armor_opacity: 1.0 }
+    }
+}
+
+/// Snapshot of visibility state for undo/redo.
+#[derive(Clone)]
+pub struct VisibilitySnapshot {
+    pub part_visibility: HashMap<(String, String), bool>,
+    pub plate_visibility: HashMap<PlateKey, bool>,
+}
+
+/// Simple undo/redo stack for visibility changes.
+pub struct VisibilityUndoStack {
+    undo: Vec<VisibilitySnapshot>,
+    redo: Vec<VisibilitySnapshot>,
+}
+
+impl Default for VisibilityUndoStack {
+    fn default() -> Self {
+        Self { undo: Vec::new(), redo: Vec::new() }
+    }
+}
+
+impl VisibilityUndoStack {
+    const MAX_ENTRIES: usize = 50;
+
+    /// Push current state before a mutation. Clears the redo stack.
+    pub fn push(&mut self, snapshot: VisibilitySnapshot) {
+        self.undo.push(snapshot);
+        if self.undo.len() > Self::MAX_ENTRIES {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Undo: returns the previous snapshot, pushing current state onto redo.
+    pub fn undo(&mut self, current: VisibilitySnapshot) -> Option<VisibilitySnapshot> {
+        let prev = self.undo.pop()?;
+        self.redo.push(current);
+        Some(prev)
+    }
+
+    /// Redo: returns the next snapshot, pushing current state onto undo.
+    pub fn redo(&mut self, current: VisibilitySnapshot) -> Option<VisibilitySnapshot> {
+        let next = self.redo.pop()?;
+        self.undo.push(current);
+        Some(next)
+    }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 }
 
@@ -98,6 +151,16 @@ impl ArmorViewerState {
         self.next_pane_id += 1;
         id
     }
+
+    /// Apply persisted defaults to all existing panes (used after deserialization).
+    pub fn apply_defaults(&mut self, defaults: &ArmorViewerDefaults) {
+        for (_, pane) in self.dock_state.iter_all_tabs_mut() {
+            pane.show_plate_edges = defaults.show_plate_edges;
+            pane.show_waterline = defaults.show_waterline;
+            pane.show_zero_mm = defaults.show_zero_mm;
+            pane.armor_opacity = defaults.armor_opacity;
+        }
+    }
 }
 
 /// Per-triangle metadata from the armor mesh, for tooltip display.
@@ -120,6 +183,8 @@ pub struct LoadedShipArmor {
     pub zones: Vec<String>,
     /// Ordered mapping: zone name -> sorted list of unique material names in that zone.
     pub zone_parts: Vec<(String, Vec<String>)>,
+    /// Three-level hierarchy: zone -> materials -> sorted unique plate thicknesses (i32, tenths of mm).
+    pub zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)>,
     /// Hull visual meshes (render sets) for optional overlay display.
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
@@ -164,6 +229,12 @@ pub struct ArmorPane {
     pub show_waterline: bool,
     /// Whether to show black outlines at plate thickness boundaries.
     pub show_plate_edges: bool,
+    /// Whether to show 0mm thickness plates.
+    pub show_zero_mm: bool,
+    /// Armor plate opacity (0.0–1.0).
+    pub armor_opacity: f32,
+    /// Undo/redo stack for visibility changes.
+    pub undo_stack: VisibilityUndoStack,
 }
 
 impl ArmorPane {
@@ -190,6 +261,9 @@ impl ArmorPane {
             context_menu_key: None,
             show_waterline: defaults.show_waterline,
             show_plate_edges: defaults.show_plate_edges,
+            show_zero_mm: defaults.show_zero_mm,
+            armor_opacity: defaults.armor_opacity,
+            undo_stack: VisibilityUndoStack::default(),
         }
     }
 }
