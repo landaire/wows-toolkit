@@ -7,7 +7,7 @@ use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::state::{
-    ArmorPane, ArmorTriangleTooltip, CompareSettings, LoadedShipArmor, PlateKey, ShipAssetsState,
+    ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, CompareSettings, LoadedShipArmor, PlateKey, ShipAssetsState,
 };
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, MeshId, Vertex};
@@ -18,6 +18,7 @@ struct ArmorPaneViewer<'a> {
     gpu_pipeline: &'a GpuPipeline,
     mirror_camera_signal: &'a std::cell::Cell<Option<u64>>,
     active_pane_signal: &'a std::cell::Cell<Option<u64>>,
+    save_defaults_signal: &'a std::cell::Cell<Option<ArmorViewerDefaults>>,
     translate_part: &'a dyn Fn(&str) -> String,
     tab_count: usize,
 }
@@ -41,6 +42,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
             self.gpu_pipeline,
             self.mirror_camera_signal,
             self.active_pane_signal,
+            self.save_defaults_signal,
             self.translate_part,
         );
     }
@@ -64,6 +66,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
 
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
+        let armor_defaults = self.tab_state.armor_viewer_defaults.clone();
         let state = &mut self.tab_state.armor_viewer;
         let render_state = self.tab_state.wgpu_render_state.clone();
         let wows_data = self.tab_state.world_of_warships_data.clone();
@@ -486,6 +489,8 @@ impl ToolkitTabViewer<'_> {
         }
 
         // Render dock area with armor panes
+        let save_defaults_cell: std::cell::Cell<Option<ArmorViewerDefaults>> = std::cell::Cell::new(None);
+        let save_defaults_ref = &save_defaults_cell;
         {
             let tab_count = state.dock_state.main_surface().num_tabs();
             let mut viewer = ArmorPaneViewer {
@@ -493,6 +498,7 @@ impl ToolkitTabViewer<'_> {
                 gpu_pipeline: &gpu_pipeline,
                 mirror_camera_signal: if mirror_cameras { active_camera_ref } else { &std::cell::Cell::new(None) },
                 active_pane_signal: active_pane_ref,
+                save_defaults_signal: save_defaults_ref,
                 translate_part: translate_part_ref,
                 tab_count,
             };
@@ -569,7 +575,7 @@ impl ToolkitTabViewer<'_> {
         // Apply deferred compare action from sidebar
         if let Some(settings) = sidebar_compare {
             let next_id = state.allocate_pane_id();
-            let mut new_pane = ArmorPane::empty(next_id);
+            let mut new_pane = ArmorPane::with_defaults(next_id, &armor_defaults);
             new_pane.viewport.camera = settings.camera.clone();
             new_pane.part_visibility = settings.part_visibility.clone();
             new_pane.hull_visibility = settings.hull_visibility.clone();
@@ -577,6 +583,11 @@ impl ToolkitTabViewer<'_> {
             let tree = state.dock_state.main_surface_mut();
             let target = tree.focused_leaf().unwrap_or(egui_dock::NodeIndex::root());
             tree.split_right(target, 0.5, vec![new_pane]);
+        }
+
+        // Apply saved defaults from Display popover (signal set inside render_armor_pane)
+        if let Some(new_defaults) = save_defaults_cell.take() {
+            self.tab_state.armor_viewer_defaults = new_defaults;
         }
     }
 }
@@ -603,12 +614,11 @@ fn poll_pane_loads(dock_state: &mut DockState<ArmorPane>, device: &wgpu::Device,
 }
 
 /// Upload loaded armor meshes to the viewport's GPU buffers,
-/// filtering out triangles belonging to invisible parts (by (zone, material_name)).
+/// filtering out triangles belonging to invisible parts or hidden plates.
 fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     pane.viewport.clear();
     pane.mesh_triangle_info.clear();
     pane.hover_highlight = None;
-    pane.pinned_highlights.clear();
 
     for mesh in &armor.meshes {
         let mut vertices: Vec<Vertex> = Vec::new();
@@ -619,6 +629,13 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
             let key = (info.zone.clone(), info.material_name.clone());
             let part_visible = pane.part_visibility.get(&key).copied().unwrap_or(true);
             if !part_visible {
+                continue;
+            }
+
+            let plate_key: PlateKey =
+                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+            let plate_visible = pane.plate_visibility.get(&plate_key).copied().unwrap_or(true);
+            if !plate_visible {
                 continue;
             }
 
@@ -717,6 +734,7 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
 /// Initial upload when a ship is first loaded. Sets up part visibility and camera.
 fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     pane.part_visibility.clear();
+    pane.plate_visibility.clear();
     for (zone, parts) in &armor.zone_parts {
         for part in parts {
             pane.part_visibility.insert((zone.clone(), part.clone()), true);
@@ -746,6 +764,7 @@ fn render_armor_pane(
     gpu_pipeline: &GpuPipeline,
     mirror_camera_signal: &std::cell::Cell<Option<u64>>,
     active_pane_signal: &std::cell::Cell<Option<u64>>,
+    save_defaults_signal: &std::cell::Cell<Option<ArmorViewerDefaults>>,
     translate_part: &dyn Fn(&str) -> String,
 ) {
     let pane_id = pane.id;
@@ -754,102 +773,106 @@ fn render_armor_pane(
     {
         let vp_ui = ui;
 
-        // Zone toggles (top bar, before the 3D image)
+        // Settings toolbar (single row with popover buttons)
         let mut zone_changed = false;
         if let Some(armor) = &pane.loaded_armor {
             if !armor.zone_parts.is_empty() {
-                vp_ui.horizontal_wrapped(|ui| {
-                    for (zone, parts) in &armor.zone_parts {
-                        let all_on = parts
-                            .iter()
-                            .all(|p| pane.part_visibility.get(&(zone.clone(), p.clone())).copied().unwrap_or(true));
-                        let any_on = parts
-                            .iter()
-                            .any(|p| pane.part_visibility.get(&(zone.clone(), p.clone())).copied().unwrap_or(true));
-
-                        // Zone checkbox (toggles all parts in zone)
-                        let mut checked = all_on;
-                        let cb_response = ui.checkbox(&mut checked, "");
-                        if any_on && !all_on {
-                            // Draw indeterminate dash over the checkbox
-                            let c = cb_response.rect.center();
-                            ui.painter().line_segment(
-                                [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
-                                egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
-                            );
-                        }
-                        if cb_response.changed() {
-                            for part in parts {
-                                pane.part_visibility.insert((zone.clone(), part.clone()), checked);
-                            }
-                            zone_changed = true;
-                        }
-
-                        // Zone name as clickable label that opens a popup for per-part control
-                        let label_response = ui.selectable_label(false, zone);
-                        egui::Popup::from_toggle_button_response(&label_response)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .show(|ui| {
-                                ui.horizontal(|ui| {
-                                    if ui.small_button("All").clicked() {
+                vp_ui.horizontal(|ui| {
+                    // ── Armor Zones button with popover ──
+                    let armor_btn = ui.button(format!("{} Armor", icons::SHIELD));
+                    egui::Popup::from_toggle_button_response(&armor_btn)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| {
+                            ui.horizontal(|ui| {
+                                if ui.small_button("All").clicked() {
+                                    for (zone, parts) in &armor.zone_parts {
                                         for part in parts {
                                             pane.part_visibility.insert((zone.clone(), part.clone()), true);
                                         }
-                                        zone_changed = true;
                                     }
-                                    if ui.small_button("None").clicked() {
+                                    zone_changed = true;
+                                }
+                                if ui.small_button("None").clicked() {
+                                    for (zone, parts) in &armor.zone_parts {
                                         for part in parts {
                                             pane.part_visibility.insert((zone.clone(), part.clone()), false);
                                         }
-                                        zone_changed = true;
                                     }
-                                });
-                                ui.separator();
-                                for part in parts {
-                                    let key = (zone.clone(), part.clone());
-                                    let mut v = pane.part_visibility.get(&key).copied().unwrap_or(true);
-                                    if ui.checkbox(&mut v, translate_part(part)).changed() {
-                                        pane.part_visibility.insert(key, v);
-                                        zone_changed = true;
-                                    }
+                                    zone_changed = true;
                                 }
                             });
+                            ui.separator();
 
-                        ui.add_space(4.0);
-                    }
+                            // Vertical list with collapsible zone groups
+                            ui.set_min_width(220.0);
+                            egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(
+                                ui,
+                                |ui| {
+                                    ui.set_width(ui.available_width());
+                                    for (zone, parts) in &armor.zone_parts {
+                                        let all_on = parts.iter().all(|p| {
+                                            pane.part_visibility
+                                                .get(&(zone.clone(), p.clone()))
+                                                .copied()
+                                                .unwrap_or(true)
+                                        });
+                                        let any_on = parts.iter().any(|p| {
+                                            pane.part_visibility
+                                                .get(&(zone.clone(), p.clone()))
+                                                .copied()
+                                                .unwrap_or(true)
+                                        });
 
-                    // Hull render set toggles, grouped by category.
-                    if !armor.hull_part_groups.is_empty() {
-                        ui.separator();
-
-                        // Collect all hull part names for the master toggle.
-                        let all_hull_names: Vec<&String> =
-                            armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
-                        let all_on =
-                            all_hull_names.iter().all(|n| pane.hull_visibility.get(*n).copied().unwrap_or(false));
-                        let any_on =
-                            all_hull_names.iter().any(|n| pane.hull_visibility.get(*n).copied().unwrap_or(false));
-
-                        let mut checked = all_on;
-                        let cb_response = ui.checkbox(&mut checked, "");
-                        if any_on && !all_on {
-                            let c = cb_response.rect.center();
-                            ui.painter().line_segment(
-                                [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
-                                egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                                        let id = ui.make_persistent_id(("armor_zone", zone));
+                                        egui::collapsing_header::CollapsingState::load_with_default_open(
+                                            ui.ctx(),
+                                            id,
+                                            false,
+                                        )
+                                        .show_header(ui, |ui| {
+                                            let mut checked = all_on;
+                                            let cb = ui.checkbox(&mut checked, "");
+                                            if any_on && !all_on {
+                                                let c = cb.rect.center();
+                                                ui.painter().line_segment(
+                                                    [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
+                                                    egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                                                );
+                                            }
+                                            if cb.changed() {
+                                                for part in parts {
+                                                    pane.part_visibility.insert((zone.clone(), part.clone()), checked);
+                                                }
+                                                zone_changed = true;
+                                            }
+                                            ui.label(zone);
+                                        })
+                                        .body(|ui| {
+                                            for part in parts {
+                                                let key = (zone.clone(), part.clone());
+                                                let mut v = pane.part_visibility.get(&key).copied().unwrap_or(true);
+                                                let display = translate_part(part);
+                                                if ui.checkbox(&mut v, &display).changed() {
+                                                    pane.part_visibility.insert(key, v);
+                                                    zone_changed = true;
+                                                }
+                                            }
+                                        });
+                                    }
+                                },
                             );
-                        }
-                        if cb_response.changed() {
-                            for name in &all_hull_names {
-                                pane.hull_visibility.insert((*name).clone(), checked);
-                            }
-                            zone_changed = true;
-                        }
+                        });
 
-                        let label_response = ui.selectable_label(false, "Hull Model");
-                        egui::Popup::from_toggle_button_response(&label_response)
+                    // ── Hull Model button with popover ──
+                    if !armor.hull_part_groups.is_empty() {
+                        let hull_btn = ui.button(format!("{} Hull", icons::CUBE));
+                        egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
+                                ui.set_min_width(200.0);
+                                let all_hull_names: Vec<&String> =
+                                    armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
+
                                 ui.horizontal(|ui| {
                                     if ui.small_button("All").clicked() {
                                         for name in &all_hull_names {
@@ -868,7 +891,6 @@ fn render_armor_pane(
 
                                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                                     for (group, names) in &armor.hull_part_groups {
-                                        // Per-group header with toggle
                                         let group_all_on =
                                             names.iter().all(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
                                         let group_any_on =
@@ -893,7 +915,6 @@ fn render_armor_pane(
                                             ui.strong(group);
                                         });
 
-                                        // Individual parts within the group
                                         ui.indent(group, |ui| {
                                             for name in names {
                                                 let mut visible =
@@ -905,22 +926,77 @@ fn render_armor_pane(
                                             }
                                         });
                                     }
-                                }); // ScrollArea
+                                });
                             });
                     }
 
-                    // Plate edges toggle
-                    ui.separator();
-                    if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
-                        zone_changed = true;
-                    }
+                    // ── Display settings button with popover ──
+                    let display_btn = ui.button(format!("{} Display", icons::GEAR_FINE));
+                    egui::Popup::from_toggle_button_response(&display_btn)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| {
+                            ui.set_min_width(160.0);
+                            if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
+                                zone_changed = true;
+                            }
+                            if armor.draft_meters.is_some() {
+                                if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
+                                    zone_changed = true;
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("Save as defaults").clicked() {
+                                save_defaults_signal.set(Some(ArmorViewerDefaults {
+                                    show_plate_edges: pane.show_plate_edges,
+                                    show_waterline: pane.show_waterline,
+                                }));
+                            }
+                        });
 
-                    // Waterline toggle
-                    if armor.draft_meters.is_some() {
-                        ui.separator();
-                        if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
-                            zone_changed = true;
-                        }
+                    // ── Hidden plates button with popover ──
+                    // Show whenever any plates have been interacted with (not just when hidden),
+                    // so users can rapidly toggle plates without the button disappearing.
+                    if !pane.plate_visibility.is_empty() {
+                        let hidden_count = pane.plate_visibility.values().filter(|&&v| !v).count();
+                        let btn_label = if hidden_count > 0 {
+                            format!("{} {} hidden", icons::EYE_SLASH, hidden_count)
+                        } else {
+                            format!("{} Plates", icons::EYE)
+                        };
+                        let hidden_btn = ui.button(btn_label);
+                        egui::Popup::from_toggle_button_response(&hidden_btn)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                ui.set_min_width(200.0);
+                                ui.horizontal(|ui| {
+                                    if ui.small_button("Show all").clicked() {
+                                        for v in pane.plate_visibility.values_mut() {
+                                            *v = true;
+                                        }
+                                        zone_changed = true;
+                                    }
+                                    if ui.small_button("Clear list").clicked() {
+                                        pane.plate_visibility.clear();
+                                        zone_changed = true;
+                                    }
+                                });
+                                ui.separator();
+
+                                let mut sorted_keys: Vec<PlateKey> = pane.plate_visibility.keys().cloned().collect();
+                                sorted_keys.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+
+                                for plate_key in &sorted_keys {
+                                    let visible = pane.plate_visibility.get(plate_key).copied().unwrap_or(true);
+                                    let thickness = plate_key.2 as f32 / 10.0;
+                                    let part_name = translate_part(&plate_key.1);
+                                    let icon = if visible { icons::EYE } else { icons::EYE_SLASH };
+                                    let label = format!("{} {:.0} mm {}", icon, thickness, part_name);
+                                    if ui.button(label).clicked() {
+                                        pane.plate_visibility.insert(plate_key.clone(), !visible);
+                                        zone_changed = true;
+                                    }
+                                }
+                            });
                     }
                 });
                 vp_ui.separator();
@@ -971,7 +1047,6 @@ fn render_armor_pane(
 
                 // Picking on hover / click / right-click
                 let mut hovered_plate_key: Option<PlateKey> = None;
-                let mut hovered_part_key: Option<(String, String)> = None;
                 let context_menu_open =
                     egui::Popup::is_id_open(vp_ui.ctx(), egui::Popup::default_response_id(&response));
                 if response.hovered() {
@@ -987,7 +1062,6 @@ fn render_armor_pane(
                                 let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
                                 hovered_plate_key =
                                     Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
-                                hovered_part_key = Some((tooltip.zone.clone(), tooltip.material_name.clone()));
                                 pane.hovered_info = Some(tooltip.clone());
                                 if !context_menu_open {
                                     egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
@@ -1003,86 +1077,72 @@ fn render_armor_pane(
                     }
                 }
 
-                // Click to toggle pinned highlight
+                // Single click: toggle plate visibility (hide/show)
                 if response.clicked() {
                     if let Some(ref key) = hovered_plate_key {
-                        if pane.pinned_highlights.contains_key(key) {
-                            // Unpin
-                            if let Some(mesh_id) = pane.pinned_highlights.remove(key) {
-                                pane.viewport.remove_mesh(mesh_id);
-                            }
-                        } else {
-                            // Pin with a distinct color
-                            if let Some(armor) = pane.loaded_armor.take() {
-                                let mesh_id = upload_plate_highlight(
-                                    pane,
-                                    &armor,
-                                    key,
-                                    &render_state.device,
-                                    [0.2, 0.6, 1.0, 0.45],
-                                );
-                                pane.pinned_highlights.insert(key.clone(), mesh_id);
-                                pane.loaded_armor = Some(armor);
-                            }
-                        }
+                        let currently_visible = pane.plate_visibility.get(key).copied().unwrap_or(true);
+                        pane.plate_visibility.insert(key.clone(), !currently_visible);
+                        zone_changed = true;
                     }
                 }
 
                 // Latch context menu key on right-click; clear when menu closes.
                 if response.secondary_clicked() {
-                    pane.context_menu_key = hovered_part_key.clone();
+                    pane.context_menu_key = hovered_plate_key.clone();
                 } else if !context_menu_open {
                     pane.context_menu_key = None;
                 }
 
-                // Right-click context menu — always call to keep popup alive.
+                // Right-click context menu with plate-level and part-level actions.
                 if let Some(ref ctx_key) = pane.context_menu_key.clone() {
                     let ctx_key = ctx_key.clone();
+                    let part_key = (ctx_key.0.clone(), ctx_key.1.clone());
+                    let thickness = ctx_key.2 as f32 / 10.0;
                     let ctx_name = translate_part(&ctx_key.1);
                     response.context_menu(|ui| {
-                        if ui.button(format!("Disable {}", ctx_name)).clicked() {
-                            pane.part_visibility.insert(ctx_key.clone(), false);
+                        // Plate-level: hide/show this specific plate
+                        let plate_visible = pane.plate_visibility.get(&ctx_key).copied().unwrap_or(true);
+                        let plate_label = if plate_visible {
+                            format!("Hide {:.0} mm {}", thickness, ctx_name)
+                        } else {
+                            format!("Show {:.0} mm {}", thickness, ctx_name)
+                        };
+                        if ui.button(plate_label).clicked() {
+                            pane.plate_visibility.insert(ctx_key.clone(), !plate_visible);
                             zone_changed = true;
-                            // Remove pinned highlights for this part
-                            let to_remove: Vec<PlateKey> = pane
-                                .pinned_highlights
-                                .keys()
-                                .filter(|k| k.0 == ctx_key.0 && k.1 == ctx_key.1)
-                                .cloned()
-                                .collect();
-                            for k in to_remove {
-                                if let Some(mesh_id) = pane.pinned_highlights.remove(&k) {
-                                    pane.viewport.remove_mesh(mesh_id);
-                                }
-                            }
                             ui.close();
                         }
-                        if !pane.pinned_highlights.is_empty() {
-                            if ui.button("Disable all selected").clicked() {
-                                let keys: Vec<_> = pane.pinned_highlights.keys().cloned().collect();
-                                for k in &keys {
-                                    pane.part_visibility.insert((k.0.clone(), k.1.clone()), false);
-                                    if let Some(mesh_id) = pane.pinned_highlights.remove(k) {
-                                        pane.viewport.remove_mesh(mesh_id);
-                                    }
-                                }
+
+                        // Show all hidden plates
+                        let hidden_count = pane.plate_visibility.values().filter(|&&v| !v).count();
+                        if hidden_count > 0 {
+                            if ui.button(format!("Show all hidden plates ({})", hidden_count)).clicked() {
+                                pane.plate_visibility.clear();
                                 zone_changed = true;
                                 ui.close();
                             }
                         }
+
+                        ui.separator();
+
+                        // Part-level: disable entire (zone, material_name)
+                        if ui.button(format!("Disable {}", ctx_name)).clicked() {
+                            pane.part_visibility.insert(part_key, false);
+                            zone_changed = true;
+                            ui.close();
+                        }
                     });
                 }
 
-                // Update hover highlight overlay (skip if plate is pinned)
-                let hover_key_for_highlight = hovered_plate_key.filter(|k| !pane.pinned_highlights.contains_key(k));
+                // Update hover highlight overlay
                 let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
-                if hover_key_for_highlight != current_hover {
+                if hovered_plate_key != current_hover {
                     // Remove old hover highlight
                     if let Some((_, old_id)) = pane.hover_highlight.take() {
                         pane.viewport.remove_mesh(old_id);
                     }
                     // Upload new hover highlight
-                    if let Some(ref key) = hover_key_for_highlight {
+                    if let Some(ref key) = hovered_plate_key {
                         if let Some(armor) = pane.loaded_armor.take() {
                             let mesh_id =
                                 upload_plate_highlight(pane, &armor, key, &render_state.device, [1.0, 1.0, 1.0, 0.35]);
@@ -1125,7 +1185,7 @@ fn load_ship_for_pane(
     pane.mesh_triangle_info.clear();
     pane.hovered_info = None;
     pane.hover_highlight = None;
-    pane.pinned_highlights.clear();
+    pane.plate_visibility.clear();
 
     let assets = ship_assets.clone();
     let ship_display_name = display_name.to_string();
@@ -1250,23 +1310,20 @@ fn show_armor_tooltip(ui: &mut egui::Ui, info: &ArmorTriangleTooltip, translate:
 
     if info.layers.len() > 1 {
         ui.separator();
+        ui.label(
+            egui::RichText::new(format!("{} layers for this part:", info.layers.len()))
+                .small()
+                .color(egui::Color32::GRAY),
+        );
 
-        // Total (sum of all layers)
-        let total: f32 = info.layers.iter().sum();
-        let total_color = thickness_to_color(total);
-        ui.horizontal(|ui| {
-            paint_swatch(ui, color32_from_f32(total_color), 10.0);
-            ui.label(format!("{:.0} mm total ({} plates)", total, info.layers.len()));
-        });
-
-        // Individual layers
+        // Individual layers with swatches
         for &layer_mm in &info.layers {
             let layer_color = thickness_to_color(layer_mm);
             let is_this = (layer_mm - info.thickness_mm).abs() < 0.1;
             ui.horizontal(|ui| {
                 paint_swatch(ui, color32_from_f32(layer_color), 10.0);
                 let text = if is_this {
-                    egui::RichText::new(format!("{:.0} mm  <<", layer_mm)).strong()
+                    egui::RichText::new(format!("{:.0} mm", layer_mm)).strong()
                 } else {
                     egui::RichText::new(format!("{:.0} mm", layer_mm))
                 };
@@ -1445,9 +1502,14 @@ fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, de
 
     for mesh in &armor.meshes {
         for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
-            // Skip invisible parts
+            // Skip invisible parts and hidden plates
             let key = (info.zone.clone(), info.material_name.clone());
             if !pane.part_visibility.get(&key).copied().unwrap_or(true) {
+                continue;
+            }
+            let plate_key: PlateKey =
+                (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32);
+            if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
                 continue;
             }
 

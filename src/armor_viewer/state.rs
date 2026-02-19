@@ -10,6 +10,20 @@ use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 /// The thickness discriminator ensures highlights stop at plate boundaries.
 pub type PlateKey = (String, String, i32);
 
+/// Persisted default display settings for the armor viewer.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ArmorViewerDefaults {
+    pub show_plate_edges: bool,
+    pub show_waterline: bool,
+}
+
+impl Default for ArmorViewerDefaults {
+    fn default() -> Self {
+        Self { show_plate_edges: true, show_waterline: true }
+    }
+}
+
 /// Loading state for ShipAssets.
 pub enum ShipAssetsState {
     NotLoaded,
@@ -142,10 +156,10 @@ pub struct ArmorPane {
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
     /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
     pub hover_highlight: Option<(PlateKey, MeshId)>,
-    /// Pinned (clicked) highlights: plate key -> overlay mesh ID.
-    pub pinned_highlights: HashMap<PlateKey, MeshId>,
-    /// Persisted key for the right-click context menu (so menu stays open when mouse moves to it).
-    pub context_menu_key: Option<(String, String)>,
+    /// Per-plate visibility toggles. Absent = visible. Only plates explicitly hidden are stored.
+    pub plate_visibility: HashMap<PlateKey, bool>,
+    /// Persisted key for the right-click context menu (plate-level).
+    pub context_menu_key: Option<PlateKey>,
     /// Whether to show the waterline plane.
     pub show_waterline: bool,
     /// Whether to show black outlines at plate thickness boundaries.
@@ -154,6 +168,10 @@ pub struct ArmorPane {
 
 impl ArmorPane {
     pub fn empty(id: u64) -> Self {
+        Self::with_defaults(id, &ArmorViewerDefaults::default())
+    }
+
+    pub fn with_defaults(id: u64, defaults: &ArmorViewerDefaults) -> Self {
         Self {
             id,
             selected_ship: None,
@@ -168,10 +186,10 @@ impl ArmorPane {
             selected_camo: None,
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
-            pinned_highlights: HashMap::new(),
+            plate_visibility: HashMap::new(),
             context_menu_key: None,
-            show_waterline: true,
-            show_plate_edges: true,
+            show_waterline: defaults.show_waterline,
+            show_plate_edges: defaults.show_plate_edges,
         }
     }
 }

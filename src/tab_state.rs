@@ -301,6 +301,9 @@ pub struct TabState {
     /// State for the Armor Viewer tab.
     #[serde(skip)]
     pub armor_viewer: crate::armor_viewer::ArmorViewerState,
+
+    /// Persisted display defaults for the Armor Viewer (plate edges, waterline, etc.).
+    pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
 }
 
 impl Default for TabState {
@@ -359,6 +362,7 @@ impl Default for TabState {
             settings_needs_attention: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
+            armor_viewer_defaults: Default::default(),
         }
     }
 }
