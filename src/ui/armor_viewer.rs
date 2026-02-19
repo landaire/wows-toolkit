@@ -1619,7 +1619,7 @@ fn render_armor_pane(
                 if pane.trajectory_mode && response.clicked() {
                     let shift_held = vp_ui.input(|i| i.modifiers.shift);
                     if let Some(click_pos) = response.interact_pointer_pos() {
-                        use crate::viewport_3d::camera::{add, normalize, scale, sub};
+                        use crate::viewport_3d::camera::{normalize, scale, sub};
 
                         // Step 1: Use camera ray to find the click point on the hull surface
                         let camera_hit = pane.viewport.pick(click_pos, response.rect);
@@ -1737,6 +1737,26 @@ fn render_armor_pane(
                             };
 
                             let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+
+                            // Compute detonation points for AP shells
+                            let detonation_points: Vec<[f32; 3]> = if let Some(ref impact) = ballistic_impact {
+                                comparison_ships
+                                    .iter()
+                                    .flat_map(|ship| ship.shells.iter())
+                                    .filter(|s| s.ammo_type == "AP")
+                                    .filter_map(|shell| {
+                                        let params =
+                                            crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                        let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                                            &params, impact, &traj_hits, &shell_dir,
+                                        );
+                                        sim.detonation.map(|d| d.position)
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+
                             let result = crate::armor_viewer::penetration::TrajectoryResult {
                                 origin: ray_origin,
                                 direction: shell_dir,
@@ -1744,6 +1764,7 @@ fn render_armor_pane(
                                 total_armor_mm: total_armor,
                                 arc_points_3d,
                                 ballistic_impact,
+                                detonation_points,
                             };
 
                             // Shift+click = add; normal click = replace all
@@ -1844,23 +1865,40 @@ fn render_armor_pane(
                 let clear_traj = std::cell::Cell::new(false);
                 let range_km_cell = std::cell::Cell::new(pane.ballistic_range_km);
                 if let Some(result) = pane.trajectory_results.last() {
-                    // Pre-compute ballistic impact results for each AP shell at the current range
+                    // Pre-compute per-plate simulation for each shell at the current range
                     let range_m = pane.ballistic_range_km as f64 * 1000.0;
-                    let ap_impacts: Vec<Vec<Option<crate::armor_viewer::ballistics::ImpactResult>>> = comparison_ships
+
+                    struct ShellSim {
+                        ship_name: String,
+                        shell: crate::armor_viewer::penetration::ShellInfo,
+                        sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
+                        impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
+                    }
+
+                    let shell_sims: Vec<ShellSim> = comparison_ships
                         .iter()
-                        .map(|ship| {
-                            ship.shells
-                                .iter()
-                                .map(|shell| {
-                                    if shell.ammo_type == "AP" {
-                                        let params =
-                                            crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                                        crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect()
+                        .flat_map(|ship| {
+                            ship.shells.iter().map(move |shell| {
+                                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                let impact = if shell.ammo_type == "AP" && range_m > 0.0 {
+                                    crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
+                                } else {
+                                    None
+                                };
+                                let sim = if shell.ammo_type == "AP" {
+                                    impact.as_ref().map(|imp| {
+                                        crate::armor_viewer::penetration::simulate_shell_through_hits(
+                                            &params,
+                                            imp,
+                                            &result.hits,
+                                            &result.direction,
+                                        )
+                                    })
+                                } else {
+                                    None
+                                };
+                                ShellSim { ship_name: ship.display_name.clone(), shell: shell.clone(), sim, impact }
+                            })
                         })
                         .collect();
 
@@ -1870,11 +1908,8 @@ fn render_armor_pane(
                             .id(traj_id)
                             .collapsible(true)
                             .resizable(true)
-                            .default_width(300.0)
-                            .default_pos(egui::pos2(
-                                response.rect.right() - 310.0,
-                                response.rect.top() + 40.0,
-                            ))
+                            .default_width(320.0)
+                            .default_pos(egui::pos2(response.rect.right() - 330.0, response.rect.top() + 40.0))
                             .show(vp_ui.ctx(), |ui| {
                                 ui.label(
                                     egui::RichText::new(format!(
@@ -1889,11 +1924,7 @@ fn render_armor_pane(
                                 if !comparison_ships.is_empty() {
                                     let mut range_km = range_km_cell.get();
                                     ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new("Range:")
-                                                .small()
-                                                .color(egui::Color32::GRAY),
-                                        );
+                                        ui.label(egui::RichText::new("Range:").small().color(egui::Color32::GRAY));
                                         ui.add(
                                             egui::Slider::new(&mut range_km, 0.0..=30.0)
                                                 .suffix(" km")
@@ -1922,18 +1953,15 @@ fn render_armor_pane(
 
                                 ui.separator();
 
-                                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                                    // Track per-shell stopping state: (ship_idx, shell_idx) -> stopped
-                                    let mut shell_stopped: std::collections::HashSet<(usize, usize)> =
-                                        std::collections::HashSet::new();
-
+                                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                                     for (i, hit) in result.hits.iter().enumerate() {
-                                        let color = if hit.angle_deg > 70.0 {
-                                            egui::Color32::from_rgb(220, 100, 100)
-                                        } else if hit.angle_deg > 45.0 {
+                                        // Angle from normal: 0°=head-on (green), 45°+=ricochet zone (red)
+                                        let color = if hit.angle_deg < 30.0 {
+                                            egui::Color32::from_rgb(100, 220, 100)
+                                        } else if hit.angle_deg < 45.0 {
                                             egui::Color32::from_rgb(220, 180, 80)
                                         } else {
-                                            egui::Color32::from_rgb(100, 220, 100)
+                                            egui::Color32::from_rgb(220, 100, 100)
                                         };
 
                                         ui.horizontal(|ui| {
@@ -1963,98 +1991,120 @@ fn render_armor_pane(
                                             .color(egui::Color32::GRAY),
                                         );
 
-                                        // Per-shell pen check with stopping behavior
-                                        for (si, ship) in comparison_ships.iter().enumerate() {
-                                            for (ji, shell) in ship.shells.iter().enumerate() {
-                                                let key = (si, ji);
-
-                                                // Skip shells already stopped by a previous hit
-                                                if shell_stopped.contains(&key) {
-                                                    continue;
-                                                }
-
-                                                let (icon, detail, stops) = match shell.ammo_type.as_str() {
-                                                    "AP" => {
-                                                        // Use ballistic penetration at range
-                                                        let impact = ap_impacts.get(si).and_then(|s| s.get(ji)).and_then(|i| i.as_ref());
-                                                        if shell.caliber_mm > hit.thickness_mm * 14.3 {
-                                                            // Overmatch: always pen, shell continues
-                                                            ("\u{2705}", "overmatch".to_string(), false)
-                                                        } else if hit.angle_deg >= shell.always_ricochet_angle {
-                                                            // Guaranteed ricochet: shell stops
-                                                            ("\u{274C}", "ricochet".to_string(), true)
-                                                        } else if hit.angle_deg >= shell.ricochet_angle {
-                                                            // Ricochet chance: show warning, shell might continue
-                                                            ("\u{2796}", format!("ricochet chance @ {:.0}°", hit.angle_deg), false)
-                                                        } else if let Some(impact) = impact {
-                                                            // Check effective penetration vs armor at this angle
-                                                            // Use belt pen with normalization for non-deck hits
-                                                            let pen_mm = impact.effective_pen_belt_normalized_mm;
-                                                            if pen_mm >= hit.thickness_mm as f64 {
-                                                                ("\u{2705}", format!("{:.0}mm pen @ {:.1}km", pen_mm, impact.distance / 1000.0), false)
-                                                            } else {
-                                                                ("\u{274C}", format!("{:.0}mm pen < {:.0}mm @ {:.1}km", pen_mm, hit.thickness_mm, impact.distance / 1000.0), true)
-                                                            }
-                                                        } else if range_m <= 0.0 {
-                                                            // Zero range: point-blank pen
-                                                            ("\u{2705}", format!("pen @ {:.0}°", hit.angle_deg), false)
-                                                        } else {
-                                                            // Out of range
-                                                            ("\u{274C}", "out of range".to_string(), true)
-                                                        }
-                                                    }
-                                                    "HE" | "CS" => {
-                                                        // HE/SAP: check pen on first hit, then always stop
-                                                        let base_result = crate::armor_viewer::penetration::check_penetration(
-                                                            shell,
-                                                            hit.thickness_mm,
-                                                            ifhe_enabled,
-                                                        );
-                                                        let icon = match base_result {
-                                                            crate::armor_viewer::penetration::PenResult::Penetrates => "\u{2705}",
-                                                            crate::armor_viewer::penetration::PenResult::Bounces => "\u{274C}",
-                                                            crate::armor_viewer::penetration::PenResult::AngleDependent => "\u{2796}",
-                                                        };
-                                                        let pen_val = match shell.ammo_type.as_str() {
-                                                            "HE" => {
-                                                                let p = if ifhe_enabled {
-                                                                    shell.he_pen_mm.unwrap_or(0.0) * 1.25
-                                                                } else {
-                                                                    shell.he_pen_mm.unwrap_or(0.0)
-                                                                };
-                                                                format!("{:.0}mm pen — detonates", p)
-                                                            }
-                                                            "CS" => format!("{:.0}mm pen — detonates", shell.sap_pen_mm.unwrap_or(0.0)),
-                                                            _ => String::new(),
-                                                        };
-                                                        // HE/SAP always detonates on contact
-                                                        (icon, pen_val, true)
-                                                    }
-                                                    _ => {
-                                                        ("\u{2796}", "unknown".to_string(), true)
-                                                    }
-                                                };
-
-                                                if stops {
-                                                    shell_stopped.insert(key);
-                                                }
-
-                                                ui.horizontal(|ui| {
-                                                    ui.add_space(12.0);
-                                                    ui.label(egui::RichText::new(icon));
-                                                    ui.label(
-                                                        egui::RichText::new(format!(
-                                                            "{} {} {:.0}mm — {}",
-                                                            &ship.display_name,
-                                                            crate::armor_viewer::penetration::ammo_type_display(
-                                                                &shell.ammo_type
+                                        // Per-shell results from simulation
+                                        for ss in &shell_sims {
+                                            if let Some(ref sim) = ss.sim {
+                                                // AP shell with simulation
+                                                if let Some(plate) = sim.plates.get(i) {
+                                                    use crate::armor_viewer::penetration::PlateOutcome;
+                                                    let (icon, detail_color, detail) = match plate.outcome {
+                                                        PlateOutcome::Overmatch => (
+                                                            "\u{2705}",
+                                                            egui::Color32::from_rgb(100, 220, 100),
+                                                            format!(
+                                                                "overmatch — {:.0}mm pen, v={:.0} m/s",
+                                                                plate.raw_pen_before_mm, plate.velocity_after,
                                                             ),
-                                                            shell.caliber_mm,
-                                                            detail,
-                                                        ))
-                                                        .small(),
-                                                    );
-                                                });
+                                                        ),
+                                                        PlateOutcome::Penetrate => (
+                                                            "\u{2705}",
+                                                            egui::Color32::from_rgb(100, 220, 100),
+                                                            format!(
+                                                                "{:.0}/{:.0}mm eff — v={:.0} m/s",
+                                                                plate.raw_pen_before_mm,
+                                                                plate.effective_thickness_mm,
+                                                                plate.velocity_after,
+                                                            ),
+                                                        ),
+                                                        PlateOutcome::Ricochet => (
+                                                            "\u{274C}",
+                                                            egui::Color32::from_rgb(220, 100, 100),
+                                                            format!("ricochet @ {:.1}°", hit.angle_deg),
+                                                        ),
+                                                        PlateOutcome::Shatter => (
+                                                            "\u{274C}",
+                                                            egui::Color32::from_rgb(220, 100, 100),
+                                                            format!(
+                                                                "shatter — {:.0} < {:.0}mm eff",
+                                                                plate.raw_pen_before_mm, plate.effective_thickness_mm,
+                                                            ),
+                                                        ),
+                                                    };
+
+                                                    ui.horizontal(|ui| {
+                                                        ui.add_space(12.0);
+                                                        ui.label(egui::RichText::new(icon));
+                                                        let mut label_text = format!(
+                                                            "{} {} {:.0}mm",
+                                                            &ss.ship_name,
+                                                            crate::armor_viewer::penetration::ammo_type_display(
+                                                                &ss.shell.ammo_type
+                                                            ),
+                                                            ss.shell.caliber_mm,
+                                                        );
+                                                        if plate.fuse_armed_here {
+                                                            label_text.push_str(" \u{1F4A3}");
+                                                        }
+                                                        ui.label(
+                                                            egui::RichText::new(label_text).small().color(detail_color),
+                                                        );
+                                                    });
+                                                    ui.horizontal(|ui| {
+                                                        ui.add_space(28.0);
+                                                        ui.label(
+                                                            egui::RichText::new(detail)
+                                                                .small()
+                                                                .color(egui::Color32::GRAY),
+                                                        );
+                                                    });
+                                                }
+                                                // If plate index doesn't exist, shell was already stopped — skip
+                                            } else {
+                                                // HE/SAP or no impact data: use simple pen check on first hit only
+                                                if i == 0 {
+                                                    let (icon, detail) = match ss.shell.ammo_type.as_str() {
+                                                        "HE" => {
+                                                            let pen = if ifhe_enabled {
+                                                                ss.shell.he_pen_mm.unwrap_or(0.0) * 1.25
+                                                            } else {
+                                                                ss.shell.he_pen_mm.unwrap_or(0.0)
+                                                            };
+                                                            let icon = if pen >= hit.thickness_mm {
+                                                                "\u{2705}"
+                                                            } else {
+                                                                "\u{274C}"
+                                                            };
+                                                            (icon, format!("{:.0}mm pen — detonates", pen))
+                                                        }
+                                                        "CS" => {
+                                                            let pen = ss.shell.sap_pen_mm.unwrap_or(0.0);
+                                                            let icon = if pen >= hit.thickness_mm {
+                                                                "\u{2705}"
+                                                            } else {
+                                                                "\u{274C}"
+                                                            };
+                                                            (icon, format!("{:.0}mm pen — detonates", pen))
+                                                        }
+                                                        _ => ("\u{2796}", "unknown".to_string()),
+                                                    };
+
+                                                    ui.horizontal(|ui| {
+                                                        ui.add_space(12.0);
+                                                        ui.label(egui::RichText::new(icon));
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "{} {} {:.0}mm — {}",
+                                                                &ss.ship_name,
+                                                                crate::armor_viewer::penetration::ammo_type_display(
+                                                                    &ss.shell.ammo_type
+                                                                ),
+                                                                ss.shell.caliber_mm,
+                                                                detail,
+                                                            ))
+                                                            .small(),
+                                                        );
+                                                    });
+                                                }
                                             }
                                         }
 
@@ -2063,6 +2113,58 @@ fn render_armor_pane(
                                         }
                                     }
                                 });
+
+                                // Fuse detonation summary
+                                if !shell_sims.is_empty() {
+                                    let has_any_detonation = shell_sims
+                                        .iter()
+                                        .any(|ss| ss.sim.as_ref().map_or(false, |s| s.detonation.is_some()));
+                                    if has_any_detonation {
+                                        ui.separator();
+                                        ui.label(
+                                            egui::RichText::new("Fuse Detonation")
+                                                .small()
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(255, 160, 60)),
+                                        );
+                                        for ss in &shell_sims {
+                                            if let Some(ref sim) = ss.sim {
+                                                let label = if let Some(ref det) = sim.detonation {
+                                                    format!(
+                                                        "{} {} — fuse armed at #{}, det {:.2}m after",
+                                                        &ss.ship_name,
+                                                        crate::armor_viewer::penetration::ammo_type_display(
+                                                            &ss.shell.ammo_type
+                                                        ),
+                                                        det.armed_at_hit + 1,
+                                                        det.travel_distance,
+                                                    )
+                                                } else if sim.stopped_at.is_some() {
+                                                    format!(
+                                                        "{} {} — stopped (no fuse arm)",
+                                                        &ss.ship_name,
+                                                        crate::armor_viewer::penetration::ammo_type_display(
+                                                            &ss.shell.ammo_type
+                                                        ),
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "{} {} — overpen (fuse never armed)",
+                                                        &ss.ship_name,
+                                                        crate::armor_viewer::penetration::ammo_type_display(
+                                                            &ss.shell.ammo_type
+                                                        ),
+                                                    )
+                                                };
+                                                ui.label(
+                                                    egui::RichText::new(label)
+                                                        .small()
+                                                        .color(egui::Color32::from_rgb(220, 180, 100)),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
 
                                 ui.separator();
                                 if ui.button("Clear").clicked() {
@@ -2161,9 +2263,31 @@ fn render_armor_pane(
                             Vec::new()
                         };
 
+                        // Recompute detonation points for the new range
+                        let detonation_points: Vec<[f32; 3]> = if let Some(ref impact) = ballistic_impact {
+                            comparison_ships
+                                .iter()
+                                .flat_map(|ship| ship.shells.iter())
+                                .filter(|s| s.ammo_type == "AP")
+                                .filter_map(|shell| {
+                                    let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                    let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                                        &params,
+                                        impact,
+                                        &result.hits,
+                                        &shell_dir,
+                                    );
+                                    sim.detonation.map(|d| d.position)
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+
                         result.direction = shell_dir;
                         result.arc_points_3d = arc_points_3d;
                         result.ballistic_impact = ballistic_impact.clone();
+                        result.detonation_points = detonation_points;
 
                         let mesh_id = upload_trajectory_visualization(pane, result, &render_state.device);
                         pane.trajectory_meshes.push(mesh_id);
@@ -2703,12 +2827,13 @@ fn upload_trajectory_visualization(
         for i in 0..result.hits.len() {
             let hit = &result.hits[i];
 
-            let color = if hit.angle_deg > 70.0 {
-                [0.9, 0.3, 0.3, 1.0]
-            } else if hit.angle_deg > 45.0 {
+            // Angle from normal: 0°=head-on (green), 45°+=ricochet zone (red)
+            let color = if hit.angle_deg < 30.0 {
+                [0.3, 0.9, 0.3, 1.0]
+            } else if hit.angle_deg < 45.0 {
                 [0.9, 0.7, 0.2, 1.0]
             } else {
-                [0.3, 0.9, 0.3, 1.0]
+                [0.9, 0.3, 0.3, 1.0]
             };
 
             traj_marker(&mut vertices, &mut indices, hit.position, color, 0.15, dir, perp1, perp2);
@@ -2741,6 +2866,39 @@ fn upload_trajectory_visualization(
             perp2,
             line_width,
         );
+
+        // Detonation markers — larger diamond shapes in orange/red
+        for det_pos in &result.detonation_points {
+            // Draw a larger "burst" marker (diamond)
+            let burst_size = 0.25;
+            let burst_color = [1.0, 0.4, 0.1, 1.0]; // orange-red
+
+            // Diamond: 6 points along each axis
+            let base_idx = vertices.len() as u32;
+            let offsets = [
+                scale(perp1, burst_size),
+                scale(perp1, -burst_size),
+                scale(perp2, burst_size),
+                scale(perp2, -burst_size),
+                scale(dir, burst_size),
+                scale(dir, -burst_size),
+            ];
+
+            // Center vertex
+            vertices.push(Vertex { position: *det_pos, normal: [0.0, 1.0, 0.0], color: burst_color });
+
+            for offset in &offsets {
+                vertices.push(Vertex { position: add(*det_pos, *offset), normal: [0.0, 1.0, 0.0], color: burst_color });
+            }
+
+            // 8 triangular faces of the octahedron
+            let tip_indices = [(1, 3, 5), (3, 2, 5), (2, 4, 5), (4, 1, 5), (1, 3, 6), (3, 2, 6), (2, 4, 6), (4, 1, 6)];
+            for (a, b, c) in tip_indices {
+                indices.push(base_idx + a);
+                indices.push(base_idx + b);
+                indices.push(base_idx + c);
+            }
+        }
     }
 
     pane.viewport.add_overlay_mesh(device, &vertices, &indices)
