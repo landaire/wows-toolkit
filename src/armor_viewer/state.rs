@@ -223,6 +223,8 @@ pub struct StoredTrajectory {
     /// Last hit index visible before shell detonation (earliest across all shells).
     /// `None` means no shell detonates — all hits are visible.
     pub last_visible_hit: Option<usize>,
+    /// Camera distance at the time markers were last uploaded (for scaling).
+    pub marker_cam_dist: f32,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -284,6 +286,8 @@ pub struct ArmorPane {
     pub ballistic_range_km: f32,
     /// Waterline plane opacity (0.0–1.0).
     pub waterline_opacity: f32,
+    /// Trajectory impact marker opacity (0.0–1.0).
+    pub marker_opacity: f32,
 }
 
 impl ArmorPane {
@@ -321,6 +325,7 @@ impl ArmorPane {
             next_trajectory_id: 0,
             ballistic_range_km: 10.0,
             waterline_opacity: defaults.waterline_opacity,
+            marker_opacity: 1.0,
         }
     }
 }

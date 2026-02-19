@@ -378,7 +378,7 @@ pub fn simulate_shell_through_hits(
         }
     }
 
-    // If fuse armed but detonation didn't happen between hits, it detonates past the last hit
+    // If fuse armed but detonation didn't happen between hits, compute where it detonates.
     if fuse_armed && detonation.is_none() {
         let remaining = fuse_distance_model - fuse_accumulated;
         let det_pos = [
@@ -389,7 +389,13 @@ pub fn simulate_shell_through_hits(
         let arm_idx = plates.iter().position(|p| p.fuse_armed_here).unwrap_or(0);
         let fuse_real_m = fuse_arm_velocity * fuse_time;
         detonation = Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
-        // detonated_at stays None — shell exited before detonating (overpen with armed fuse)
+
+        if stopped_at.is_some() {
+            // Shell stopped (ricochet/shatter) but fuse was armed — it still detonates.
+            // Mark the stop plate as the detonation plate so the outcome shows as detonation.
+            detonated_at = stopped_at;
+        }
+        // else: shell exited before detonating — overpen with armed fuse (detonated_at stays None)
     }
 
     ShellSimResult { plates, detonation, stopped_at, detonated_at }

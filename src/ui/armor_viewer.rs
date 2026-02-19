@@ -655,7 +655,7 @@ impl ToolkitTabViewer<'_> {
         // ── Penetration Comparison floating window ──
         if state.show_comparison_panel {
             let mut open = state.show_comparison_panel;
-            egui::Window::new(format!("{} Penetration Check", icons::CROSSHAIR))
+            egui::Window::new(icon_str!(icons::CROSSHAIR, "Penetration Check"))
                 .id(egui::Id::new("pen_check_panel"))
                 .open(&mut open)
                 .collapsible(true)
@@ -1106,12 +1106,20 @@ fn render_armor_pane(
             }
         }
 
+        // Ctrl+T toggles trajectory mode
+        if vp_ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::T)) {
+            pane.trajectory_mode = !pane.trajectory_mode;
+        }
+
         // Settings toolbar (single row with popover buttons)
+        let prev_marker_opacity = pane.marker_opacity;
+        let ctrl_s_pressed = vp_ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S));
         if let Some(armor) = &pane.loaded_armor {
             if !armor.zone_parts.is_empty() {
                 vp_ui.horizontal(|ui| {
                     // ── Armor Zones button with popover ──
-                    let armor_btn = ui.button(format!("{} Armor", icons::SHIELD));
+                    let armor_btn =
+                        ui.button(icon_str!(icons::SHIELD, "Armor")).on_hover_text("Toggle armor zone visibility");
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1341,7 +1349,9 @@ fn render_armor_pane(
 
                     // ── Hull Model button with popover ──
                     if !armor.hull_part_groups.is_empty() {
-                        let hull_btn = ui.button(format!("{} Hull", icons::CUBE));
+                        let hull_btn = ui
+                            .button(icon_str!(icons::CUBE, "Hull"))
+                            .on_hover_text("Toggle hull model part visibility");
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
@@ -1434,7 +1444,7 @@ fn render_armor_pane(
                         } else if pane.show_gaps {
                             format!("{} Gaps (0)", icons::CHECK)
                         } else {
-                            format!("{} Gaps", icons::WARNING)
+                            icon_str!(icons::WARNING, "Gaps").to_string()
                         };
                         let gap_color = if pane.show_gaps && pane.gap_count > 0 {
                             Some(egui::Color32::from_rgb(255, 100, 100))
@@ -1458,8 +1468,15 @@ fn render_armor_pane(
                     }
 
                     // ── Display settings button with popover ──
-                    let display_btn = ui.button(format!("{} Display", icons::GEAR_FINE));
+                    let display_btn =
+                        ui.button(icon_str!(icons::GEAR_FINE, "Display")).on_hover_text("Display settings (Ctrl+S)");
+                    let display_popup_id = display_btn.id.with("display_popup");
+                    // Ctrl+S opens display popover at mouse position
+                    if ctrl_s_pressed {
+                        egui::Popup::toggle_id(ui.ctx(), display_popup_id);
+                    }
                     egui::Popup::from_toggle_button_response(&display_btn)
+                        .id(display_popup_id)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
                             ui.set_min_width(160.0);
@@ -1490,7 +1507,7 @@ fn render_armor_pane(
                                 zone_changed = true;
                             }
                             ui.horizontal(|ui| {
-                                ui.label("Opacity");
+                                ui.label("Armor Opacity");
                                 if ui
                                     .add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2))
                                     .changed()
@@ -1498,6 +1515,12 @@ fn render_armor_pane(
                                     zone_changed = true;
                                 }
                             });
+                            if !pane.trajectories.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label("Marker Opacity");
+                                    ui.add(egui::Slider::new(&mut pane.marker_opacity, 0.0..=1.0).fixed_decimals(2));
+                                });
+                            }
                             ui.separator();
                             if ui.button("Save as defaults").clicked() {
                                 save_defaults_signal.set(Some(ArmorViewerDefaults {
@@ -1512,7 +1535,11 @@ fn render_armor_pane(
 
                     // ── Export Ship Model button ──
                     if let Some(param_index) = &pane.selected_ship {
-                        if ui.button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export")).clicked() {
+                        if ui
+                            .button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export"))
+                            .on_hover_text("Export ship model to OBJ file")
+                            .clicked()
+                        {
                             let display_name = armor.display_name.clone();
                             export_signal.set(Some((param_index.clone(), display_name)));
                         }
@@ -1525,7 +1552,7 @@ fn render_armor_pane(
                         } else {
                             format!("{} Pen Check ({})", icons::CROSSHAIR, comparison_ships.len())
                         };
-                        if ui.button(label).clicked() {
+                        if ui.button(label).on_hover_text("Configure shells for penetration comparison").clicked() {
                             pen_check_toggle.set(true);
                         }
                     }
@@ -1536,7 +1563,7 @@ fn render_armor_pane(
                         let btn = egui::Button::new(traj_label);
                         let btn =
                             if pane.trajectory_mode { btn.fill(egui::Color32::from_rgb(80, 60, 20)) } else { btn };
-                        if ui.add(btn).clicked() {
+                        if ui.add(btn).on_hover_text("Click armor to simulate shell trajectories (Ctrl+T)").clicked() {
                             pane.trajectory_mode = !pane.trajectory_mode;
                         }
                     }
@@ -1550,6 +1577,7 @@ fn render_armor_pane(
                 pane.loaded_armor = Some(armor);
             }
             // Re-upload trajectory visualizations (viewport.clear() destroyed them)
+            let cam_dist = pane.viewport.camera.distance;
             for traj in &mut pane.trajectories {
                 let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
                 let mesh_id = upload_trajectory_visualization(
@@ -1558,8 +1586,11 @@ fn render_armor_pane(
                     &render_state.device,
                     color,
                     traj.last_visible_hit,
+                    cam_dist,
+                    pane.marker_opacity,
                 );
                 traj.mesh_id = Some(mesh_id);
+                traj.marker_cam_dist = cam_dist;
             }
         }
 
@@ -1592,6 +1623,33 @@ fn render_armor_pane(
                     vp_ui.ctx().request_repaint();
                     mirror_camera_signal.set(Some(pane_id));
                     active_pane_signal.set(Some(pane_id));
+
+                    // Re-upload trajectory markers if camera distance changed significantly
+                    // so that marker/line sizes scale with zoom level.
+                    let cam_dist = pane.viewport.camera.distance;
+                    let needs_rescale = !pane.trajectories.is_empty()
+                        && pane.trajectories.iter().any(|t| {
+                            let ratio = cam_dist / t.marker_cam_dist.max(1e-6);
+                            ratio < 0.7 || ratio > 1.4
+                        });
+                    if needs_rescale {
+                        for traj in &mut pane.trajectories {
+                            if let Some(old_mid) = traj.mesh_id.take() {
+                                pane.viewport.remove_mesh(old_mid);
+                            }
+                            let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+                            traj.mesh_id = Some(upload_trajectory_visualization(
+                                &mut pane.viewport,
+                                &traj.result,
+                                &render_state.device,
+                                color,
+                                traj.last_visible_hit,
+                                cam_dist,
+                                pane.marker_opacity,
+                            ));
+                            traj.marker_cam_dist = cam_dist;
+                        }
+                    }
                 }
 
                 // Clicking on the viewport also makes this the active pane
@@ -1839,12 +1897,15 @@ fn render_armor_pane(
                             pane.next_trajectory_id += 1;
                             let color_index = pane.trajectories.len() % TRAJECTORY_PALETTE.len();
                             let color = TRAJECTORY_PALETTE[color_index];
+                            let cam_dist = pane.viewport.camera.distance;
                             let mesh_id = upload_trajectory_visualization(
                                 &mut pane.viewport,
                                 &result,
                                 &render_state.device,
                                 color,
                                 last_visible_hit,
+                                cam_dist,
+                                pane.marker_opacity,
                             );
                             pane.trajectories.push(crate::armor_viewer::state::StoredTrajectory {
                                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
@@ -1856,6 +1917,7 @@ fn render_armor_pane(
                                 result,
                                 mesh_id: Some(mesh_id),
                                 last_visible_hit,
+                                marker_cam_dist: cam_dist,
                             });
                         } else if !shift_held {
                             // Clicked empty space without shift: clear all
@@ -1964,6 +2026,15 @@ fn render_armor_pane(
                             response.rect.top() + 40.0,
                         ))
                         .show(vp_ui.ctx(), |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    egui::RichText::new("This simulation is based on reverse engineered data and may not accurately reflect how the game simulates ballistics.")
+                                        .small()
+                                        .color(egui::Color32::from_rgb(220, 160, 60)),
+                                );
+                            });
+                            ui.separator();
+
                             // Shared range slider
                             if !comparison_ships.is_empty() {
                                 let mut range_km = range_km_cell.get();
@@ -2134,44 +2205,73 @@ fn render_armor_pane(
                                             format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber_mm);
                                         if let Some(ref sim) = ss.sim {
                                             use crate::armor_viewer::penetration::PlateOutcome;
-                                            let (icon, badge_color, outcome_text) = if sim.detonated_at.is_some() {
-                                                // Shell detonated inside the armor
-                                                (icons::BOMB, egui::Color32::from_rgb(255, 140, 40), "detonation")
-                                            } else if sim.stopped_at.is_some() {
-                                                // Shell stopped — check last plate outcome
-                                                let last_outcome = sim.plates.last().map(|p| &p.outcome);
-                                                match last_outcome {
-                                                    Some(PlateOutcome::Ricochet) => (
-                                                        icons::PROHIBIT,
-                                                        egui::Color32::from_rgb(220, 100, 100),
-                                                        "ricochet",
-                                                    ),
-                                                    Some(PlateOutcome::Shatter) => (
-                                                        icons::X_CIRCLE,
-                                                        egui::Color32::from_rgb(220, 100, 100),
-                                                        "shatter",
-                                                    ),
-                                                    _ => (
-                                                        icons::X_CIRCLE,
-                                                        egui::Color32::from_rgb(220, 100, 100),
-                                                        "stopped",
-                                                    ),
-                                                }
-                                            } else if sim.detonation.is_some() {
-                                                // Fuse armed but shell exited before detonation = overpen
-                                                (
-                                                    icons::ARROWS_OUT_SIMPLE,
-                                                    egui::Color32::from_rgb(220, 180, 80),
-                                                    "overpen",
-                                                )
-                                            } else {
-                                                // Fuse never armed, shell passed through = overpen
-                                                (
-                                                    icons::ARROWS_OUT_SIMPLE,
-                                                    egui::Color32::from_rgb(220, 180, 80),
-                                                    "overpen (fuse never armed)",
-                                                )
-                                            };
+                                            let (icon, badge_color, outcome_text) =
+                                                if let Some(det_idx) = sim.detonated_at {
+                                                    // Shell detonated — show which plate
+                                                    let plate_desc = result
+                                                        .hits
+                                                        .get(det_idx)
+                                                        .map(|h| {
+                                                            format!(
+                                                                "#{} {:.0}mm {}",
+                                                                det_idx + 1,
+                                                                h.thickness_mm,
+                                                                translate_part(&h.material)
+                                                            )
+                                                        })
+                                                        .unwrap_or_default();
+                                                    (
+                                                        icons::BOMB,
+                                                        egui::Color32::from_rgb(255, 140, 40),
+                                                        format!("detonation @ {}", plate_desc),
+                                                    )
+                                                } else if let Some(stop_idx) = sim.stopped_at {
+                                                    // Shell stopped — show which plate and why
+                                                    let plate_desc = result
+                                                        .hits
+                                                        .get(stop_idx)
+                                                        .map(|h| {
+                                                            format!(
+                                                                "#{} {:.0}mm {}",
+                                                                stop_idx + 1,
+                                                                h.thickness_mm,
+                                                                translate_part(&h.material)
+                                                            )
+                                                        })
+                                                        .unwrap_or_default();
+                                                    let last_outcome = sim.plates.last().map(|p| &p.outcome);
+                                                    match last_outcome {
+                                                        Some(PlateOutcome::Ricochet) => (
+                                                            icons::PROHIBIT,
+                                                            egui::Color32::from_rgb(220, 100, 100),
+                                                            format!("ricochet @ {}", plate_desc),
+                                                        ),
+                                                        Some(PlateOutcome::Shatter) => (
+                                                            icons::X_CIRCLE,
+                                                            egui::Color32::from_rgb(220, 100, 100),
+                                                            format!("shatter @ {}", plate_desc),
+                                                        ),
+                                                        _ => (
+                                                            icons::X_CIRCLE,
+                                                            egui::Color32::from_rgb(220, 100, 100),
+                                                            format!("stopped @ {}", plate_desc),
+                                                        ),
+                                                    }
+                                                } else if sim.detonation.is_some() {
+                                                    // Fuse armed but shell exited before detonation = overpen
+                                                    (
+                                                        icons::ARROWS_OUT_SIMPLE,
+                                                        egui::Color32::from_rgb(220, 180, 80),
+                                                        "overpen".to_string(),
+                                                    )
+                                                } else {
+                                                    // Fuse never armed, shell passed through = overpen
+                                                    (
+                                                        icons::ARROWS_OUT_SIMPLE,
+                                                        egui::Color32::from_rgb(220, 180, 80),
+                                                        "overpen (fuse never armed)".to_string(),
+                                                    )
+                                                };
 
                                             ui.horizontal(|ui| {
                                                 ui.label(egui::RichText::new(icon).color(badge_color));
@@ -2305,45 +2405,74 @@ fn render_armor_pane(
                                                     }
                                                 } else if i == 0 {
                                                     // HE/SAP on first hit
-                                                    let (icon, detail) = match ss.shell.ammo_type.as_str() {
+                                                    let (icon, detail_color, detail) = match ss.shell.ammo_type.as_str()
+                                                    {
                                                         "HE" => {
                                                             let pen = if ifhe_enabled {
                                                                 ss.shell.he_pen_mm.unwrap_or(0.0) * 1.25
                                                             } else {
                                                                 ss.shell.he_pen_mm.unwrap_or(0.0)
                                                             };
-                                                            let ic = if pen >= hit.thickness_mm {
-                                                                "\u{2705}"
+                                                            if pen >= hit.thickness_mm {
+                                                                (
+                                                                    icons::FIRE,
+                                                                    egui::Color32::from_rgb(255, 140, 40),
+                                                                    format!("{:.0}mm pen \u{2014} detonates", pen),
+                                                                )
                                                             } else {
-                                                                "\u{274C}"
-                                                            };
-                                                            (ic, format!("{:.0}mm pen \u{2014} detonates", pen))
+                                                                (
+                                                                    "\u{274C}",
+                                                                    egui::Color32::from_rgb(220, 100, 100),
+                                                                    format!(
+                                                                        "{:.0}mm pen < {:.0}mm",
+                                                                        pen, hit.thickness_mm
+                                                                    ),
+                                                                )
+                                                            }
                                                         }
                                                         "CS" => {
                                                             let pen = ss.shell.sap_pen_mm.unwrap_or(0.0);
-                                                            let ic = if pen >= hit.thickness_mm {
-                                                                "\u{2705}"
+                                                            if pen >= hit.thickness_mm {
+                                                                (
+                                                                    icons::SHIELD_STAR,
+                                                                    egui::Color32::from_rgb(255, 140, 40),
+                                                                    format!("{:.0}mm pen \u{2014} detonates", pen),
+                                                                )
                                                             } else {
-                                                                "\u{274C}"
-                                                            };
-                                                            (ic, format!("{:.0}mm pen \u{2014} detonates", pen))
+                                                                (
+                                                                    "\u{274C}",
+                                                                    egui::Color32::from_rgb(220, 100, 100),
+                                                                    format!(
+                                                                        "{:.0}mm pen < {:.0}mm",
+                                                                        pen, hit.thickness_mm
+                                                                    ),
+                                                                )
+                                                            }
                                                         }
-                                                        _ => ("\u{2796}", "unknown".to_string()),
+                                                        _ => ("\u{2796}", egui::Color32::GRAY, "unknown".to_string()),
                                                     };
                                                     ui.horizontal(|ui| {
                                                         ui.add_space(12.0);
-                                                        ui.label(egui::RichText::new(icon));
+                                                        ui.label(egui::RichText::new(icon).color(detail_color));
                                                         ui.label(
                                                             egui::RichText::new(format!(
-                                                                "{} {} {:.0}mm \u{2014} {}",
+                                                                "{} {} {:.0}mm",
                                                                 &ss.ship_name,
                                                                 crate::armor_viewer::penetration::ammo_type_display(
                                                                     &ss.shell.ammo_type
                                                                 ),
                                                                 ss.shell.caliber_mm,
-                                                                detail,
                                                             ))
-                                                            .small(),
+                                                            .small()
+                                                            .color(detail_color),
+                                                        );
+                                                    });
+                                                    ui.horizontal(|ui| {
+                                                        ui.add_space(28.0);
+                                                        ui.label(
+                                                            egui::RichText::new(detail)
+                                                                .small()
+                                                                .color(egui::Color32::GRAY),
                                                         );
                                                     });
                                                 }
@@ -2392,24 +2521,31 @@ fn render_armor_pane(
                                     }
                                 };
 
-                            egui::ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
-                                ui.horizontal_top(|ui| {
-                                    for ti in 0..traj_count {
-                                        if ti > 0 {
-                                            ui.separator(); // vertical divider
+                            egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).max_height(500.0).show(
+                                ui,
+                                |ui| {
+                                    ui.horizontal_top(|ui| {
+                                        for ti in 0..traj_count {
+                                            if ti > 0 {
+                                                ui.separator(); // vertical divider
+                                            }
+                                            ui.push_id(("traj_col", pane.trajectories[ti].meta.id), |ui| {
+                                                ui.vertical(|ui| {
+                                                    ui.set_width(320.0);
+                                                    render_traj_column(ui, ti, &pane.trajectories[ti]);
+                                                });
+                                            });
                                         }
-                                        ui.vertical(|ui| {
-                                            ui.set_width(320.0);
-                                            render_traj_column(ui, ti, &pane.trajectories[ti]);
-                                        });
-                                    }
-                                });
-                            });
+                                    });
+                                },
+                            );
                         });
                 }
 
                 // Apply per-trajectory range changes and lock toggling
                 {
+                    let cam_dist_for_recompute = pane.viewport.camera.distance;
+                    let mo = pane.marker_opacity;
                     let changes = traj_range_changes.into_inner();
                     for (ti, new_range, force_locked) in &changes {
                         if *ti < pane.trajectories.len() {
@@ -2426,6 +2562,8 @@ fn render_armor_pane(
                                     &mut pane.viewport,
                                     pane.loaded_armor.as_ref(),
                                     &render_state.device,
+                                    cam_dist_for_recompute,
+                                    mo,
                                 );
                             }
                         }
@@ -2436,6 +2574,8 @@ fn render_armor_pane(
                 let new_range_km = range_km_cell.get();
                 if (new_range_km - pane.ballistic_range_km).abs() > 0.01 {
                     pane.ballistic_range_km = new_range_km;
+                    let cam_dist = pane.viewport.camera.distance;
+                    let mo = pane.marker_opacity;
                     for ti in 0..pane.trajectories.len() {
                         if pane.trajectories[ti].meta.range_locked {
                             pane.trajectories[ti].meta.range_km = new_range_km;
@@ -2445,6 +2585,8 @@ fn render_armor_pane(
                                 &mut pane.viewport,
                                 pane.loaded_armor.as_ref(),
                                 &render_state.device,
+                                cam_dist,
+                                mo,
                             );
                         }
                     }
@@ -2468,6 +2610,29 @@ fn render_armor_pane(
                         if let Some(mid) = traj.mesh_id {
                             pane.viewport.remove_mesh(mid);
                         }
+                    }
+                }
+
+                // Handle marker opacity change — re-upload all trajectory meshes
+                let marker_opacity_changed = (pane.marker_opacity - prev_marker_opacity).abs() > 0.001;
+                if marker_opacity_changed && !pane.trajectories.is_empty() {
+                    let cam_dist = pane.viewport.camera.distance;
+                    let mo = pane.marker_opacity;
+                    for traj in &mut pane.trajectories {
+                        if let Some(old_mid) = traj.mesh_id.take() {
+                            pane.viewport.remove_mesh(old_mid);
+                        }
+                        let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+                        traj.mesh_id = Some(upload_trajectory_visualization(
+                            &mut pane.viewport,
+                            &traj.result,
+                            &render_state.device,
+                            color,
+                            traj.last_visible_hit,
+                            cam_dist,
+                            mo,
+                        ));
+                        traj.marker_cam_dist = cam_dist;
                     }
                 }
 
@@ -2505,6 +2670,7 @@ fn render_armor_pane(
                 pane.loaded_armor = Some(armor);
             }
             // Re-upload trajectory visualizations (viewport.clear() destroyed them)
+            let cam_dist = pane.viewport.camera.distance;
             for traj in &mut pane.trajectories {
                 let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
                 let mesh_id = upload_trajectory_visualization(
@@ -2513,8 +2679,11 @@ fn render_armor_pane(
                     &render_state.device,
                     color,
                     traj.last_visible_hit,
+                    cam_dist,
+                    pane.marker_opacity,
                 );
                 traj.mesh_id = Some(mesh_id);
+                traj.marker_cam_dist = cam_dist;
             }
         }
     }
@@ -2928,6 +3097,8 @@ fn recompute_trajectory_for_range(
     viewport: &mut crate::viewport_3d::Viewport3D,
     loaded_armor: Option<&crate::armor_viewer::state::LoadedShipArmor>,
     device: &wgpu::Device,
+    cam_distance: f32,
+    marker_opacity: f32,
 ) {
     use crate::viewport_3d::camera::normalize;
 
@@ -3036,7 +3207,16 @@ fn recompute_trajectory_for_range(
         viewport.remove_mesh(old_mid);
     }
     let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-    traj.mesh_id = Some(upload_trajectory_visualization(viewport, &traj.result, device, color, traj.last_visible_hit));
+    traj.mesh_id = Some(upload_trajectory_visualization(
+        viewport,
+        &traj.result,
+        device,
+        color,
+        traj.last_visible_hit,
+        cam_distance,
+        marker_opacity,
+    ));
+    traj.marker_cam_dist = cam_distance;
 }
 
 /// Compute perpendicular vectors for a line segment direction, for cross-shaped quad rendering.
@@ -3057,6 +3237,8 @@ fn upload_trajectory_visualization(
     device: &wgpu::Device,
     traj_color: [f32; 4],
     last_visible_hit: Option<usize>,
+    cam_distance: f32,
+    marker_opacity: f32,
 ) -> MeshId {
     use crate::viewport_3d::camera::{add, cross, normalize, scale, sub};
 
@@ -3064,7 +3246,9 @@ fn upload_trajectory_visualization(
     let mut indices: Vec<u32> = Vec::new();
 
     let dir = result.direction;
-    let line_width = 0.05;
+    // Scale markers and line width with camera distance so they shrink when zoomed in
+    let scale_factor = (cam_distance / 15.0).clamp(0.15, 3.0);
+    let line_width = 0.05 * scale_factor;
 
     let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
     let perp1 = normalize(cross(dir, arbitrary));
@@ -3126,14 +3310,14 @@ fn upload_trajectory_visualization(
 
             // Angle from normal: 0°=head-on (green), 45°+=ricochet zone (red)
             let color = if hit.angle_deg < 30.0 {
-                [0.3, 0.9, 0.3, 1.0]
+                [0.3, 0.9, 0.3, marker_opacity]
             } else if hit.angle_deg < 45.0 {
-                [0.9, 0.7, 0.2, 1.0]
+                [0.9, 0.7, 0.2, marker_opacity]
             } else {
-                [0.9, 0.3, 0.3, 1.0]
+                [0.9, 0.3, 0.3, marker_opacity]
             };
 
-            traj_marker(&mut vertices, &mut indices, hit.position, color, 0.15, dir, perp1, perp2);
+            traj_marker(&mut vertices, &mut indices, hit.position, color, 0.15 * scale_factor, dir, perp1, perp2);
 
             if i + 1 < result.hits.len() && i < max_hit {
                 let next_pos = result.hits[i + 1].position;
@@ -3150,16 +3334,18 @@ fn upload_trajectory_visualization(
             }
         }
 
-        // Trailing segment: only if shell did NOT detonate (it continues past the ship)
-        if last_visible_hit.is_none() {
-            let last_pos = result.hits.last().unwrap().position;
+        // Trailing segment: show the shell's continued path after the last visible hit.
+        // This visualizes overpen exit, ricochet bounce path, or post-detonation trajectory.
+        {
+            let last_rendered_idx = last_visible_hit.unwrap_or(result.hits.len().saturating_sub(1));
+            let last_pos = result.hits[last_rendered_idx].position;
             let trail_end = add(last_pos, scale(dir, 2.0));
             traj_line_segment(
                 &mut vertices,
                 &mut indices,
                 last_pos,
                 trail_end,
-                [traj_color[0], traj_color[1], traj_color[2], 0.5],
+                [traj_color[0], traj_color[1], traj_color[2], 0.3],
                 perp1,
                 perp2,
                 line_width,
@@ -3169,12 +3355,12 @@ fn upload_trajectory_visualization(
         // Detonation markers — larger diamond shapes in brightened trajectory color
         for det_pos in &result.detonation_points {
             // Draw a larger "burst" marker (diamond)
-            let burst_size = 0.25;
+            let burst_size = 0.25 * scale_factor;
             let burst_color = [
                 (traj_color[0] * 0.5 + 0.5).min(1.0),
                 (traj_color[1] * 0.3 + 0.1).min(1.0),
                 (traj_color[2] * 0.2).min(1.0),
-                1.0,
+                marker_opacity,
             ]; // warm/bright tint of trajectory color
 
             // Diamond: 6 points along each axis
