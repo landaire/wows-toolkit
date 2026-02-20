@@ -4,6 +4,7 @@ use std::sync::mpsc;
 use egui_dock::{DockArea, DockState, TabViewer};
 
 use crate::app::ToolkitTabViewer;
+use crate::armor_viewer::constants::*;
 use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::state::{
@@ -13,30 +14,7 @@ use crate::armor_viewer::state::{
 use crate::icon_str;
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, LAYER_OVERLAY, MeshId, Vertex};
-
-/// Color palette for distinguishing multiple trajectories in the 3D view.
-const TRAJECTORY_PALETTE: [[f32; 4]; 8] = [
-    [1.0, 0.8, 0.2, 1.0], // gold (original)
-    [0.3, 0.7, 1.0, 1.0], // sky blue
-    [1.0, 0.4, 0.4, 1.0], // coral
-    [0.4, 0.9, 0.4, 1.0], // lime
-    [1.0, 0.5, 0.8, 1.0], // pink
-    [1.0, 0.6, 0.2, 1.0], // orange
-    [0.3, 0.9, 0.9, 1.0], // cyan
-    [0.7, 0.5, 1.0, 1.0], // lavender
-];
-
-/// Color palette for distinguishing comparison ships in detonation markers and UI labels.
-const SHIP_COLORS: [[f32; 3]; 8] = [
-    [1.0, 0.5, 0.1], // orange
-    [0.3, 0.6, 1.0], // blue
-    [1.0, 0.3, 0.5], // pink
-    [0.3, 0.9, 0.4], // green
-    [0.9, 0.3, 0.9], // magenta
-    [1.0, 0.9, 0.2], // yellow
-    [0.2, 0.9, 0.8], // teal
-    [0.8, 0.5, 1.0], // purple
-];
+use wowsunpack::game_params::types::AmmoType;
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
 struct ArmorPaneViewer<'a> {
@@ -772,29 +750,29 @@ impl ToolkitTabViewer<'_> {
                                     );
                                 });
                                 for shell in &ship.shells {
-                                    let pen_text = match shell.ammo_type.as_str() {
-                                        "HE" => {
+                                    let pen_text = match &shell.ammo_type {
+                                        AmmoType::HE => {
                                             let pen = shell.he_pen_mm.unwrap_or(0.0);
                                             format!(
                                                 "  {} {:.0}mm — {:.0}mm pen",
-                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.ammo_type.display_name(),
                                                 shell.caliber_mm,
                                                 pen
                                             )
                                         }
-                                        "CS" => {
+                                        AmmoType::SAP => {
                                             let pen = shell.sap_pen_mm.unwrap_or(0.0);
                                             format!(
                                                 "  {} {:.0}mm — {:.0}mm pen",
-                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.ammo_type.display_name(),
                                                 shell.caliber_mm,
                                                 pen
                                             )
                                         }
-                                        "AP" => {
+                                        AmmoType::AP => {
                                             format!(
                                                 "  {} {:.0}mm — {:.0} krupp",
-                                                crate::armor_viewer::penetration::ammo_type_display(&shell.ammo_type),
+                                                shell.ammo_type.display_name(),
                                                 shell.caliber_mm,
                                                 shell.krupp
                                             )
@@ -1745,7 +1723,7 @@ fn render_armor_pane(
                             let first_shell = comparison_ships
                                 .iter()
                                 .flat_map(|s| s.shells.iter())
-                                .find(|s| s.ammo_type == "AP")
+                                .find(|s| s.ammo_type == AmmoType::AP)
                                 .or_else(|| comparison_ships.iter().flat_map(|s| s.shells.iter()).next());
 
                             let ballistic_impact = if range_m > 0.0 {
@@ -1841,7 +1819,7 @@ fn render_armor_pane(
                                     let shell = ship
                                         .shells
                                         .iter()
-                                        .find(|s| s.ammo_type == "AP")
+                                        .find(|s| s.ammo_type == AmmoType::AP)
                                         .or_else(|| ship.shells.first());
                                     if let Some(shell) = shell {
                                         let params =
@@ -1888,7 +1866,7 @@ fn render_armor_pane(
                             let mut last_visible_hit: Option<usize> = None;
                             let range_m_f64 = pane.ballistic_range_km as f64 * 1000.0;
                             for (ship_idx, ship) in comparison_ships.iter().enumerate() {
-                                for shell in ship.shells.iter().filter(|s| s.ammo_type == "AP") {
+                                for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
                                     let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
                                     let shell_impact = if range_m_f64 > 0.0 {
                                         crate::armor_viewer::ballistics::solve_for_range(&params, range_m_f64)
@@ -2242,7 +2220,7 @@ fn render_armor_pane(
                                     struct ShellSim {
                                         ship_name: String,
                                         ship_index: usize,
-                                        shell: crate::armor_viewer::penetration::ShellInfo,
+                                        shell: wowsunpack::game_params::types::ShellInfo,
                                         sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
                                     }
 
@@ -2255,13 +2233,13 @@ fn render_armor_pane(
                                                     crate::armor_viewer::ballistics::ShellParams::from_shell_info(
                                                         shell,
                                                     );
-                                                let impact = if shell.ammo_type == "AP" && range_m > 0.0 {
+                                                let impact = if shell.ammo_type == AmmoType::AP && range_m > 0.0 {
                                                     crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
                                                 } else {
                                                     None
                                                 };
                                                 let sim =
-                                                    if shell.ammo_type == "AP" {
+                                                    if shell.ammo_type == AmmoType::AP {
                                                         impact.as_ref().map(|imp| {
                                                     crate::armor_viewer::penetration::simulate_shell_through_hits(
                                                         &params, imp, &result.hits, &result.direction,
@@ -2296,7 +2274,7 @@ fn render_armor_pane(
                                     // Outcome badges per shell
                                     for ss in &shell_sims {
                                         let ammo =
-                                            crate::armor_viewer::penetration::ammo_type_display(&ss.shell.ammo_type);
+                                            ss.shell.ammo_type.display_name();
                                         let shell_label =
                                             format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber_mm);
                                         if let Some(ref sim) = ss.sim {
@@ -2482,9 +2460,7 @@ fn render_armor_pane(
                                                             let mut label_text = format!(
                                                                 "{} {} {:.0}mm",
                                                                 &ss.ship_name,
-                                                                crate::armor_viewer::penetration::ammo_type_display(
-                                                                    &ss.shell.ammo_type
-                                                                ),
+                                                                ss.shell.ammo_type.display_name(),
                                                                 ss.shell.caliber_mm,
                                                             );
                                                             if plate.fuse_armed_here {
@@ -2507,9 +2483,9 @@ fn render_armor_pane(
                                                     }
                                                 } else if i == 0 {
                                                     // HE/SAP on first hit
-                                                    let (icon, detail_color, detail) = match ss.shell.ammo_type.as_str()
+                                                    let (icon, detail_color, detail) = match &ss.shell.ammo_type
                                                     {
-                                                        "HE" => {
+                                                        AmmoType::HE => {
                                                             let pen = if ifhe_enabled {
                                                                 ss.shell.he_pen_mm.unwrap_or(0.0) * 1.25
                                                             } else {
@@ -2532,7 +2508,7 @@ fn render_armor_pane(
                                                                 )
                                                             }
                                                         }
-                                                        "CS" => {
+                                                        AmmoType::SAP => {
                                                             let pen = ss.shell.sap_pen_mm.unwrap_or(0.0);
                                                             if pen >= hit.thickness_mm {
                                                                 (
@@ -2566,9 +2542,7 @@ fn render_armor_pane(
                                                             egui::RichText::new(format!(
                                                                 "{} {} {:.0}mm",
                                                                 &ss.ship_name,
-                                                                crate::armor_viewer::penetration::ammo_type_display(
-                                                                    &ss.shell.ammo_type
-                                                                ),
+                                                                ss.shell.ammo_type.display_name(),
                                                                 ss.shell.caliber_mm,
                                                             ))
                                                             .small()
@@ -2611,9 +2585,7 @@ fn render_armor_pane(
                                                                 egui::RichText::new(format!(
                                                                     "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",
                                                                     &ss.ship_name,
-                                                                    crate::armor_viewer::penetration::ammo_type_display(
-                                                                        &ss.shell.ammo_type
-                                                                    ),
+                                                                    ss.shell.ammo_type.display_name(),
                                                                     volume_desc,
                                                                     det.travel_distance,
                                                                     det.armed_at_hit + 1,
@@ -3068,7 +3040,7 @@ fn show_armor_tooltip(
     ifhe_enabled: bool,
     translate: &dyn Fn(&str) -> String,
 ) {
-    use crate::armor_viewer::penetration::{PenResult, ammo_type_display, check_penetration};
+    use crate::armor_viewer::penetration::{PenResult, check_penetration};
     use wowsunpack::export::gltf_export::thickness_to_color;
 
     // Main header: this plate's thickness with color swatch
@@ -3126,12 +3098,13 @@ fn show_armor_tooltip(
             for shell in &ship.shells {
                 let result = check_penetration(shell, info.thickness_mm, ifhe_enabled);
                 let (icon, color) = match result {
-                    PenResult::Penetrates => ("\u{2705}", egui::Color32::from_rgb(100, 220, 100)),
-                    PenResult::Bounces => ("\u{274C}", egui::Color32::from_rgb(220, 100, 100)),
-                    PenResult::AngleDependent => ("\u{2796}", egui::Color32::GRAY),
+                    Some(PenResult::Penetrates) => ("\u{2705}", egui::Color32::from_rgb(100, 220, 100)),
+                    Some(PenResult::Bounces) => ("\u{274C}", egui::Color32::from_rgb(220, 100, 100)),
+                    Some(PenResult::AngleDependent) => ("\u{2796}", egui::Color32::GRAY),
+                    None => ("\u{2753}", egui::Color32::GRAY),
                 };
-                let pen_info = match shell.ammo_type.as_str() {
-                    "HE" => {
+                let pen_info = match &shell.ammo_type {
+                    AmmoType::HE => {
                         let pen = if ifhe_enabled {
                             shell.he_pen_mm.unwrap_or(0.0) * 1.25
                         } else {
@@ -3139,22 +3112,22 @@ fn show_armor_tooltip(
                         };
                         format!("{:.0}mm pen", pen)
                     }
-                    "CS" => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
-                    "AP" => {
+                    AmmoType::SAP => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
+                    AmmoType::AP => {
                         if shell.caliber_mm > info.thickness_mm * 14.3 {
                             "overmatch".to_string()
                         } else {
                             "angle-dependent".to_string()
                         }
                     }
-                    _ => String::new(),
+                    AmmoType::Unknown(_) => String::new(),
                 };
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(icon));
                     ui.label(
                         egui::RichText::new(format!(
                             "{} {:.0}mm ({})",
-                            ammo_type_display(&shell.ammo_type),
+                            shell.ammo_type.display_name(),
                             shell.caliber_mm,
                             pen_info,
                         ))
@@ -3176,7 +3149,7 @@ fn upload_plate_highlight(
     device: &wgpu::Device,
     highlight_color: [f32; 4],
 ) -> MeshId {
-    let normal_offset = 0.01; // slight offset along normal to avoid z-fighting
+    let normal_offset = TRAJECTORY_NORMAL_OFFSET;
 
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -3330,7 +3303,7 @@ fn recompute_trajectory_for_range(
     let first_shell = comparison_ships
         .iter()
         .flat_map(|s| s.shells.iter())
-        .find(|s| s.ammo_type == "AP")
+        .find(|s| s.ammo_type == AmmoType::AP)
         .or_else(|| comparison_ships.iter().flat_map(|s| s.shells.iter()).next());
 
     // Update shell direction from first shell's impact angle
@@ -3360,7 +3333,7 @@ fn recompute_trajectory_for_range(
     let mut new_ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
     if range_m > 0.0 {
         for (ship_idx, ship) in comparison_ships.iter().enumerate() {
-            let shell = ship.shells.iter().find(|s| s.ammo_type == "AP").or_else(|| ship.shells.first());
+            let shell = ship.shells.iter().find(|s| s.ammo_type == AmmoType::AP).or_else(|| ship.shells.first());
             if let Some(shell) = shell {
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
                 if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_m) {
@@ -3396,7 +3369,7 @@ fn recompute_trajectory_for_range(
     let mut new_detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> = Vec::new();
     let mut new_last_visible: Option<usize> = None;
     for (ship_idx, ship) in comparison_ships.iter().enumerate() {
-        for shell in ship.shells.iter().filter(|s| s.ammo_type == "AP") {
+        for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
             let shell_impact =
                 if range_m > 0.0 { crate::armor_viewer::ballistics::solve_for_range(&params, range_m) } else { None };
@@ -3475,7 +3448,7 @@ fn upload_trajectory_visualization(
     let dir = result.direction;
     // Scale markers and line width with camera distance so they shrink when zoomed in
     let scale_factor = (cam_distance / 200.0).clamp(0.15, 3.0);
-    let line_width = 0.12 * scale_factor;
+    let line_width = TRAJECTORY_LINE_WIDTH_FACTOR * scale_factor;
 
     let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
     let perp1 = normalize(cross(dir, arbitrary));
@@ -3542,15 +3515,25 @@ fn upload_trajectory_visualization(
             let hit = &result.hits[i];
 
             // Angle from normal: 0°=head-on (green), 45°+=ricochet zone (red)
-            let color = if hit.angle_deg < 30.0 {
-                [0.3, 0.9, 0.3, marker_opacity]
-            } else if hit.angle_deg < 45.0 {
-                [0.9, 0.7, 0.2, marker_opacity]
+            let rgb = if hit.angle_deg < SHALLOW_ANGLE_DEG {
+                IMPACT_COLOR_SHALLOW
+            } else if hit.angle_deg < STEEP_ANGLE_DEG {
+                IMPACT_COLOR_MEDIUM
             } else {
-                [0.9, 0.3, 0.3, marker_opacity]
+                IMPACT_COLOR_STEEP
             };
+            let color = [rgb[0], rgb[1], rgb[2], marker_opacity];
 
-            traj_marker(&mut vertices, &mut indices, hit.position, color, 0.15 * scale_factor, dir, perp1, perp2);
+            traj_marker(
+                &mut vertices,
+                &mut indices,
+                hit.position,
+                color,
+                MARKER_SIZE_FACTOR * scale_factor,
+                dir,
+                perp1,
+                perp2,
+            );
 
             if i + 1 < result.hits.len() && i < max_hit {
                 let next_pos = result.hits[i + 1].position;
@@ -3597,7 +3580,7 @@ fn upload_trajectory_visualization(
                 [0.0, 0.0, 0.0]
             };
             let det_pos = add(det.position, lateral_offset);
-            let burst_size = 0.25 * scale_factor;
+            let burst_size = DETONATION_BURST_SIZE_FACTOR * scale_factor;
             let sc = SHIP_COLORS[det.ship_index % SHIP_COLORS.len()];
             let burst_color = [sc[0], sc[1], sc[2], marker_opacity];
 
@@ -3714,9 +3697,9 @@ fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: f32) -> (Ve
 fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     use std::collections::HashMap;
 
-    let edge_half_width: f32 = 0.003; // half-width of the edge quad in world space
-    let normal_offset: f32 = 0.005; // offset to avoid z-fighting with the armor surface
-    let edge_color: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // black
+    let edge_half_width: f32 = PLATE_EDGE_HALF_WIDTH;
+    let normal_offset: f32 = PLATE_EDGE_NORMAL_OFFSET;
+    let edge_color: [f32; 4] = EDGE_COLOR;
 
     // Quantize a float position to an integer key to avoid floating-point comparison issues.
     fn quantize(v: [f32; 3]) -> [i32; 3] {
@@ -3895,10 +3878,10 @@ fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, de
 fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) -> usize {
     use std::collections::HashMap;
 
-    let edge_half_width: f32 = 0.006;
-    let normal_offset: f32 = 0.008;
-    let gap_color: [f32; 4] = [1.0, 0.15, 0.1, 1.0]; // red
-    let max_edge_length: f32 = 5.0; // filter out very long edges (mesh outer boundaries)
+    let edge_half_width: f32 = GAP_EDGE_HALF_WIDTH;
+    let normal_offset: f32 = GAP_EDGE_NORMAL_OFFSET;
+    let gap_color: [f32; 4] = GAP_COLOR;
+    let max_edge_length: f32 = MAX_GAP_EDGE_LENGTH;
 
     fn quantize(v: [f32; 3]) -> [i32; 3] {
         [(v[0] * 10000.0).round() as i32, (v[1] * 10000.0).round() as i32, (v[2] * 10000.0).round() as i32]

@@ -6,7 +6,7 @@
 
 use std::f64::consts::PI;
 
-use super::penetration::ShellInfo;
+use wowsunpack::game_params::types::ShellInfo;
 
 // Physical constants (ISA atmospheric model)
 const G: f64 = 9.8; // gravitational acceleration (m/s²)

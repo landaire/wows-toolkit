@@ -477,6 +477,63 @@ pub struct PlaybackFrame {
     pub game_duration: f32,
 }
 
+// ─── Realtime Armor Bridge ───────────────────────────────────────────────────
+
+/// A salvo event extracted from the replay for the realtime armor viewer.
+#[derive(Clone, Debug)]
+pub struct ReplaySalvoEvent {
+    pub clock: f32,
+    pub target_entity_id: EntityId,
+    pub attacker_entity_id: EntityId,
+    pub params_id: wowsunpack::game_types::GameParamId,
+    pub shots: Vec<ReplayShotData>,
+}
+
+/// Per-shell origin/target in world space.
+#[derive(Clone, Debug)]
+pub struct ReplayShotData {
+    pub origin: [f32; 3],
+    pub target: [f32; 3],
+}
+
+/// Player info snapshot captured from BattleController for the armor viewer.
+#[derive(Clone, Debug)]
+pub struct ReplayPlayerInfo {
+    pub entity_id: EntityId,
+    pub username: String,
+    pub team_id: i64,
+    pub vehicle: Arc<wowsunpack::game_params::types::Param>,
+    pub ship_display_name: String,
+    pub is_friendly: bool,
+}
+
+/// Shared bridge between replay thread and realtime armor viewer windows.
+pub struct RealtimeArmorBridge {
+    pub players: Vec<ReplayPlayerInfo>,
+    pub salvos: Vec<ReplaySalvoEvent>,
+    pub ship_yaws: HashMap<EntityId, f32>,
+    pub last_clock: f32,
+}
+
+impl RealtimeArmorBridge {
+    pub fn new() -> Self {
+        Self { players: Vec::new(), salvos: Vec::new(), ship_yaws: HashMap::new(), last_clock: 0.0 }
+    }
+
+    pub fn clear_salvos(&mut self) {
+        self.salvos.clear();
+        self.ship_yaws.clear();
+        self.last_clock = 0.0;
+    }
+}
+
+/// A request from the context menu to open a realtime armor viewer.
+pub struct ArmorViewerRequest {
+    pub target_entity_id: EntityId,
+    pub target_ship_name: String,
+    pub bridge: Arc<Mutex<RealtimeArmorBridge>>,
+}
+
 /// Raw RGBA asset data loaded on the background thread.
 /// Uses Arc to share cached data across renderer instances.
 pub struct ReplayRendererAssets {
@@ -534,6 +591,10 @@ pub struct SharedRendererState {
     pub game_fonts: Option<GameFonts>,
     /// Whether game fonts have been registered with the egui context.
     pub game_fonts_registered: bool,
+    /// Active armor bridges for realtime armor viewer windows.
+    pub armor_bridges: Vec<Arc<Mutex<RealtimeArmorBridge>>>,
+    /// Pending requests to open realtime armor viewer windows (consumed by app.rs).
+    pub pending_armor_viewers: Vec<ArmorViewerRequest>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -630,6 +691,8 @@ pub fn launch_replay_renderer(
         self_entity_id: None,
         game_fonts: None,
         game_fonts_registered: false,
+        armor_bridges: Vec::new(),
+        pending_armor_viewers: Vec::new(),
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -876,6 +939,7 @@ fn playback_thread(
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
+        let armor_bridges = shared_state.lock().armor_bridges.clone();
         parse_to_clock(
             &live_replay,
             &game_metadata,
@@ -883,7 +947,98 @@ fn playback_thread(
             &mut live_renderer,
             frame_snapshots[0].clock,
             frame_duration,
+            &armor_bridges,
         );
+    }
+
+    /// Extract active shots from the controller and push them to all armor bridges.
+    fn push_salvos_to_bridges(
+        controller: &BattleController<'_, '_, GameMetadataProvider>,
+        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
+        clock: f32,
+    ) {
+        if bridges.is_empty() {
+            return;
+        }
+        let active_shots = controller.active_shots();
+        if active_shots.is_empty() {
+            return;
+        }
+        let salvos: Vec<ReplaySalvoEvent> = active_shots
+            .iter()
+            .map(|shot| ReplaySalvoEvent {
+                clock,
+                target_entity_id: shot.entity_id,
+                attacker_entity_id: shot.salvo.owner_id,
+                params_id: shot.salvo.params_id,
+                shots: shot
+                    .salvo
+                    .shots
+                    .iter()
+                    .map(|s| ReplayShotData {
+                        origin: [s.origin.x, s.origin.y, s.origin.z],
+                        target: [s.target.x, s.target.y, s.target.z],
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        // Update yaws from ship positions
+        let positions = controller.ship_positions();
+
+        for bridge in bridges {
+            let mut b = bridge.lock();
+            b.salvos.extend(salvos.iter().cloned());
+            b.last_clock = clock;
+            for (eid, pos) in positions {
+                b.ship_yaws.insert(*eid, pos.yaw);
+            }
+        }
+    }
+
+    /// Populate player info on all armor bridges from the controller.
+    fn populate_bridge_players(
+        controller: &BattleController<'_, '_, GameMetadataProvider>,
+        game_metadata: &GameMetadataProvider,
+        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
+    ) {
+        if bridges.is_empty() {
+            return;
+        }
+        let players = controller.player_entities();
+        if players.is_empty() {
+            return;
+        }
+
+        // Find self team
+        let self_team = players.values().find(|p| p.relation().is_self()).map(|p| p.initial_state().team_id());
+
+        let player_infos: Vec<ReplayPlayerInfo> = players
+            .iter()
+            .map(|(eid, player)| {
+                let display_name = game_metadata
+                    .localized_name_from_param(player.vehicle())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let team_id = player.initial_state().team_id();
+                let is_friendly = self_team.map(|st| st == team_id).unwrap_or(false);
+                ReplayPlayerInfo {
+                    entity_id: *eid,
+                    username: player.initial_state().username().to_string(),
+                    team_id,
+                    vehicle: Arc::new(player.vehicle().clone()),
+                    ship_display_name: display_name,
+                    is_friendly,
+                }
+            })
+            .collect();
+
+        for bridge in bridges {
+            let mut b = bridge.lock();
+            if b.players.is_empty() {
+                b.players = player_infos.clone();
+            }
+        }
     }
 
     /// Helper: parse replay packets up to `target_clock`, feeding them into
@@ -895,6 +1050,7 @@ fn playback_thread(
         renderer: &mut MinimapRenderer<'_>,
         target_clock: f32,
         frame_duration: f32,
+        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
     ) {
         let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
         let mut remaining = &replay_file.packet_data[..];
@@ -929,12 +1085,14 @@ fn playback_thread(
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
+                    push_salvos_to_bridges(controller, bridges, packet.clock.seconds());
                     remaining = rest;
                 }
                 Err(_) => break,
             }
         }
 
+        populate_bridge_players(controller, game_metadata, bridges);
         renderer.populate_players(controller);
         renderer.update_squadron_info(controller);
         renderer.update_ship_abilities(controller);
@@ -964,6 +1122,11 @@ fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
+            // Clear and re-accumulate armor bridge salvos on seek/rebuild
+            let armor_bridges = shared_state.lock().armor_bridges.clone();
+            for bridge in &armor_bridges {
+                bridge.lock().clear_salvos();
+            }
             parse_to_clock(
                 &live_replay,
                 &game_metadata,
@@ -971,6 +1134,7 @@ fn playback_thread(
                 &mut live_renderer,
                 $target_clock,
                 frame_duration,
+                &armor_bridges,
             );
         }};
     }
@@ -5180,6 +5344,22 @@ impl ReplayRendererViewer {
                                                     drop(state);
                                                     shared_state.lock().options.show_ship_config = true;
                                                 }
+                                                ann.show_context_menu = false;
+                                                ctx.request_repaint();
+                                            }
+
+                                            // ── Realtime Armor Viewer ──
+                                            ui.separator();
+                                            if ui.button(icon_str!(icons::SHIELD, "Show in Armor Viewer")).clicked() {
+                                                let bridge = Arc::new(Mutex::new(RealtimeArmorBridge::new()));
+                                                let mut state = shared_state.lock();
+                                                state.armor_bridges.push(bridge.clone());
+                                                state.pending_armor_viewers.push(ArmorViewerRequest {
+                                                    target_entity_id: ship_eid,
+                                                    target_ship_name: ship_name.clone(),
+                                                    bridge,
+                                                });
+                                                drop(state);
                                                 ann.show_context_menu = false;
                                                 ctx.request_repaint();
                                             }
