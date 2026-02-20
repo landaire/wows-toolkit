@@ -18,6 +18,7 @@ use egui::Vec2;
 use egui::mutex::Mutex;
 
 use rootcause::report;
+use tracing::warn;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
@@ -4243,6 +4244,7 @@ impl ReplayRendererViewer {
         let annotation_arc = self.annotation_state.clone();
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
+        let parent_ctx = ctx.clone();
 
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
@@ -4254,6 +4256,8 @@ impl ReplayRendererViewer {
                 if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
                     return;
                 }
+
+                let mut repaint = false;
 
                 let mut state = shared_state.lock();
                 let status_is_loading = matches!(state.status, RendererStatus::Loading);
@@ -4569,7 +4573,7 @@ impl ReplayRendererViewer {
 
                     // Request repaint if zoom/pan changed while paused
                     if zoom_changed && !playing {
-                        ctx.request_repaint();
+                        repaint = true;
                     }
 
                     // Draw dark background
@@ -5066,7 +5070,6 @@ impl ReplayRendererViewer {
                                         friendly: *friendly,
                                     });
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::Freehand { current_stroke } => {
@@ -5085,7 +5088,6 @@ impl ReplayRendererViewer {
                                         width: stroke_width,
                                     });
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::Eraser => {
@@ -5106,7 +5108,6 @@ impl ReplayRendererViewer {
                                         erase_idx = closest_idx;
                                     }
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::DrawingLine { start } => {
@@ -5125,7 +5126,6 @@ impl ReplayRendererViewer {
                                         *start = Some(pos);
                                     }
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::DrawingCircle { filled, center } => {
@@ -5153,7 +5153,6 @@ impl ReplayRendererViewer {
                                     }
                                     *center = None;
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::DrawingRect { filled, center } => {
@@ -5182,7 +5181,6 @@ impl ReplayRendererViewer {
                                     }
                                     *center = None;
                                 }
-                                ctx.request_repaint();
                             }
 
                             PaintTool::DrawingTriangle { filled, center } => {
@@ -5204,7 +5202,6 @@ impl ReplayRendererViewer {
                                         *center = Some(pos);
                                     }
                                 }
-                                ctx.request_repaint();
                             }
                         }
 
@@ -5222,6 +5219,10 @@ impl ReplayRendererViewer {
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
                             ann.undo();
+                        }
+
+                        if response.clicked() {
+                            repaint = true;
                         }
                     }
 
@@ -5531,7 +5532,8 @@ impl ReplayRendererViewer {
                                                         }
                                                     }
                                                 }
-                                                ctx.request_repaint();
+
+                                                repaint = true;
                                             }
 
                                             // Disable all other trails
@@ -5554,7 +5556,7 @@ impl ReplayRendererViewer {
                                                     shared_state.lock().options.show_trails = true;
                                                 }
                                                 ann.show_context_menu = false;
-                                                ctx.request_repaint();
+                                                repaint = true;
                                             }
 
                                             // Per-type range toggles for this ship
@@ -5596,7 +5598,7 @@ impl ReplayRendererViewer {
                                                         state.options.show_ship_config = false;
                                                     }
                                                 }
-                                                ctx.request_repaint();
+                                                repaint = true;
                                             }
 
                                             // Disable all other ships' ranges
@@ -5611,7 +5613,7 @@ impl ReplayRendererViewer {
                                                     ann.ship_range_overrides.remove(&k);
                                                 }
                                                 ann.show_context_menu = false;
-                                                ctx.request_repaint();
+                                                repaint = true;
                                             }
 
                                             // Enable ranges for all alive ships
@@ -5630,7 +5632,7 @@ impl ReplayRendererViewer {
                                                     shared_state.lock().options.show_ship_config = true;
                                                 }
                                                 ann.show_context_menu = false;
-                                                ctx.request_repaint();
+                                                repaint = true;
                                             }
 
                                             // ── Realtime Armor Viewer ──
@@ -5653,7 +5655,7 @@ impl ReplayRendererViewer {
                                                 drop(state);
                                                 let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
                                                 ann.show_context_menu = false;
-                                                ctx.request_repaint();
+                                                repaint = true;
                                             }
                                         }
                                         // ── Clear all ──
@@ -5863,7 +5865,7 @@ impl ReplayRendererViewer {
                                         }
                                     });
                             });
-                        ctx.request_repaint();
+                        repaint = true;
                     }
 
                     // Track mouse activity for fade
@@ -5895,7 +5897,7 @@ impl ReplayRendererViewer {
 
                     // Request repaint during fade animation
                     if opacity > 0.0 && opacity < 1.0 {
-                        ctx.request_repaint();
+                        repaint = true;
                     }
 
                     // Only render overlay when visible (so it doesn't block canvas input when hidden)
@@ -6300,7 +6302,8 @@ impl ReplayRendererViewer {
                                                             opts.show_ship_config = false;
                                                             changed = true;
                                                         }
-                                                        ctx.request_repaint();
+
+                                                        repaint = true;
                                                     }
                                                 }
 
@@ -6576,8 +6579,11 @@ impl ReplayRendererViewer {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
                     ctx.request_repaint();
-                } else if playing {
+                } else if playing || repaint {
+                    // Repaint both this viewport AND the parent so sibling
+                    // viewports (e.g. armor viewer) also update in realtime.
                     ctx.request_repaint();
+                    parent_ctx.request_repaint();
                 }
             },
         );

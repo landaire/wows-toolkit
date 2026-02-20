@@ -11,6 +11,7 @@ use std::sync::mpsc;
 
 use egui::mutex::Mutex;
 
+use tracing::warn;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::{AmmoType, Meters, ShellInfo};
 use wowsunpack::game_types::{GameParamId, WorldPos};
@@ -75,6 +76,10 @@ pub struct RealtimeArmorViewer {
 
     /// Target ship's vehicle param (for loading).
     target_vehicle: Arc<wowsunpack::game_params::types::Param>,
+
+    /// Set by any method that changes visible state. Checked and cleared by
+    /// the viewport closure to decide whether to request a repaint.
+    needs_repaint: bool,
 }
 
 /// Log entry for a single salvo displayed in the side panel.
@@ -130,6 +135,7 @@ impl RealtimeArmorViewer {
             salvo_log: Vec::new(),
             selected_salvo_id: None,
             target_vehicle: target_player.vehicle.clone(),
+            needs_repaint: true,
         }
     }
 
@@ -294,6 +300,7 @@ impl RealtimeArmorViewer {
                 self.processed_salvo_count = 0;
                 drop(bridge);
                 self.clear_and_reprocess();
+                self.needs_repaint = true;
                 return;
             }
         }
@@ -657,6 +664,7 @@ impl RealtimeArmorViewer {
             });
 
             self.processed_salvo_count += 1;
+            self.needs_repaint = true;
         }
 
         if skipped_target > 0 || skipped_attacker > 0 || skipped_friendly > 0 {
@@ -669,6 +677,8 @@ impl RealtimeArmorViewer {
                 self.target_entity_id,
             );
         }
+
+        self.needs_repaint = true;
     }
 
     /// Tick state: load ship, process salvos. Called before rendering.
@@ -679,12 +689,14 @@ impl RealtimeArmorViewer {
             if !bridge.players.is_empty() {
                 self.enemy_players = bridge.players.iter().filter(|p| !p.is_friendly).cloned().collect();
                 self.players_populated = true;
+                self.needs_repaint = true;
             }
         }
 
         // Start ship load on first frame
         if !self.ship_loaded && self.pane.load_receiver.is_none() && !self.pane.loading {
             self.start_ship_load();
+            self.needs_repaint = true;
         }
 
         // Check if ship load completed
@@ -712,6 +724,7 @@ impl RealtimeArmorViewer {
                     }
                 }
                 self.pane.load_receiver = None;
+                self.needs_repaint = true;
             }
         }
 
@@ -726,6 +739,10 @@ impl RealtimeArmorViewer {
             if n % 100 == 0 {
                 tracing::debug!("RealtimeArmorViewer: tick #{n} — ship not loaded yet (loading={})", self.pane.loading);
             }
+        }
+
+        if self.needs_repaint {
+            warn!("needs repaint");
         }
     }
 
@@ -763,6 +780,7 @@ impl RealtimeArmorViewer {
 
         if removed_any {
             self.pane.viewport.mark_dirty();
+            self.needs_repaint = true;
         }
     }
 }
@@ -778,16 +796,21 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
         (v.title.clone(), v.open.clone())
     };
 
+    let viewport_id = egui::ViewportId::from_hash_of(&*title);
+    let viewer_clone = viewer.clone();
+    let window_open = open.clone();
+    let parent_ctx = ctx.clone();
+
     // Tick state (process new salvos, load ship, etc.)
     // Must happen on the main context so it runs even when the viewport isn't focused.
     {
         let mut v = viewer.lock();
         v.tick();
-    }
 
-    let viewport_id = egui::ViewportId::from_hash_of(&*title);
-    let viewer_clone = viewer.clone();
-    let window_open = open.clone();
+        if v.needs_repaint {
+            ctx.request_repaint_of(viewport_id);
+        }
+    }
 
     ctx.show_viewport_deferred(
         viewport_id,
@@ -806,12 +829,19 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
                 return;
             }
 
-            egui::CentralPanel::default().show(ctx, |ui| {
-                viewer_clone.lock().draw_content(ui);
-            });
+            {
+                let mut viewer = viewer_clone.lock();
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    viewer.draw_content(ui);
+                });
 
-            // Keep the viewport repainting so new trajectories are visible immediately
-            ctx.request_repaint();
+                // Repaint both this viewport AND the parent so sibling viewports
+                // (e.g. replay renderer) also update while this window has focus.
+                if std::mem::take(&mut viewer.needs_repaint) {
+                    ctx.request_repaint();
+                    parent_ctx.request_repaint();
+                }
+            }
         },
     );
 }
@@ -938,7 +968,7 @@ impl RealtimeArmorViewer {
 
             let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
             if self.pane.viewport.handle_input(&response, bounds) {
-                ui.ctx().request_repaint();
+                self.needs_repaint = true;
             }
 
             // Plate interaction: hover tooltip, click-to-hide, right-click context menu, highlight
@@ -978,6 +1008,7 @@ impl RealtimeArmorViewer {
                 ));
                 traj.marker_cam_dist = cam_dist;
             }
+            self.needs_repaint = true;
         } else if marker_opacity_changed && !self.pane.trajectories.is_empty() {
             let cam_dist = self.pane.viewport.camera.distance;
             for traj in &mut self.pane.trajectories {
@@ -996,6 +1027,7 @@ impl RealtimeArmorViewer {
                 ));
                 traj.marker_cam_dist = cam_dist;
             }
+            self.needs_repaint = true;
         }
     }
 
@@ -1030,6 +1062,7 @@ impl RealtimeArmorViewer {
         });
         if attacker_changed {
             self.clear_and_reprocess();
+            self.needs_repaint = true;
         }
 
         ui.separator();
@@ -1089,6 +1122,7 @@ impl RealtimeArmorViewer {
 
         if let Some(new_sel) = clicked_id {
             self.selected_salvo_id = new_sel;
+            self.needs_repaint = true;
         }
 
         // Detail panel for selected salvo

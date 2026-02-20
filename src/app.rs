@@ -1196,10 +1196,12 @@ impl WowsToolkitApp {
 
         self.tab_state.toasts.lock().show(ctx);
 
-        // When realtime armor viewers are open, repaint frequently so they
-        // receive new salvo data even when the replay renderer viewport is focused.
-        if !self.realtime_armor_viewers.is_empty() {
-            ctx.request_repaint_after_secs(0.05); // ~20fps for salvo processing
+        // When any replay renderer is playing, repaint continuously so all
+        // deferred viewports (replay renderer + armor viewer) stay in sync
+        // regardless of which window currently has focus.
+        let any_playing = self.tab_state.replay_renderers.lock().iter().any(|r| r.shared_state().lock().playing);
+        if any_playing || !self.realtime_armor_viewers.is_empty() {
+            ctx.request_repaint();
         } else {
             ctx.request_repaint_after_secs(1.0);
         }
