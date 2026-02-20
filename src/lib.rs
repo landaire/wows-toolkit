@@ -10,6 +10,7 @@ mod game_params;
 mod mod_manager;
 mod personal_rating;
 mod plaintext_viewer;
+pub mod realtime_armor_viewer;
 mod replay_export;
 pub mod replay_renderer;
 mod session_stats;

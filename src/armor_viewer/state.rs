@@ -4,6 +4,8 @@ use std::sync::mpsc::Receiver;
 
 use egui_dock::DockState;
 
+use wowsunpack::game_params::types::Km;
+
 use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 
 /// Key identifying a specific plate: (zone, material_name, thickness in tenths of mm).
@@ -288,8 +290,8 @@ pub struct ArmorPane {
     pub trajectories: Vec<StoredTrajectory>,
     /// Counter for assigning unique trajectory IDs.
     pub next_trajectory_id: u64,
-    /// Default ballistic range for new trajectories (km).
-    pub ballistic_range_km: f32,
+    /// Default ballistic range for new trajectories.
+    pub ballistic_range: Km,
     /// Waterline plane opacity (0.0–1.0).
     pub waterline_opacity: f32,
     /// Trajectory impact marker opacity (0.0–1.0).
@@ -331,7 +333,7 @@ impl ArmorPane {
             trajectory_mode: false,
             trajectories: Vec::new(),
             next_trajectory_id: 0,
-            ballistic_range_km: 10.0,
+            ballistic_range: Km::new(10.0),
             waterline_opacity: defaults.waterline_opacity,
             marker_opacity: 1.0,
             comparison_ships_version: 0,

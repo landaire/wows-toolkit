@@ -44,6 +44,8 @@ use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Meters;
+use wowsunpack::game_types::WorldPos;
 use wowsunpack::recognized::Recognized;
 use wowsunpack::vfs::VfsPath;
 
@@ -483,17 +485,19 @@ pub struct PlaybackFrame {
 #[derive(Clone, Debug)]
 pub struct ReplaySalvoEvent {
     pub clock: f32,
+    /// Estimated time the shells reach the target (fire time + flight time).
+    pub estimated_impact_clock: f32,
     pub target_entity_id: EntityId,
     pub attacker_entity_id: EntityId,
     pub params_id: wowsunpack::game_types::GameParamId,
     pub shots: Vec<ReplayShotData>,
 }
 
-/// Per-shell origin/target in world space.
+/// Per-shell origin/target in world space (BigWorld coordinates).
 #[derive(Clone, Debug)]
 pub struct ReplayShotData {
-    pub origin: [f32; 3],
-    pub target: [f32; 3],
+    pub origin: WorldPos,
+    pub target: WorldPos,
 }
 
 /// Player info snapshot captured from BattleController for the armor viewer.
@@ -512,18 +516,35 @@ pub struct RealtimeArmorBridge {
     pub players: Vec<ReplayPlayerInfo>,
     pub salvos: Vec<ReplaySalvoEvent>,
     pub ship_yaws: HashMap<EntityId, f32>,
+    /// World-space positions of ships (BigWorld coordinates), updated each tick.
+    pub ship_positions: HashMap<EntityId, WorldPos>,
     pub last_clock: f32,
+    /// The entity this bridge tracks (the ship whose armor viewer is open).
+    pub target_entity_id: EntityId,
+    /// Incremented each time salvos are cleared (seek/rebuild). Consumers use
+    /// this to detect that their cursor into `salvos` is stale.
+    pub generation: u64,
 }
 
 impl RealtimeArmorBridge {
-    pub fn new() -> Self {
-        Self { players: Vec::new(), salvos: Vec::new(), ship_yaws: HashMap::new(), last_clock: 0.0 }
+    pub fn new(target_entity_id: EntityId) -> Self {
+        Self {
+            players: Vec::new(),
+            salvos: Vec::new(),
+            ship_yaws: HashMap::new(),
+            ship_positions: HashMap::new(),
+            last_clock: 0.0,
+            target_entity_id,
+            generation: 0,
+        }
     }
 
     pub fn clear_salvos(&mut self) {
         self.salvos.clear();
         self.ship_yaws.clear();
+        self.ship_positions.clear();
         self.last_clock = 0.0;
+        self.generation += 1;
     }
 }
 
@@ -937,61 +958,224 @@ fn playback_thread(
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
 
+    // Tracks how many entries in `controller.active_shots()` we've already pushed
+    // to bridges. Reset to 0 whenever the controller is rebuilt (seek/rebuild).
+    let mut salvo_cursor: usize = 0;
+
+    // Persistent parser + incremental parse tracking.
+    // These allow forward playback to continue parsing from where we left off
+    // instead of rebuilding from scratch every frame.
+    let mut live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+    let mut live_offset: usize = 0;
+    let mut live_clock = GameClock(0.0);
+
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
         let armor_bridges = shared_state.lock().armor_bridges.clone();
-        parse_to_clock(
-            &live_replay,
-            &game_metadata,
+        let mut staging = init_bridge_staging(&armor_bridges);
+        (live_offset, live_clock) = parse_to_clock(
+            &mut live_parser,
+            &packet_data,
+            live_offset,
+            live_clock,
             &mut live_controller,
             &mut live_renderer,
             frame_snapshots[0].clock,
             frame_duration,
-            &armor_bridges,
+            &mut staging,
+            &mut salvo_cursor,
         );
+        populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+        finalize_bridge_staging(&armor_bridges, staging, true);
     }
 
-    /// Extract active shots from the controller and push them to all armor bridges.
-    fn push_salvos_to_bridges(
-        controller: &BattleController<'_, '_, GameMetadataProvider>,
-        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
-        clock: f32,
-    ) {
-        if bridges.is_empty() {
-            return;
-        }
-        let active_shots = controller.active_shots();
-        if active_shots.is_empty() {
-            return;
-        }
-        let salvos: Vec<ReplaySalvoEvent> = active_shots
+    /// Proximity threshold for salvo filtering.
+    /// Only salvos whose average target position is within this distance of
+    /// the bridge's target ship are forwarded to the armor viewer.
+    /// Large BBs are ~270 m long, so a bow/stern hit can be ~135 m from center.
+    /// With dispersion and position-tracking lag we use 300 m to avoid
+    /// rejecting legitimate hits.
+    const SALVO_PROXIMITY_THRESHOLD: Meters = Meters::new(300.0); // 10 BW
+
+    /// Per-bridge staging area used during `parse_to_clock` to collect salvos
+    /// without holding the bridge lock. Swapped into the bridge atomically at the end.
+    struct BridgeStaging {
+        target_entity_id: EntityId,
+        salvos: Vec<ReplaySalvoEvent>,
+        ship_yaws: HashMap<EntityId, f32>,
+        ship_positions: HashMap<EntityId, WorldPos>,
+        last_clock: f32,
+    }
+
+    /// Initialize staging vecs from the current set of bridges (reads target_entity_id only).
+    fn init_bridge_staging(bridges: &[Arc<Mutex<RealtimeArmorBridge>>]) -> Vec<BridgeStaging> {
+        bridges
             .iter()
-            .map(|shot| ReplaySalvoEvent {
+            .map(|b| {
+                let locked = b.lock();
+                BridgeStaging {
+                    target_entity_id: locked.target_entity_id,
+                    salvos: Vec::new(),
+                    ship_yaws: HashMap::new(),
+                    ship_positions: HashMap::new(),
+                    last_clock: 0.0,
+                }
+            })
+            .collect()
+    }
+
+    /// Finalize staging: merge accumulated salvos/yaws into bridges.
+    ///
+    /// When `replace` is true (full rebuild), the bridge salvo vec is replaced
+    /// wholesale and generation is bumped.  When false (incremental parse),
+    /// new salvos are appended and generation is only bumped if there are new
+    /// salvos, so the viewer doesn't see a spurious "vec shrank" on every frame.
+    fn finalize_bridge_staging(
+        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
+        staging: Vec<BridgeStaging>,
+        replace: bool,
+    ) {
+        for (bridge, staged) in bridges.iter().zip(staging) {
+            let mut b = bridge.lock();
+            if replace {
+                b.salvos = staged.salvos;
+                b.generation += 1;
+            } else if !staged.salvos.is_empty() {
+                b.salvos.extend(staged.salvos);
+                b.generation += 1;
+            }
+            b.ship_yaws = staged.ship_yaws;
+            b.ship_positions = staged.ship_positions;
+            b.last_clock = staged.last_clock;
+        }
+    }
+
+    /// Extract *new* active shots from the controller and push them into staging vecs.
+    /// `cursor` tracks how many shots from `active_shots()` have already been processed;
+    /// it is updated in place and must be reset to 0 whenever the controller is rebuilt.
+    fn push_salvos_to_staging(
+        controller: &BattleController<'_, '_, GameMetadataProvider>,
+        staging: &mut [BridgeStaging],
+        clock: f32,
+        cursor: &mut usize,
+    ) {
+        if staging.is_empty() {
+            return;
+        }
+
+        let positions = controller.ship_positions();
+        let active_shots = controller.active_shots();
+        let new_count = active_shots.len();
+
+        if new_count <= *cursor {
+            // No new shots — just update yaws and positions
+            for s in staging.iter_mut() {
+                s.last_clock = clock;
+                for (eid, pos) in positions {
+                    s.ship_yaws.insert(*eid, pos.yaw);
+                    s.ship_positions.insert(*eid, pos.position);
+                }
+            }
+            return;
+        }
+
+        // receiveArtilleryShots is called on the replay owner's avatar entity for
+        // ALL shots visible to that player — NOT just shots aimed at them. The
+        // entity_id on ActiveShot is always the replay owner's avatar and cannot
+        // be used for target detection. Instead, we determine the target ship by
+        // checking which bridge's target ship is closest to each salvo's average
+        // tarPos (shell impact position in BigWorld coordinates).
+
+        let new_shots = &active_shots[*cursor..];
+        if *cursor == 0 && !new_shots.is_empty() {
+            tracing::trace!(
+                "push_salvos_to_staging: first batch — {} new shots, {} staging targets, clock={:.1}",
+                new_shots.len(),
+                staging.len(),
                 clock,
-                target_entity_id: shot.entity_id,
+            );
+        }
+        *cursor = new_count;
+
+        let mut closest_dist = Meters::from(f32::MAX);
+        let mut total_checked = 0u32;
+        let mut total_passed = 0u32;
+        let mut no_position = 0u32;
+
+        for shot in new_shots {
+            // Skip secondary battery salvos (salvo_id == 0xFFFFFFFF)
+            if shot.salvo.salvo_id == u32::MAX {
+                continue;
+            }
+
+            // Compute average target position for this salvo
+            let n = shot.salvo.shots.len() as f32;
+            if n < 1.0 {
+                continue;
+            }
+            let avg_target: WorldPos = shot.salvo.shots.iter().map(|s| s.target).sum::<WorldPos>() / n;
+
+            // Estimate flight time from average origin→target distance and shell speed.
+            // distance_xz returns meters; speed is in m/s (game units).
+            let avg_origin: WorldPos = shot.salvo.shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
+            let avg_speed = shot.salvo.shots.iter().map(|s| s.speed).sum::<f32>() / n;
+            let flight_distance_m = avg_origin.distance_xz(&avg_target).value();
+            let flight_time = if avg_speed > 0.0 { flight_distance_m / avg_speed } else { 0.0 };
+            let estimated_impact_clock = clock + flight_time;
+
+            let salvo_event = ReplaySalvoEvent {
+                clock,
+                estimated_impact_clock,
+                target_entity_id: EntityId::from(0u32), // placeholder, set per-bridge below
                 attacker_entity_id: shot.salvo.owner_id,
                 params_id: shot.salvo.params_id,
-                shots: shot
-                    .salvo
-                    .shots
-                    .iter()
-                    .map(|s| ReplayShotData {
-                        origin: [s.origin.x, s.origin.y, s.origin.z],
-                        target: [s.target.x, s.target.y, s.target.z],
-                    })
-                    .collect(),
-            })
-            .collect();
+                shots: shot.salvo.shots.iter().map(|s| ReplayShotData { origin: s.origin, target: s.target }).collect(),
+            };
 
-        // Update yaws from ship positions
-        let positions = controller.ship_positions();
+            for s in staging.iter_mut() {
+                let target_eid = s.target_entity_id;
 
-        for bridge in bridges {
-            let mut b = bridge.lock();
-            b.salvos.extend(salvos.iter().cloned());
-            b.last_clock = clock;
+                // Get the bridge target's current world position
+                let target_pos = positions.get(&target_eid);
+                let Some(tp) = target_pos else {
+                    no_position += 1;
+                    continue;
+                };
+
+                // Proximity check: is the salvo's average impact near our target ship?
+                let dist: Meters = avg_target.distance_xz(&tp.position);
+                total_checked += 1;
+                if dist < closest_dist {
+                    closest_dist = dist;
+                }
+                if dist > SALVO_PROXIMITY_THRESHOLD {
+                    continue;
+                }
+
+                total_passed += 1;
+                let mut event = salvo_event.clone();
+                event.target_entity_id = target_eid;
+                s.salvos.push(event);
+            }
+        }
+
+        if !new_shots.is_empty() && !staging.is_empty() {
+            tracing::debug!(
+                "push_salvos_to_staging: {} shots, checked={} passed={} no_pos={} closest_dist={:.1}m threshold={:.0}m",
+                new_shots.len(),
+                total_checked,
+                total_passed,
+                no_position,
+                closest_dist.value(),
+                SALVO_PROXIMITY_THRESHOLD.value(),
+            );
+        }
+
+        for s in staging.iter_mut() {
+            s.last_clock = clock;
             for (eid, pos) in positions {
-                b.ship_yaws.insert(*eid, pos.yaw);
+                s.ship_yaws.insert(*eid, pos.yaw);
+                s.ship_positions.insert(*eid, pos.position);
             }
         }
     }
@@ -1043,18 +1227,24 @@ fn playback_thread(
 
     /// Helper: parse replay packets up to `target_clock`, feeding them into
     /// the given controller and renderer.
+    ///
+    /// Supports incremental parsing: starts from `start_offset` into
+    /// `packet_data` and uses the provided `prev_clock` as the initial
+    /// clock value.  Returns `(new_offset, last_clock)` so the caller can
+    /// resume from where we left off on the next frame.
     fn parse_to_clock(
-        replay_file: &ReplayFile,
-        game_metadata: &GameMetadataProvider,
+        parser: &mut wows_replays::packet2::Parser<'_>,
+        packet_data: &[u8],
+        start_offset: usize,
+        mut prev_clock: GameClock,
         controller: &mut BattleController<'_, '_, GameMetadataProvider>,
         renderer: &mut MinimapRenderer<'_>,
         target_clock: f32,
         frame_duration: f32,
-        bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
-    ) {
-        let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
-        let mut remaining = &replay_file.packet_data[..];
-        let mut prev_clock = GameClock(0.0);
+        staging: &mut [BridgeStaging],
+        salvo_cursor: &mut usize,
+    ) -> (usize, GameClock) {
+        let mut remaining = &packet_data[start_offset..];
 
         while !remaining.is_empty() {
             match parser.parse_packet(remaining) {
@@ -1085,17 +1275,19 @@ fn playback_thread(
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
-                    push_salvos_to_bridges(controller, bridges, packet.clock.seconds());
+                    push_salvos_to_staging(controller, staging, packet.clock.seconds(), salvo_cursor);
                     remaining = rest;
                 }
                 Err(_) => break,
             }
         }
 
-        populate_bridge_players(controller, game_metadata, bridges);
         renderer.populate_players(controller);
         renderer.update_squadron_info(controller);
         renderer.update_ship_abilities(controller);
+
+        let new_offset = packet_data.len() - remaining.len();
+        (new_offset, prev_clock)
     }
 
     // Request a repaint of the viewport from the background thread.
@@ -1106,10 +1298,13 @@ fn playback_thread(
         }
     };
 
-    /// Rebuild live_replay/live_controller/live_renderer from scratch,
-    /// parsing up to `$target_clock`. The macro is needed because Rust's
-    /// borrow checker won't allow passing `&mut live_replay` and
-    /// `&mut live_controller` (which borrows from `live_replay`) to the same function.
+    /// Rebuild live_replay/live_controller/live_renderer/live_parser from
+    /// scratch, parsing up to `$target_clock`.  Only needed for backward
+    /// seeks — forward playback uses incremental parsing instead.
+    ///
+    /// The macro is needed because Rust's borrow checker won't allow passing
+    /// `&mut live_replay` and `&mut live_controller` (which borrows from
+    /// `live_replay`) to the same function.
     macro_rules! rebuild_live_state {
         ($target_clock:expr) => {{
             let mut new_replay = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
@@ -1122,26 +1317,59 @@ fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
-            // Clear and re-accumulate armor bridge salvos on seek/rebuild
+            // Reset parser and tracking state for full re-parse
+            live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+            salvo_cursor = 0;
+            // Rebuild armor bridge salvos via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
-            for bridge in &armor_bridges {
-                bridge.lock().clear_salvos();
-            }
-            parse_to_clock(
-                &live_replay,
-                &game_metadata,
+            let mut staging = init_bridge_staging(&armor_bridges);
+            (live_offset, live_clock) = parse_to_clock(
+                &mut live_parser,
+                &packet_data,
+                0,
+                GameClock(0.0),
                 &mut live_controller,
                 &mut live_renderer,
                 $target_clock,
                 frame_duration,
-                &armor_bridges,
+                &mut staging,
+                &mut salvo_cursor,
             );
+            populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+            finalize_bridge_staging(&armor_bridges, staging, true);
         }};
     }
+
+    let mut last_bridge_count: usize = shared_state.lock().armor_bridges.len();
 
     loop {
         if !open.load(Ordering::Relaxed) {
             break;
+        }
+
+        // Detect new armor bridges — rebuild from scratch so their salvos are re-parsed.
+        {
+            let current_bridge_count = shared_state.lock().armor_bridges.len();
+            if current_bridge_count != last_bridge_count {
+                tracing::debug!(
+                    "Replay renderer: armor bridge count changed {} -> {}, rebuilding to re-parse salvos",
+                    last_bridge_count,
+                    current_bridge_count,
+                );
+                last_bridge_count = current_bridge_count;
+                let target_clock = frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration);
+                rebuild_live_state!(target_clock);
+                live_renderer.options = shared_state.lock().options.clone();
+                let commands = live_renderer.draw_frame(&live_controller);
+                shared_state.lock().frame = Some(PlaybackFrame {
+                    commands,
+                    clock_seconds: target_clock,
+                    frame_index: current_frame,
+                    total_frames: actual_total_frames,
+                    game_duration: actual_game_duration,
+                });
+                request_repaint(&shared_state);
+            }
         }
 
         // Process all pending commands
@@ -1164,7 +1392,28 @@ fn playback_thread(
                     let target_clock =
                         frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration);
 
-                    rebuild_live_state!(target_clock);
+                    if target_clock < live_clock.seconds() {
+                        // Seeking backward — must rebuild from scratch
+                        rebuild_live_state!(target_clock);
+                    } else {
+                        // Seeking forward — continue parsing incrementally
+                        let armor_bridges = shared_state.lock().armor_bridges.clone();
+                        let mut staging = init_bridge_staging(&armor_bridges);
+                        (live_offset, live_clock) = parse_to_clock(
+                            &mut live_parser,
+                            &packet_data,
+                            live_offset,
+                            live_clock,
+                            &mut live_controller,
+                            &mut live_renderer,
+                            target_clock,
+                            frame_duration,
+                            &mut staging,
+                            &mut salvo_cursor,
+                        );
+                        populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+                        finalize_bridge_staging(&armor_bridges, staging, false);
+                    }
 
                     live_renderer.options = shared_state.lock().options.clone();
                     let commands = live_renderer.draw_frame(&live_controller);
@@ -1207,7 +1456,23 @@ fn playback_thread(
                     actual_game_duration
                 };
 
-                rebuild_live_state!(target_clock);
+                // Forward playback — always incremental, never rebuild
+                let armor_bridges = shared_state.lock().armor_bridges.clone();
+                let mut staging = init_bridge_staging(&armor_bridges);
+                (live_offset, live_clock) = parse_to_clock(
+                    &mut live_parser,
+                    &packet_data,
+                    live_offset,
+                    live_clock,
+                    &mut live_controller,
+                    &mut live_renderer,
+                    target_clock,
+                    frame_duration,
+                    &mut staging,
+                    &mut salvo_cursor,
+                );
+                populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+                finalize_bridge_staging(&armor_bridges, staging, false);
 
                 live_renderer.options = shared_state.lock().options.clone();
                 let commands = live_renderer.draw_frame(&live_controller);
@@ -3949,6 +4214,11 @@ fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> Render
 // ─── Viewport Rendering ─────────────────────────────────────────────────────
 
 impl ReplayRendererViewer {
+    /// Access the shared renderer state (for polling pending requests, etc.).
+    pub fn shared_state(&self) -> &Arc<Mutex<SharedRendererState>> {
+        &self.shared_state
+    }
+
     pub fn draw(&self, ctx: &egui::Context) {
         // Store the parent context so the background thread can request repaints.
         // Deferred viewports repaint as part of their parent's paint cycle.
@@ -4019,39 +4289,54 @@ impl ReplayRendererViewer {
                     None
                 };
 
-                // Register game fonts with egui (once, when available)
-                if !state.game_fonts_registered
-                    && let Some(ref fonts) = state.game_fonts
-                {
+                // Register game fonts with egui.
+                // If real game fonts aren't available yet, register a placeholder that
+                // maps "GameFont" to the default proportional fonts so that any UI code
+                // referencing game_font() won't panic.
+                if !state.game_fonts_registered {
                     let mut font_defs = egui::FontDefinitions::default();
                     egui_phosphor::add_to_fonts(&mut font_defs, egui_phosphor::Variant::Regular);
 
-                    // Primary game font (no scale tweak — egui handles sizing via FontId)
-                    font_defs.font_data.insert(
-                        "game_font_primary".to_owned(),
-                        egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
-                    );
-
-                    let mut family_fonts = vec!["game_font_primary".to_owned()];
-
-                    // CJK fallback fonts
-                    let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
-                    for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
-                        let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
+                    if let Some(ref fonts) = state.game_fonts {
+                        // Primary game font (no scale tweak — egui handles sizing via FontId)
                         font_defs.font_data.insert(
-                            name.clone(),
-                            egui::FontData::from_owned(bytes.clone()).into(),
+                            "game_font_primary".to_owned(),
+                            egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
                         );
-                        family_fonts.push(name);
+
+                        let mut family_fonts = vec!["game_font_primary".to_owned()];
+
+                        // CJK fallback fonts
+                        let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
+                        for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
+                            let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
+                            font_defs.font_data.insert(
+                                name.clone(),
+                                egui::FontData::from_owned(bytes.clone()).into(),
+                            );
+                            family_fonts.push(name);
+                        }
+
+                        font_defs.families.insert(
+                            egui::FontFamily::Name("GameFont".into()),
+                            family_fonts,
+                        );
+                        state.game_fonts_registered = true;
+                    } else {
+                        // Placeholder: map "GameFont" to the default proportional fonts
+                        // so game_font() calls don't panic before real fonts load.
+                        let proportional = font_defs
+                            .families
+                            .get(&egui::FontFamily::Proportional)
+                            .cloned()
+                            .unwrap_or_default();
+                        font_defs.families.insert(
+                            egui::FontFamily::Name("GameFont".into()),
+                            proportional,
+                        );
                     }
 
-                    font_defs.families.insert(
-                        egui::FontFamily::Name("GameFont".into()),
-                        family_fonts,
-                    );
-
                     ctx.set_fonts(font_defs);
-                    state.game_fonts_registered = true;
                 }
 
                 drop(state);
@@ -5350,8 +5635,8 @@ impl ReplayRendererViewer {
 
                                             // ── Realtime Armor Viewer ──
                                             ui.separator();
-                                            if ui.button(icon_str!(icons::SHIELD, "Show in Armor Viewer")).clicked() {
-                                                let bridge = Arc::new(Mutex::new(RealtimeArmorBridge::new()));
+                                            if ui.button(icon_str!(icons::SHIELD, "Show Realtime Armor")).clicked() {
+                                                let bridge = Arc::new(Mutex::new(RealtimeArmorBridge::new(ship_eid)));
                                                 let mut state = shared_state.lock();
                                                 state.armor_bridges.push(bridge.clone());
                                                 state.pending_armor_viewers.push(ArmorViewerRequest {
@@ -5359,7 +5644,14 @@ impl ReplayRendererViewer {
                                                     target_ship_name: ship_name.clone(),
                                                     bridge,
                                                 });
+                                                // Seek to current position to populate the new bridge
+                                                let current_clock = state
+                                                    .frame
+                                                    .as_ref()
+                                                    .map(|f| f.clock_seconds)
+                                                    .unwrap_or(0.0);
                                                 drop(state);
+                                                let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
                                                 ann.show_context_menu = false;
                                                 ctx.request_repaint();
                                             }

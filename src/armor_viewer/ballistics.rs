@@ -6,7 +6,7 @@
 
 use std::f64::consts::PI;
 
-use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::game_params::types::{Meters, ShellInfo};
 
 // Physical constants (ISA atmospheric model)
 const G: f64 = 9.8; // gravitational acceleration (m/s²)
@@ -255,7 +255,8 @@ fn max_range(params: &ShellParams) -> Option<f64> {
 /// Solve for the launch angle that produces a given horizontal range.
 /// Uses bisection on the low-angle (flat) trajectory.
 /// Returns None if the range exceeds the shell's maximum range.
-pub fn solve_for_range(params: &ShellParams, range_m: f64) -> Option<ImpactResult> {
+pub fn solve_for_range(params: &ShellParams, range: Meters) -> Option<ImpactResult> {
+    let range_m = range.value() as f64;
     if range_m <= 0.0 {
         // At zero range, return muzzle velocity impact
         return Some(build_impact_result(params, 0.0, params.v0, 0.0, 0.0, 0.0));
@@ -299,16 +300,16 @@ pub fn solve_for_range(params: &ShellParams, range_m: f64) -> Option<ImpactResul
 }
 
 /// Compute impact data at regular range intervals.
-pub fn compute_range_table(params: &ShellParams, max_range_m: f64, step_m: f64) -> Vec<ImpactResult> {
+pub fn compute_range_table(params: &ShellParams, max_range: Meters, step: Meters) -> Vec<ImpactResult> {
     let mut results = Vec::new();
-    let mut range = step_m;
-    while range <= max_range_m {
+    let mut range = step;
+    while range <= max_range {
         if let Some(impact) = solve_for_range(params, range) {
             results.push(impact);
         } else {
             break; // Exceeded max range
         }
-        range += step_m;
+        range = range + step;
     }
     results
 }

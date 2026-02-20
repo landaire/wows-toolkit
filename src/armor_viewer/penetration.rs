@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Param, ShellInfo, Species};
+use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Km, Param, ShellInfo, Species};
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
@@ -404,8 +404,8 @@ pub struct TrajectoryMeta {
     pub id: u64,
     /// Index into the trajectory color palette.
     pub color_index: usize,
-    /// Per-trajectory ballistic range (km).
-    pub range_km: f32,
+    /// Per-trajectory ballistic range.
+    pub range: Km,
 }
 
 /// Euclidean distance between two 3D points.

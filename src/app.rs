@@ -185,6 +185,10 @@ pub struct WowsToolkitApp {
     #[cfg(feature = "logging")]
     #[serde(skip)]
     _log_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
+
+    /// Active realtime armor viewer windows spawned from replay renderers.
+    #[serde(skip)]
+    realtime_armor_viewers: Vec<Arc<egui::mutex::Mutex<crate::realtime_armor_viewer::RealtimeArmorViewer>>>,
 }
 
 impl Default for WowsToolkitApp {
@@ -210,6 +214,7 @@ impl Default for WowsToolkitApp {
             runtime: Arc::new(Runtime::new().expect("failed to create tokio runtime")),
             #[cfg(feature = "logging")]
             _log_guard: None,
+            realtime_armor_viewers: Vec::new(),
         }
     }
 }
@@ -1079,11 +1084,125 @@ impl WowsToolkitApp {
                 .collect();
         }
 
+        // Poll pending armor viewer requests from replay renderers and spawn viewers
+        {
+            // Poll ship assets loading (so it works without the Armor Viewer tab open)
+            if let crate::armor_viewer::state::ShipAssetsState::Loading(ref rx) =
+                self.tab_state.armor_viewer.ship_assets
+            {
+                if let Ok(result) = rx.try_recv() {
+                    match result {
+                        Ok(assets) => {
+                            self.tab_state.armor_viewer.ship_assets =
+                                crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to load ship assets: {e}");
+                            self.tab_state.armor_viewer.ship_assets =
+                                crate::armor_viewer::state::ShipAssetsState::Failed(e);
+                        }
+                    }
+                }
+            }
+
+            let replay_renderers = self.tab_state.replay_renderers.lock();
+            for renderer in replay_renderers.iter() {
+                let mut state = renderer.shared_state().lock();
+                let requests: Vec<crate::replay_renderer::ArmorViewerRequest> =
+                    state.pending_armor_viewers.drain(..).collect();
+                drop(state);
+
+                for request in requests {
+                    // Ensure ship assets and GPU pipeline are available
+                    let ship_assets = match &self.tab_state.armor_viewer.ship_assets {
+                        crate::armor_viewer::state::ShipAssetsState::Loaded(assets) => Some(assets.clone()),
+                        _ => None,
+                    };
+                    let gpu_pipeline = self.tab_state.armor_viewer.gpu_pipeline.clone();
+                    let render_state = self.tab_state.wgpu_render_state.clone();
+
+                    if let (Some(ship_assets), Some(gpu_pipeline), Some(render_state)) =
+                        (ship_assets, gpu_pipeline, render_state)
+                    {
+                        // Find the target player info from the bridge
+                        let bridge = request.bridge.lock();
+                        let target_player = bridge.players.iter().find(|p| p.entity_id == request.target_entity_id);
+                        if let Some(player) = target_player {
+                            let viewer = crate::realtime_armor_viewer::RealtimeArmorViewer::new(
+                                player,
+                                request.bridge.clone(),
+                                ship_assets,
+                                gpu_pipeline,
+                                render_state,
+                            );
+                            drop(bridge);
+                            self.realtime_armor_viewers.push(Arc::new(egui::mutex::Mutex::new(viewer)));
+                        } else {
+                            // Bridge players not populated yet — re-queue for next frame
+                            drop(bridge);
+                            let mut state = renderer.shared_state().lock();
+                            state.pending_armor_viewers.push(request);
+                        }
+                    } else {
+                        // Assets not ready — trigger loading if needed
+                        if matches!(
+                            &self.tab_state.armor_viewer.ship_assets,
+                            crate::armor_viewer::state::ShipAssetsState::NotLoaded
+                        ) {
+                            if let Some(ref wows_data) = self.tab_state.world_of_warships_data {
+                                let wd = wows_data.read();
+                                let vfs = wd.vfs.clone();
+                                let game_metadata = wd.game_metadata.clone();
+                                drop(wd);
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                std::thread::spawn(move || {
+                                    let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
+                                        let metadata = game_metadata
+                                            .ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
+                                        let assets = wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(
+                                            &vfs, metadata,
+                                        )
+                                        .map_err(|e| format!("{e:?}"))?;
+                                        Ok(Arc::new(assets))
+                                    })();
+                                    let _ = tx.send(result);
+                                });
+                                self.tab_state.armor_viewer.ship_assets =
+                                    crate::armor_viewer::state::ShipAssetsState::Loading(rx);
+                            }
+                        }
+                        if self.tab_state.armor_viewer.gpu_pipeline.is_none() {
+                            if let Some(ref rs) = self.tab_state.wgpu_render_state {
+                                self.tab_state.armor_viewer.gpu_pipeline =
+                                    Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device)));
+                            }
+                        }
+                        // Re-queue the request for next frame
+                        let mut state = renderer.shared_state().lock();
+                        state.pending_armor_viewers.push(request);
+                    }
+                }
+            }
+            drop(replay_renderers);
+        }
+
+        // Draw realtime armor viewer windows
+        self.realtime_armor_viewers.retain(|v| v.lock().open.load(Ordering::Relaxed));
+        for viewer in &self.realtime_armor_viewers {
+            crate::realtime_armor_viewer::draw_realtime_armor_viewer(viewer, ctx);
+        }
+
         self.ui_file_drag_and_drop(ctx);
 
         self.tab_state.toasts.lock().show(ctx);
 
-        ctx.request_repaint_after_secs(1.0);
+        // When realtime armor viewers are open, repaint frequently so they
+        // receive new salvo data even when the replay renderer viewport is focused.
+        if !self.realtime_armor_viewers.is_empty() {
+            ctx.request_repaint_after_secs(0.05); // ~20fps for salvo processing
+        } else {
+            ctx.request_repaint_after_secs(1.0);
+        }
     }
 
     fn show_panic_window(&mut self, ctx: &Context) {

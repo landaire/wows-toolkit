@@ -14,7 +14,7 @@ use crate::armor_viewer::state::{
 use crate::icon_str;
 use crate::icons;
 use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, LAYER_OVERLAY, MeshId, Vertex};
-use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::{AmmoType, Km};
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
 struct ArmorPaneViewer<'a> {
@@ -892,7 +892,7 @@ fn poll_pane_loads(dock_state: &mut DockState<ArmorPane>, device: &wgpu::Device,
 
 /// Upload loaded armor meshes to the viewport's GPU buffers,
 /// filtering out triangles belonging to invisible parts or hidden plates.
-fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     pane.viewport.clear();
     pane.mesh_triangle_info.clear();
     pane.hover_highlight = None;
@@ -1028,7 +1028,7 @@ fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, devic
 }
 
 /// Initial upload when a ship is first loaded. Sets up part visibility and camera.
-fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+pub(crate) fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     pane.part_visibility.clear();
     pane.plate_visibility.clear();
     pane.undo_stack.clear();
@@ -1114,7 +1114,7 @@ fn render_armor_pane(
         // Settings toolbar (single row with popover buttons)
         let prev_marker_opacity = pane.marker_opacity;
         let ctrl_s_pressed = vp_ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S));
-        if let Some(armor) = &pane.loaded_armor {
+        if let Some(armor) = pane.loaded_armor.take() {
             if !armor.zone_parts.is_empty() {
                 vp_ui.horizontal(|ui| {
                     // ── Armor Zones button with popover ──
@@ -1123,228 +1123,9 @@ fn render_armor_pane(
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            ui.horizontal(|ui| {
-                                if ui.small_button("All").clicked() {
-                                    pane.undo_stack.push(VisibilitySnapshot {
-                                        part_visibility: pane.part_visibility.clone(),
-                                        plate_visibility: pane.plate_visibility.clone(),
-                                    });
-                                    for (zone, parts) in &armor.zone_parts {
-                                        for part in parts {
-                                            pane.part_visibility.insert((zone.clone(), part.clone()), true);
-                                        }
-                                    }
-                                    pane.plate_visibility.clear();
-                                    zone_changed = true;
-                                }
-                                if ui.small_button("None").clicked() {
-                                    pane.undo_stack.push(VisibilitySnapshot {
-                                        part_visibility: pane.part_visibility.clone(),
-                                        plate_visibility: pane.plate_visibility.clone(),
-                                    });
-                                    for (zone, parts) in &armor.zone_parts {
-                                        for part in parts {
-                                            pane.part_visibility.insert((zone.clone(), part.clone()), false);
-                                        }
-                                    }
-                                    zone_changed = true;
-                                }
-                            });
-                            // "Reset plates" clears plate-level overrides
-                            if !pane.plate_visibility.is_empty() {
-                                if ui.small_button("Reset plates").clicked() {
-                                    pane.undo_stack.push(VisibilitySnapshot {
-                                        part_visibility: pane.part_visibility.clone(),
-                                        plate_visibility: pane.plate_visibility.clone(),
-                                    });
-                                    pane.plate_visibility.clear();
-                                    zone_changed = true;
-                                }
+                            if draw_armor_visibility_popover(ui, pane, &armor, translate_part) {
+                                zone_changed = true;
                             }
-                            ui.separator();
-
-                            // Three-level hierarchy: zone > material > plate
-                            ui.set_min_width(250.0);
-                            egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(
-                                ui,
-                                |ui| {
-                                    ui.set_width(ui.available_width());
-                                    let show_zero = pane.show_zero_mm;
-                                    for (zone, parts_with_plates) in &armor.zone_part_plates {
-                                        // Zone-level: "all on" only if every part is enabled
-                                        // AND no plates within any part are explicitly hidden.
-                                        let zone_all_on = parts_with_plates.iter().all(|(p, plates)| {
-                                            let part_on = pane
-                                                .part_visibility
-                                                .get(&(zone.clone(), p.clone()))
-                                                .copied()
-                                                .unwrap_or(true);
-                                            if !part_on {
-                                                return false;
-                                            }
-                                            !plates.iter().filter(|&&t| show_zero || t != 0).any(|&t| {
-                                                let pk: PlateKey = (zone.clone(), p.clone(), t);
-                                                pane.plate_visibility.get(&pk).copied() == Some(false)
-                                            })
-                                        });
-                                        let zone_any_on = parts_with_plates.iter().any(|(p, _)| {
-                                            pane.part_visibility
-                                                .get(&(zone.clone(), p.clone()))
-                                                .copied()
-                                                .unwrap_or(true)
-                                        });
-
-                                        let zone_id = ui.make_persistent_id(("armor_zone", zone));
-                                        egui::collapsing_header::CollapsingState::load_with_default_open(
-                                            ui.ctx(),
-                                            zone_id,
-                                            false,
-                                        )
-                                        .show_header(ui, |ui| {
-                                            let mut checked = zone_all_on;
-                                            let cb = ui.checkbox(&mut checked, "");
-                                            if zone_any_on && !zone_all_on {
-                                                let c = cb.rect.center();
-                                                ui.painter().line_segment(
-                                                    [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
-                                                    egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
-                                                );
-                                            }
-                                            if cb.changed() {
-                                                pane.undo_stack.push(VisibilitySnapshot {
-                                                    part_visibility: pane.part_visibility.clone(),
-                                                    plate_visibility: pane.plate_visibility.clone(),
-                                                });
-                                                let is_ctrl = ui.input(|i| i.modifiers.command);
-                                                if is_ctrl {
-                                                    // Solo: disable all zones, enable only this one
-                                                    for (z, pp) in &armor.zone_part_plates {
-                                                        let on = z == zone;
-                                                        for (p, _) in pp {
-                                                            pane.part_visibility.insert((z.clone(), p.clone()), on);
-                                                        }
-                                                    }
-                                                } else {
-                                                    for (p, _) in parts_with_plates {
-                                                        pane.part_visibility.insert((zone.clone(), p.clone()), checked);
-                                                    }
-                                                }
-                                                zone_changed = true;
-                                            }
-                                            ui.label(zone).on_hover_text("Ctrl+click to solo");
-                                        })
-                                        .body(|ui| {
-                                            for (part, plates) in parts_with_plates {
-                                                let part_key = (zone.clone(), part.clone());
-                                                let part_on =
-                                                    pane.part_visibility.get(&part_key).copied().unwrap_or(true);
-
-                                                // Filter plates by 0mm setting
-                                                let visible_plates: Vec<i32> =
-                                                    plates.iter().copied().filter(|&t| show_zero || t != 0).collect();
-
-                                                // Check if any plates are hidden at plate level
-                                                let any_plate_hidden = visible_plates.iter().any(|&t| {
-                                                    let pk: PlateKey = (zone.clone(), part.clone(), t);
-                                                    pane.plate_visibility.get(&pk).copied() == Some(false)
-                                                });
-
-                                                let display = translate_part(part);
-
-                                                if visible_plates.len() <= 1 {
-                                                    // Single plate or no plates: just show material checkbox
-                                                    let mut v = part_on && !any_plate_hidden;
-                                                    if ui.checkbox(&mut v, &display).changed() {
-                                                        pane.undo_stack.push(VisibilitySnapshot {
-                                                            part_visibility: pane.part_visibility.clone(),
-                                                            plate_visibility: pane.plate_visibility.clone(),
-                                                        });
-                                                        pane.part_visibility.insert(part_key.clone(), v);
-                                                        // Clear plate-level overrides for this part
-                                                        for &t in &visible_plates {
-                                                            pane.plate_visibility.remove(&(
-                                                                zone.clone(),
-                                                                part.clone(),
-                                                                t,
-                                                            ));
-                                                        }
-                                                        zone_changed = true;
-                                                    }
-                                                } else {
-                                                    // Multiple plates: collapsible material header
-                                                    let mat_id = ui.make_persistent_id(("armor_mat", zone, part));
-                                                    egui::collapsing_header::CollapsingState::load_with_default_open(
-                                                        ui.ctx(),
-                                                        mat_id,
-                                                        false,
-                                                    )
-                                                    .show_header(ui, |ui| {
-                                                        let mut checked = part_on && !any_plate_hidden;
-                                                        let cb = ui.checkbox(&mut checked, "");
-                                                        // Indeterminate: part enabled but some plates hidden
-                                                        if part_on && any_plate_hidden {
-                                                            let c = cb.rect.center();
-                                                            ui.painter().line_segment(
-                                                                [
-                                                                    egui::pos2(c.x - 3.5, c.y),
-                                                                    egui::pos2(c.x + 3.5, c.y),
-                                                                ],
-                                                                egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
-                                                            );
-                                                        }
-                                                        if cb.changed() {
-                                                            pane.undo_stack.push(VisibilitySnapshot {
-                                                                part_visibility: pane.part_visibility.clone(),
-                                                                plate_visibility: pane.plate_visibility.clone(),
-                                                            });
-                                                            pane.part_visibility.insert(part_key.clone(), checked);
-                                                            // Clear plate-level overrides
-                                                            for &t in &visible_plates {
-                                                                pane.plate_visibility.remove(&(
-                                                                    zone.clone(),
-                                                                    part.clone(),
-                                                                    t,
-                                                                ));
-                                                            }
-                                                            zone_changed = true;
-                                                        }
-                                                        ui.label(&display);
-                                                    })
-                                                    .body(|ui| {
-                                                        for &thickness_i32 in &visible_plates {
-                                                            let pk: PlateKey =
-                                                                (zone.clone(), part.clone(), thickness_i32);
-                                                            let plate_on =
-                                                                pane.plate_visibility.get(&pk).copied().unwrap_or(true);
-                                                            let thickness_mm = thickness_i32 as f32 / 10.0;
-
-                                                            ui.horizontal(|ui| {
-                                                                let color =
-                                                                    wowsunpack::export::gltf_export::thickness_to_color(
-                                                                        thickness_mm,
-                                                                    );
-                                                                paint_swatch(ui, color32_from_f32(color), 10.0);
-                                                                let mut v = part_on && plate_on;
-                                                                if ui
-                                                                    .checkbox(&mut v, format!("{:.0} mm", thickness_mm))
-                                                                    .changed()
-                                                                {
-                                                                    pane.undo_stack.push(VisibilitySnapshot {
-                                                                        part_visibility: pane.part_visibility.clone(),
-                                                                        plate_visibility: pane.plate_visibility.clone(),
-                                                                    });
-                                                                    pane.plate_visibility.insert(pk, !plate_on);
-                                                                    zone_changed = true;
-                                                                }
-                                                            });
-                                                        }
-                                                    });
-                                                }
-                                            }
-                                        });
-                                    }
-                                },
-                            );
                         });
 
                     // ── Hull Model button with popover ──
@@ -1479,42 +1260,9 @@ fn render_armor_pane(
                         .id(display_popup_id)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            ui.set_min_width(160.0);
-                            if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
+                            if draw_display_settings_popover(ui, pane, &armor) {
                                 zone_changed = true;
                             }
-                            if armor.draft_meters.is_some() {
-                                if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
-                                    zone_changed = true;
-                                }
-                                if pane.show_waterline {
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(20.0);
-                                        ui.label("Opacity");
-                                        if ui
-                                            .add(
-                                                egui::Slider::new(&mut pane.waterline_opacity, 0.05..=1.0)
-                                                    .fixed_decimals(2),
-                                            )
-                                            .changed()
-                                        {
-                                            zone_changed = true;
-                                        }
-                                    });
-                                }
-                            }
-                            if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
-                                zone_changed = true;
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label("Armor Opacity");
-                                if ui
-                                    .add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2))
-                                    .changed()
-                                {
-                                    zone_changed = true;
-                                }
-                            });
                             if !pane.trajectories.is_empty() {
                                 ui.horizontal(|ui| {
                                     ui.label("Marker Opacity");
@@ -1570,6 +1318,7 @@ fn render_armor_pane(
                 });
                 vp_ui.separator();
             }
+            pane.loaded_armor = Some(armor);
         }
         if zone_changed {
             if let Some(armor) = pane.loaded_armor.take() {
@@ -1657,38 +1406,6 @@ fn render_armor_pane(
                     active_pane_signal.set(Some(pane_id));
                 }
 
-                // Picking on hover / click / right-click
-                let mut hovered_plate_key: Option<PlateKey> = None;
-                let context_menu_open =
-                    egui::Popup::is_id_open(vp_ui.ctx(), egui::Popup::default_response_id(&response));
-                if response.hovered() {
-                    if let Some(hover_pos) = response.hover_pos() {
-                        if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
-                            let tooltip = pane
-                                .mesh_triangle_info
-                                .iter()
-                                .find(|(id, _)| *id == hit.mesh_id)
-                                .and_then(|(_, infos)| infos.get(hit.triangle_index));
-
-                            if let Some(tooltip) = tooltip {
-                                let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
-                                hovered_plate_key =
-                                    Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
-                                pane.hovered_info = Some(tooltip.clone());
-                                if !context_menu_open {
-                                    egui::containers::Tooltip::for_widget(&response).at_pointer().show(|ui| {
-                                        show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, translate_part);
-                                    });
-                                }
-                            } else {
-                                pane.hovered_info = None;
-                            }
-                        } else {
-                            pane.hovered_info = None;
-                        }
-                    }
-                }
-
                 // Trajectory mode: click to cast ray through model
                 // Normal click = replace all trajectories; Shift+click = add another
                 if pane.trajectory_mode && response.clicked() {
@@ -1701,7 +1418,7 @@ fn render_armor_pane(
 
                         if let Some(surface_hit) = camera_hit {
                             let click_point = surface_hit.world_position;
-                            let range_m = pane.ballistic_range_km as f64 * 1000.0;
+                            let range_meters = pane.ballistic_range.to_meters();
 
                             // Compute shell approach direction from the camera ray at the click point.
                             // Project onto XZ plane so the shell approaches horizontally from
@@ -1726,14 +1443,10 @@ fn render_armor_pane(
                                 .find(|s| s.ammo_type == AmmoType::AP)
                                 .or_else(|| comparison_ships.iter().flat_map(|s| s.shells.iter()).next());
 
-                            let ballistic_impact = if range_m > 0.0 {
-                                first_shell.and_then(|shell| {
-                                    let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                                    crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
-                                })
-                            } else {
-                                None
-                            };
+                            let ballistic_impact = first_shell.and_then(|shell| {
+                                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+                                crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
+                            });
 
                             // Step 2: Compute shell direction from ballistic impact angle
                             let shell_dir = if let Some(ref impact) = ballistic_impact {
@@ -1814,7 +1527,7 @@ fn render_armor_pane(
                             let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(click_point);
 
                             let mut ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
-                            if range_m > 0.0 {
+                            if range_meters.value() > 0.0 {
                                 for (ship_idx, ship) in comparison_ships.iter().enumerate() {
                                     let shell = ship
                                         .shells
@@ -1825,7 +1538,7 @@ fn render_armor_pane(
                                         let params =
                                             crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
                                         if let Some(impact) =
-                                            crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
+                                            crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                         {
                                             let (arc_2d, height_ratio) =
                                                 crate::armor_viewer::ballistics::simulate_arc_points(
@@ -1864,12 +1577,11 @@ fn render_armor_pane(
                             let mut detonation_points: Vec<crate::armor_viewer::penetration::DetonationMarker> =
                                 Vec::new();
                             let mut last_visible_hit: Option<usize> = None;
-                            let range_m_f64 = pane.ballistic_range_km as f64 * 1000.0;
                             for (ship_idx, ship) in comparison_ships.iter().enumerate() {
                                 for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
                                     let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                                    let shell_impact = if range_m_f64 > 0.0 {
-                                        crate::armor_viewer::ballistics::solve_for_range(&params, range_m_f64)
+                                    let shell_impact = if range_meters.value() > 0.0 {
+                                        crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                     } else {
                                         None
                                     };
@@ -1936,7 +1648,7 @@ fn render_armor_pane(
                                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
                                     id: traj_id,
                                     color_index,
-                                    range_km: pane.ballistic_range_km,
+                                    range: pane.ballistic_range,
                                 },
                                 result,
                                 mesh_id: Some(mesh_id),
@@ -1956,77 +1668,18 @@ fn render_armor_pane(
                     }
                 }
 
-                // Single click: toggle plate visibility (hide/show) — skip in trajectory mode
-                if !pane.trajectory_mode && response.clicked() {
-                    if let Some(ref key) = hovered_plate_key {
-                        pane.undo_stack.push(VisibilitySnapshot {
-                            part_visibility: pane.part_visibility.clone(),
-                            plate_visibility: pane.plate_visibility.clone(),
-                        });
-                        let currently_visible = pane.plate_visibility.get(key).copied().unwrap_or(true);
-                        pane.plate_visibility.insert(key.clone(), !currently_visible);
-                        zone_changed = true;
-                    }
-                }
-
-                // Latch context menu key on right-click; clear when menu closes.
-                if response.secondary_clicked() {
-                    pane.context_menu_key = hovered_plate_key.clone();
-                } else if !context_menu_open {
-                    pane.context_menu_key = None;
-                }
-
-                // Right-click context menu with plate-level and part-level actions.
-                if let Some(ref ctx_key) = pane.context_menu_key.clone() {
-                    let ctx_key = ctx_key.clone();
-                    let part_key = (ctx_key.0.clone(), ctx_key.1.clone());
-                    let thickness = ctx_key.2 as f32 / 10.0;
-                    let ctx_name = translate_part(&ctx_key.1);
-                    response.context_menu(|ui| {
-                        // Plate-level: hide/show this specific plate
-                        let plate_visible = pane.plate_visibility.get(&ctx_key).copied().unwrap_or(true);
-                        let plate_label = if plate_visible {
-                            format!("Hide {:.0} mm {}", thickness, ctx_name)
-                        } else {
-                            format!("Show {:.0} mm {}", thickness, ctx_name)
-                        };
-                        if ui.button(plate_label).clicked() {
-                            pane.undo_stack.push(VisibilitySnapshot {
-                                part_visibility: pane.part_visibility.clone(),
-                                plate_visibility: pane.plate_visibility.clone(),
-                            });
-                            pane.plate_visibility.insert(ctx_key.clone(), !plate_visible);
-                            zone_changed = true;
-                            ui.close();
-                        }
-
-                        // Show all hidden plates
-                        let hidden_count = pane.plate_visibility.values().filter(|&&v| !v).count();
-                        if hidden_count > 0 {
-                            if ui.button(format!("Show all hidden plates ({})", hidden_count)).clicked() {
-                                pane.undo_stack.push(VisibilitySnapshot {
-                                    part_visibility: pane.part_visibility.clone(),
-                                    plate_visibility: pane.plate_visibility.clone(),
-                                });
-                                pane.plate_visibility.clear();
-                                zone_changed = true;
-                                ui.close();
-                            }
-                        }
-
-                        ui.separator();
-
-                        // Part-level: disable entire (zone, material_name)
-                        if ui.button(format!("Disable {}", ctx_name)).clicked() {
-                            pane.undo_stack.push(VisibilitySnapshot {
-                                part_visibility: pane.part_visibility.clone(),
-                                plate_visibility: pane.plate_visibility.clone(),
-                            });
-                            pane.part_visibility.insert(part_key, false);
-                            zone_changed = true;
-                            ui.close();
-                        }
-                    });
+                // Hover tooltip, click-to-toggle, right-click context menu, hover highlight
+                if handle_plate_interaction(
+                    vp_ui,
+                    &response,
+                    pane,
+                    &render_state.device,
+                    translate_part,
+                    !pane.trajectory_mode,
+                    comparison_ships,
+                    ifhe_enabled,
+                ) {
+                    zone_changed = true;
                 }
 
                 // Recompute all trajectory arcs if comparison ships changed
@@ -2051,8 +1704,8 @@ fn render_armor_pane(
                 // ── Trajectory results floating panel ──
                 let clear_traj = std::cell::Cell::new(false);
                 let delete_traj_id: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
-                let range_km_cell = std::cell::Cell::new(pane.ballistic_range_km);
-                let traj_range_changes: std::cell::RefCell<Vec<(usize, f32)>> = std::cell::RefCell::new(Vec::new());
+                let range_km_cell = std::cell::Cell::new(pane.ballistic_range);
+                let traj_range_changes: std::cell::RefCell<Vec<(usize, Km)>> = std::cell::RefCell::new(Vec::new());
                 let show_all_hit_plates = std::cell::Cell::new(false);
                 let show_all_hit_zones = std::cell::Cell::new(false);
                 // Per-arc plate/zone isolation toggles: (arc_index, new_active_state)
@@ -2085,17 +1738,17 @@ fn render_armor_pane(
 
                             // Shared range slider
                             if !comparison_ships.is_empty() {
-                                let mut range_km = range_km_cell.get();
+                                let mut range_km_val = range_km_cell.get().value();
                                 ui.horizontal(|ui| {
                                     ui.label(egui::RichText::new("Range:").small().color(egui::Color32::GRAY));
                                     ui.add(
-                                        egui::Slider::new(&mut range_km, 0.0..=30.0)
+                                        egui::Slider::new(&mut range_km_val, 0.0..=30.0)
                                             .suffix(" km")
                                             .step_by(0.5)
                                             .max_decimals(1),
                                     );
                                 });
-                                range_km_cell.set(range_km);
+                                range_km_cell.set(Km::new(range_km_val));
                             }
 
                             ui.horizontal(|ui| {
@@ -2145,7 +1798,7 @@ fn render_armor_pane(
                                                 "{} hits, {:.0}mm @ {:.1}km",
                                                 result.hits.len(),
                                                 result.total_armor_mm,
-                                                traj.meta.range_km,
+                                                traj.meta.range.value(),
                                             ))
                                             .small()
                                             .color(egui::Color32::GRAY),
@@ -2173,7 +1826,7 @@ fn render_armor_pane(
 
                                     // Per-trajectory range slider
                                     {
-                                        let mut rng = traj.meta.range_km;
+                                        let mut rng = traj.meta.range.value();
                                         let resp = ui.add(
                                             egui::Slider::new(&mut rng, 0.0..=30.0)
                                                 .suffix(" km")
@@ -2182,7 +1835,7 @@ fn render_armor_pane(
                                                 .text(""),
                                         );
                                         if resp.changed() {
-                                            traj_range_changes.borrow_mut().push((ti, rng));
+                                            traj_range_changes.borrow_mut().push((ti, Km::new(rng)));
                                         }
                                     }
 
@@ -2215,7 +1868,7 @@ fn render_armor_pane(
                                     }
 
                                     // Compute shell simulations for this trajectory
-                                    let range_m = traj.meta.range_km as f64 * 1000.0;
+                                    let range_meters = traj.meta.range.to_meters();
 
                                     struct ShellSim {
                                         ship_name: String,
@@ -2233,8 +1886,8 @@ fn render_armor_pane(
                                                     crate::armor_viewer::ballistics::ShellParams::from_shell_info(
                                                         shell,
                                                     );
-                                                let impact = if shell.ammo_type == AmmoType::AP && range_m > 0.0 {
-                                                    crate::armor_viewer::ballistics::solve_for_range(&params, range_m)
+                                                let impact = if shell.ammo_type == AmmoType::AP && range_meters.value() > 0.0 {
+                                                    crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                                 } else {
                                                     None
                                                 };
@@ -2636,8 +2289,8 @@ fn render_armor_pane(
                     let changes = traj_range_changes.into_inner();
                     for (ti, new_range) in &changes {
                         if *ti < pane.trajectories.len() {
-                            if (pane.trajectories[*ti].meta.range_km - *new_range).abs() > 0.01 {
-                                pane.trajectories[*ti].meta.range_km = *new_range;
+                            if (pane.trajectories[*ti].meta.range.value() - new_range.value()).abs() > 0.01 {
+                                pane.trajectories[*ti].meta.range = *new_range;
                                 recompute_trajectory_for_range(
                                     &mut pane.trajectories[*ti],
                                     comparison_ships,
@@ -2653,7 +2306,7 @@ fn render_armor_pane(
                 }
 
                 // Write back shared range slider (only affects future arcs)
-                pane.ballistic_range_km = range_km_cell.get();
+                pane.ballistic_range = range_km_cell.get();
 
                 // Handle delete single trajectory
                 if let Some(del_id) = delete_traj_id.get() {
@@ -2819,24 +2472,6 @@ fn render_armor_pane(
                             mo,
                         ));
                         traj.marker_cam_dist = cam_dist;
-                    }
-                }
-
-                // Update hover highlight overlay
-                let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
-                if hovered_plate_key != current_hover {
-                    // Remove old hover highlight
-                    if let Some((_, old_id)) = pane.hover_highlight.take() {
-                        pane.viewport.remove_mesh(old_id);
-                    }
-                    // Upload new hover highlight
-                    if let Some(ref key) = hovered_plate_key {
-                        if let Some(armor) = pane.loaded_armor.take() {
-                            let mesh_id =
-                                upload_plate_highlight(pane, &armor, key, &render_state.device, [1.0, 1.0, 1.0, 0.35]);
-                            pane.hover_highlight = Some((key.clone(), mesh_id));
-                            pane.loaded_armor = Some(armor);
-                        }
                     }
                 }
             }
@@ -3022,18 +2657,18 @@ fn load_ship_for_pane(
 }
 
 /// Helper to create an egui Color32 from an [f32; 4] RGBA color.
-fn color32_from_f32(c: [f32; 4]) -> egui::Color32 {
+pub(crate) fn color32_from_f32(c: [f32; 4]) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 255)
 }
 
 /// Paint a small color swatch rectangle inline.
-fn paint_swatch(ui: &mut egui::Ui, color: egui::Color32, size: f32) {
+pub(crate) fn paint_swatch(ui: &mut egui::Ui, color: egui::Color32, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     ui.painter().rect_filled(rect, 2.0, color);
 }
 
 /// Show tooltip for a hovered armor triangle.
-fn show_armor_tooltip(
+pub(crate) fn show_armor_tooltip(
     ui: &mut egui::Ui,
     info: &ArmorTriangleTooltip,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
@@ -3142,7 +2777,7 @@ fn show_armor_tooltip(
 
 /// Upload a highlight overlay mesh for all triangles matching the given plate key
 /// (zone, material_name, thickness). Returns the MeshId of the uploaded highlight mesh.
-fn upload_plate_highlight(
+pub(crate) fn upload_plate_highlight(
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
     key: &PlateKey,
@@ -3291,7 +2926,7 @@ fn recompute_trajectory_for_range(
 ) {
     use crate::viewport_3d::camera::normalize;
 
-    let range_m = traj.meta.range_km as f64 * 1000.0;
+    let range_meters = traj.meta.range.to_meters();
     let result = &mut traj.result;
 
     // Derive horizontal approach direction from the existing shell direction
@@ -3308,9 +2943,9 @@ fn recompute_trajectory_for_range(
 
     // Update shell direction from first shell's impact angle
     if let Some(shell) = first_shell {
-        if range_m > 0.0 {
+        if range_meters.value() > 0.0 {
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_m) {
+            if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
                 let horiz_angle = impact.impact_angle_horizontal as f32;
                 let cos_h = horiz_angle.cos();
                 let sin_h = horiz_angle.sin();
@@ -3331,12 +2966,12 @@ fn recompute_trajectory_for_range(
     let first_hit_pos = result.hits.first().map(|h| h.position).unwrap_or(result.origin);
 
     let mut new_ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
-    if range_m > 0.0 {
+    if range_meters.value() > 0.0 {
         for (ship_idx, ship) in comparison_ships.iter().enumerate() {
             let shell = ship.shells.iter().find(|s| s.ammo_type == AmmoType::AP).or_else(|| ship.shells.first());
             if let Some(shell) = shell {
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_m) {
+                if let Some(impact) = crate::armor_viewer::ballistics::solve_for_range(&params, range_meters) {
                     let (arc_2d, height_ratio) =
                         crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
                     let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
@@ -3371,8 +3006,11 @@ fn recompute_trajectory_for_range(
     for (ship_idx, ship) in comparison_ships.iter().enumerate() {
         for shell in ship.shells.iter().filter(|s| s.ammo_type == AmmoType::AP) {
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            let shell_impact =
-                if range_m > 0.0 { crate::armor_viewer::ballistics::solve_for_range(&params, range_m) } else { None };
+            let shell_impact = if range_meters.value() > 0.0 {
+                crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
+            } else {
+                None
+            };
             if let Some(ref impact) = shell_impact {
                 let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
                     &params,
@@ -3431,7 +3069,7 @@ fn segment_perps(seg_dir: [f32; 3]) -> ([f32; 3], [f32; 3]) {
 /// Upload a trajectory visualization as colored line segments on the overlay layer.
 /// If arc_points_3d is non-empty, draws a curved arc from firing position to first hit,
 /// then straight segments through subsequent armor plates.
-fn upload_trajectory_visualization(
+pub(crate) fn upload_trajectory_visualization(
     viewport: &mut crate::viewport_3d::Viewport3D,
     result: &crate::armor_viewer::penetration::TrajectoryResult,
     device: &wgpu::Device,
@@ -3653,7 +3291,7 @@ fn hull_group_order(group: &str) -> u32 {
 }
 
 /// Build hull part groups from a list of hull meshes.
-fn build_hull_part_groups(
+pub(crate) fn build_hull_part_groups(
     hull_meshes: &[wowsunpack::export::gltf_export::InteractiveHullMesh],
 ) -> Vec<(String, Vec<String>)> {
     use std::collections::{BTreeSet, HashMap};
@@ -3672,7 +3310,7 @@ fn build_hull_part_groups(
 
 /// Create a water plane quad at the given Y height, extending beyond the hull bounding box.
 /// Returns (vertices, indices) for a semi-transparent blue quad.
-fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: f32) -> (Vec<Vertex>, Vec<u32>) {
+pub(crate) fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: f32) -> (Vec<Vertex>, Vec<u32>) {
     let cx = (bounds.0[0] + bounds.1[0]) * 0.5;
     let cz = (bounds.0[2] + bounds.1[2]) * 0.5;
     let ex = (bounds.1[0] - bounds.0[0]) * 2.25;
@@ -3694,7 +3332,7 @@ fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: f32) -> (Ve
 
 /// Upload plate boundary edge outlines where adjacent triangles have different thickness values.
 /// These appear as thin black lines along edges where two plates of different thickness meet.
-fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
     use std::collections::HashMap;
 
     let edge_half_width: f32 = PLATE_EDGE_HALF_WIDTH;
@@ -4030,7 +3668,7 @@ fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu
 }
 
 /// Apply a column-major 4x4 transform to a point (position).
-fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
+pub(crate) fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
     [
         t[0] * p[0] + t[4] * p[1] + t[8] * p[2] + t[12],
         t[1] * p[0] + t[5] * p[1] + t[9] * p[2] + t[13],
@@ -4039,7 +3677,7 @@ fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
 }
 
 /// Apply the upper-left 3x3 of a column-major 4x4 transform to a normal and renormalize.
-fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
+pub(crate) fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
     let x = t[0] * n[0] + t[4] * n[1] + t[8] * n[2];
     let y = t[1] * n[0] + t[5] * n[1] + t[9] * n[2];
     let z = t[2] * n[0] + t[6] * n[1] + t[10] * n[2];
@@ -4048,4 +3686,352 @@ fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
         return [0.0, 0.0, 0.0];
     }
     [x / len, y / len, z / len]
+}
+
+/// Draw the Armor zone/material/plate visibility popover content.
+/// Returns true if any visibility changed.
+pub(crate) fn draw_armor_visibility_popover(
+    ui: &mut egui::Ui,
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    translate_part: &dyn Fn(&str) -> String,
+) -> bool {
+    let mut zone_changed = false;
+    ui.horizontal(|ui| {
+        if ui.small_button("All").clicked() {
+            pane.undo_stack.push(VisibilitySnapshot {
+                part_visibility: pane.part_visibility.clone(),
+                plate_visibility: pane.plate_visibility.clone(),
+            });
+            for (zone, parts) in &armor.zone_parts {
+                for part in parts {
+                    pane.part_visibility.insert((zone.clone(), part.clone()), true);
+                }
+            }
+            pane.plate_visibility.clear();
+            zone_changed = true;
+        }
+        if ui.small_button("None").clicked() {
+            pane.undo_stack.push(VisibilitySnapshot {
+                part_visibility: pane.part_visibility.clone(),
+                plate_visibility: pane.plate_visibility.clone(),
+            });
+            for (zone, parts) in &armor.zone_parts {
+                for part in parts {
+                    pane.part_visibility.insert((zone.clone(), part.clone()), false);
+                }
+            }
+            zone_changed = true;
+        }
+    });
+    // "Reset plates" clears plate-level overrides
+    if !pane.plate_visibility.is_empty() {
+        if ui.small_button("Reset plates").clicked() {
+            pane.undo_stack.push(VisibilitySnapshot {
+                part_visibility: pane.part_visibility.clone(),
+                plate_visibility: pane.plate_visibility.clone(),
+            });
+            pane.plate_visibility.clear();
+            zone_changed = true;
+        }
+    }
+    ui.separator();
+
+    // Three-level hierarchy: zone > material > plate
+    ui.set_min_width(250.0);
+    egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let show_zero = pane.show_zero_mm;
+        for (zone, parts_with_plates) in &armor.zone_part_plates {
+            let zone_all_on = parts_with_plates.iter().all(|(p, plates)| {
+                let part_on = pane.part_visibility.get(&(zone.clone(), p.clone())).copied().unwrap_or(true);
+                if !part_on {
+                    return false;
+                }
+                !plates.iter().filter(|&&t| show_zero || t != 0).any(|&t| {
+                    let pk: PlateKey = (zone.clone(), p.clone(), t);
+                    pane.plate_visibility.get(&pk).copied() == Some(false)
+                })
+            });
+            let zone_any_on = parts_with_plates
+                .iter()
+                .any(|(p, _)| pane.part_visibility.get(&(zone.clone(), p.clone())).copied().unwrap_or(true));
+
+            let zone_id = ui.make_persistent_id(("armor_zone", zone));
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), zone_id, false)
+                .show_header(ui, |ui| {
+                    let mut checked = zone_all_on;
+                    let cb = ui.checkbox(&mut checked, "");
+                    if zone_any_on && !zone_all_on {
+                        let c = cb.rect.center();
+                        ui.painter().line_segment(
+                            [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
+                            egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                        );
+                    }
+                    if cb.changed() {
+                        pane.undo_stack.push(VisibilitySnapshot {
+                            part_visibility: pane.part_visibility.clone(),
+                            plate_visibility: pane.plate_visibility.clone(),
+                        });
+                        let is_ctrl = ui.input(|i| i.modifiers.command);
+                        if is_ctrl {
+                            for (z, pp) in &armor.zone_part_plates {
+                                let on = z == zone;
+                                for (p, _) in pp {
+                                    pane.part_visibility.insert((z.clone(), p.clone()), on);
+                                }
+                            }
+                        } else {
+                            for (p, _) in parts_with_plates {
+                                pane.part_visibility.insert((zone.clone(), p.clone()), checked);
+                            }
+                        }
+                        zone_changed = true;
+                    }
+                    ui.label(zone).on_hover_text("Ctrl+click to solo");
+                })
+                .body(|ui| {
+                    for (part, plates) in parts_with_plates {
+                        let part_key = (zone.clone(), part.clone());
+                        let part_on = pane.part_visibility.get(&part_key).copied().unwrap_or(true);
+                        let visible_plates: Vec<i32> =
+                            plates.iter().copied().filter(|&t| show_zero || t != 0).collect();
+                        let any_plate_hidden = visible_plates.iter().any(|&t| {
+                            let pk: PlateKey = (zone.clone(), part.clone(), t);
+                            pane.plate_visibility.get(&pk).copied() == Some(false)
+                        });
+                        let display = translate_part(part);
+
+                        if visible_plates.len() <= 1 {
+                            let mut v = part_on && !any_plate_hidden;
+                            if ui.checkbox(&mut v, &display).changed() {
+                                pane.undo_stack.push(VisibilitySnapshot {
+                                    part_visibility: pane.part_visibility.clone(),
+                                    plate_visibility: pane.plate_visibility.clone(),
+                                });
+                                pane.part_visibility.insert(part_key.clone(), v);
+                                for &t in &visible_plates {
+                                    pane.plate_visibility.remove(&(zone.clone(), part.clone(), t));
+                                }
+                                zone_changed = true;
+                            }
+                        } else {
+                            let mat_id = ui.make_persistent_id(("armor_mat", zone, part));
+                            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), mat_id, false)
+                                .show_header(ui, |ui| {
+                                    let mut checked = part_on && !any_plate_hidden;
+                                    let cb = ui.checkbox(&mut checked, "");
+                                    if part_on && any_plate_hidden {
+                                        let c = cb.rect.center();
+                                        ui.painter().line_segment(
+                                            [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
+                                            egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                                        );
+                                    }
+                                    if cb.changed() {
+                                        pane.undo_stack.push(VisibilitySnapshot {
+                                            part_visibility: pane.part_visibility.clone(),
+                                            plate_visibility: pane.plate_visibility.clone(),
+                                        });
+                                        pane.part_visibility.insert(part_key.clone(), checked);
+                                        for &t in &visible_plates {
+                                            pane.plate_visibility.remove(&(zone.clone(), part.clone(), t));
+                                        }
+                                        zone_changed = true;
+                                    }
+                                    ui.label(&display);
+                                })
+                                .body(|ui| {
+                                    for &thickness_i32 in &visible_plates {
+                                        let pk: PlateKey = (zone.clone(), part.clone(), thickness_i32);
+                                        let plate_on = pane.plate_visibility.get(&pk).copied().unwrap_or(true);
+                                        let thickness_mm = thickness_i32 as f32 / 10.0;
+                                        ui.horizontal(|ui| {
+                                            let color =
+                                                wowsunpack::export::gltf_export::thickness_to_color(thickness_mm);
+                                            paint_swatch(ui, color32_from_f32(color), 10.0);
+                                            let mut v = part_on && plate_on;
+                                            if ui.checkbox(&mut v, format!("{:.0} mm", thickness_mm)).changed() {
+                                                pane.undo_stack.push(VisibilitySnapshot {
+                                                    part_visibility: pane.part_visibility.clone(),
+                                                    plate_visibility: pane.plate_visibility.clone(),
+                                                });
+                                                pane.plate_visibility.insert(pk, !plate_on);
+                                                zone_changed = true;
+                                            }
+                                        });
+                                    }
+                                });
+                        }
+                    }
+                });
+        }
+    });
+    zone_changed
+}
+
+/// Draw the Display settings popover content (plate edges, waterline, 0mm, opacity).
+/// Returns true if any visibility changed.
+pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorPane, armor: &LoadedShipArmor) -> bool {
+    let mut zone_changed = false;
+    ui.set_min_width(160.0);
+    if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
+        zone_changed = true;
+    }
+    if armor.draft_meters.is_some() {
+        if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
+            zone_changed = true;
+        }
+        if pane.show_waterline {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label("Opacity");
+                if ui.add(egui::Slider::new(&mut pane.waterline_opacity, 0.05..=1.0).fixed_decimals(2)).changed() {
+                    zone_changed = true;
+                }
+            });
+        }
+    }
+    if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
+        zone_changed = true;
+    }
+    ui.horizontal(|ui| {
+        ui.label("Armor Opacity");
+        if ui.add(egui::Slider::new(&mut pane.armor_opacity, 0.1..=1.0).fixed_decimals(2)).changed() {
+            zone_changed = true;
+        }
+    });
+    zone_changed
+}
+
+/// Handle viewport hover (tooltip + highlight), click-to-hide, and right-click context menu.
+/// Returns true if visibility changed (zone_changed).
+pub(crate) fn handle_plate_interaction(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    pane: &mut ArmorPane,
+    device: &wgpu::Device,
+    translate_part: &dyn Fn(&str) -> String,
+    allow_click_toggle: bool,
+    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
+) -> bool {
+    let mut zone_changed = false;
+
+    // Picking on hover
+    let mut hovered_plate_key: Option<PlateKey> = None;
+    let context_menu_open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(response));
+    if response.hovered() {
+        if let Some(hover_pos) = response.hover_pos() {
+            if let Some(hit) = pane.viewport.pick(hover_pos, response.rect) {
+                let tooltip = pane
+                    .mesh_triangle_info
+                    .iter()
+                    .find(|(id, _)| *id == hit.mesh_id)
+                    .and_then(|(_, infos)| infos.get(hit.triangle_index));
+
+                if let Some(tooltip) = tooltip {
+                    let thickness_key = (tooltip.thickness_mm * 10.0).round() as i32;
+                    hovered_plate_key = Some((tooltip.zone.clone(), tooltip.material_name.clone(), thickness_key));
+                    pane.hovered_info = Some(tooltip.clone());
+                    if !context_menu_open {
+                        egui::containers::Tooltip::for_widget(response).at_pointer().show(|ui| {
+                            show_armor_tooltip(ui, tooltip, comparison_ships, ifhe_enabled, translate_part);
+                        });
+                    }
+                } else {
+                    pane.hovered_info = None;
+                }
+            } else {
+                pane.hovered_info = None;
+            }
+        }
+    }
+
+    // Click to toggle plate visibility
+    if allow_click_toggle && response.clicked() {
+        if let Some(ref key) = hovered_plate_key {
+            pane.undo_stack.push(VisibilitySnapshot {
+                part_visibility: pane.part_visibility.clone(),
+                plate_visibility: pane.plate_visibility.clone(),
+            });
+            let currently_visible = pane.plate_visibility.get(key).copied().unwrap_or(true);
+            pane.plate_visibility.insert(key.clone(), !currently_visible);
+            zone_changed = true;
+        }
+    }
+
+    // Right-click context menu
+    if response.secondary_clicked() {
+        pane.context_menu_key = hovered_plate_key.clone();
+    } else if !context_menu_open {
+        pane.context_menu_key = None;
+    }
+
+    if let Some(ref ctx_key) = pane.context_menu_key.clone() {
+        let ctx_key = ctx_key.clone();
+        let part_key = (ctx_key.0.clone(), ctx_key.1.clone());
+        let thickness = ctx_key.2 as f32 / 10.0;
+        let ctx_name = translate_part(&ctx_key.1);
+        response.context_menu(|ui| {
+            let plate_visible = pane.plate_visibility.get(&ctx_key).copied().unwrap_or(true);
+            let plate_label = if plate_visible {
+                format!("Hide {:.0} mm {}", thickness, ctx_name)
+            } else {
+                format!("Show {:.0} mm {}", thickness, ctx_name)
+            };
+            if ui.button(plate_label).clicked() {
+                pane.undo_stack.push(VisibilitySnapshot {
+                    part_visibility: pane.part_visibility.clone(),
+                    plate_visibility: pane.plate_visibility.clone(),
+                });
+                pane.plate_visibility.insert(ctx_key.clone(), !plate_visible);
+                zone_changed = true;
+                ui.close();
+            }
+
+            let hidden_count = pane.plate_visibility.values().filter(|&&v| !v).count();
+            if hidden_count > 0 {
+                if ui.button(format!("Show all hidden plates ({})", hidden_count)).clicked() {
+                    pane.undo_stack.push(VisibilitySnapshot {
+                        part_visibility: pane.part_visibility.clone(),
+                        plate_visibility: pane.plate_visibility.clone(),
+                    });
+                    pane.plate_visibility.clear();
+                    zone_changed = true;
+                    ui.close();
+                }
+            }
+
+            ui.separator();
+
+            if ui.button(format!("Disable {}", ctx_name)).clicked() {
+                pane.undo_stack.push(VisibilitySnapshot {
+                    part_visibility: pane.part_visibility.clone(),
+                    plate_visibility: pane.plate_visibility.clone(),
+                });
+                pane.part_visibility.insert(part_key, false);
+                zone_changed = true;
+                ui.close();
+            }
+        });
+    }
+
+    // Update hover highlight overlay
+    let current_hover = pane.hover_highlight.as_ref().map(|(k, _)| k.clone());
+    if hovered_plate_key != current_hover {
+        if let Some((_, old_id)) = pane.hover_highlight.take() {
+            pane.viewport.remove_mesh(old_id);
+        }
+        if let Some(ref key) = hovered_plate_key {
+            if let Some(armor) = pane.loaded_armor.take() {
+                let mesh_id = upload_plate_highlight(pane, &armor, key, device, [1.0, 1.0, 1.0, 0.35]);
+                pane.hover_highlight = Some((key.clone(), mesh_id));
+                pane.loaded_armor = Some(armor);
+            }
+        }
+    }
+
+    zone_changed
 }
