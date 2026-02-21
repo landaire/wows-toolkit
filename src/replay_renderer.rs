@@ -492,6 +492,10 @@ pub struct ReplaySalvoEvent {
     pub attacker_entity_id: EntityId,
     pub params_id: wowsunpack::game_types::GameParamId,
     pub shots: Vec<ReplayShotData>,
+    /// Target ship's yaw (radians) at the time this salvo was created.
+    pub target_ship_yaw: f32,
+    /// Target ship's world position at the time this salvo was created.
+    pub target_ship_position: WorldPos,
 }
 
 /// Per-shell origin/target in world space (BigWorld coordinates).
@@ -516,9 +520,6 @@ pub struct ReplayPlayerInfo {
 pub struct RealtimeArmorBridge {
     pub players: Vec<ReplayPlayerInfo>,
     pub salvos: Vec<ReplaySalvoEvent>,
-    pub ship_yaws: HashMap<EntityId, f32>,
-    /// World-space positions of ships (BigWorld coordinates), updated each tick.
-    pub ship_positions: HashMap<EntityId, WorldPos>,
     pub last_clock: f32,
     /// The entity this bridge tracks (the ship whose armor viewer is open).
     pub target_entity_id: EntityId,
@@ -529,21 +530,11 @@ pub struct RealtimeArmorBridge {
 
 impl RealtimeArmorBridge {
     pub fn new(target_entity_id: EntityId) -> Self {
-        Self {
-            players: Vec::new(),
-            salvos: Vec::new(),
-            ship_yaws: HashMap::new(),
-            ship_positions: HashMap::new(),
-            last_clock: 0.0,
-            target_entity_id,
-            generation: 0,
-        }
+        Self { players: Vec::new(), salvos: Vec::new(), last_clock: 0.0, target_entity_id, generation: 0 }
     }
 
     pub fn clear_salvos(&mut self) {
         self.salvos.clear();
-        self.ship_yaws.clear();
-        self.ship_positions.clear();
         self.last_clock = 0.0;
         self.generation += 1;
     }
@@ -1003,8 +994,6 @@ fn playback_thread(
     struct BridgeStaging {
         target_entity_id: EntityId,
         salvos: Vec<ReplaySalvoEvent>,
-        ship_yaws: HashMap<EntityId, f32>,
-        ship_positions: HashMap<EntityId, WorldPos>,
         last_clock: f32,
     }
 
@@ -1014,13 +1003,7 @@ fn playback_thread(
             .iter()
             .map(|b| {
                 let locked = b.lock();
-                BridgeStaging {
-                    target_entity_id: locked.target_entity_id,
-                    salvos: Vec::new(),
-                    ship_yaws: HashMap::new(),
-                    ship_positions: HashMap::new(),
-                    last_clock: 0.0,
-                }
+                BridgeStaging { target_entity_id: locked.target_entity_id, salvos: Vec::new(), last_clock: 0.0 }
             })
             .collect()
     }
@@ -1045,8 +1028,6 @@ fn playback_thread(
                 b.salvos.extend(staged.salvos);
                 b.generation += 1;
             }
-            b.ship_yaws = staged.ship_yaws;
-            b.ship_positions = staged.ship_positions;
             b.last_clock = staged.last_clock;
         }
     }
@@ -1064,21 +1045,19 @@ fn playback_thread(
             return;
         }
 
-        let positions = controller.ship_positions();
         let active_shots = controller.active_shots();
         let new_count = active_shots.len();
 
         if new_count <= *cursor {
-            // No new shots — just update yaws and positions
+            // No new shots — just update clock
             for s in staging.iter_mut() {
                 s.last_clock = clock;
-                for (eid, pos) in positions {
-                    s.ship_yaws.insert(*eid, pos.yaw);
-                    s.ship_positions.insert(*eid, pos.position);
-                }
             }
             return;
         }
+
+        let positions = controller.ship_positions();
+        let minimap_positions = controller.minimap_positions();
 
         // receiveArtilleryShots is called on the replay owner's avatar entity for
         // ALL shots visible to that player — NOT just shots aimed at them. The
@@ -1124,14 +1103,8 @@ fn playback_thread(
             let flight_time = if avg_speed > 0.0 { flight_distance_m / avg_speed } else { 0.0 };
             let estimated_impact_clock = clock + flight_time;
 
-            let salvo_event = ReplaySalvoEvent {
-                clock,
-                estimated_impact_clock,
-                target_entity_id: EntityId::from(0u32), // placeholder, set per-bridge below
-                attacker_entity_id: shot.salvo.owner_id,
-                params_id: shot.salvo.params_id,
-                shots: shot.salvo.shots.iter().map(|s| ReplayShotData { origin: s.origin, target: s.target }).collect(),
-            };
+            let shot_data: Vec<ReplayShotData> =
+                shot.salvo.shots.iter().map(|s| ReplayShotData { origin: s.origin, target: s.target }).collect();
 
             for s in staging.iter_mut() {
                 let target_eid = s.target_entity_id;
@@ -1154,9 +1127,25 @@ fn playback_thread(
                 }
 
                 total_passed += 1;
-                let mut event = salvo_event.clone();
-                event.target_entity_id = target_eid;
-                s.salvos.push(event);
+                // Prefer minimap heading (accurate for all ships) over Position
+                // packet yaw (often ~0 for non-player entities).
+                // Minimap heading: degrees, compass (0=N, CW).
+                // Math yaw: radians, 0=E (+X), CCW.
+                // Conversion: yaw = PI/2 - heading.to_radians()
+                let target_yaw = minimap_positions
+                    .get(&target_eid)
+                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians())
+                    .unwrap_or(tp.yaw);
+                s.salvos.push(ReplaySalvoEvent {
+                    clock,
+                    estimated_impact_clock,
+                    target_entity_id: target_eid,
+                    attacker_entity_id: shot.salvo.owner_id,
+                    params_id: shot.salvo.params_id,
+                    shots: shot_data.clone(),
+                    target_ship_yaw: target_yaw,
+                    target_ship_position: tp.position,
+                });
             }
         }
 
@@ -1174,10 +1163,6 @@ fn playback_thread(
 
         for s in staging.iter_mut() {
             s.last_clock = clock;
-            for (eid, pos) in positions {
-                s.ship_yaws.insert(*eid, pos.yaw);
-                s.ship_positions.insert(*eid, pos.position);
-            }
         }
     }
 

@@ -318,8 +318,6 @@ impl RealtimeArmorViewer {
         );
 
         let new_salvos: Vec<ReplaySalvoEvent> = bridge.salvos[self.processed_salvo_count..].to_vec();
-        let ship_yaws = bridge.ship_yaws.clone();
-        let ship_positions = bridge.ship_positions.clone();
         let players = bridge.players.clone();
         drop(bridge);
 
@@ -388,13 +386,24 @@ impl RealtimeArmorViewer {
             let range: Meters = avg_origin.distance_xz(&avg_target);
             let azimuth = dz.atan2(dx);
 
-            // Get target ship yaw and world position
-            let ship_yaw = ship_yaws.get(&self.target_entity_id).copied().unwrap_or(0.0);
-            let ship_world_pos = ship_positions.get(&self.target_entity_id).copied().unwrap_or_default();
+            // Get target ship yaw and world position (captured at salvo creation time)
+            let ship_yaw = salvo.target_ship_yaw;
+            let ship_world_pos = salvo.target_ship_position;
             let relative_angle = azimuth - ship_yaw;
 
-            // Compute approach direction in model space
-            let approach_xz = [relative_angle.cos(), 0.0_f32, relative_angle.sin()];
+            // Compute approach direction in model space.
+            //
+            // BigWorld world space (yaw=0): bow = +X (east), +Z = south, up = +Y.
+            //   Yaw increases counter-clockwise.
+            // Model space: bow = +Z, starboard = +X, up = +Y.
+            //
+            // Ship-local world direction: (cos θ, sin θ) where θ = relative_angle.
+            // World→Model rotation (90° about Y):
+            //   model_x = world_z
+            //   model_z = world_x
+            //
+            // So model approach = (sin θ, cos θ).
+            let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
 
             // Solve ballistics for this range
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
@@ -432,19 +441,22 @@ impl RealtimeArmorViewer {
             let world_offset_x = avg_target.x - ship_world_pos.x;
             let world_offset_z = avg_target.z - ship_world_pos.z;
 
-            // Rotate world offset into model space by -ship_yaw
-            // (undoing the ship's rotation to get back to model-aligned coords)
+            // Rotate world offset into model space.
+            // Step 1: undo ship yaw (world-aligned, bow along +X when yaw=0)
             let neg_yaw_cos = (-ship_yaw).cos();
             let neg_yaw_sin = (-ship_yaw).sin();
-            let rotated_x = world_offset_x * neg_yaw_cos - world_offset_z * neg_yaw_sin;
-            let rotated_z = world_offset_x * neg_yaw_sin + world_offset_z * neg_yaw_cos;
+            let unrotated_x = world_offset_x * neg_yaw_cos - world_offset_z * neg_yaw_sin;
+            let unrotated_z = world_offset_x * neg_yaw_sin + world_offset_z * neg_yaw_cos;
+            // Step 2: World→Model (90° about Y):
+            //   model_x = world_z, model_z = world_x
+            let rotated_x = unrotated_z;
+            let rotated_z = unrotated_x;
 
             // The ray through-point is model_center offset by the rotated world offset.
             // Clamp XZ to model bounds so dispersion/aiming scatter doesn't push
             // the ray outside the hull entirely.
-            // Use Y=0.0 (waterline) instead of model_center Y, because at typical
-            // engagement ranges shells arrive nearly flat and hit the belt/hull
-            // near the waterline, not the superstructure.
+            // Use Y=0.0 (waterline) because at typical engagement ranges shells
+            // arrive nearly flat and hit the belt/hull near the waterline.
             let (clamped_x, clamped_z) = if let Some(ref armor) = self.pane.loaded_armor {
                 let cx = (model_center[0] + rotated_x).clamp(armor.bounds.0[0], armor.bounds.1[0]);
                 let cz = (model_center[2] + rotated_z).clamp(armor.bounds.0[2], armor.bounds.1[2]);
@@ -470,9 +482,11 @@ impl RealtimeArmorViewer {
                     )
                 })
                 .unwrap_or_default();
-            tracing::debug!(
-                "RealtimeArmorViewer: ray cast — shell={} dir=[{:.3},{:.3},{:.3}] through(clamped)=[{:.2},{:.2},{:.2}] through(raw)=[{:.2},{:.2},{:.2}] world_off=[{:.2},{:.2}] rotated=[{:.2},{:.2}] range={:.0}m hits={} {}",
+            tracing::info!(
+                "RealtimeArmorViewer: ray cast — shell={} approach_xz=[{:.3},{:.3}] dir=[{:.3},{:.3},{:.3}] through(clamped)=[{:.2},{:.2},{:.2}] through(raw)=[{:.2},{:.2},{:.2}] world_off=[{:.2},{:.2}] rotated=[{:.2},{:.2}] range={:.0}m hits={} azimuth={:.1}° ship_yaw={:.1}° rel_angle={:.1}° origin=({:.1},{:.1}) target=({:.1},{:.1}) ship_pos=({:.1},{:.1}) {}",
                 shell.name,
+                approach_xz[0],
+                approach_xz[2],
                 shell_dir[0],
                 shell_dir[1],
                 shell_dir[2],
@@ -488,6 +502,15 @@ impl RealtimeArmorViewer {
                 rotated_z,
                 range.value(),
                 all_hits.len(),
+                azimuth.to_degrees(),
+                ship_yaw.to_degrees(),
+                relative_angle.to_degrees(),
+                avg_origin.x,
+                avg_origin.z,
+                avg_target.x,
+                avg_target.z,
+                ship_world_pos.x,
+                ship_world_pos.z,
                 bounds_str,
             );
 
@@ -724,6 +747,7 @@ impl RealtimeArmorViewer {
                     }
                 }
                 self.pane.load_receiver = None;
+                warn!("Ship loaded! we need repaint");
                 self.needs_repaint = true;
             }
         }
