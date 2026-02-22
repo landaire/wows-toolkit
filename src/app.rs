@@ -1093,6 +1093,33 @@ impl WowsToolkitApp {
                 if let Ok(result) = rx.try_recv() {
                     match result {
                         Ok(assets) => {
+                            // Build ship catalog if not already built (same logic as build_armor_viewer_tab)
+                            if self.tab_state.armor_viewer.ship_catalog.is_none() {
+                                if let Some(ref wows_data) = self.tab_state.world_of_warships_data {
+                                    let wd = wows_data.read();
+                                    if let Some(metadata) = wd.game_metadata.as_ref() {
+                                        let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
+                                        for nation_group in &catalog.nations {
+                                            if !self
+                                                .tab_state
+                                                .armor_viewer
+                                                .nation_flag_textures
+                                                .contains_key(&nation_group.nation)
+                                            {
+                                                if let Some(asset) =
+                                                    crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
+                                                {
+                                                    self.tab_state
+                                                        .armor_viewer
+                                                        .nation_flag_textures
+                                                        .insert(nation_group.nation.clone(), asset);
+                                                }
+                                            }
+                                        }
+                                        self.tab_state.armor_viewer.ship_catalog = Some(std::sync::Arc::new(catalog));
+                                    }
+                                }
+                            }
                             self.tab_state.armor_viewer.ship_assets =
                                 crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
                         }

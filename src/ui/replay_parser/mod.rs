@@ -2701,16 +2701,29 @@ impl ToolkitTabViewer<'_> {
 
                 if !self.tab_state.settings.wows_dir.is_empty()
                     && replay_file.source_path.is_some()
-                    && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
                 {
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(
-                            egui::Id::new("pending_confirmation_request"),
-                            Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                replay_path: replay_file.source_path.clone().unwrap(),
-                            }),
-                        );
-                    });
+                    let alt_held = ui.input(|i| i.modifiers.alt);
+                    let label = if alt_held {
+                        icon_str!(icons::KEYBOARD, "Show Replay Controls")
+                    } else {
+                        icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+                    };
+                    if ui.button(label).clicked() {
+                        if alt_held {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                            });
+                        } else {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(
+                                    egui::Id::new("pending_confirmation_request"),
+                                    Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                        replay_path: replay_file.source_path.clone().unwrap(),
+                                    }),
+                                );
+                            });
+                        }
+                    }
                 }
 
                 if self.tab_state.wows_data_map.is_some()
@@ -2929,18 +2942,30 @@ impl ToolkitTabViewer<'_> {
                                 util::open_file_explorer(&path_clone);
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if !wows_dir.is_empty()
-                                && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
-                            {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        egui::Id::new("pending_confirmation_request"),
-                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                            replay_path: path_clone.to_path_buf(),
-                                        }),
-                                    );
-                                });
-                                ui.close_kind(UiKind::Menu);
+                            if !wows_dir.is_empty() {
+                                let alt_held = ui.input(|i| i.modifiers.alt);
+                                let label = if alt_held {
+                                    icon_str!(icons::KEYBOARD, "Show Replay Controls")
+                                } else {
+                                    icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+                                };
+                                if ui.button(label).clicked() {
+                                    if alt_held {
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                                        });
+                                    } else {
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(
+                                                egui::Id::new("pending_confirmation_request"),
+                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                                    replay_path: path_clone.to_path_buf(),
+                                                }),
+                                            );
+                                        });
+                                    }
+                                    ui.close_kind(UiKind::Menu);
+                                }
                             }
                             if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                 ui.ctx().data_mut(|data| {
@@ -3194,18 +3219,33 @@ impl ToolkitTabViewer<'_> {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if !wows_dir.is_empty()
-                                        && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
-                                    {
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(
-                                                egui::Id::new("pending_confirmation_request"),
-                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                                    replay_path: path_clone.to_path_buf(),
-                                                }),
-                                            );
-                                        });
-                                        ui.close_kind(UiKind::Menu);
+                                    if !wows_dir.is_empty() {
+                                        let alt_held = ui.input(|i| i.modifiers.alt);
+                                        let label = if alt_held {
+                                            icon_str!(icons::KEYBOARD, "Show Replay Controls")
+                                        } else {
+                                            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+                                        };
+                                        if ui.button(label).clicked() {
+                                            if alt_held {
+                                                ui.ctx().data_mut(|data| {
+                                                    data.insert_temp(
+                                                        egui::Id::new("open_replay_controls_window"),
+                                                        true,
+                                                    );
+                                                });
+                                            } else {
+                                                ui.ctx().data_mut(|data| {
+                                                    data.insert_temp(
+                                                        egui::Id::new("pending_confirmation_request"),
+                                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                                            replay_path: path_clone.to_path_buf(),
+                                                        }),
+                                                    );
+                                                });
+                                            }
+                                            ui.close_kind(UiKind::Menu);
+                                        }
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                         if let Some(replay_weak) = replay_weak2.as_ref() {
@@ -3507,18 +3547,33 @@ impl ToolkitTabViewer<'_> {
                                         util::open_file_explorer(&path_clone);
                                         ui.close_kind(UiKind::Menu);
                                     }
-                                    if !wows_dir.is_empty()
-                                        && ui.button(icon_str!(icons::GAME_CONTROLLER, "Open in Game")).clicked()
-                                    {
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(
-                                                egui::Id::new("pending_confirmation_request"),
-                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                                    replay_path: path_clone.to_path_buf(),
-                                                }),
-                                            );
-                                        });
-                                        ui.close_kind(UiKind::Menu);
+                                    if !wows_dir.is_empty() {
+                                        let alt_held = ui.input(|i| i.modifiers.alt);
+                                        let label = if alt_held {
+                                            icon_str!(icons::KEYBOARD, "Show Replay Controls")
+                                        } else {
+                                            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+                                        };
+                                        if ui.button(label).clicked() {
+                                            if alt_held {
+                                                ui.ctx().data_mut(|data| {
+                                                    data.insert_temp(
+                                                        egui::Id::new("open_replay_controls_window"),
+                                                        true,
+                                                    );
+                                                });
+                                            } else {
+                                                ui.ctx().data_mut(|data| {
+                                                    data.insert_temp(
+                                                        egui::Id::new("pending_confirmation_request"),
+                                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                                                            replay_path: path_clone.to_path_buf(),
+                                                        }),
+                                                    );
+                                                });
+                                            }
+                                            ui.close_kind(UiKind::Menu);
+                                        }
                                     }
                                     if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
                                         if let Some(replay_weak) = replay_weak2.as_ref() {
@@ -3691,6 +3746,8 @@ impl ToolkitTabViewer<'_> {
         self.show_session_stats_window(ui);
         self.show_session_stats_chart_window(ui);
         self.show_confirmation_dialog(ui);
+        self.pick_up_replay_controls_request(ui.ctx());
+        self.show_replay_controls_window(ui.ctx());
     }
 
     pub fn show_session_stats_window(&mut self, ui: &mut egui::Ui) {
@@ -4249,6 +4306,7 @@ impl ToolkitTabViewer<'_> {
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
                 let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
                 let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
+                self.open_replay_controls_window();
             }
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
                 self.tab_state.session_stats.clear();
@@ -4305,5 +4363,86 @@ impl ToolkitTabViewer<'_> {
             );
             self.tab_state.replay_renderers.lock().push(viewer);
         }
+    }
+
+    /// Called from the main button (non-closure) path.
+    fn open_replay_controls_window(&mut self) {
+        // Parse from VFS on first use, then cache
+        if self.tab_state.replay_controls_cache.is_none() {
+            if let Some(map) = &self.tab_state.wows_data_map {
+                let result = map.with_builds(|builds| {
+                    for data in builds.values() {
+                        let data = data.read();
+                        let path = "system/data/commands.scheme.xml";
+                        let mut buf = Vec::new();
+                        if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
+                            use std::io::Read;
+                            if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                                let groups = crate::replay_renderer::parse_commands_scheme(&buf);
+                                if !groups.is_empty() {
+                                    return Some(groups);
+                                }
+                            }
+                        }
+                    }
+                    None
+                });
+                self.tab_state.replay_controls_cache = result;
+            }
+        }
+        self.tab_state.show_replay_controls = true;
+    }
+
+    /// Pick up the temp data flag set from context menu closures.
+    fn pick_up_replay_controls_request(&mut self, ctx: &egui::Context) {
+        let request: Option<bool> = ctx.data_mut(|data| data.remove_temp(egui::Id::new("open_replay_controls_window")));
+        if request == Some(true) {
+            self.open_replay_controls_window();
+        }
+    }
+
+    /// Draw the standalone replay controls reference window.
+    fn show_replay_controls_window(&mut self, ctx: &egui::Context) {
+        if !self.tab_state.show_replay_controls {
+            return;
+        }
+
+        egui::Window::new("Replay Controls")
+            .open(&mut self.tab_state.show_replay_controls)
+            .collapsible(true)
+            .resizable(true)
+            .default_width(360.0)
+            .show(ctx, |ui| {
+                if let Some(groups) = &self.tab_state.replay_controls_cache {
+                    egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.7).show(ui, |ui| {
+                        for group in groups {
+                            ui.add_space(2.0);
+                            ui.label(egui::RichText::new(group.title).strong());
+                            egui::Grid::new(group.title).num_columns(2).spacing([16.0, 2.0]).striped(true).show(
+                                ui,
+                                |ui| {
+                                    for cmd in &group.commands {
+                                        ui.label(&cmd.label);
+                                        let binding = if let Some(ref k2) = cmd.key2 {
+                                            format!("{}  /  {}", cmd.key1, k2)
+                                        } else {
+                                            cmd.key1.clone()
+                                        };
+                                        ui.label(
+                                            egui::RichText::new(binding)
+                                                .monospace()
+                                                .color(egui::Color32::from_rgb(180, 210, 255)),
+                                        );
+                                        ui.end_row();
+                                    }
+                                },
+                            );
+                            ui.separator();
+                        }
+                    });
+                } else {
+                    ui.label("Controls not available (commands.scheme.xml not found in game files).");
+                }
+            });
     }
 }

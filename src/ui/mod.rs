@@ -1,3 +1,4 @@
+pub mod analysis_panel;
 pub mod armor_viewer;
 pub mod file_unpacker;
 pub mod mod_manager;

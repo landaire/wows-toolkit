@@ -20,7 +20,7 @@ use crate::armor_viewer::constants::*;
 use crate::armor_viewer::state::{ArmorPane, LoadedShipArmor, StoredTrajectory};
 use crate::icon_str;
 use crate::icons;
-use crate::replay_renderer::{RealtimeArmorBridge, ReplayPlayerInfo, ReplaySalvoEvent, ReplayShotData};
+use crate::replay_renderer::{RealtimeArmorBridge, ReplayPlayerInfo};
 use crate::viewport_3d::GpuPipeline;
 
 /// A realtime armor viewer window spawned from the replay renderer.
@@ -52,9 +52,6 @@ pub struct RealtimeArmorViewer {
     /// Selected attacker entity ID. `None` = show all enemies.
     selected_attacker: Option<wows_replays::types::EntityId>,
 
-    /// How many salvos we've consumed from the bridge.
-    processed_salvo_count: usize,
-
     /// Last seen bridge generation. When this changes, the bridge was rebuilt
     /// (seek/rebuild) and we need to reset our cursor and reprocess.
     bridge_generation: u64,
@@ -76,6 +73,9 @@ pub struct RealtimeArmorViewer {
 
     /// Target ship's vehicle param (for loading).
     target_vehicle: Arc<wowsunpack::game_params::types::Param>,
+
+    /// How many shot hits we've consumed from the bridge.
+    processed_hit_count: usize,
 
     /// Set by any method that changes visible state. Checked and cleared by
     /// the viewport closure to decide whether to request a repaint.
@@ -127,7 +127,6 @@ impl RealtimeArmorViewer {
             render_state,
             enemy_players: Vec::new(),
             selected_attacker: None,
-            processed_salvo_count: 0,
             bridge_generation: 0,
             shell_cache: HashMap::new(),
             ship_loaded: false,
@@ -135,6 +134,7 @@ impl RealtimeArmorViewer {
             salvo_log: Vec::new(),
             selected_salvo_id: None,
             target_vehicle: target_player.vehicle.clone(),
+            processed_hit_count: 0,
             needs_repaint: true,
         }
     }
@@ -265,6 +265,8 @@ impl RealtimeArmorViewer {
                     hull_meshes,
                     hull_part_groups,
                     draft_meters,
+                    splash_data: None,
+                    hit_locations: None,
                 })
             })();
             let _ = tx.send(result);
@@ -273,157 +275,129 @@ impl RealtimeArmorViewer {
         self.pane.load_receiver = Some(rx);
     }
 
-    /// Process new salvos from the bridge and create trajectories.
-    fn process_new_salvos(&mut self) {
+    /// Detect bridge generation changes (seek/rebuild) and clear+reprocess if needed.
+    fn check_bridge_generation(&mut self) {
         let bridge = self.bridge.lock();
 
-        // The bridge salvo vec is replaced every frame (rebuild_live_state! re-parses
-        // from scratch). The generation counter tracks this. Since the parse is
-        // deterministic, salvos 0..N in the new vec are identical to the old vec.
-        // We just update our generation tracker and keep our cursor valid.
-        //
-        // If the new vec is shorter than our cursor (e.g. user seeked backward),
-        // we need to clear and reprocess from the current window.
         if bridge.generation != self.bridge_generation {
             let old_gen = self.bridge_generation;
             self.bridge_generation = bridge.generation;
             tracing::debug!(
-                "RealtimeArmorViewer: generation changed {old_gen} -> {} | bridge salvos={} cursor={} clock={:.1}",
+                "RealtimeArmorViewer: generation changed {old_gen} -> {} | bridge hits={} cursor={} clock={:.1}",
                 bridge.generation,
-                bridge.salvos.len(),
-                self.processed_salvo_count,
+                bridge.shot_hits.len(),
+                self.processed_hit_count,
                 bridge.last_clock,
             );
-            if bridge.salvos.len() < self.processed_salvo_count {
-                // Seeked backward: salvo vec shrank. Clear and reprocess.
+            if bridge.shot_hits.len() < self.processed_hit_count {
                 tracing::debug!("RealtimeArmorViewer: seek backward detected, clearing and reprocessing");
-                self.processed_salvo_count = 0;
+                self.processed_hit_count = 0;
                 drop(bridge);
                 self.clear_and_reprocess();
                 self.needs_repaint = true;
-                return;
             }
         }
+    }
 
-        let new_count = bridge.salvos.len();
-        if new_count <= self.processed_salvo_count {
+    /// Process new shot hits from the bridge (server-authoritative impact data).
+    ///
+    /// Each `ResolvedShotHit` contains the actual world-space impact position and
+    /// (optionally) terminal ballistics info (velocity, impact angle, detonator state).
+    /// We use this to create trajectories with accurate impact positioning instead of
+    /// relying solely on ballistic simulation.
+    fn process_new_shot_hits(&mut self) {
+        use crate::viewport_3d::camera::{normalize, scale, sub};
+
+        let bridge = self.bridge.lock();
+
+        let new_count = bridge.shot_hits.len();
+        if new_count <= self.processed_hit_count {
             return;
         }
 
-        tracing::debug!(
-            "RealtimeArmorViewer: processing {} new salvos (total in bridge: {}, cursor was: {})",
-            new_count - self.processed_salvo_count,
-            new_count,
-            self.processed_salvo_count,
-        );
-
-        let new_salvos: Vec<ReplaySalvoEvent> = bridge.salvos[self.processed_salvo_count..].to_vec();
+        let new_hits = bridge.shot_hits[self.processed_hit_count..].to_vec();
         let players = bridge.players.clone();
         drop(bridge);
 
-        let mut skipped_target = 0u32;
-        let mut skipped_attacker = 0u32;
-        let mut skipped_friendly = 0u32;
-
-        for salvo in &new_salvos {
-            // Only show salvos targeting our ship
-            if salvo.target_entity_id != self.target_entity_id {
-                skipped_target += 1;
-                self.processed_salvo_count += 1;
-                continue;
-            }
+        for hit in &new_hits {
+            self.processed_hit_count += 1;
 
             // Filter by selected attacker
             if let Some(ref sel) = self.selected_attacker {
-                if salvo.attacker_entity_id != *sel {
-                    skipped_attacker += 1;
-                    self.processed_salvo_count += 1;
+                if hit.hit.owner_id != *sel {
                     continue;
                 }
             } else {
-                // "All Enemies" mode: skip friendly fire.
-                // If we don't know the attacker yet, assume enemy (don't discard).
-                let attacker_friendly = players
-                    .iter()
-                    .find(|p| p.entity_id == salvo.attacker_entity_id)
-                    .map(|p| p.is_friendly)
-                    .unwrap_or(false);
+                // "All Enemies" mode: skip friendly fire
+                let attacker_friendly =
+                    players.iter().find(|p| p.entity_id == hit.hit.owner_id).map(|p| p.is_friendly).unwrap_or(false);
                 if attacker_friendly {
-                    skipped_friendly += 1;
-                    self.processed_salvo_count += 1;
                     continue;
                 }
             }
 
-            tracing::debug!(
-                "RealtimeArmorViewer: salvo passed filters — clock={:.1} attacker={:?} target={:?} shots={}",
-                salvo.clock,
-                salvo.attacker_entity_id,
-                salvo.target_entity_id,
-                salvo.shots.len(),
-            );
-
-            // Resolve shell info
-            let shell_info = self
-                .shell_cache
-                .entry(salvo.params_id)
-                .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(salvo.params_id))
-                .clone();
+            // Resolve shell info from the matched salvo's params_id
+            let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
+                self.shell_cache
+                    .entry(pid)
+                    .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
+                    .clone()
+            });
 
             let Some(shell) = shell_info else {
-                tracing::warn!(
-                    "RealtimeArmorViewer: could not resolve shell for params_id={:?}, skipping salvo",
-                    salvo.params_id,
-                );
-                self.processed_salvo_count += 1;
                 continue;
             };
 
-            // Compute approach direction from average shot origin→target
-            let (avg_origin, avg_target) = average_shot_positions(&salvo.shots);
-            let dx = avg_target.x - avg_origin.x;
-            let dz = avg_target.z - avg_origin.z;
-            let range: Meters = avg_origin.distance_xz(&avg_target);
-            let azimuth = dz.atan2(dx);
+            // Victim ship position and yaw come directly from the ResolvedShotHit
+            // (captured at impact time by the controller).
+            let ship_yaw = hit.victim_yaw;
+            let ship_world_pos = hit.victim_position;
+            // Shot origins come directly from the married salvo
+            let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
 
-            // Get target ship yaw and world position (captured at salvo creation time)
-            let ship_yaw = salvo.target_ship_yaw;
-            let ship_world_pos = salvo.target_ship_position;
-            let relative_angle = azimuth - ship_yaw;
+            // Use the actual impact position from the server
+            let impact_pos = hit.hit.position;
+            let neg_yaw_cos = (-ship_yaw).cos();
+            let neg_yaw_sin = (-ship_yaw).sin();
 
-            // Compute approach direction in model space.
-            //
-            // BigWorld world space (yaw=0): bow = +X (east), +Z = south, up = +Y.
-            //   Yaw increases counter-clockwise.
-            // Model space: bow = +Z, starboard = +X, up = +Y.
-            //
-            // Ship-local world direction: (cos θ, sin θ) where θ = relative_angle.
-            // World→Model rotation (90° about Y):
-            //   model_x = world_z
-            //   model_z = world_x
-            //
-            // So model approach = (sin θ, cos θ).
-            let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
+            // Determine shell direction: prefer terminal ballistics if available,
+            // otherwise compute from salvo origin → actual impact position.
+            let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
+                let vel = tb.velocity;
+                let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
+                if speed < 1.0 {
+                    continue;
+                }
+                let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
+                let local_dir_x = world_dir[0] * neg_yaw_cos - world_dir[2] * neg_yaw_sin;
+                let local_dir_z = world_dir[0] * neg_yaw_sin + world_dir[2] * neg_yaw_cos;
+                normalize([local_dir_z, world_dir[1], local_dir_x])
+            } else if !salvo_shots.is_empty() {
+                // Compute direction from average shot origin to actual impact position
+                let n = salvo_shots.len() as f32;
+                let avg_origin: WorldPos = salvo_shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
+                let dx = impact_pos.x - avg_origin.x;
+                let dz = impact_pos.z - avg_origin.z;
+                let azimuth = dz.atan2(dx);
+                let relative_angle = azimuth - ship_yaw;
+                let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
 
-            // Solve ballistics for this range
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-            let impact = crate::armor_viewer::ballistics::solve_for_range(&params, range);
-
-            // Compute shell direction with vertical component from ballistic impact
-            use crate::viewport_3d::camera::normalize;
-            let shell_dir = if let Some(ref imp) = impact {
-                let horiz_angle = imp.impact_angle_horizontal as f32;
-                let cos_h = horiz_angle.cos();
-                let sin_h = horiz_angle.sin();
-                normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h])
+                // Solve ballistics for vertical angle
+                let range: Meters = avg_origin.distance_xz(&impact_pos);
+                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
+                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, range);
+                if let Some(ref imp) = impact_result {
+                    let horiz_angle = imp.impact_angle_horizontal as f32;
+                    let cos_h = horiz_angle.cos();
+                    let sin_h = horiz_angle.sin();
+                    normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h])
+                } else {
+                    normalize([approach_xz[0], 0.0, approach_xz[2]])
+                }
             } else {
-                normalize([approach_xz[0], 0.0, approach_xz[2]])
+                continue; // No way to determine shell direction
             };
 
-            // Compute model-space target point from the shell's world-space target.
-            // Both world positions and model coordinates are in BigWorld units (1 BW = 30m),
-            // so we transform the offset from world space → model space using the ship's yaw.
-            use crate::viewport_3d::camera::{scale, sub};
             let model_center = self
                 .pane
                 .loaded_armor
@@ -437,26 +411,14 @@ impl RealtimeArmorViewer {
                 })
                 .unwrap_or([0.0; 3]);
 
-            // World-space offset of the shell target from the ship's center (BW units)
-            let world_offset_x = avg_target.x - ship_world_pos.x;
-            let world_offset_z = avg_target.z - ship_world_pos.z;
-
-            // Rotate world offset into model space.
-            // Step 1: undo ship yaw (world-aligned, bow along +X when yaw=0)
-            let neg_yaw_cos = (-ship_yaw).cos();
-            let neg_yaw_sin = (-ship_yaw).sin();
+            // Transform impact position from world space to model space
+            let world_offset_x = impact_pos.x - ship_world_pos.x;
+            let world_offset_z = impact_pos.z - ship_world_pos.z;
             let unrotated_x = world_offset_x * neg_yaw_cos - world_offset_z * neg_yaw_sin;
             let unrotated_z = world_offset_x * neg_yaw_sin + world_offset_z * neg_yaw_cos;
-            // Step 2: World→Model (90° about Y):
-            //   model_x = world_z, model_z = world_x
-            let rotated_x = unrotated_z;
-            let rotated_z = unrotated_x;
+            let rotated_x = unrotated_z; // model_x = world_z
+            let rotated_z = unrotated_x; // model_z = world_x
 
-            // The ray through-point is model_center offset by the rotated world offset.
-            // Clamp XZ to model bounds so dispersion/aiming scatter doesn't push
-            // the ray outside the hull entirely.
-            // Use Y=0.0 (waterline) because at typical engagement ranges shells
-            // arrive nearly flat and hit the belt/hull near the waterline.
             let (clamped_x, clamped_z) = if let Some(ref armor) = self.pane.loaded_armor {
                 let cx = (model_center[0] + rotated_x).clamp(armor.bounds.0[0], armor.bounds.1[0]);
                 let cz = (model_center[2] + rotated_z).clamp(armor.bounds.0[2], armor.bounds.1[2]);
@@ -470,97 +432,82 @@ impl RealtimeArmorViewer {
             let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
             let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
 
-            let unclamped_through = [model_center[0] + rotated_x, model_center[1], model_center[2] + rotated_z];
-            let bounds_str = self
-                .pane
-                .loaded_armor
-                .as_ref()
-                .map(|a| {
-                    format!(
-                        "bounds X=[{:.2},{:.2}] Y=[{:.2},{:.2}] Z=[{:.2},{:.2}]",
-                        a.bounds.0[0], a.bounds.1[0], a.bounds.0[1], a.bounds.1[1], a.bounds.0[2], a.bounds.1[2],
-                    )
-                })
-                .unwrap_or_default();
             tracing::info!(
-                "RealtimeArmorViewer: ray cast — shell={} approach_xz=[{:.3},{:.3}] dir=[{:.3},{:.3},{:.3}] through(clamped)=[{:.2},{:.2},{:.2}] through(raw)=[{:.2},{:.2},{:.2}] world_off=[{:.2},{:.2}] rotated=[{:.2},{:.2}] range={:.0}m hits={} azimuth={:.1}° ship_yaw={:.1}° rel_angle={:.1}° origin=({:.1},{:.1}) target=({:.1},{:.1}) ship_pos=({:.1},{:.1}) {}",
+                "RealtimeArmorViewer: shot_hit ray — shell={} dir=[{:.3},{:.3},{:.3}] impact=({:.1},{:.1},{:.1}) hits={} has_tb={}",
                 shell.name,
-                approach_xz[0],
-                approach_xz[2],
                 shell_dir[0],
                 shell_dir[1],
                 shell_dir[2],
-                ray_through[0],
-                ray_through[1],
-                ray_through[2],
-                unclamped_through[0],
-                unclamped_through[1],
-                unclamped_through[2],
-                world_offset_x,
-                world_offset_z,
-                rotated_x,
-                rotated_z,
-                range.value(),
+                impact_pos.x,
+                impact_pos.y,
+                impact_pos.z,
                 all_hits.len(),
-                azimuth.to_degrees(),
-                ship_yaw.to_degrees(),
-                relative_angle.to_degrees(),
-                avg_origin.x,
-                avg_origin.z,
-                avg_target.x,
-                avg_target.z,
-                ship_world_pos.x,
-                ship_world_pos.z,
-                bounds_str,
+                hit.hit.terminal_ballistics.is_some(),
             );
 
             if all_hits.is_empty() {
-                // No armor hit — log but skip trajectory
+                // Log but skip — no armor hit by this ray
                 let attacker_name = players
                     .iter()
-                    .find(|p| p.entity_id == salvo.attacker_entity_id)
+                    .find(|p| p.entity_id == hit.hit.owner_id)
                     .map(|p| p.username.clone())
                     .unwrap_or_else(|| "Unknown".to_string());
                 self.salvo_log.push(SalvoLogEntry {
-                    clock: salvo.clock,
-                    estimated_impact_clock: salvo.estimated_impact_clock,
+                    clock: hit.clock.seconds(),
+                    estimated_impact_clock: hit.clock.seconds(),
                     attacker_name,
                     shell_name: shell.name.clone(),
                     ammo_type: shell.ammo_type.clone(),
-                    shell_count: salvo.shots.len(),
-                    range,
+                    shell_count: 1,
+                    range: Meters::new(0.0),
                     trajectory_id: None,
                     shell_info: Some(shell.clone()),
                 });
-                self.processed_salvo_count += 1;
                 continue;
             }
 
             // Build trajectory hits
             let mut traj_hits = Vec::new();
             let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
-            for (hit, normal) in &all_hits {
+            for (armor_hit, normal) in &all_hits {
                 let tooltip = self
                     .pane
                     .mesh_triangle_info
                     .iter()
-                    .find(|(id, _)| *id == hit.mesh_id)
-                    .and_then(|(_, infos)| infos.get(hit.triangle_index));
+                    .find(|(id, _)| *id == armor_hit.mesh_id)
+                    .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
 
                 if let Some(info) = tooltip {
                     let angle = crate::armor_viewer::penetration::impact_angle_deg(&shell_dir, normal);
                     traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
-                        position: hit.world_position,
+                        position: armor_hit.world_position,
                         thickness_mm: info.thickness_mm,
                         zone: info.zone.clone(),
                         material: info.material_name.clone(),
                         angle_deg: angle,
-                        distance_from_start: hit.distance - first_dist,
+                        distance_from_start: armor_hit.distance - first_dist,
                     });
                 }
             }
 
-            // Compute detonation for AP shells
+            // Build ImpactResult: use terminal ballistics if available, otherwise simulate.
+            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
+            let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
+                Some(crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
+                    &params,
+                    tb.velocity.x as f64,
+                    tb.velocity.y as f64,
+                    tb.velocity.z as f64,
+                ))
+            } else if !salvo_shots.is_empty() {
+                let n = salvo_shots.len() as f32;
+                let avg_origin: WorldPos = salvo_shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
+                let range: Meters = avg_origin.distance_xz(&impact_pos);
+                crate::armor_viewer::ballistics::solve_for_range(&params, range)
+            } else {
+                None
+            };
+
             let mut detonation_points = Vec::new();
             let mut last_visible_hit: Option<usize> = None;
             if shell.ammo_type == AmmoType::AP {
@@ -586,7 +533,14 @@ impl RealtimeArmorViewer {
                 }
             }
 
-            // Build arc
+            // Build arc from approach direction
+            let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
+            let approach_len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
+            let approach_xz = if approach_len > 0.001 {
+                [approach_xz[0] / approach_len, 0.0, approach_xz[2] / approach_len]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
             let model_extent = self
                 .pane
                 .loaded_armor
@@ -640,7 +594,7 @@ impl RealtimeArmorViewer {
 
             // Pick trajectory color based on attacker
             let attacker_color_idx =
-                self.enemy_players.iter().position(|p| p.entity_id == salvo.attacker_entity_id).unwrap_or(0);
+                self.enemy_players.iter().position(|p| p.entity_id == hit.hit.owner_id).unwrap_or(0);
             let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
 
             let cam_dist = self.pane.viewport.camera.distance;
@@ -658,7 +612,7 @@ impl RealtimeArmorViewer {
                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
                     id: traj_id,
                     color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
-                    range: range.to_km(),
+                    range: Meters::new(0.0).to_km(),
                 },
                 result,
                 mesh_id: Some(mesh_id),
@@ -671,37 +625,23 @@ impl RealtimeArmorViewer {
             // Log entry
             let attacker_name = players
                 .iter()
-                .find(|p| p.entity_id == salvo.attacker_entity_id)
+                .find(|p| p.entity_id == hit.hit.owner_id)
                 .map(|p| p.username.clone())
                 .unwrap_or_else(|| "Unknown".to_string());
             self.salvo_log.push(SalvoLogEntry {
-                clock: salvo.clock,
-                estimated_impact_clock: salvo.estimated_impact_clock,
+                clock: hit.clock.seconds(),
+                estimated_impact_clock: hit.clock.seconds(),
                 attacker_name,
                 shell_name: shell.name.clone(),
                 ammo_type: shell.ammo_type.clone(),
-                shell_count: salvo.shots.len(),
-                range,
+                shell_count: 1,
+                range: Meters::new(0.0),
                 trajectory_id: Some(traj_id),
                 shell_info: Some(shell.clone()),
             });
 
-            self.processed_salvo_count += 1;
             self.needs_repaint = true;
         }
-
-        if skipped_target > 0 || skipped_attacker > 0 || skipped_friendly > 0 {
-            tracing::debug!(
-                "RealtimeArmorViewer: filter summary — skipped: target_mismatch={} attacker_mismatch={} friendly={} processed={} | self.target={:?}",
-                skipped_target,
-                skipped_attacker,
-                skipped_friendly,
-                new_salvos.len() - (skipped_target + skipped_attacker + skipped_friendly) as usize,
-                self.target_entity_id,
-            );
-        }
-
-        self.needs_repaint = true;
     }
 
     /// Tick state: load ship, process salvos. Called before rendering.
@@ -752,9 +692,10 @@ impl RealtimeArmorViewer {
             }
         }
 
-        // Process new salvos if ship is loaded
+        // Process shot hits if ship is loaded
         if self.ship_loaded {
-            self.process_new_salvos();
+            self.check_bridge_generation();
+            self.process_new_shot_hits();
             self.expire_old_salvos();
         } else {
             // Log occasionally that we're waiting for ship load
@@ -1379,31 +1320,16 @@ impl RealtimeArmorViewer {
 
     /// Clear trajectories and reprocess all salvos (used when attacker filter changes).
     fn clear_and_reprocess(&mut self) {
+        // Remove GPU meshes for all trajectories
+        for traj in &self.pane.trajectories {
+            if let Some(mesh_id) = traj.mesh_id {
+                self.pane.viewport.remove_mesh(mesh_id);
+            }
+        }
         self.pane.trajectories.clear();
         self.pane.viewport.mark_dirty();
         self.salvo_log.clear();
-        self.processed_salvo_count = 0;
-
-        // Re-upload armor since trajectories were overlay meshes
-        if let Some(armor) = self.pane.loaded_armor.take() {
-            crate::ui::armor_viewer::upload_armor_to_viewport(&mut self.pane, &armor, &self.render_state.device);
-            self.pane.loaded_armor = Some(armor);
-        }
-
-        // Process all accumulated salvos
-        if self.ship_loaded {
-            self.process_new_salvos();
-        }
+        self.processed_hit_count = 0;
+        // Next tick() will call process_new_shot_hits() to reprocess.
     }
-}
-
-/// Compute average origin and target from shot data.
-fn average_shot_positions(shots: &[ReplayShotData]) -> (WorldPos, WorldPos) {
-    if shots.is_empty() {
-        return (WorldPos::default(), WorldPos::default());
-    }
-    let n = shots.len() as f32;
-    let origin = shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
-    let target = shots.iter().map(|s| s.target).sum::<WorldPos>() / n;
-    (origin, target)
 }

@@ -304,6 +304,14 @@ pub struct TabState {
 
     /// Persisted display defaults for the Armor Viewer (plate edges, waterline, etc.).
     pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
+
+    /// Whether the standalone replay controls reference window is open.
+    #[serde(skip)]
+    pub show_replay_controls: bool,
+
+    /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
+    #[serde(skip)]
+    pub replay_controls_cache: Option<Vec<crate::replay_renderer::CommandGroup>>,
 }
 
 impl Default for TabState {
@@ -363,6 +371,8 @@ impl Default for TabState {
             wgpu_render_state: None,
             armor_viewer: Default::default(),
             armor_viewer_defaults: Default::default(),
+            show_replay_controls: false,
+            replay_controls_cache: None,
         }
     }
 }

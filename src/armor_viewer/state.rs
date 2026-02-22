@@ -12,6 +12,15 @@ use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 /// The thickness discriminator ensures highlights stop at plate boundaries.
 pub type PlateKey = (String, String, i32);
 
+/// Which tab is active in the unified analysis window.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AnalysisTab {
+    #[default]
+    Ships,
+    Trajectory,
+    Splash,
+}
+
 /// Persisted default display settings for the armor viewer.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -146,6 +155,8 @@ pub struct ArmorViewerState {
     pub ifhe_enabled: bool,
     /// Incremented whenever comparison_ships changes; panes check this to recompute arcs.
     pub comparison_ships_version: u64,
+    /// Dock state for the analysis sub-panel (Ships / Trajectory / Splash).
+    pub analysis_dock_state: DockState<AnalysisTab>,
 }
 
 impl Default for ArmorViewerState {
@@ -168,6 +179,7 @@ impl Default for ArmorViewerState {
             show_comparison_panel: false,
             ifhe_enabled: false,
             comparison_ships_version: 0,
+            analysis_dock_state: DockState::new(vec![AnalysisTab::Ships, AnalysisTab::Trajectory, AnalysisTab::Splash]),
         }
     }
 }
@@ -218,6 +230,10 @@ pub struct LoadedShipArmor {
     pub hull_part_groups: Vec<(String, Vec<String>)>,
     /// Ship draft (depth below waterline) in meters, from the hull component.
     pub draft_meters: Option<f32>,
+    /// Parsed splash box data for HE splash visualization.
+    pub splash_data: Option<crate::armor_viewer::splash::ShipSplashData>,
+    /// Hit location data from GameParams (zone name → HitLocation).
+    pub hit_locations: Option<std::collections::HashMap<String, wowsunpack::game_params::types::HitLocation>>,
 }
 
 /// A trajectory with its metadata and visualization mesh.
@@ -298,6 +314,12 @@ pub struct ArmorPane {
     pub marker_opacity: f32,
     /// Last comparison_ships_version this pane recomputed arcs for.
     pub comparison_ships_version: u64,
+    /// Whether HE splash analysis mode is active (click to place splash volume).
+    pub splash_mode: bool,
+    /// Current splash analysis result.
+    pub splash_result: Option<crate::armor_viewer::splash::SplashResult>,
+    /// Overlay mesh IDs for the current splash visualization (cube + highlight).
+    pub splash_mesh_ids: Vec<MeshId>,
 }
 
 impl ArmorPane {
@@ -337,6 +359,9 @@ impl ArmorPane {
             waterline_opacity: defaults.waterline_opacity,
             marker_opacity: 1.0,
             comparison_ships_version: 0,
+            splash_mode: false,
+            splash_result: None,
+            splash_mesh_ids: Vec::new(),
         }
     }
 }

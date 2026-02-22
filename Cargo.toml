@@ -86,6 +86,7 @@ rkyv = "0.8.15"
 const_format = "0.2.35"
 tempfile = "3.25.0"
 unidecode = "0.3.0"
+roxmltree = "0.21.1"
 
 [build-dependencies]
 winresource = "0.1.20"

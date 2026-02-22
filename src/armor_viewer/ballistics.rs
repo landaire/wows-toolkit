@@ -109,6 +109,45 @@ pub struct ImpactResult {
     pub launch_angle: f64,
 }
 
+impl ImpactResult {
+    /// Construct an ImpactResult from actual terminal velocity components (m/s).
+    ///
+    /// Used when server-authoritative data (e.g. from `TerminalBallisticsInfo`) is
+    /// available, bypassing trajectory simulation entirely.
+    /// `vx` and `vz` are horizontal velocity components, `vy` is vertical (negative = falling).
+    pub fn from_terminal_velocity(params: &ShellParams, vx: f64, vy: f64, vz: f64) -> Self {
+        let vx_horiz = (vx * vx + vz * vz).sqrt();
+        let impact_velocity = (vx_horiz * vx_horiz + vy * vy).sqrt();
+
+        // Impact angle from horizontal (positive = falling, vy negative when descending)
+        let ia_horizontal = if vx_horiz > 0.001 { (vy / vx_horiz).atan().abs() } else { PI / 2.0 };
+        let ia_deck = PI / 2.0 - ia_horizontal;
+
+        let raw_pen = params.p_ppc * impact_velocity.powf(VELOCITY_POWER);
+        let eff_belt = raw_pen * ia_horizontal.cos();
+        let eff_belt_norm = raw_pen * calc_normalization(ia_horizontal, params.normalization).cos();
+        let eff_deck = raw_pen * ia_deck.cos();
+        let eff_deck_norm = raw_pen * calc_normalization(ia_deck, params.normalization).cos();
+
+        // Estimate launch angle from impact angle (rough; only used for arc drawing)
+        let launch_angle = ia_horizontal * 0.6;
+
+        ImpactResult {
+            distance: 0.0,
+            impact_velocity,
+            impact_angle_horizontal: ia_horizontal,
+            impact_angle_deck: ia_deck,
+            time_to_target: 0.0,
+            raw_pen_mm: raw_pen,
+            effective_pen_belt_mm: eff_belt,
+            effective_pen_belt_normalized_mm: eff_belt_norm,
+            effective_pen_deck_mm: eff_deck,
+            effective_pen_deck_normalized_mm: eff_deck_norm,
+            launch_angle,
+        }
+    }
+}
+
 /// Compute air density at a given altitude using ISA atmospheric model.
 fn air_density(altitude: f64) -> f64 {
     let t = T0 - L * altitude;
