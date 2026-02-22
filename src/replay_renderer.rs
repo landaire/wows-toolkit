@@ -1479,12 +1479,21 @@ fn playback_thread(
         let new_hits = &all_hits[*hit_cursor..];
         *hit_cursor = new_count;
 
+        let mut total_matched = 0u32;
         for hit in new_hits {
             for s in staging.iter_mut() {
                 if hit.victim_entity_id == s.target_entity_id {
                     s.shot_hits.push(hit.clone());
+                    total_matched += 1;
                 }
             }
+        }
+        if total_matched > 0 {
+            tracing::debug!(
+                "push_shot_hits_to_staging: {} new hits, {} matched staging targets",
+                new_hits.len(),
+                total_matched,
+            );
         }
     }
 

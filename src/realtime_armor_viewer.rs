@@ -12,11 +12,14 @@ use std::sync::mpsc;
 use egui::mutex::Mutex;
 
 use tracing::warn;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wowsunpack::export::ship::ShipAssets;
-use wowsunpack::game_params::types::{AmmoType, Meters, ShellInfo};
-use wowsunpack::game_types::{GameParamId, WorldPos};
+use wowsunpack::game_params::types::{AmmoType, Meters, Millimeters, ShellInfo};
+use wowsunpack::game_types::{EntityId, GameClock, GameParamId, ShellHitType, ShotId, WorldPos};
+use wowsunpack::recognized::Recognized;
 
 use crate::armor_viewer::constants::*;
+use crate::armor_viewer::penetration::{ComparisonVerdict, ExitDivergence, ServerOutcome, ServerVsSimComparison};
 use crate::armor_viewer::state::{ArmorPane, LoadedShipArmor, StoredTrajectory};
 use crate::icon_str;
 use crate::icons;
@@ -33,6 +36,9 @@ pub struct RealtimeArmorViewer {
 
     /// The target ship's entity ID in the replay.
     target_entity_id: wows_replays::types::EntityId,
+
+    /// The target ship's team ID (used to determine which players are attackers).
+    target_team_id: i64,
 
     /// 3D viewport pane (reuses the existing ArmorPane infrastructure).
     pane: ArmorPane,
@@ -65,14 +71,30 @@ pub struct RealtimeArmorViewer {
     /// Whether players have been populated from the bridge.
     players_populated: bool,
 
-    /// Per-salvo info for the side panel.
-    salvo_log: Vec<SalvoLogEntry>,
+    /// Salvo groups for the side panel (shells grouped by salvo firing event).
+    salvo_groups: Vec<SalvoGroup>,
 
-    /// Currently selected salvo (by trajectory_id) for detail panel.
-    selected_salvo_id: Option<u64>,
+    /// Fast lookup: SalvoKey → index in `salvo_groups`.
+    salvo_group_index: HashMap<SalvoKey, usize>,
+
+    /// Counter for `SalvoKey::Unmatched` (monotonically increasing).
+    unmatched_counter: u64,
+
+    /// Current selection state (salvo group or individual shell).
+    selection: Option<SalvoSelection>,
+
+    /// Set when selection changes; triggers trajectory mesh re-upload in draw_viewport.
+    selection_dirty: bool,
 
     /// Target ship's vehicle param (for loading).
     target_vehicle: Arc<wowsunpack::game_params::types::Param>,
+
+    /// Whether to show secondary armament hits (off by default).
+    show_secondaries: bool,
+
+    /// Cached lookup: is a given projectile params_id a main battery shell?
+    /// Built at player-populate time by resolving each ship's main_battery_ammo names to param IDs.
+    is_main_battery: HashMap<GameParamId, bool>,
 
     /// How many shot hits we've consumed from the bridge.
     processed_hit_count: usize,
@@ -82,18 +104,60 @@ pub struct RealtimeArmorViewer {
     needs_repaint: bool,
 }
 
-/// Log entry for a single salvo displayed in the side panel.
-struct SalvoLogEntry {
-    clock: f32,
-    /// Estimated clock time when shells reach the target.
-    estimated_impact_clock: f32,
+/// Identifies a salvo firing event. Shells with `salvo: None` get unique unmatched keys.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum SalvoKey {
+    /// Grouped by who fired and which turret salvo (salvo_id from the game).
+    Matched {
+        owner_id: EntityId,
+        salvo_id: u32,
+    },
+    Unmatched(u64),
+}
+
+/// Per-shell data within a [`SalvoGroup`].
+struct ShellEntry {
+    shot_id: ShotId,
+    clock: GameClock,
+    range: Meters,
+    /// Links to `StoredTrajectory.meta.id`. `None` if no armor was hit.
+    trajectory_id: Option<u64>,
+    /// Server vs simulation comparison (AP only).
+    comparison: Option<ServerVsSimComparison>,
+    server_outcome: ServerOutcome,
+}
+
+/// All shells from one salvo firing event, grouped together.
+struct SalvoGroup {
+    key: SalvoKey,
     attacker_name: String,
     shell_name: String,
     ammo_type: AmmoType,
-    shell_count: usize,
-    range: Meters,
-    trajectory_id: Option<u64>,
     shell_info: Option<ShellInfo>,
+    /// Earliest shell clock (display ordering).
+    first_clock: GameClock,
+    /// Latest shell clock (expiration).
+    latest_clock: GameClock,
+    shells: Vec<ShellEntry>,
+}
+
+/// Two-level selection state for the salvo log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SalvoSelection {
+    /// Salvo header clicked — all shells in this group are highlighted.
+    Group(SalvoKey),
+    /// Specific shell clicked — that shell is emphasized, siblings moderate, rest dimmed.
+    Shell { group_key: SalvoKey, trajectory_id: u64 },
+}
+
+/// Grouped hits for a single shell (entry + optional exit).
+struct ShellHitGroup {
+    /// Primary hit (the non-ExitOverpenetration entry).
+    entry: ResolvedShotHit,
+    /// Exit point (ExitOverpenetration), if present.
+    exit: Option<ResolvedShotHit>,
+    /// Server outcome from the entry hit.
+    server_outcome: ServerOutcome,
 }
 
 impl RealtimeArmorViewer {
@@ -121,6 +185,7 @@ impl RealtimeArmorViewer {
             open: Arc::new(AtomicBool::new(true)),
             bridge,
             target_entity_id: target_player.entity_id,
+            target_team_id: target_player.team_id,
             pane,
             gpu_pipeline,
             ship_assets,
@@ -131,9 +196,14 @@ impl RealtimeArmorViewer {
             shell_cache: HashMap::new(),
             ship_loaded: false,
             players_populated: false,
-            salvo_log: Vec::new(),
-            selected_salvo_id: None,
+            salvo_groups: Vec::new(),
+            salvo_group_index: HashMap::new(),
+            unmatched_counter: 0,
+            selection: None,
+            selection_dirty: false,
             target_vehicle: target_player.vehicle.clone(),
+            show_secondaries: false,
+            is_main_battery: HashMap::new(),
             processed_hit_count: 0,
             needs_repaint: true,
         }
@@ -163,12 +233,11 @@ impl RealtimeArmorViewer {
                 let param = ship_assets.metadata().game_param_by_index(vehicle.index());
                 let v =
                     param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "No vehicle found".to_string())?;
-                let draft_meters = param.as_ref().and_then(|p| {
+                let dock_y_offset = param.as_ref().and_then(|p| {
                     p.vehicle()
                         .and_then(|v| v.hull_upgrades())
                         .and_then(|upgrades| upgrades.values().next())
-                        .and_then(|config| config.draft())
-                        .map(|m| m.value())
+                        .and_then(|c| c.dock_y_offset())
                 });
 
                 let options =
@@ -255,7 +324,7 @@ impl RealtimeArmorViewer {
                 }
                 let hull_part_groups = crate::ui::armor_viewer::build_hull_part_groups(&hull_meshes);
 
-                Ok(LoadedShipArmor {
+                let mut armor = LoadedShipArmor {
                     display_name,
                     meshes,
                     bounds: (min, max),
@@ -264,10 +333,13 @@ impl RealtimeArmorViewer {
                     zone_part_plates,
                     hull_meshes,
                     hull_part_groups,
-                    draft_meters,
+                    dock_y_offset,
                     splash_data: None,
                     hit_locations: None,
-                })
+                    waterline_dy: 0.0,
+                };
+                armor.apply_waterline_offset();
+                Ok(armor)
             })();
             let _ = tx.send(result);
         });
@@ -299,12 +371,136 @@ impl RealtimeArmorViewer {
         }
     }
 
+    /// Transform a world-space position to model-space given ship position and yaw.
+    fn world_to_model(
+        world_pos: &WorldPos,
+        ship_pos: &WorldPos,
+        neg_yaw_cos: f32,
+        neg_yaw_sin: f32,
+        model_center: &[f32; 3],
+        bounds: Option<&([f32; 3], [f32; 3])>,
+    ) -> [f32; 3] {
+        let offset_x = world_pos.x - ship_pos.x;
+        let offset_z = world_pos.z - ship_pos.z;
+        let unrotated_x = offset_x * neg_yaw_cos - offset_z * neg_yaw_sin;
+        let unrotated_z = offset_x * neg_yaw_sin + offset_z * neg_yaw_cos;
+        // model_x = world_z, model_z = world_x
+        let model_x = model_center[0] + unrotated_z;
+        // ship_pos.y is at the waterline (sea surface), so world_pos.y - ship_pos.y
+        // already gives height above waterline. No additional offset needed since
+        // apply_waterline_offset() shifted the mesh so Y=0 = waterline.
+        let model_y = world_pos.y - ship_pos.y;
+        let model_z = model_center[2] + unrotated_x;
+        if let Some((min, max)) = bounds {
+            [model_x.clamp(min[0], max[0]), model_y, model_z.clamp(min[2], max[2])]
+        } else {
+            [model_x, model_y, model_z]
+        }
+    }
+
+    /// Group a flat list of hits by `(owner_id, shot_id)`, pairing entry + exit.
+    fn group_hits_by_shot(hits: &[ResolvedShotHit]) -> Vec<ShellHitGroup> {
+        let mut groups: Vec<ShellHitGroup> = Vec::new();
+        // Use an index map keyed by (owner_id, shot_id) for efficient lookup
+        let mut index_map: HashMap<(EntityId, ShotId), usize> = HashMap::new();
+
+        for hit in hits {
+            let key = (hit.hit.owner_id, hit.hit.shot_id);
+            let is_exit = matches!(hit.hit.hit_type.shell_hit, Recognized::Known(ShellHitType::ExitOverpenetration));
+
+            if let Some(&idx) = index_map.get(&key) {
+                // Already have a group for this shot — add as exit or replace entry
+                if is_exit {
+                    groups[idx].exit = Some(hit.clone());
+                }
+                // If not exit and group already has an entry, skip duplicate
+            } else if is_exit {
+                // Exit without an entry (rare) — create group anyway
+                groups.push(ShellHitGroup {
+                    entry: hit.clone(),
+                    exit: None,
+                    server_outcome: ServerOutcome::Overpenetration,
+                });
+                index_map.insert(key, groups.len() - 1);
+            } else {
+                let server_outcome = ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit);
+                groups.push(ShellHitGroup { entry: hit.clone(), exit: None, server_outcome });
+                index_map.insert(key, groups.len() - 1);
+            }
+        }
+        groups
+    }
+
     /// Process new shot hits from the bridge (server-authoritative impact data).
     ///
+    /// Insert a shell entry into the appropriate `SalvoGroup`, creating one if needed.
+    fn insert_shell_into_group(
+        &mut self,
+        hit: &ResolvedShotHit,
+        shell: &ShellInfo,
+        firing_range: Meters,
+        trajectory_id: Option<u64>,
+        comparison: Option<ServerVsSimComparison>,
+        server_outcome: ServerOutcome,
+        players: &[ReplayPlayerInfo],
+    ) {
+        let key = match hit.salvo.as_ref() {
+            Some(salvo) => SalvoKey::Matched { owner_id: salvo.owner_id, salvo_id: salvo.salvo_id },
+            None => {
+                let id = self.unmatched_counter;
+                self.unmatched_counter += 1;
+                SalvoKey::Unmatched(id)
+            }
+        };
+
+        let shell_entry = ShellEntry {
+            shot_id: hit.hit.shot_id,
+            clock: hit.clock,
+            range: firing_range,
+            trajectory_id,
+            comparison,
+            server_outcome,
+        };
+
+        if let Some(&idx) = self.salvo_group_index.get(&key) {
+            let group = &mut self.salvo_groups[idx];
+            if hit.clock > group.latest_clock {
+                group.latest_clock = hit.clock;
+            }
+            group.shells.push(shell_entry);
+        } else {
+            let attacker_name = players
+                .iter()
+                .find(|p| p.entity_id == hit.hit.owner_id)
+                .map(|p| p.username.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            // Translate shell name via IDS_ localization key
+            let shell_name = {
+                use wowsunpack::data::ResourceLoader;
+                let ids_key = format!("IDS_{}", shell.name.to_uppercase());
+                self.ship_assets.metadata().localized_name_from_id(&ids_key).unwrap_or_else(|| shell.name.clone())
+            };
+
+            let idx = self.salvo_groups.len();
+            self.salvo_groups.push(SalvoGroup {
+                key: key.clone(),
+                attacker_name,
+                shell_name,
+                ammo_type: shell.ammo_type.clone(),
+                shell_info: Some(shell.clone()),
+                first_clock: hit.clock,
+                latest_clock: hit.clock,
+                shells: vec![shell_entry],
+            });
+            self.salvo_group_index.insert(key, idx);
+        }
+    }
+
     /// Each `ResolvedShotHit` contains the actual world-space impact position and
     /// (optionally) terminal ballistics info (velocity, impact angle, detonator state).
-    /// We use this to create trajectories with accurate impact positioning instead of
-    /// relying solely on ballistic simulation.
+    /// Hits are grouped by `shot_id` to pair entry + exit (for overpenetrations).
+    /// We compare our simulation result against the server's authoritative outcome.
     fn process_new_shot_hits(&mut self) {
         use crate::viewport_3d::camera::{normalize, scale, sub};
 
@@ -317,10 +513,14 @@ impl RealtimeArmorViewer {
 
         let new_hits = bridge.shot_hits[self.processed_hit_count..].to_vec();
         let players = bridge.players.clone();
+        self.processed_hit_count = new_count;
         drop(bridge);
 
-        for hit in &new_hits {
-            self.processed_hit_count += 1;
+        // Group hits by (owner_id, shot_id) to pair entry + exit
+        let groups = Self::group_hits_by_shot(&new_hits);
+
+        for group in &groups {
+            let hit = &group.entry;
 
             // Filter by selected attacker
             if let Some(ref sel) = self.selected_attacker {
@@ -328,10 +528,13 @@ impl RealtimeArmorViewer {
                     continue;
                 }
             } else {
-                // "All Enemies" mode: skip friendly fire
-                let attacker_friendly =
-                    players.iter().find(|p| p.entity_id == hit.hit.owner_id).map(|p| p.is_friendly).unwrap_or(false);
-                if attacker_friendly {
+                // "All Enemies" mode: skip shots from the target's own team
+                let same_team = players
+                    .iter()
+                    .find(|p| p.entity_id == hit.hit.owner_id)
+                    .map(|p| p.team_id == self.target_team_id)
+                    .unwrap_or(true);
+                if same_team {
                     continue;
                 }
             }
@@ -348,15 +551,37 @@ impl RealtimeArmorViewer {
                 continue;
             };
 
+            // Filter out secondary armament shells unless the toggle is on.
+            // If params_id is not in is_main_battery and the cache is populated, it's secondary.
+            if !self.show_secondaries && !self.is_main_battery.is_empty() {
+                if let Some(salvo) = &hit.salvo {
+                    if !self.is_main_battery.contains_key(&salvo.params_id) {
+                        continue;
+                    }
+                }
+            }
+
             // Victim ship position and yaw come directly from the ResolvedShotHit
             // (captured at impact time by the controller).
             let ship_yaw = hit.victim_yaw;
             let ship_world_pos = hit.victim_position;
-            // Shot origins come directly from the married salvo
             let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
 
-            // Use the actual impact position from the server
             let impact_pos = hit.hit.position;
+
+            // Find the exact barrel origin for this shell by matching shot_id.
+            let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
+            if !salvo_shots.is_empty() && matched_shot.is_none() {
+                tracing::warn!(
+                    "RealtimeArmorViewer: shot_id {:?} not found in salvo ({} shots) for owner {:?}",
+                    hit.hit.shot_id,
+                    salvo_shots.len(),
+                    hit.hit.owner_id,
+                );
+            }
+            let firing_range: Meters =
+                matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
+
             let neg_yaw_cos = (-ship_yaw).cos();
             let neg_yaw_sin = (-ship_yaw).sin();
 
@@ -372,20 +597,15 @@ impl RealtimeArmorViewer {
                 let local_dir_x = world_dir[0] * neg_yaw_cos - world_dir[2] * neg_yaw_sin;
                 let local_dir_z = world_dir[0] * neg_yaw_sin + world_dir[2] * neg_yaw_cos;
                 normalize([local_dir_z, world_dir[1], local_dir_x])
-            } else if !salvo_shots.is_empty() {
-                // Compute direction from average shot origin to actual impact position
-                let n = salvo_shots.len() as f32;
-                let avg_origin: WorldPos = salvo_shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
-                let dx = impact_pos.x - avg_origin.x;
-                let dz = impact_pos.z - avg_origin.z;
+            } else if let Some(shot) = matched_shot {
+                let dx = impact_pos.x - shot.origin.x;
+                let dz = impact_pos.z - shot.origin.z;
                 let azimuth = dz.atan2(dx);
                 let relative_angle = azimuth - ship_yaw;
                 let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
 
-                // Solve ballistics for vertical angle
-                let range: Meters = avg_origin.distance_xz(&impact_pos);
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, range);
+                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
                 if let Some(ref imp) = impact_result {
                     let horiz_angle = imp.impact_angle_horizontal as f32;
                     let cos_h = horiz_angle.cos();
@@ -395,7 +615,7 @@ impl RealtimeArmorViewer {
                     normalize([approach_xz[0], 0.0, approach_xz[2]])
                 }
             } else {
-                continue; // No way to determine shell direction
+                continue;
             };
 
             let model_center = self
@@ -411,29 +631,23 @@ impl RealtimeArmorViewer {
                 })
                 .unwrap_or([0.0; 3]);
 
-            // Transform impact position from world space to model space
-            let world_offset_x = impact_pos.x - ship_world_pos.x;
-            let world_offset_z = impact_pos.z - ship_world_pos.z;
-            let unrotated_x = world_offset_x * neg_yaw_cos - world_offset_z * neg_yaw_sin;
-            let unrotated_z = world_offset_x * neg_yaw_sin + world_offset_z * neg_yaw_cos;
-            let rotated_x = unrotated_z; // model_x = world_z
-            let rotated_z = unrotated_x; // model_z = world_x
-
-            let (clamped_x, clamped_z) = if let Some(ref armor) = self.pane.loaded_armor {
-                let cx = (model_center[0] + rotated_x).clamp(armor.bounds.0[0], armor.bounds.1[0]);
-                let cz = (model_center[2] + rotated_z).clamp(armor.bounds.0[2], armor.bounds.1[2]);
-                (cx, cz)
-            } else {
-                (model_center[0] + rotated_x, model_center[2] + rotated_z)
-            };
-            let ray_through = [clamped_x, 0.0, clamped_z];
+            let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
+            let model_impact = Self::world_to_model(
+                &impact_pos,
+                &ship_world_pos,
+                neg_yaw_cos,
+                neg_yaw_sin,
+                &model_center,
+                bounds.as_ref(),
+            );
+            let ray_through = [model_impact[0], 0.0, model_impact[2]];
 
             // Cast ray from far behind the through-point along shell_dir
             let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
             let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
 
             tracing::info!(
-                "RealtimeArmorViewer: shot_hit ray — shell={} dir=[{:.3},{:.3},{:.3}] impact=({:.1},{:.1},{:.1}) hits={} has_tb={}",
+                "RealtimeArmorViewer: shot_hit ray — shell={} dir=[{:.3},{:.3},{:.3}] world_impact=({:.1},{:.1},{:.1}) model_impact=({:.3},{:.3},{:.3}) ship_pos=({:.1},{:.1},{:.1}) hits={} has_tb={} server={}",
                 shell.name,
                 shell_dir[0],
                 shell_dir[1],
@@ -441,28 +655,27 @@ impl RealtimeArmorViewer {
                 impact_pos.x,
                 impact_pos.y,
                 impact_pos.z,
+                model_impact[0],
+                model_impact[1],
+                model_impact[2],
+                ship_world_pos.x,
+                ship_world_pos.y,
+                ship_world_pos.z,
                 all_hits.len(),
                 hit.hit.terminal_ballistics.is_some(),
+                group.server_outcome.display_name(),
             );
 
             if all_hits.is_empty() {
-                // Log but skip — no armor hit by this ray
-                let attacker_name = players
-                    .iter()
-                    .find(|p| p.entity_id == hit.hit.owner_id)
-                    .map(|p| p.username.clone())
-                    .unwrap_or_else(|| "Unknown".to_string());
-                self.salvo_log.push(SalvoLogEntry {
-                    clock: hit.clock.seconds(),
-                    estimated_impact_clock: hit.clock.seconds(),
-                    attacker_name,
-                    shell_name: shell.name.clone(),
-                    ammo_type: shell.ammo_type.clone(),
-                    shell_count: 1,
-                    range: Meters::new(0.0),
-                    trajectory_id: None,
-                    shell_info: Some(shell.clone()),
-                });
+                self.insert_shell_into_group(
+                    hit,
+                    &shell,
+                    firing_range,
+                    None,
+                    None,
+                    group.server_outcome.clone(),
+                    &players,
+                );
                 continue;
             }
 
@@ -493,29 +706,31 @@ impl RealtimeArmorViewer {
             // Build ImpactResult: use terminal ballistics if available, otherwise simulate.
             let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
             let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
-                Some(crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
+                let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
                     &params,
                     tb.velocity.x as f64,
                     tb.velocity.y as f64,
                     tb.velocity.z as f64,
-                ))
-            } else if !salvo_shots.is_empty() {
-                let n = salvo_shots.len() as f32;
-                let avg_origin: WorldPos = salvo_shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
-                let range: Meters = avg_origin.distance_xz(&impact_pos);
-                crate::armor_viewer::ballistics::solve_for_range(&params, range)
+                );
+                imp.distance = firing_range.value() as f64;
+                Some(imp)
+            } else if matched_shot.is_some() {
+                crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
             } else {
                 None
             };
 
+            // Run simulation and build comparison
             let mut detonation_points = Vec::new();
             let mut last_visible_hit: Option<usize> = None;
+            let mut comparison: Option<ServerVsSimComparison> = None;
+
             if shell.ammo_type == AmmoType::AP {
                 if let Some(ref imp) = impact {
                     let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
                         &params, imp, &traj_hits, &shell_dir,
                     );
-                    if let Some(det) = sim.detonation {
+                    if let Some(ref det) = sim.detonation {
                         detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
                             position: det.position,
                             ship_index: 0,
@@ -530,6 +745,52 @@ impl RealtimeArmorViewer {
                     if let Some(idx) = shell_stop {
                         last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
                     }
+
+                    // Compare simulation with server outcome
+                    let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
+                    let first_thickness =
+                        traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
+                    let verdict = crate::armor_viewer::penetration::compare_with_server(
+                        &sim,
+                        &traj_hits,
+                        &group.server_outcome,
+                        &params,
+                        first_angle,
+                        first_thickness,
+                    );
+
+                    // Compute exit divergence for overpenetrations
+                    let exit_divergence = if group.server_outcome == ServerOutcome::Overpenetration {
+                        self.compute_exit_divergence(
+                            group,
+                            &sim,
+                            &traj_hits,
+                            &ship_world_pos,
+                            neg_yaw_cos,
+                            neg_yaw_sin,
+                            &model_center,
+                        )
+                    } else {
+                        None
+                    };
+
+                    tracing::info!(
+                        "RealtimeArmorViewer: comparison — server={} verdict={:?}{}",
+                        group.server_outcome.display_name(),
+                        verdict,
+                        exit_divergence
+                            .as_ref()
+                            .and_then(|d| d.distance)
+                            .map(|d| format!(" exit_div={d:.2}"))
+                            .unwrap_or_default(),
+                    );
+
+                    comparison = Some(ServerVsSimComparison {
+                        server_outcome: group.server_outcome.clone(),
+                        sim,
+                        verdict,
+                        exit_divergence,
+                    });
                 }
             }
 
@@ -598,21 +859,23 @@ impl RealtimeArmorViewer {
             let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
 
             let cam_dist = self.pane.viewport.camera.distance;
+            let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
             let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
                 &mut self.pane.viewport,
                 &result,
                 &self.render_state.device,
-                traj_color,
+                upload_color,
                 last_visible_hit,
                 cam_dist,
                 self.pane.marker_opacity,
+                upload_lw,
             );
 
             self.pane.trajectories.push(StoredTrajectory {
                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
                     id: traj_id,
                     color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
-                    range: Meters::new(0.0).to_km(),
+                    range: firing_range.to_km(),
                 },
                 result,
                 mesh_id: Some(mesh_id),
@@ -622,26 +885,59 @@ impl RealtimeArmorViewer {
                 show_zones_active: false,
             });
 
-            // Log entry
-            let attacker_name = players
-                .iter()
-                .find(|p| p.entity_id == hit.hit.owner_id)
-                .map(|p| p.username.clone())
-                .unwrap_or_else(|| "Unknown".to_string());
-            self.salvo_log.push(SalvoLogEntry {
-                clock: hit.clock.seconds(),
-                estimated_impact_clock: hit.clock.seconds(),
-                attacker_name,
-                shell_name: shell.name.clone(),
-                ammo_type: shell.ammo_type.clone(),
-                shell_count: 1,
-                range: Meters::new(0.0),
-                trajectory_id: Some(traj_id),
-                shell_info: Some(shell.clone()),
-            });
+            // Log entry — insert into salvo group
+            self.insert_shell_into_group(
+                hit,
+                &shell,
+                firing_range,
+                Some(traj_id),
+                comparison,
+                group.server_outcome.clone(),
+                &players,
+            );
 
             self.needs_repaint = true;
         }
+    }
+
+    /// Compute exit divergence between server and simulated overpen exit points.
+    fn compute_exit_divergence(
+        &self,
+        group: &ShellHitGroup,
+        sim: &crate::armor_viewer::penetration::ShellSimResult,
+        traj_hits: &[crate::armor_viewer::penetration::TrajectoryHit],
+        ship_world_pos: &WorldPos,
+        neg_yaw_cos: f32,
+        neg_yaw_sin: f32,
+        model_center: &[f32; 3],
+    ) -> Option<ExitDivergence> {
+        // Server exit position from the ExitOverpenetration hit's terminal ballistics
+        let exit_tb = group.exit.as_ref().and_then(|e| e.hit.terminal_ballistics.as_ref());
+        let server_exit_world =
+            exit_tb.map(|tb| tb.position).or_else(|| group.exit.as_ref().map(|e| e.hit.position))?;
+
+        let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
+        let server_exit_model = Self::world_to_model(
+            &server_exit_world,
+            ship_world_pos,
+            neg_yaw_cos,
+            neg_yaw_sin,
+            model_center,
+            bounds.as_ref(),
+        );
+
+        // Simulated exit: the last plate the shell passed through
+        let sim_exit_pos = if sim.stopped_at.is_none() && !traj_hits.is_empty() {
+            // Shell passed through all plates — exit is after the last hit
+            traj_hits.last().map(|h| h.position)
+        } else {
+            None
+        };
+
+        let distance =
+            sim_exit_pos.map(|sim_pos| crate::armor_viewer::penetration::distance_3d(&server_exit_model, &sim_pos));
+
+        Some(ExitDivergence { server_exit_pos: server_exit_model, sim_exit_pos, distance })
     }
 
     /// Tick state: load ship, process salvos. Called before rendering.
@@ -650,7 +946,24 @@ impl RealtimeArmorViewer {
         if !self.players_populated {
             let bridge = self.bridge.lock();
             if !bridge.players.is_empty() {
-                self.enemy_players = bridge.players.iter().filter(|p| !p.is_friendly).cloned().collect();
+                self.enemy_players =
+                    bridge.players.iter().filter(|p| p.team_id != self.target_team_id).cloned().collect();
+                // Build main battery params_id cache from all players' ammo lists
+                {
+                    use wowsunpack::game_params::types::GameParamProvider;
+                    let metadata = self.ship_assets.metadata();
+                    for player in &bridge.players {
+                        if let Some(ammo_names) =
+                            player.vehicle.vehicle().and_then(|v| v.config_data()).map(|c| &c.main_battery_ammo)
+                        {
+                            for name in ammo_names {
+                                if let Some(param) = metadata.game_param_by_name(name) {
+                                    self.is_main_battery.insert(param.id(), true);
+                                }
+                            }
+                        }
+                    }
+                }
                 self.players_populated = true;
                 self.needs_repaint = true;
             }
@@ -716,24 +1029,95 @@ impl RealtimeArmorViewer {
     const SLIDING_WINDOW_SECS: f32 = 5.0;
 
     /// Remove trajectories and log entries older than the sliding window.
+    /// Compute the display color and line-width multiplier for a trajectory
+    /// based on the current selection state.
+    fn trajectory_display_params(&self, trajectory_id: u64, base_color: [f32; 4]) -> ([f32; 4], f32) {
+        match &self.selection {
+            None => (base_color, 1.0),
+            Some(SalvoSelection::Group(sel_key)) => {
+                let in_group = self
+                    .salvo_groups
+                    .iter()
+                    .any(|g| g.key == *sel_key && g.shells.iter().any(|s| s.trajectory_id == Some(trajectory_id)));
+                if in_group {
+                    // Brighten
+                    let [r, g, b, a] = base_color;
+                    ([(r * 1.3).min(1.0), (g * 1.3).min(1.0), (b * 1.3).min(1.0), a], 1.5)
+                } else {
+                    // Dim
+                    let [r, g, b, _] = base_color;
+                    ([r, g, b, 0.2], 0.6)
+                }
+            }
+            Some(SalvoSelection::Shell { group_key, trajectory_id: sel_tid }) => {
+                if trajectory_id == *sel_tid {
+                    // Emphasized
+                    let [r, g, b, a] = base_color;
+                    ([(r * 1.5).min(1.0), (g * 1.5).min(1.0), (b * 1.5).min(1.0), a], 2.0)
+                } else {
+                    let is_sibling = self.salvo_groups.iter().any(|g| {
+                        g.key == *group_key && g.shells.iter().any(|s| s.trajectory_id == Some(trajectory_id))
+                    });
+                    if is_sibling {
+                        // Moderate
+                        let [r, g, b, _] = base_color;
+                        ([r, g, b, 0.5], 1.0)
+                    } else {
+                        // Dim
+                        let [r, g, b, _] = base_color;
+                        ([r, g, b, 0.15], 0.5)
+                    }
+                }
+            }
+        }
+    }
+
     fn expire_old_salvos(&mut self) {
-        let current_clock = self.bridge.lock().last_clock;
-        let cutoff = current_clock - Self::SLIDING_WINDOW_SECS;
+        let current_clock = GameClock(self.bridge.lock().last_clock);
+        let cutoff = GameClock(current_clock.seconds() - Self::SLIDING_WINDOW_SECS);
 
-        // Find trajectory IDs to remove
-        let expired_ids: Vec<Option<u64>> =
-            self.salvo_log.iter().filter(|e| e.estimated_impact_clock < cutoff).map(|e| e.trajectory_id).collect();
+        // Collect trajectory IDs from groups whose latest shell is expired
+        let mut expired_traj_ids: Vec<u64> = Vec::new();
+        let mut expired_keys: Vec<SalvoKey> = Vec::new();
 
-        if expired_ids.is_empty() {
+        for group in &self.salvo_groups {
+            if group.latest_clock < cutoff {
+                expired_keys.push(group.key.clone());
+                for shell in &group.shells {
+                    if let Some(tid) = shell.trajectory_id {
+                        expired_traj_ids.push(tid);
+                    }
+                }
+            }
+        }
+
+        if expired_keys.is_empty() {
             return;
         }
 
-        // Remove expired log entries
-        self.salvo_log.retain(|e| e.estimated_impact_clock >= cutoff);
+        // Check if selection is being removed
+        let selection_expired = match &self.selection {
+            Some(SalvoSelection::Group(key)) => expired_keys.contains(key),
+            Some(SalvoSelection::Shell { group_key, .. }) => expired_keys.contains(group_key),
+            None => false,
+        };
+        if selection_expired {
+            self.selection = None;
+            self.selection_dirty = true;
+        }
+
+        // Remove expired groups
+        self.salvo_groups.retain(|g| g.latest_clock >= cutoff);
+
+        // Rebuild index
+        self.salvo_group_index.clear();
+        for (i, group) in self.salvo_groups.iter().enumerate() {
+            self.salvo_group_index.insert(group.key.clone(), i);
+        }
 
         // Remove expired trajectories and their GPU meshes
         let mut removed_any = false;
-        for expired_traj_id in expired_ids.into_iter().flatten() {
+        for expired_traj_id in expired_traj_ids {
             if let Some(pos) = self.pane.trajectories.iter().position(|t| t.meta.id == expired_traj_id) {
                 let traj = self.pane.trajectories.remove(pos);
                 if let Some(mesh_id) = traj.mesh_id {
@@ -953,34 +1337,34 @@ impl RealtimeArmorViewer {
 
         // Re-upload armor and trajectories if visibility changed
         let marker_opacity_changed = (self.pane.marker_opacity - prev_marker_opacity).abs() > 0.001;
+        let needs_traj_reupload = zone_changed || marker_opacity_changed || self.selection_dirty;
+
         if zone_changed {
             if let Some(armor) = self.pane.loaded_armor.take() {
                 crate::ui::armor_viewer::upload_armor_to_viewport(&mut self.pane, &armor, &self.render_state.device);
                 self.pane.loaded_armor = Some(armor);
             }
-            // Re-upload trajectory meshes (viewport.clear() destroyed them)
+        }
+
+        if needs_traj_reupload && !self.pane.trajectories.is_empty() {
+            // Pre-compute display params per trajectory (avoids borrow conflict in mutable loop)
+            let display_params: Vec<(u64, [f32; 4], f32)> = self
+                .pane
+                .trajectories
+                .iter()
+                .map(|traj| {
+                    let base_color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+                    let (color, lw) = self.trajectory_display_params(traj.meta.id, base_color);
+                    (traj.meta.id, color, lw)
+                })
+                .collect();
+
             let cam_dist = self.pane.viewport.camera.distance;
-            for traj in &mut self.pane.trajectories {
-                let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(
-                    &mut self.pane.viewport,
-                    &traj.result,
-                    &self.render_state.device,
-                    color,
-                    traj.last_visible_hit,
-                    cam_dist,
-                    self.pane.marker_opacity,
-                ));
-                traj.marker_cam_dist = cam_dist;
-            }
-            self.needs_repaint = true;
-        } else if marker_opacity_changed && !self.pane.trajectories.is_empty() {
-            let cam_dist = self.pane.viewport.camera.distance;
-            for traj in &mut self.pane.trajectories {
+            for (i, traj) in self.pane.trajectories.iter_mut().enumerate() {
                 if let Some(old_mid) = traj.mesh_id.take() {
                     self.pane.viewport.remove_mesh(old_mid);
                 }
-                let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+                let (_, color, lw_mult) = display_params[i];
                 traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(
                     &mut self.pane.viewport,
                     &traj.result,
@@ -989,9 +1373,11 @@ impl RealtimeArmorViewer {
                     traj.last_visible_hit,
                     cam_dist,
                     self.pane.marker_opacity,
+                    lw_mult,
                 ));
                 traj.marker_cam_dist = cam_dist;
             }
+            self.selection_dirty = false;
             self.needs_repaint = true;
         }
     }
@@ -1030,70 +1416,200 @@ impl RealtimeArmorViewer {
             self.needs_repaint = true;
         }
 
+        if ui.checkbox(&mut self.show_secondaries, "Show secondary armament").changed() {
+            self.clear_and_reprocess();
+            self.needs_repaint = true;
+        }
+
         ui.separator();
 
         // Stats
-        ui.label(egui::RichText::new(format!("{} salvos tracked", self.salvo_log.len())).small());
+        let total_shells: usize = self.salvo_groups.iter().map(|g| g.shells.len()).sum();
+        ui.label(
+            egui::RichText::new(format!("{} salvos, {} shells tracked", self.salvo_groups.len(), total_shells)).small(),
+        );
 
         ui.separator();
 
-        // Salvo log — clickable entries
-        let mut clicked_id: Option<Option<u64>> = None;
+        // Salvo log — collapsible groups with individual shell entries
+        #[derive(Clone)]
+        enum ClickAction {
+            SelectAllInGroup(SalvoKey),
+            SelectShell { group_key: SalvoKey, trajectory_id: u64 },
+        }
+        let mut click_action: Option<ClickAction> = None;
+
+        let sel_bg = ui.visuals().selection.bg_fill;
+        let normal_bg = ui.visuals().widgets.noninteractive.bg_fill;
+
         egui::ScrollArea::vertical()
             .id_salt("salvo_log_scroll")
             .auto_shrink([false; 2])
             .max_height(ui.available_height() * 0.4)
             .show(ui, |ui| {
-                for entry in &self.salvo_log {
-                    let is_selected = entry.trajectory_id.is_some() && self.selected_salvo_id == entry.trajectory_id;
-                    let frame = egui::Frame::group(ui.style()).fill(if is_selected {
-                        ui.visuals().selection.bg_fill
+                for group_idx in 0..self.salvo_groups.len() {
+                    let group = &self.salvo_groups[group_idx];
+                    let group_key = group.key.clone();
+                    let shell_count = group.shells.len();
+
+                    let clock_secs = group.first_clock.seconds();
+                    let time_min = (clock_secs / 60.0).floor() as i32;
+                    let time_sec = (clock_secs % 60.0) as i32;
+
+                    let avg_range_km = if group.shells.is_empty() {
+                        0.0
                     } else {
-                        ui.visuals().widgets.noninteractive.bg_fill
-                    });
-                    let resp = frame.show(ui, |ui| {
-                        let time_min = (entry.clock / 60.0).floor() as i32;
-                        let time_sec = (entry.clock % 60.0) as i32;
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{}:{:02} — {} {}",
-                                time_min, time_sec, entry.shell_count, entry.shell_name
-                            ))
-                            .strong()
-                            .small(),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "  {} • {} • {:.1}km",
-                                entry.attacker_name,
-                                entry.ammo_type.display_name(),
-                                entry.range.to_km().value(),
-                            ))
-                            .small(),
-                        );
-                        if entry.trajectory_id.is_none() {
-                            ui.label(egui::RichText::new("  (no armor hit)").small().weak());
+                        let sum: f32 = group.shells.iter().map(|s| s.range.to_km().value()).sum();
+                        sum / shell_count as f32
+                    };
+
+                    // Is this group (or a shell in it) selected?
+                    let group_selected = match &self.selection {
+                        Some(SalvoSelection::Group(k)) => *k == group_key,
+                        Some(SalvoSelection::Shell { group_key: gk, .. }) => *gk == group_key,
+                        None => false,
+                    };
+
+                    let caliber_str =
+                        group.shell_info.as_ref().map(|s| format!("{:.0}mm", s.caliber.value())).unwrap_or_default();
+
+                    let header_text = format!(
+                        "{}:{:02} \u{2014} {}x {} {} \u{2022} {} \u{2022} {:.1}km",
+                        time_min,
+                        time_sec,
+                        shell_count,
+                        caliber_str,
+                        group.shell_name,
+                        group.attacker_name,
+                        avg_range_km,
+                    );
+
+                    if shell_count <= 1 {
+                        // Single-shell group: just a clickable frame, no collapsing
+                        let header_bg = if group_selected { sel_bg } else { normal_bg };
+                        let resp = egui::Frame::group(ui.style()).fill(header_bg).show(ui, |ui| {
+                            ui.label(egui::RichText::new(&header_text).strong().small());
+                            if let Some(shell) = group.shells.first() {
+                                let outcome_str = shell.server_outcome.display_name();
+                                ui.label(egui::RichText::new(format!("  {}", outcome_str)).small());
+                            }
+                        });
+                        if resp.response.interact(egui::Sense::click()).clicked() {
+                            // For single-shell, select the shell directly
+                            if let Some(tid) = group.shells.first().and_then(|s| s.trajectory_id) {
+                                click_action =
+                                    Some(ClickAction::SelectShell { group_key: group_key.clone(), trajectory_id: tid });
+                            }
                         }
-                    });
-                    if entry.trajectory_id.is_some() && resp.response.interact(egui::Sense::click()).clicked() {
-                        if is_selected {
-                            clicked_id = Some(None); // deselect
-                        } else {
-                            clicked_id = Some(entry.trajectory_id);
-                        }
+                    } else {
+                        // Multi-shell group: collapsing header with select-all button
+                        let collapsing_id = ui.make_persistent_id(format!("salvo_group_{}", group_idx));
+                        let state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            collapsing_id,
+                            false,
+                        );
+
+                        state
+                            .show_header(ui, |ui| {
+                                // Select All / Deselect button
+                                let btn_label = if group_selected { "Deselect" } else { "Select All" };
+                                if ui.small_button(btn_label).clicked() {
+                                    click_action = Some(ClickAction::SelectAllInGroup(group_key.clone()));
+                                }
+                                ui.label(egui::RichText::new(&header_text).strong().small());
+                            })
+                            .body(|ui| {
+                                for (shell_idx, shell) in group.shells.iter().enumerate() {
+                                    let shell_selected = matches!(
+                                        &self.selection,
+                                        Some(SalvoSelection::Shell { trajectory_id: tid, .. })
+                                        if shell.trajectory_id == Some(*tid)
+                                    );
+                                    let shell_bg = if shell_selected { sel_bg } else { normal_bg };
+
+                                    let outcome_str = shell.server_outcome.display_name();
+                                    let range_km = shell.range.to_km().value();
+                                    let label = if shell.trajectory_id.is_some() {
+                                        format!(
+                                            "Shell #{} \u{2022} {:.1}km \u{2022} {}",
+                                            shell_idx + 1,
+                                            range_km,
+                                            outcome_str
+                                        )
+                                    } else {
+                                        format!(
+                                            "Shell #{} \u{2022} {:.1}km \u{2022} (no armor hit)",
+                                            shell_idx + 1,
+                                            range_km
+                                        )
+                                    };
+
+                                    let shell_resp = egui::Frame::group(ui.style())
+                                        .fill(shell_bg)
+                                        .inner_margin(egui::Margin::symmetric(8, 2))
+                                        .show(ui, |ui| {
+                                            ui.label(egui::RichText::new(label).small());
+                                        });
+
+                                    if let Some(tid) = shell.trajectory_id {
+                                        if shell_resp.response.interact(egui::Sense::click()).clicked() {
+                                            click_action = Some(ClickAction::SelectShell {
+                                                group_key: group_key.clone(),
+                                                trajectory_id: tid,
+                                            });
+                                        }
+                                    }
+                                }
+                            });
                     }
                 }
             });
 
-        if let Some(new_sel) = clicked_id {
-            self.selected_salvo_id = new_sel;
-            self.needs_repaint = true;
+        // Process click actions
+        if let Some(action) = click_action {
+            match action {
+                ClickAction::SelectAllInGroup(key) => {
+                    let already_selected = matches!(&self.selection, Some(SalvoSelection::Group(k)) if *k == key);
+                    if already_selected {
+                        self.selection = None;
+                    } else {
+                        self.selection = Some(SalvoSelection::Group(key));
+                    }
+                    self.selection_dirty = true;
+                    self.needs_repaint = true;
+                }
+                ClickAction::SelectShell { group_key, trajectory_id } => {
+                    let already_selected = matches!(
+                        &self.selection,
+                        Some(SalvoSelection::Shell { trajectory_id: tid, .. }) if *tid == trajectory_id
+                    );
+                    if already_selected {
+                        self.selection = None;
+                    } else {
+                        self.selection = Some(SalvoSelection::Shell { group_key, trajectory_id });
+                    }
+                    self.selection_dirty = true;
+                    self.needs_repaint = true;
+                }
+            }
         }
 
-        // Detail panel for selected salvo
-        if let Some(sel_id) = self.selected_salvo_id {
+        // Detail panel for selected shell
+        let selected_trajectory_id = match &self.selection {
+            Some(SalvoSelection::Shell { trajectory_id, .. }) => Some(*trajectory_id),
+            Some(SalvoSelection::Group(key)) => {
+                // For single-shell groups, show detail
+                self.salvo_group_index.get(key).and_then(|&idx| {
+                    let g = &self.salvo_groups[idx];
+                    if g.shells.len() == 1 { g.shells[0].trajectory_id } else { None }
+                })
+            }
+            None => None,
+        };
+        if let Some(tid) = selected_trajectory_id {
             ui.separator();
-            self.draw_salvo_detail(ui, sel_id);
+            self.draw_salvo_detail(ui, tid);
         }
     }
 
@@ -1101,19 +1617,22 @@ impl RealtimeArmorViewer {
     fn draw_salvo_detail(&self, ui: &mut egui::Ui, trajectory_id: u64) {
         use crate::armor_viewer::penetration::{PlateOutcome, enclosing_zone};
 
-        // Find the matching log entry and trajectory
-        let entry = self.salvo_log.iter().find(|e| e.trajectory_id == Some(trajectory_id));
+        // Find the matching shell entry (from salvo groups) and trajectory
+        let shell_and_group = self
+            .salvo_groups
+            .iter()
+            .find_map(|g| g.shells.iter().find(|s| s.trajectory_id == Some(trajectory_id)).map(|s| (s, g)));
         let traj = self.pane.trajectories.iter().find(|t| t.meta.id == trajectory_id);
 
-        let (Some(entry), Some(traj)) = (entry, traj) else {
-            ui.label(egui::RichText::new("Salvo data no longer available").small().weak());
+        let (Some((shell_entry, group)), Some(traj)) = (shell_and_group, traj) else {
+            ui.label(egui::RichText::new("Shell data no longer available").small().weak());
             return;
         };
 
         let result = &traj.result;
 
         // Header
-        ui.label(egui::RichText::new(&entry.shell_name).strong());
+        ui.label(egui::RichText::new(&group.shell_name).strong());
 
         // Impact stats from the ballistic arc
         if let Some(arc) = result.ship_arcs.first() {
@@ -1130,78 +1649,103 @@ impl RealtimeArmorViewer {
             }
         }
 
-        // Re-run shell simulation for outcome and per-plate results
-        let sim = entry.shell_info.as_ref().and_then(|shell| {
-            if shell.ammo_type != AmmoType::AP {
-                return None;
-            }
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            let impact = crate::armor_viewer::ballistics::solve_for_range(&params, entry.range);
-            impact.map(|imp| {
-                crate::armor_viewer::penetration::simulate_shell_through_hits(
-                    &params,
-                    &imp,
-                    &result.hits,
-                    &result.direction,
-                )
-            })
-        });
+        // Use stored comparison if available (AP), otherwise compute HE/SAP outcome
+        let sim = shell_entry.comparison.as_ref().map(|c| &c.sim);
 
-        // HE/SAP outcome for non-AP shells
-        let he_sap_outcome = entry.shell_info.as_ref().and_then(|shell| match shell.ammo_type {
-            AmmoType::HE => {
-                let pen = shell.he_pen_mm.unwrap_or(0.0);
-                result.hits.first().map(|hit| {
-                    if pen >= hit.thickness_mm {
-                        (
-                            egui::Color32::from_rgb(255, 140, 40),
-                            format!("HE detonates — {:.0}mm pen vs {:.0}mm", pen, hit.thickness_mm),
-                        )
-                    } else {
-                        (egui::Color32::RED, format!("HE shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
-                    }
-                })
-            }
-            AmmoType::SAP => {
-                let pen = shell.sap_pen_mm.unwrap_or(0.0);
-                result.hits.first().map(|hit| {
-                    if pen >= hit.thickness_mm {
-                        (
-                            egui::Color32::from_rgb(255, 140, 40),
-                            format!("SAP pen — {:.0}mm vs {:.0}mm", pen, hit.thickness_mm),
-                        )
-                    } else {
-                        (egui::Color32::RED, format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
-                    }
-                })
-            }
-            _ => None,
-        });
-
-        // Shell outcome badge
-        if let Some(ref sim) = sim {
-            let (color, text) = if let Some(det_idx) = sim.detonated_at {
-                let zone = enclosing_zone(&result.hits, det_idx);
-                (egui::Color32::from_rgb(255, 140, 40), format!("Detonation inside {zone}"))
-            } else if let Some(stop_idx) = sim.stopped_at {
-                let plate_desc = result
-                    .hits
-                    .get(stop_idx)
-                    .map(|h| format!("{:.0}mm {}", h.thickness_mm, h.zone))
-                    .unwrap_or_default();
-                match sim.plates.get(stop_idx).map(|p| &p.outcome) {
-                    Some(PlateOutcome::Ricochet) => (egui::Color32::RED, format!("Ricochet @ {plate_desc}")),
-                    Some(PlateOutcome::Shatter) => (egui::Color32::RED, format!("Shatter @ {plate_desc}")),
-                    _ => (egui::Color32::RED, format!("Stopped @ {plate_desc}")),
-                }
-            } else if sim.detonation.is_some() {
-                (egui::Color32::YELLOW, "Overpen".to_string())
-            } else {
-                (egui::Color32::YELLOW, "Overpen (fuse never armed)".to_string())
+        // Server outcome + comparison verdict (AP with comparison data)
+        if let Some(ref cmp) = shell_entry.comparison {
+            // Server outcome line
+            let server_color = match cmp.server_outcome {
+                ServerOutcome::Penetration => egui::Color32::from_rgb(255, 140, 40),
+                ServerOutcome::Citadel => egui::Color32::from_rgb(255, 80, 80),
+                ServerOutcome::Ricochet => egui::Color32::from_rgb(120, 120, 255),
+                ServerOutcome::Shatter => egui::Color32::RED,
+                ServerOutcome::Overpenetration => egui::Color32::YELLOW,
+                ServerOutcome::Underwater => egui::Color32::from_rgb(80, 180, 255),
+                ServerOutcome::Unknown(_) => egui::Color32::GRAY,
             };
-            ui.label(egui::RichText::new(&text).strong().small().color(color));
-        } else if let Some((color, text)) = he_sap_outcome {
-            ui.label(egui::RichText::new(&text).strong().small().color(color));
+            ui.label(
+                egui::RichText::new(format!("Server: {}", cmp.server_outcome.display_name()))
+                    .strong()
+                    .small()
+                    .color(server_color),
+            );
+
+            // Verdict line
+            match &cmp.verdict {
+                ComparisonVerdict::Match => {
+                    ui.label(egui::RichText::new("Sim agrees").small().color(egui::Color32::from_rgb(80, 220, 80)));
+                }
+                ComparisonVerdict::RicochetRngDefer { angle_deg, range_start_deg, range_end_deg } => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "RNG zone ({:.1}° in [{:.1}°–{:.1}°])",
+                            angle_deg, range_start_deg, range_end_deg,
+                        ))
+                        .small()
+                        .color(egui::Color32::YELLOW),
+                    );
+                }
+                ComparisonVerdict::Mismatch { sim_desc, server_desc } => {
+                    ui.label(
+                        egui::RichText::new(format!("Sim: {} / Server: {}", sim_desc, server_desc))
+                            .small()
+                            .color(egui::Color32::from_rgb(255, 80, 80)),
+                    );
+                }
+            }
+
+            // Exit divergence for overpens
+            if let Some(ref exit_div) = cmp.exit_divergence {
+                if let Some(dist) = exit_div.distance {
+                    let div_color = if dist < 0.5 {
+                        egui::Color32::from_rgb(80, 220, 80)
+                    } else if dist < 2.0 {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::from_rgb(255, 80, 80)
+                    };
+                    ui.label(egui::RichText::new(format!("Exit divergence: {dist:.2} units")).small().color(div_color));
+                } else if exit_div.sim_exit_pos.is_none() {
+                    ui.label(
+                        egui::RichText::new("Exit divergence: sim has no exit").small().color(egui::Color32::GRAY),
+                    );
+                }
+            }
+        } else {
+            // HE/SAP outcome for non-AP shells
+            let he_sap_outcome = group.shell_info.as_ref().and_then(|shell| match shell.ammo_type {
+                AmmoType::HE => {
+                    let pen = shell.he_pen_mm.unwrap_or(0.0);
+                    result.hits.first().map(|hit| {
+                        if pen >= hit.thickness_mm {
+                            (
+                                egui::Color32::from_rgb(255, 140, 40),
+                                format!("HE detonates — {:.0}mm pen vs {:.0}mm", pen, hit.thickness_mm),
+                            )
+                        } else {
+                            (egui::Color32::RED, format!("HE shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
+                        }
+                    })
+                }
+                AmmoType::SAP => {
+                    let pen = shell.sap_pen_mm.unwrap_or(0.0);
+                    result.hits.first().map(|hit| {
+                        if pen >= hit.thickness_mm {
+                            (
+                                egui::Color32::from_rgb(255, 140, 40),
+                                format!("SAP pen — {:.0}mm vs {:.0}mm", pen, hit.thickness_mm),
+                            )
+                        } else {
+                            (egui::Color32::RED, format!("SAP shatter — {:.0}mm pen < {:.0}mm", pen, hit.thickness_mm))
+                        }
+                    })
+                }
+                _ => None,
+            });
+            if let Some((color, text)) = he_sap_outcome {
+                ui.label(egui::RichText::new(&text).strong().small().color(color));
+            }
         }
 
         ui.separator();
@@ -1328,7 +1872,11 @@ impl RealtimeArmorViewer {
         }
         self.pane.trajectories.clear();
         self.pane.viewport.mark_dirty();
-        self.salvo_log.clear();
+        self.salvo_groups.clear();
+        self.salvo_group_index.clear();
+        self.unmatched_counter = 0;
+        self.selection = None;
+        self.selection_dirty = false;
         self.processed_hit_count = 0;
         // Next tick() will call process_new_shot_hits() to reprocess.
     }

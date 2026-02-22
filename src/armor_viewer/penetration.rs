@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Km, Param, ShellInfo, Species};
+use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Km, Millimeters, Param, ShellInfo, Species};
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
@@ -42,7 +42,11 @@ pub fn check_penetration(shell: &ShellInfo, thickness_mm: f32, ifhe: bool) -> Op
         }
         AmmoType::AP => {
             // Overmatch: caliber > armor * 14.3
-            Some(if shell.caliber_mm > thickness_mm * 14.3 { PenResult::Penetrates } else { PenResult::AngleDependent })
+            Some(if shell.caliber.value() > thickness_mm * 14.3 {
+                PenResult::Penetrates
+            } else {
+                PenResult::AngleDependent
+            })
         }
         AmmoType::Unknown(t) => {
             tracing::warn!("Unknown ammo type '{}' for shell '{}', cannot check penetration", t, shell.name);
@@ -86,7 +90,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
         a.ammo_type
             .sort_order()
             .cmp(&b.ammo_type.sort_order())
-            .then(a.caliber_mm.partial_cmp(&b.caliber_mm).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.caliber.partial_cmp(&b.caliber).unwrap_or(std::cmp::Ordering::Equal))
     });
 
     Some(ComparisonShip { param_index: param_index.to_string(), display_name, tier, nation, species, shells })
@@ -409,9 +413,185 @@ pub struct TrajectoryMeta {
 }
 
 /// Euclidean distance between two 3D points.
-fn distance_3d(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+pub fn distance_3d(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
     let dz = b[2] - a[2];
     (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+// ---------------------------------------------------------------------------
+// Server vs Simulation Comparison
+// ---------------------------------------------------------------------------
+
+use wowsunpack::game_types::ShellHitType;
+use wowsunpack::recognized::Recognized;
+
+/// Server-authoritative shell outcome (mapped from ShellHitType).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ServerOutcome {
+    Penetration,
+    Citadel,
+    Ricochet,
+    Shatter,
+    Overpenetration,
+    Underwater,
+    Unknown(String),
+}
+
+impl ServerOutcome {
+    pub fn from_shell_hit_type(hit: &Recognized<ShellHitType>) -> Self {
+        match hit {
+            Recognized::Known(ShellHitType::Normal) => Self::Penetration,
+            Recognized::Known(ShellHitType::MajorHit) => Self::Citadel,
+            Recognized::Known(ShellHitType::Ricochet) => Self::Ricochet,
+            Recognized::Known(ShellHitType::NoPenetration) => Self::Shatter,
+            Recognized::Known(ShellHitType::Overpenetration) => Self::Overpenetration,
+            Recognized::Known(ShellHitType::ExitOverpenetration) => Self::Overpenetration,
+            Recognized::Known(ShellHitType::Underwater) => Self::Underwater,
+            Recognized::Known(ShellHitType::None) => Self::Unknown("None".into()),
+            Recognized::Unknown(s) => Self::Unknown(s.clone()),
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Penetration => "Penetration",
+            Self::Citadel => "Citadel",
+            Self::Ricochet => "Ricochet",
+            Self::Shatter => "Shatter",
+            Self::Overpenetration => "Overpenetration",
+            Self::Underwater => "Underwater",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+}
+
+/// How our simulation compares to the server.
+#[derive(Clone, Debug)]
+pub enum ComparisonVerdict {
+    /// Simulation matches server.
+    Match,
+    /// Angle is in the ricochet RNG zone — server's call is valid either way.
+    RicochetRngDefer { angle_deg: f32, range_start_deg: f32, range_end_deg: f32 },
+    /// Simulation disagrees with server.
+    Mismatch { sim_desc: String, server_desc: String },
+}
+
+/// Overpen exit point comparison.
+#[derive(Clone, Debug)]
+pub struct ExitDivergence {
+    /// Server exit position (model space).
+    pub server_exit_pos: [f32; 3],
+    /// Simulated exit position (model space). None if sim didn't produce an exit.
+    pub sim_exit_pos: Option<[f32; 3]>,
+    /// Distance between them in model units. None if sim exit unavailable.
+    pub distance: Option<f32>,
+}
+
+/// Full comparison for one shell.
+#[derive(Clone, Debug)]
+pub struct ServerVsSimComparison {
+    pub server_outcome: ServerOutcome,
+    pub sim: ShellSimResult,
+    pub verdict: ComparisonVerdict,
+    pub exit_divergence: Option<ExitDivergence>,
+}
+
+/// Describe the simulation outcome in human-readable form.
+fn describe_sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> &'static str {
+    // If fuse was armed and shell detonates, the detonation outcome takes priority
+    // even if the shell shattered/ricocheted on a later plate (the fragments still explode).
+    if sim.detonation.is_some() {
+        if let Some(det_idx) = sim.detonated_at {
+            let zone = enclosing_zone(hits, det_idx);
+            if zone.to_lowercase().contains("citadel") {
+                return "Citadel";
+            }
+            return "Penetration";
+        }
+        return "Overpenetration";
+    }
+    if let Some(stop_idx) = sim.stopped_at {
+        if let Some(plate) = sim.plates.get(stop_idx) {
+            return match plate.outcome {
+                PlateOutcome::Ricochet => "Ricochet",
+                PlateOutcome::Shatter => "Shatter",
+                _ => "Stopped",
+            };
+        }
+        return "Stopped";
+    }
+    "Overpenetration"
+}
+
+/// Compare a shell simulation result against the server's authoritative outcome.
+///
+/// `first_hit_angle_deg`: impact angle from normal of the first plate (0° = head-on, 90° = parallel).
+/// `first_hit_thickness_mm`: thickness of the first plate hit.
+pub fn compare_with_server(
+    sim: &ShellSimResult,
+    hits: &[TrajectoryHit],
+    server_outcome: &ServerOutcome,
+    params: &ShellParams,
+    first_hit_angle_deg: f32,
+    first_hit_thickness: Millimeters,
+) -> ComparisonVerdict {
+    let caliber = Millimeters::new((params.caliber * 1000.0) as f32);
+    let is_overmatch = caliber > first_hit_thickness * 14.3;
+    let ricochet0_deg = params.ricochet0.to_degrees() as f32;
+    let ricochet1_deg = params.ricochet1.to_degrees() as f32;
+
+    let server_is_ricochet = *server_outcome == ServerOutcome::Ricochet;
+
+    // Handle ricochet logic first
+    if server_is_ricochet {
+        if is_overmatch {
+            return ComparisonVerdict::Mismatch {
+                sim_desc: "Overmatch (can't ricochet)".into(),
+                server_desc: "Ricochet".into(),
+            };
+        }
+        if first_hit_angle_deg >= ricochet1_deg {
+            return ComparisonVerdict::Match;
+        }
+        if first_hit_angle_deg >= ricochet0_deg {
+            return ComparisonVerdict::RicochetRngDefer {
+                angle_deg: first_hit_angle_deg,
+                range_start_deg: ricochet0_deg,
+                range_end_deg: ricochet1_deg,
+            };
+        }
+        return ComparisonVerdict::Mismatch {
+            sim_desc: "No ricochet possible (angle too low)".into(),
+            server_desc: "Ricochet".into(),
+        };
+    }
+
+    // Server didn't ricochet. Check if we think it should have.
+    if !is_overmatch && first_hit_angle_deg >= ricochet1_deg {
+        return ComparisonVerdict::Mismatch {
+            sim_desc: "Ricochet (always-ricochet zone)".into(),
+            server_desc: server_outcome.display_name().into(),
+        };
+    }
+
+    // Compare pen/shatter/overpen outcomes
+    let sim_desc = describe_sim_outcome(sim, hits);
+
+    let matches = match server_outcome {
+        ServerOutcome::Penetration => sim_desc == "Penetration" || sim_desc == "Citadel",
+        ServerOutcome::Citadel => sim_desc == "Citadel" || sim_desc == "Penetration",
+        ServerOutcome::Shatter => sim_desc == "Shatter",
+        ServerOutcome::Overpenetration => sim_desc == "Overpenetration",
+        ServerOutcome::Underwater => true,
+        ServerOutcome::Unknown(_) => true,
+        ServerOutcome::Ricochet => false,
+    };
+
+    if matches {
+        ComparisonVerdict::Match
+    } else {
+        ComparisonVerdict::Mismatch { sim_desc: sim_desc.into(), server_desc: server_outcome.display_name().into() }
+    }
 }

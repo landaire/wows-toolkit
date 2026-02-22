@@ -847,6 +847,7 @@ impl ToolkitTabViewer<'_> {
                             traj.last_visible_hit,
                             cam_dist,
                             pane.marker_opacity,
+                            1.0,
                         );
                         traj.mesh_id = Some(mesh_id);
                         traj.marker_cam_dist = cam_dist;
@@ -1077,14 +1078,15 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
         pane.gap_count = 0;
     }
 
-    // Upload hull visual meshes (semi-transparent gray overlay)
+    // Upload hull visual meshes
+    let hull_alpha: f32 = if pane.hull_opaque { 1.0 } else { 0.7 };
+    let hull_layer = if pane.hull_opaque { LAYER_DEFAULT } else { LAYER_HULL };
     for mesh in &armor.hull_meshes {
         let visible = pane.hull_visibility.get(&mesh.name).copied().unwrap_or(false);
         if !visible {
             continue;
         }
 
-        let hull_alpha: f32 = 0.7;
         let fallback_color: [f32; 4] = [0.6, 0.6, 0.65, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
@@ -1107,18 +1109,12 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
         }
 
         if !mesh.indices.is_empty() {
-            pane.viewport.add_mesh(device, &vertices, &mesh.indices, LAYER_HULL);
+            pane.viewport.add_mesh(device, &vertices, &mesh.indices, hull_layer);
         }
     }
 
-    // Water plane at draft height.
-    // The model's Y=0 appears to be at the keel. The `draft` value (in the same units as
-    // the model) tells us how deep below the waterline the keel sits, so the waterline
-    // is at Y = draft. However, draft is in real-world meters while the model uses a
-    // smaller coordinate system. We estimate the scale from the model's vertical extent
-    // vs a typical hull depth (~draft * 1.3 as a rough approximation).
-    // For now, place the plane at Y=0 (which appears to be the waterline in BigWorld models).
-    if pane.show_waterline && armor.draft_meters.is_some() {
+    // Water plane at Y=0 (hull is pre-shifted so waterline sits at origin).
+    if pane.show_waterline {
         let (verts, indices) = create_water_plane(0.0, armor.bounds, pane.waterline_opacity);
         pane.viewport.add_non_pickable_mesh(device, &verts, &indices, LAYER_HULL);
     }
@@ -1377,6 +1373,7 @@ fn render_armor_pane(
                                     show_zero_mm: pane.show_zero_mm,
                                     armor_opacity: pane.armor_opacity,
                                     waterline_opacity: pane.waterline_opacity,
+                                    hull_opaque: pane.hull_opaque,
                                 }));
                             }
                         });
@@ -1468,6 +1465,7 @@ fn render_armor_pane(
                     traj.last_visible_hit,
                     cam_dist,
                     pane.marker_opacity,
+                    1.0,
                 );
                 traj.mesh_id = Some(mesh_id);
                 traj.marker_cam_dist = cam_dist;
@@ -1562,6 +1560,7 @@ fn render_armor_pane(
                                 traj.last_visible_hit,
                                 cam_dist,
                                 pane.marker_opacity,
+                                1.0,
                             ));
                             traj.marker_cam_dist = cam_dist;
                         }
@@ -1810,6 +1809,7 @@ fn render_armor_pane(
                                 last_visible_hit,
                                 cam_dist,
                                 pane.marker_opacity,
+                                1.0,
                             );
                             pane.trajectories.push(crate::armor_viewer::state::StoredTrajectory {
                                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
@@ -1848,17 +1848,15 @@ fn render_armor_pane(
                             let click_point = surface_hit.world_position;
 
                             // Use the largest-caliber HE/SAP shell to size the splash cube
-                            let max_caliber_mm = comparison_ships
+                            let max_caliber = comparison_ships
                                 .iter()
                                 .flat_map(|s| s.shells.iter())
                                 .filter(|s| s.ammo_type == AmmoType::HE || s.ammo_type == AmmoType::SAP)
-                                .map(|s| s.caliber_mm)
-                                .fold(0.0f32, f32::max);
+                                .map(|s| s.caliber)
+                                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-                            if max_caliber_mm > 0.0 {
-                                let half_ext = crate::armor_viewer::splash::splash_half_extent(
-                                    wowsunpack::game_params::types::Millimeters::new(max_caliber_mm),
-                                );
+                            if let Some(max_caliber) = max_caliber {
+                                let half_ext = crate::armor_viewer::splash::splash_half_extent(max_caliber);
 
                                 // Compute zone-level splash result (shell-independent)
                                 let splash_result = if let Some(armor) = &pane.loaded_armor {
@@ -1991,6 +1989,7 @@ fn render_armor_pane(
                             traj.last_visible_hit,
                             cam_dist,
                             mo,
+                            1.0,
                         ));
                         traj.marker_cam_dist = cam_dist;
                     }
@@ -2023,6 +2022,7 @@ fn render_armor_pane(
                     traj.last_visible_hit,
                     cam_dist,
                     pane.marker_opacity,
+                    1.0,
                 );
                 traj.mesh_id = Some(mesh_id);
                 traj.marker_cam_dist = cam_dist;
@@ -2063,12 +2063,11 @@ fn load_ship_for_pane(
     use wowsunpack::game_params::types::GameParamProvider;
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
-    let draft_meters = param.as_ref().and_then(|p| {
+    let dock_y_offset = param.as_ref().and_then(|p| {
         p.vehicle()
             .and_then(|v| v.hull_upgrades())
             .and_then(|upgrades| upgrades.values().next())
-            .and_then(|config| config.draft())
-            .map(|m| m.value())
+            .and_then(|c| c.dock_y_offset())
     });
 
     std::thread::spawn(move || {
@@ -2166,9 +2165,9 @@ fn load_ship_for_pane(
                 crate::armor_viewer::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
             let hit_locations = ctx.hit_locations().cloned();
 
-            tracing::debug!("Ship loaded: draft={:?}, bounds Y=[{:.2}, {:.2}]", draft_meters, min[1], max[1]);
+            tracing::debug!("Ship loaded: dock_y_offset={:?}, bounds Y=[{:.4}, {:.4}]", dock_y_offset, min[1], max[1]);
 
-            Ok(LoadedShipArmor {
+            let mut armor = LoadedShipArmor {
                 display_name: ship_display_name,
                 meshes,
                 bounds: (min, max),
@@ -2177,10 +2176,13 @@ fn load_ship_for_pane(
                 zone_part_plates,
                 hull_meshes,
                 hull_part_groups,
-                draft_meters,
+                dock_y_offset,
                 splash_data,
                 hit_locations,
-            })
+                waterline_dy: 0.0,
+            };
+            armor.apply_waterline_offset();
+            Ok(armor)
         })();
 
         let _ = tx.send(result);
@@ -2282,7 +2284,7 @@ pub(crate) fn show_armor_tooltip(
                     }
                     AmmoType::SAP => format!("{:.0}mm pen", shell.sap_pen_mm.unwrap_or(0.0)),
                     AmmoType::AP => {
-                        if shell.caliber_mm > info.thickness_mm * 14.3 {
+                        if shell.caliber.value() > info.thickness_mm * 14.3 {
                             "overmatch".to_string()
                         } else {
                             "angle-dependent".to_string()
@@ -2296,7 +2298,7 @@ pub(crate) fn show_armor_tooltip(
                         egui::RichText::new(format!(
                             "{} {:.0}mm ({})",
                             shell.ammo_type.display_name(),
-                            shell.caliber_mm,
+                            shell.caliber.value(),
                             pen_info,
                         ))
                         .color(color)
@@ -2586,6 +2588,7 @@ fn recompute_trajectory_for_range(
         traj.last_visible_hit,
         cam_distance,
         marker_opacity,
+        1.0,
     ));
     traj.marker_cam_dist = cam_distance;
 }
@@ -2610,6 +2613,7 @@ pub(crate) fn upload_trajectory_visualization(
     last_visible_hit: Option<usize>,
     cam_distance: f32,
     marker_opacity: f32,
+    line_width_mult: f32,
 ) -> MeshId {
     use crate::viewport_3d::camera::{add, cross, normalize, scale, sub};
 
@@ -2619,7 +2623,7 @@ pub(crate) fn upload_trajectory_visualization(
     let dir = result.direction;
     // Scale markers and line width with camera distance so they shrink when zoomed in
     let scale_factor = (cam_distance / 200.0).clamp(0.15, 3.0);
-    let line_width = TRAJECTORY_LINE_WIDTH_FACTOR * scale_factor;
+    let line_width = TRAJECTORY_LINE_WIDTH_FACTOR * scale_factor * line_width_mult;
 
     let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
     let perp1 = normalize(cross(dir, arbitrary));
@@ -3412,7 +3416,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
         zone_changed = true;
     }
-    if armor.draft_meters.is_some() {
+    if armor.dock_y_offset.is_some() {
         if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
             zone_changed = true;
         }
@@ -3428,6 +3432,22 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     }
     if ui.checkbox(&mut pane.show_zero_mm, "0 mm Plates").changed() {
         zone_changed = true;
+    }
+    if !armor.hull_meshes.is_empty() {
+        if ui.checkbox(&mut pane.show_hull, "Ship Hull").changed() {
+            for (_, vis) in pane.hull_visibility.iter_mut() {
+                *vis = pane.show_hull;
+            }
+            zone_changed = true;
+        }
+        if pane.show_hull {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                if ui.checkbox(&mut pane.hull_opaque, "Opaque Hull").changed() {
+                    zone_changed = true;
+                }
+            });
+        }
     }
     ui.horizontal(|ui| {
         ui.label("Armor Opacity");

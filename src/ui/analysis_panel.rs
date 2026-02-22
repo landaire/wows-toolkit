@@ -279,7 +279,7 @@ impl AnalysisPaneViewer<'_> {
                                 format!(
                                     "  {} {:.0}mm — {:.0}mm pen",
                                     shell.ammo_type.display_name(),
-                                    shell.caliber_mm,
+                                    shell.caliber.value(),
                                     pen
                                 )
                             }
@@ -288,7 +288,7 @@ impl AnalysisPaneViewer<'_> {
                                 format!(
                                     "  {} {:.0}mm — {:.0}mm pen",
                                     shell.ammo_type.display_name(),
-                                    shell.caliber_mm,
+                                    shell.caliber.value(),
                                     pen
                                 )
                             }
@@ -296,7 +296,7 @@ impl AnalysisPaneViewer<'_> {
                                 format!(
                                     "  {} {:.0}mm — {:.0} krupp",
                                     shell.ammo_type.display_name(),
-                                    shell.caliber_mm,
+                                    shell.caliber.value(),
                                     shell.krupp
                                 )
                             }
@@ -530,7 +530,7 @@ impl AnalysisPaneViewer<'_> {
             // Outcome badges per shell
             for ss in &shell_sims {
                 let ammo = ss.shell.ammo_type.display_name();
-                let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber_mm);
+                let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber.value());
                 if let Some(ref sim) = ss.sim {
                     use crate::armor_viewer::penetration::PlateOutcome;
                     let (icon, badge_color, outcome_text) = if let Some(det_idx) = sim.detonated_at {
@@ -682,7 +682,7 @@ impl AnalysisPaneViewer<'_> {
                                         "{} {} {:.0}mm",
                                         &ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
-                                        ss.shell.caliber_mm,
+                                        ss.shell.caliber.value(),
                                     );
                                     if plate.fuse_armed_here {
                                         label_text.push_str(" \u{23F1}");
@@ -749,7 +749,7 @@ impl AnalysisPaneViewer<'_> {
                                         "{} {} {:.0}mm",
                                         &ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
-                                        ss.shell.caliber_mm,
+                                        ss.shell.caliber.value(),
                                     ))
                                     .small()
                                     .color(detail_color),
@@ -925,7 +925,7 @@ impl AnalysisPaneViewer<'_> {
                                 egui::RichText::new(format!(
                                     "{} {:.0}mm {} \u{2014} {:.0}mm pen{}",
                                     ship_name,
-                                    shell.caliber_mm,
+                                    shell.caliber.value(),
                                     ammo_label,
                                     pen_mm,
                                     if self.ifhe_enabled { " (IFHE)" } else { "" },

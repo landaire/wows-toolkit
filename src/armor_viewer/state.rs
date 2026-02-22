@@ -30,6 +30,7 @@ pub struct ArmorViewerDefaults {
     pub show_zero_mm: bool,
     pub armor_opacity: f32,
     pub waterline_opacity: f32,
+    pub hull_opaque: bool,
 }
 
 impl Default for ArmorViewerDefaults {
@@ -40,6 +41,7 @@ impl Default for ArmorViewerDefaults {
             show_zero_mm: false,
             armor_opacity: 1.0,
             waterline_opacity: 0.3,
+            hull_opaque: false,
         }
     }
 }
@@ -228,12 +230,47 @@ pub struct LoadedShipArmor {
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    /// Ship draft (depth below waterline) in meters, from the hull component.
-    pub draft_meters: Option<f32>,
+    /// Normalized waterline offset from model origin [-1, 1].
+    /// -1 = bottom of bounding box, 0 = pivot (model origin), +1 = top.
+    pub dock_y_offset: Option<f32>,
     /// Parsed splash box data for HE splash visualization.
     pub splash_data: Option<crate::armor_viewer::splash::ShipSplashData>,
     /// Hit location data from GameParams (zone name → HitLocation).
     pub hit_locations: Option<std::collections::HashMap<String, wowsunpack::game_params::types::HitLocation>>,
+    /// Vertical offset applied by `apply_waterline_offset()`. World-space Y positions
+    /// must be shifted by this amount to align with the shifted model coordinates.
+    pub waterline_dy: f32,
+}
+
+impl LoadedShipArmor {
+    /// Shift all mesh vertex positions and bounds so the waterline sits at Y=0.
+    ///
+    /// `dockYOffset` is normalized [-1, 1]: -1 = bbox bottom, 0 = pivot, +1 = bbox top.
+    /// Call this once after construction. All downstream consumers (upload, picking,
+    /// edges, trajectories, splash) then work in waterline-relative coordinates.
+    pub fn apply_waterline_offset(&mut self) {
+        let dy = self.dock_y_offset.map_or(0.0, |offset| {
+            let waterline_y = if offset < 0.0 { offset * self.bounds.0[1].abs() } else { offset * self.bounds.1[1] };
+            -waterline_y
+        });
+        if dy.abs() < 1e-7 {
+            return;
+        }
+
+        for mesh in &mut self.meshes {
+            for pos in &mut mesh.positions {
+                pos[1] += dy;
+            }
+        }
+        for mesh in &mut self.hull_meshes {
+            for pos in &mut mesh.positions {
+                pos[1] += dy;
+            }
+        }
+        self.bounds.0[1] += dy;
+        self.bounds.1[1] += dy;
+        self.waterline_dy = dy;
+    }
 }
 
 /// A trajectory with its metadata and visualization mesh.
@@ -274,6 +311,8 @@ pub struct ArmorPane {
     pub hull_visibility: HashMap<String, bool>,
     /// Whether to show non-armor hull parts (future).
     pub show_hull: bool,
+    /// When true, hull renders fully opaque with depth writes (like armor plates).
+    pub hull_opaque: bool,
     /// Selected camouflage (future).
     pub selected_camo: Option<String>,
     /// Maps MeshId -> per-triangle tooltip data for picking.
@@ -339,6 +378,7 @@ impl ArmorPane {
             part_visibility: HashMap::new(),
             hull_visibility: HashMap::new(),
             show_hull: false,
+            hull_opaque: defaults.hull_opaque,
             selected_camo: None,
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,

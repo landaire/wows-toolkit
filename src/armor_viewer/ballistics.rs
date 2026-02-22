@@ -50,7 +50,7 @@ pub struct ShellParams {
 
 impl ShellParams {
     pub fn from_shell_info(shell: &ShellInfo) -> Self {
-        let caliber = shell.caliber_mm as f64 / 1000.0; // mm -> m
+        let caliber = shell.caliber.value() as f64 / 1000.0; // mm -> m
         let mass = shell.mass_kg as f64;
         let v0 = shell.muzzle_velocity as f64;
         let krupp = shell.krupp as f64;

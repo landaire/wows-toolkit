@@ -124,7 +124,7 @@ step_count++
 ```
 
 - Max 1024 steps per trajectory
-- Max range 84 000 m (60.0 × 1400.0)
+- Max range 42 000 m (`data_142994650` × 1400.0, where the scale is 30.0 at runtime)
 - Time step varies with altitude (larger dt at higher altitudes)
 - At low altitudes, dt is clamped to ~0.1001 (≈100 ms game time)
 
@@ -145,19 +145,95 @@ approach is faster computationally, suitable for real-time client prediction.
 
 ## 5. Coordinate System
 
-The game operates in BigWorld coordinates where positions are scaled by 60.0:
-```
-game_pos = bigworld_pos * 60.0
+The game uses three coordinate spaces, defined by four hardcoded constants
+exposed via the `BigWorld` C++ Python module:
+
+| Constant | Value | Address | Meaning |
+|----------|-------|---------|---------|
+| `BW_TO_BALLISTIC` | 30.0 | `sub_140f66070` | 1 BW unit = 30 meters |
+| `BALLISTIC_TO_BW` | 1/30 | `sub_140f66080` | 1 meter = 1/30 BW units |
+| `BW_TO_SHIP` | 15.0 | `sub_140f66090` | 1 BW unit = 15 ship-model units |
+| `SHIP_TO_BW` | 1/15 | `sub_140f660a0` | 1 ship-model unit = 1/15 BW units |
+
+From these: **1 ship-model unit = 2 meters** (since 30/15 = 2).
+
+| Space | Scale to BW | Scale to meters | Notes |
+|-------|-------------|-----------------|-------|
+| BigWorld (BW) | 1 | 30 | Entity positions, map coordinates |
+| Ballistic (meters) | 1/30 | 1 | Physics sim, ISA model, drag |
+| Ship-model | 1/15 | 2 | Ship geometry/armor meshes |
+
+### Ballistic scale (30.0 at runtime)
+
+The trajectory simulation uses a scale factor stored at `data_142994650` to
+convert between its input coordinate space and SI meters. This global is set
+by `Lesta.setBallicticScale()` from Python at startup.
+
+**Static binary value:** The on-disk binary contains `0x42700000` = **60.0** at
+`data_142994650`. This is the compiled-in default before any Python initialization.
+
+**Runtime value:** The deobfuscated game scripts show the actual value is **30.0**:
+
+```python
+# BWPersonality.pyc (deobfuscated, bytecode offset 1052-1092):
+#   from m3510ec80 import BW_TO_BALLISTIC, BALLISTIC_TRAJECTORY_FLATTENING, AVATAR_FILTER_PARAMS
+#   Lesta.setBallicticScale(BW_TO_BALLISTIC)
+
+# m3510ec80 = ConstantsShip (deobfuscated):
+from BigWorld import BW_TO_BALLISTIC, BALLISTIC_TO_BW, BW_TO_SHIP, SHIP_TO_BW
 ```
 
-This is applied at initialization in `sub_140307700`:
+The Python variable `BW_TO_BALLISTIC` is imported directly from the `BigWorld`
+C++ module, where it is hardcoded to **30.0** (see table above). So at runtime,
+`data_142994650 = 30.0`.
+
+At initialization in `sub_140307700`, input positions are scaled by this factor:
 ```
-var_520 = position[0] * 60.0
-var_51c = position[1] * 60.0
-var_518 = position[2] * 60.0
+var_520 = position[0] * data_142994650   // * 30.0 → meters
+var_51c = position[1] * data_142994650   // * 30.0 → meters
+var_518 = position[2] * data_142994650   // * 30.0 → meters
 ```
 
-Our simulation works in meters directly and only converts at the UI boundary.
+And in `sub_1403841b0`, outputs are divided by it:
+```
+direction[i] = direction[i] / data_142994650   // / 30.0 → BW
+speed = speed / data_142994650                 // / 30.0 → BW
+```
+
+This means the trajectory functions receive positions in **BigWorld units** and
+convert to meters by multiplying by 30.0. Outputs (direction, speed) are
+converted back to BW units by dividing by 30.0. The internal simulation works
+in SI meters (ISA constants, g=9.8 m/s²).
+
+### ConstantsShip usage patterns (from deobfuscated `m3510ec80`)
+
+The deobfuscated `ConstantsShip` module confirms the conversion conventions:
+
+```python
+AGRO_DISTANCE = 700.0 * BALLISTIC_TO_BW              # 700 m → BW
+AIR_DEFENSE_SHOOT_EFFECTS_VISIBILITY = 5000.0 * BALLISTIC_TO_BW  # 5000 m → BW
+WAVEHORN_WAVE_SPEED = 3000.0 * BALLISTIC_TO_BW       # 3000 m/s → BW/s
+WAVEHORN_WAVE_RADIUS = 5000.0 * BALLISTIC_TO_BW      # 5000 m → BW
+DEFAULT_AIR_SUPPORT_DISTANCES = (500 * BALLISTIC_TO_BW, 7000 * BALLISTIC_TO_BW)
+SHIP_BY_SHIP_XRAY_BALLISTIC_KM = VisibilityDistance.SHIP_BY_SHIP_XRAY * BW_TO_BALLISTIC / KM_TO_M
+```
+
+All distance literals are in meters, multiplied by `BALLISTIC_TO_BW` (= 1/30)
+to convert to BigWorld units for the engine.
+
+### Additional constants from ConstantsShip
+
+| Constant | Value | Notes |
+|----------|-------|-------|
+| `BALLISTIC_TRAJECTORY_FLATTENING` | 0.1 | Passed to `Lesta.setBallisticFlattening()` |
+| `MAX_MAP_SIZE` | 5000.0 | BW units (= 150 km) |
+| `MAX_SHOOT_LEN` | 1500.0 | BW units (= 45 km) |
+| `KNOTS_TO_MPS` | 1.852/3.6 | ≈ 0.5144 m/s per knot |
+| `SHIP_TIME_SCALE` | 2.61 | Server time scaling factor |
+| `BW_KNOTS_TO_MPS` | KNOTS_TO_MPS × SHIP_TO_BW × SHIP_TIME_SCALE | Composite speed conversion |
+
+Our simulation works in meters directly and only converts at the UI boundary,
+using `BW_TO_METERS = 30.0` (from `wowsunpack`) for model-space conversions.
 
 ---
 
@@ -227,7 +303,7 @@ interpolation, not the AP penetration formula.
 
 | String | Function |
 |--------|----------|
-| `Ballistics::_py_setBallicticScale` | Sets the BigWorld scale (60.0) at `data_142994650` |
+| `Ballistics::_py_setBallicticScale` | Sets the ballistic scale at `data_142994650` (30.0 at runtime, = `BW_TO_BALLISTIC`) |
 | `Ballistics::_py_ballistics_trajectory` | Full trajectory simulation wrapper |
 | `Ballistics::_py_getDistUnderWater` | Underwater distance computation |
 | `Ballistics::_py_getTimeUnderWater` | Underwater time computation |
@@ -247,13 +323,11 @@ splash damage (box intersection geometry). This is NOT AP shell-vs-plate penetra
 
 ### Ballistic scale constant
 
-The global at `data_142994650` = `60.0` (the BigWorld coordinate scale, not the
-time multiplier 2.75). The `_py_setBallicticScale` function stores this value,
-and it's read by the trajectory simulation functions for coordinate conversion.
-
-The `BW_TO_BALLISTIC` and `BALLISTIC_TO_BW` Python module constants (at
-`0x14250c088` and `0x14250c098`) are registered as BigWorld module-level values
-for Python scripts to use in coordinate conversions.
+The global at `data_142994650` is the ballistic scale factor, set from Python via
+`Lesta.setBallicticScale(BW_TO_BALLISTIC)` where `BW_TO_BALLISTIC = 30.0` (see
+Section 5). The on-disk binary contains a default of 60.0, but at runtime this
+is overwritten to 30.0. It converts the trajectory function's input positions
+(in BW units) to meters, and is used inversely to convert outputs back.
 
 ### Verdict
 
@@ -794,7 +868,7 @@ The `Cd` (water drag coefficient) should be available in GameParams shell data
 | Cross-sectional area | pi/4 * d² | 0.5 * cd * (d/2)² * pi / mass (folded into k) | **Yes** |
 | Dimensionality | 3D (vx, vy, vz) | 2D (vx, vy) | ~Close |
 | Integration | Forward Euler, adaptive dt | RK4, fixed dt=0.02s | Different |
-| Max range | 84 000 m | 200 s timeout | ~Same |
+| Max range | 42 000 m | 200 s timeout | ~Same |
 | Time multiplier | Not in trajectory code | 2.75 (applied to output) | N/A |
 | Penetration | Server-only | wows_shell formula (community) | Unverifiable |
 | Normalization/ricochet | Server-only | Community constants | Unverifiable |
