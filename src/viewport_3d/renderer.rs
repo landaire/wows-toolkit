@@ -14,10 +14,14 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+@group(1) @binding(0) var diffuse_texture: texture_2d<f32>;
+@group(1) @binding(1) var diffuse_sampler: sampler;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) uv: vec2<f32>,
 };
 
 struct VertexOutput {
@@ -25,6 +29,7 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) normal_vs: vec3<f32>,
     @location(2) position_vs: vec3<f32>,
+    @location(3) uv: vec2<f32>,
 };
 
 @vertex
@@ -34,11 +39,17 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.normal_vs = (uniforms.model_view * vec4(in.normal, 0.0)).xyz;
     out.position_vs = (uniforms.model_view * vec4(in.position, 1.0)).xyz;
     out.color = in.color;
+    out.uv = in.uv;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Sample texture and multiply with vertex color.
+    // Non-textured meshes bind a 1x1 white fallback, so this is a passthrough.
+    let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    let base_color = tex_color * in.color;
+
     // View direction (camera is at origin in view space)
     let V = normalize(-in.position_vs);
 
@@ -68,9 +79,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let rim = pow(1.0 - max(dot(n, V), 0.0), 3.0) * 0.15;
 
     let brightness = ambient + diffuse1 + diffuse2 + rim;
-    let color = in.color.rgb * brightness + vec3(spec);
+    let color = base_color.rgb * brightness + vec3(spec);
 
-    return vec4(color, in.color.a);
+    return vec4(color, base_color.a);
 }
 "#;
 
@@ -87,10 +98,15 @@ pub struct GpuPipeline {
     /// Pipeline that ignores depth — used for highlight overlays (always on top).
     pipeline_overlay: wgpu::RenderPipeline,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Shared sampler for all diffuse textures.
+    default_sampler: wgpu::Sampler,
+    /// 1x1 white texture bind group — bound for non-textured meshes.
+    fallback_texture_bind_group: wgpu::BindGroup,
 }
 
 impl GpuPipeline {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport_3d_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -110,9 +126,31 @@ impl GpuPipeline {
             }],
         });
 
+        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport_3d_texture_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("viewport_3d_pipeline_layout"),
-            bind_group_layouts: &[&uniform_bind_group_layout],
+            bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -214,7 +252,100 @@ impl GpuPipeline {
             cache: None,
         });
 
-        Self { pipeline, pipeline_no_depth_write, pipeline_overlay, uniform_bind_group_layout }
+        // Create shared sampler (repeat wrapping, linear filtering).
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("viewport_3d_default_sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        // Create 1x1 white fallback texture.
+        let fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport_3d_fallback_texture"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255, 255, 255],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        let fallback_view = fallback_texture.create_view(&Default::default());
+        let fallback_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport_3d_fallback_texture_bg"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&fallback_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&default_sampler) },
+            ],
+        });
+
+        Self {
+            pipeline,
+            pipeline_no_depth_write,
+            pipeline_overlay,
+            uniform_bind_group_layout,
+            texture_bind_group_layout,
+            default_sampler,
+            fallback_texture_bind_group,
+        }
+    }
+
+    /// Create a texture bind group from RGBA8 pixel data.
+    pub fn create_texture_bind_group(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> wgpu::BindGroup {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport_3d_hull_texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba_data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        let view = texture.create_view(&Default::default());
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport_3d_texture_bg"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.default_sampler) },
+            ],
+        })
     }
 }
 
@@ -236,6 +367,8 @@ struct GpuMesh {
     index_count: u32,
     visible: bool,
     layer: i32,
+    /// Optional per-mesh texture bind group. When None, the fallback white texture is used.
+    texture_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// Offscreen render target (MSAA color + resolve color + depth).
@@ -310,7 +443,60 @@ impl Viewport3D {
 
         self.meshes.insert(
             id,
-            GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true, layer },
+            GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer,
+                texture_bind_group: None,
+            },
+        );
+
+        // Keep CPU-side data for picking
+        let positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
+        self.pick_data.insert(id, PickableMesh { positions, indices: indices.to_vec() });
+
+        self.needs_redraw = true;
+        id
+    }
+
+    /// Upload a textured mesh to the GPU. The texture bind group is bound per-mesh during rendering.
+    pub fn add_textured_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+        layer: i32,
+        texture_bind_group: wgpu::BindGroup,
+    ) -> MeshId {
+        use wgpu::util::DeviceExt;
+
+        let id = MeshId(self.next_mesh_id);
+        self.next_mesh_id += 1;
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_tex_vb_{}", id.0)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_tex_ib_{}", id.0)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        self.meshes.insert(
+            id,
+            GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer,
+                texture_bind_group: Some(texture_bind_group),
+            },
         );
 
         // Keep CPU-side data for picking
@@ -348,7 +534,56 @@ impl Viewport3D {
 
         self.meshes.insert(
             id,
-            GpuMesh { vertex_buffer, index_buffer, index_count: indices.len() as u32, visible: true, layer },
+            GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer,
+                texture_bind_group: None,
+            },
+        );
+
+        self.needs_redraw = true;
+        id
+    }
+
+    /// Add a non-pickable textured mesh.
+    pub fn add_textured_non_pickable_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+        layer: i32,
+        texture_bind_group: wgpu::BindGroup,
+    ) -> MeshId {
+        use wgpu::util::DeviceExt;
+
+        let id = MeshId(self.next_mesh_id);
+        self.next_mesh_id += 1;
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_tex_np_vb_{}", id.0)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_tex_np_ib_{}", id.0)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        self.meshes.insert(
+            id,
+            GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer,
+                texture_bind_group: Some(texture_bind_group),
+            },
         );
 
         self.needs_redraw = true;
@@ -382,6 +617,7 @@ impl Viewport3D {
                 index_count: indices.len() as u32,
                 visible: true,
                 layer: LAYER_OVERLAY,
+                texture_bind_group: None,
             },
         );
 
@@ -527,7 +763,9 @@ impl Viewport3D {
         let proj_mat = self.camera.projection_matrix(aspect);
         let mvp = mat4_mul(proj_mat, view_mat);
 
-        let uniforms = Uniforms { mvp, model_view: view_mat, light_dir: [0.3, 0.8, 0.5, 0.0] };
+        // Light follows camera: in view space the camera looks down -Z,
+        // so light_dir = [0,0,1] means "light coming from the viewer".
+        let uniforms = Uniforms { mvp, model_view: view_mat, light_dir: [0.0, 0.0, 1.0, 0.0] };
 
         if self.uniform_buffer.is_none() {
             use wgpu::util::DeviceExt;
@@ -569,13 +807,17 @@ impl Viewport3D {
             });
 
             pass.set_bind_group(0, self.uniform_bind_group.as_ref().unwrap(), &[]);
+            // Start with fallback texture; per-mesh textures override below.
+            pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
             // Sort meshes by layer: armor (opaque, depth-write) first, then hull + overlays (transparent, no depth-write).
-            let mut sorted: Vec<&GpuMesh> = self.meshes.values().filter(|m| m.visible && m.index_count > 0).collect();
-            sorted.sort_by_key(|m| m.layer);
+            let mut sorted: Vec<(MeshId, &GpuMesh)> =
+                self.meshes.iter().filter(|(_, m)| m.visible && m.index_count > 0).map(|(id, m)| (*id, m)).collect();
+            sorted.sort_by_key(|(_, m)| m.layer);
 
             let mut current_layer_kind: i32 = -1; // force first set_pipeline
-            for mesh in sorted {
+            let mut has_custom_texture = false; // track whether we need to rebind fallback
+            for (_id, mesh) in sorted {
                 let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
                     0 // opaque
                 } else if mesh.layer < LAYER_OVERLAY {
@@ -591,6 +833,17 @@ impl Viewport3D {
                     }
                     current_layer_kind = layer_kind;
                 }
+
+                // Bind per-mesh texture or fallback
+                if let Some(ref tex_bg) = mesh.texture_bind_group {
+                    pass.set_bind_group(1, tex_bg, &[]);
+                    has_custom_texture = true;
+                } else if has_custom_texture {
+                    // Rebind fallback after a textured mesh
+                    pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
+                    has_custom_texture = false;
+                }
+
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, 0..1);

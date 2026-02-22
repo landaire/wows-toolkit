@@ -12,6 +12,19 @@ use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 /// The thickness discriminator ensures highlights stop at plate boundaries.
 pub type PlateKey = (String, String, i32);
 
+/// Identifies what the user is hovering over in a sidebar/popover for highlight purposes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarHighlightKey {
+    /// All visible armor triangles in a zone.
+    Zone(String),
+    /// All visible armor triangles for a (zone, material/part).
+    Part(String, String),
+    /// A specific plate by (zone, material, thickness_i32).
+    Plate(PlateKey),
+    /// One or more hull meshes by name.
+    HullMeshes(Vec<String>),
+}
+
 /// Which tab is active in the unified analysis window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AnalysisTab {
@@ -240,6 +253,9 @@ pub struct LoadedShipArmor {
     /// Vertical offset applied by `apply_waterline_offset()`. World-space Y positions
     /// must be shifted by this amount to align with the shifted model coordinates.
     pub waterline_dy: f32,
+    /// Decoded hull textures: mfm_path → (width, height, RGBA8 pixels).
+    /// Loaded on background thread, uploaded to GPU during `upload_armor_to_viewport`.
+    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
 }
 
 impl LoadedShipArmor {
@@ -319,6 +335,8 @@ pub struct ArmorPane {
     pub mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
     /// Hover highlight: plate key (zone, material_name, thickness_mm rounded) and its overlay mesh.
     pub hover_highlight: Option<(PlateKey, MeshId)>,
+    /// Sidebar hover highlight — overlay mesh for the item currently hovered in a visibility popover.
+    pub sidebar_highlight: Option<(SidebarHighlightKey, MeshId)>,
     /// Per-plate visibility toggles. Absent = visible. Only plates explicitly hidden are stored.
     pub plate_visibility: HashMap<PlateKey, bool>,
     /// Persisted key for the right-click context menu (plate-level).
@@ -382,6 +400,7 @@ impl ArmorPane {
             selected_camo: None,
             mesh_triangle_info: Vec::new(),
             hover_highlight: None,
+            sidebar_highlight: None,
             plate_visibility: HashMap::new(),
             context_menu_key: None,
             show_waterline: defaults.show_waterline,

@@ -1201,7 +1201,7 @@ impl WowsToolkitApp {
                         if self.tab_state.armor_viewer.gpu_pipeline.is_none() {
                             if let Some(ref rs) = self.tab_state.wgpu_render_state {
                                 self.tab_state.armor_viewer.gpu_pipeline =
-                                    Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device)));
+                                    Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device, &rs.queue)));
                             }
                         }
                         // Re-queue the request for next frame

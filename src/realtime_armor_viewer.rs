@@ -20,7 +20,7 @@ use wowsunpack::recognized::Recognized;
 
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::{ComparisonVerdict, ExitDivergence, ServerOutcome, ServerVsSimComparison};
-use crate::armor_viewer::state::{ArmorPane, LoadedShipArmor, StoredTrajectory};
+use crate::armor_viewer::state::{ArmorPane, LoadedShipArmor, SidebarHighlightKey, StoredTrajectory};
 use crate::icon_str;
 use crate::icons;
 use crate::replay_renderer::{RealtimeArmorBridge, ReplayPlayerInfo};
@@ -324,6 +324,26 @@ impl RealtimeArmorViewer {
                 }
                 let hull_part_groups = crate::ui::armor_viewer::build_hull_part_groups(&hull_meshes);
 
+                // Load hull albedo textures (DDS → RGBA8) for GPU texture sampling.
+                let mut hull_textures = std::collections::HashMap::new();
+                for mesh in &hull_meshes {
+                    if let Some(mfm) = &mesh.mfm_path {
+                        if hull_textures.contains_key(mfm) {
+                            continue;
+                        }
+                        if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ctx.vfs(), mfm) {
+                            if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
+                                if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
+                                    let w = img.width();
+                                    let h = img.height();
+                                    hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
+                                    tracing::debug!("Loaded hull texture: {mfm} ({w}x{h})");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let mut armor = LoadedShipArmor {
                     display_name,
                     meshes,
@@ -337,6 +357,7 @@ impl RealtimeArmorViewer {
                     splash_data: None,
                     hit_locations: None,
                     waterline_dy: 0.0,
+                    hull_textures,
                 };
                 armor.apply_waterline_offset();
                 Ok(armor)
@@ -989,7 +1010,13 @@ impl RealtimeArmorViewer {
                             armor.bounds.1[1],
                             armor.bounds.1[2],
                         );
-                        crate::ui::armor_viewer::init_armor_viewport(&mut self.pane, &armor, &self.render_state.device);
+                        crate::ui::armor_viewer::init_armor_viewport(
+                            &mut self.pane,
+                            &armor,
+                            &self.render_state.device,
+                            &self.render_state.queue,
+                            &self.gpu_pipeline,
+                        );
                         self.pane.loaded_armor = Some(armor);
                         self.pane.loading = false;
                         self.ship_loaded = true;
@@ -1259,6 +1286,7 @@ impl RealtimeArmorViewer {
 
         // Toolbar
         let prev_marker_opacity = self.pane.marker_opacity;
+        let sidebar_hovered_key: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
         if let Some(armor) = self.pane.loaded_armor.take() {
             if !armor.zone_parts.is_empty() {
                 ui.horizontal(|ui| {
@@ -1268,15 +1296,38 @@ impl RealtimeArmorViewer {
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if crate::ui::armor_viewer::draw_armor_visibility_popover(
+                            let (changed, hkey) = crate::ui::armor_viewer::draw_armor_visibility_popover(
                                 ui,
                                 &mut self.pane,
                                 &armor,
                                 &translate_part,
-                            ) {
+                            );
+                            if changed {
                                 zone_changed = true;
                             }
+                            if hkey.is_some() {
+                                sidebar_hovered_key.set(hkey);
+                            }
                         });
+
+                    // Hull Model button with popover
+                    if !armor.hull_part_groups.is_empty() {
+                        let hull_btn = ui
+                            .button(icon_str!(icons::CUBE, "Hull"))
+                            .on_hover_text("Toggle hull model part visibility");
+                        egui::Popup::from_toggle_button_response(&hull_btn)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                let (changed, hkey) =
+                                    crate::ui::armor_viewer::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
+                                if changed {
+                                    zone_changed = true;
+                                }
+                                if let Some(k) = hkey {
+                                    sidebar_hovered_key.set(Some(k));
+                                }
+                            });
+                    }
 
                     // Display settings button
                     let display_btn =
@@ -1300,6 +1351,51 @@ impl RealtimeArmorViewer {
                 ui.separator();
             }
             self.pane.loaded_armor = Some(armor);
+        }
+
+        // Sidebar hover highlight lifecycle: compare new key with current, update overlay mesh.
+        {
+            let new_key = sidebar_hovered_key.into_inner();
+            let current_key = self.pane.sidebar_highlight.as_ref().map(|(k, _)| k.clone());
+            if new_key != current_key {
+                // Remove old highlight
+                if let Some((_, old_id)) = self.pane.sidebar_highlight.take() {
+                    self.pane.viewport.remove_mesh(old_id);
+                    self.pane.viewport.mark_dirty();
+                }
+                if let Some(key) = new_key {
+                    if let Some(armor) = self.pane.loaded_armor.take() {
+                        let device = &self.render_state.device;
+                        let mesh_id = match &key {
+                            SidebarHighlightKey::Zone(z) => {
+                                crate::ui::armor_viewer::upload_zone_highlight(&mut self.pane, &armor, z, device)
+                            }
+                            SidebarHighlightKey::Part(z, p) => {
+                                crate::ui::armor_viewer::upload_part_highlight(&mut self.pane, &armor, z, p, device)
+                            }
+                            SidebarHighlightKey::Plate(pk) => crate::ui::armor_viewer::upload_plate_highlight(
+                                &mut self.pane,
+                                &armor,
+                                pk,
+                                device,
+                                crate::ui::armor_viewer::SIDEBAR_HIGHLIGHT_COLOR,
+                            ),
+                            SidebarHighlightKey::HullMeshes(names) => {
+                                let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                                crate::ui::armor_viewer::upload_hull_highlight(
+                                    &mut self.pane,
+                                    &armor,
+                                    &name_refs,
+                                    device,
+                                )
+                            }
+                        };
+                        self.pane.sidebar_highlight = Some((key, mesh_id));
+                        self.pane.viewport.mark_dirty();
+                        self.pane.loaded_armor = Some(armor);
+                    }
+                }
+            }
         }
 
         // Viewport rendering
@@ -1341,7 +1437,13 @@ impl RealtimeArmorViewer {
 
         if zone_changed {
             if let Some(armor) = self.pane.loaded_armor.take() {
-                crate::ui::armor_viewer::upload_armor_to_viewport(&mut self.pane, &armor, &self.render_state.device);
+                crate::ui::armor_viewer::upload_armor_to_viewport(
+                    &mut self.pane,
+                    &armor,
+                    &self.render_state.device,
+                    &self.render_state.queue,
+                    &self.gpu_pipeline,
+                );
                 self.pane.loaded_armor = Some(armor);
             }
         }

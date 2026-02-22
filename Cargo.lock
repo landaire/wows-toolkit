@@ -8259,6 +8259,7 @@ dependencies = [
  "http-body-util",
  "humansize",
  "image",
+ "image_dds",
  "itertools 0.14.0",
  "jiff",
  "language-tags",

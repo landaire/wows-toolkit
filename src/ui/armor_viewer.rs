@@ -9,7 +9,7 @@ use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::state::{
     AnalysisTab, ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, CompareSettings, LoadedShipArmor, PlateKey,
-    ShipAssetsState, VisibilitySnapshot,
+    ShipAssetsState, SidebarHighlightKey, VisibilitySnapshot,
 };
 use crate::icon_str;
 use crate::icons;
@@ -111,7 +111,7 @@ impl ToolkitTabViewer<'_> {
 
         // Initialize GPU pipeline once
         if state.gpu_pipeline.is_none() {
-            state.gpu_pipeline = Some(Arc::new(GpuPipeline::new(&render_state.device)));
+            state.gpu_pipeline = Some(Arc::new(GpuPipeline::new(&render_state.device, &render_state.queue)));
         }
 
         // Initialize ShipAssets on background thread (catalog is built when loading completes)
@@ -201,7 +201,7 @@ impl ToolkitTabViewer<'_> {
         let nation_flags = &state.nation_flag_textures;
 
         // Poll per-pane ship loading receivers
-        poll_pane_loads(&mut state.dock_state, &render_state.device, &gpu_pipeline);
+        poll_pane_loads(&mut state.dock_state, &render_state.device, &render_state.queue, &gpu_pipeline);
 
         // Multi-pane toolbar (only shown when multiple panes exist)
         let pane_count = state.dock_state.main_surface().num_tabs();
@@ -615,7 +615,13 @@ impl ToolkitTabViewer<'_> {
                         tab.part_visibility = part_vis.clone();
                         tab.hull_visibility = hull_vis.clone();
                         if let Some(armor) = tab.loaded_armor.take() {
-                            upload_armor_to_viewport(tab, &armor, &render_state.device);
+                            upload_armor_to_viewport(
+                                tab,
+                                &armor,
+                                &render_state.device,
+                                &render_state.queue,
+                                &gpu_pipeline,
+                            );
                             tab.loaded_armor = Some(armor);
                         }
                     }
@@ -831,7 +837,13 @@ impl ToolkitTabViewer<'_> {
                     }
                     // Re-upload armor after visibility change
                     if let Some(armor) = pane.loaded_armor.take() {
-                        upload_armor_to_viewport(pane, &armor, &render_state.device);
+                        upload_armor_to_viewport(
+                            pane,
+                            &armor,
+                            &render_state.device,
+                            &render_state.queue,
+                            &gpu_pipeline,
+                        );
                         pane.loaded_armor = Some(armor);
                     }
 
@@ -970,13 +982,18 @@ impl ToolkitTabViewer<'_> {
 }
 
 /// Poll all panes for completed ship loads.
-fn poll_pane_loads(dock_state: &mut DockState<ArmorPane>, device: &wgpu::Device, _pipeline: &GpuPipeline) {
+fn poll_pane_loads(
+    dock_state: &mut DockState<ArmorPane>,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &GpuPipeline,
+) {
     for (_, pane) in dock_state.iter_all_tabs_mut() {
         if let Some(rx) = &pane.load_receiver {
             if let Ok(result) = rx.try_recv() {
                 match result {
                     Ok(armor) => {
-                        init_armor_viewport(pane, &armor, device);
+                        init_armor_viewport(pane, &armor, device, queue, pipeline);
                         pane.loaded_armor = Some(armor);
                     }
                     Err(e) => {
@@ -992,10 +1009,17 @@ fn poll_pane_loads(dock_state: &mut DockState<ArmorPane>, device: &wgpu::Device,
 
 /// Upload loaded armor meshes to the viewport's GPU buffers,
 /// filtering out triangles belonging to invisible parts or hidden plates.
-pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+pub(crate) fn upload_armor_to_viewport(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &GpuPipeline,
+) {
     pane.viewport.clear();
     pane.mesh_triangle_info.clear();
     pane.hover_highlight = None;
+    pane.sidebar_highlight = None;
 
     for mesh in &armor.meshes {
         let mut vertices: Vec<Vertex> = Vec::new();
@@ -1046,7 +1070,7 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
 
                     let mut color = mesh.colors[orig_idx];
                     color[3] = pane.armor_opacity;
-                    vertices.push(Vertex { position: pos, normal: norm, color });
+                    vertices.push(Vertex { position: pos, normal: norm, color, uv: [0.0, 0.0] });
                 }
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
@@ -1087,6 +1111,10 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
             continue;
         }
 
+        let has_uvs = mesh.uvs.len() == mesh.positions.len();
+        let texture_data = mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p));
+        let has_texture = texture_data.is_some() && has_uvs;
+
         let fallback_color: [f32; 4] = [0.6, 0.6, 0.65, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
@@ -1099,17 +1127,26 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
                 norm = transform_normal(t, norm);
             }
 
-            let color = if has_baked_colors {
+            let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
+            let color = if has_texture {
+                // Texture provides albedo; vertex color is white with desired alpha.
+                [1.0, 1.0, 1.0, hull_alpha]
+            } else if has_baked_colors {
                 let c = mesh.colors[i];
                 [c[0], c[1], c[2], hull_alpha]
             } else {
                 fallback_color
             };
-            vertices.push(Vertex { position: pos, normal: norm, color });
+            vertices.push(Vertex { position: pos, normal: norm, color, uv });
         }
 
         if !mesh.indices.is_empty() {
-            pane.viewport.add_mesh(device, &vertices, &mesh.indices, hull_layer);
+            if let Some((w, h, rgba)) = texture_data.filter(|_| has_uvs) {
+                let tex_bg = pipeline.create_texture_bind_group(device, queue, rgba, *w, *h);
+                pane.viewport.add_textured_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg);
+            } else {
+                pane.viewport.add_mesh(device, &vertices, &mesh.indices, hull_layer);
+            }
         }
     }
 
@@ -1123,7 +1160,13 @@ pub(crate) fn upload_armor_to_viewport(pane: &mut ArmorPane, armor: &LoadedShipA
 }
 
 /// Initial upload when a ship is first loaded. Sets up part visibility and camera.
-pub(crate) fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu::Device) {
+pub(crate) fn init_armor_viewport(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &GpuPipeline,
+) {
     pane.part_visibility.clear();
     pane.plate_visibility.clear();
     pane.undo_stack.clear();
@@ -1141,7 +1184,7 @@ pub(crate) fn init_armor_viewport(pane: &mut ArmorPane, armor: &LoadedShipArmor,
         }
     }
 
-    upload_armor_to_viewport(pane, armor, device);
+    upload_armor_to_viewport(pane, armor, device, queue, pipeline);
 
     // Frame camera on the model
     pane.viewport.camera = crate::viewport_3d::ArcballCamera::from_bounds(armor.bounds.0, armor.bounds.1);
@@ -1210,6 +1253,7 @@ fn render_armor_pane(
         // Settings toolbar (single row with popover buttons)
         let prev_marker_opacity = pane.marker_opacity;
         let ctrl_s_pressed = vp_ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::S));
+        let sidebar_hovered_key: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
         if let Some(armor) = pane.loaded_armor.take() {
             if !armor.zone_parts.is_empty() {
                 vp_ui.horizontal(|ui| {
@@ -1219,8 +1263,12 @@ fn render_armor_pane(
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if draw_armor_visibility_popover(ui, pane, &armor, translate_part) {
+                            let (changed, hkey) = draw_armor_visibility_popover(ui, pane, &armor, translate_part);
+                            if changed {
                                 zone_changed = true;
+                            }
+                            if hkey.is_some() {
+                                sidebar_hovered_key.set(hkey);
                             }
                         });
 
@@ -1232,75 +1280,13 @@ fn render_armor_pane(
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let all_hull_names: Vec<&String> =
-                                    armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
-
-                                ui.horizontal(|ui| {
-                                    if ui.small_button("All").clicked() {
-                                        for name in &all_hull_names {
-                                            pane.hull_visibility.insert((*name).clone(), true);
-                                        }
-                                        zone_changed = true;
-                                    }
-                                    if ui.small_button("None").clicked() {
-                                        for name in &all_hull_names {
-                                            pane.hull_visibility.insert((*name).clone(), false);
-                                        }
-                                        zone_changed = true;
-                                    }
-                                });
-                                ui.separator();
-
-                                ui.set_min_width(220.0);
-                                egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(
-                                    ui,
-                                    |ui| {
-                                        ui.set_width(ui.available_width());
-                                        for (group, names) in &armor.hull_part_groups {
-                                            let group_all_on = names
-                                                .iter()
-                                                .all(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
-                                            let group_any_on = names
-                                                .iter()
-                                                .any(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
-
-                                            let id = ui.make_persistent_id(("hull_group", group));
-                                            egui::collapsing_header::CollapsingState::load_with_default_open(
-                                                ui.ctx(),
-                                                id,
-                                                false,
-                                            )
-                                            .show_header(ui, |ui| {
-                                                let mut group_checked = group_all_on;
-                                                let gcb = ui.checkbox(&mut group_checked, "");
-                                                if group_any_on && !group_all_on {
-                                                    let c = gcb.rect.center();
-                                                    ui.painter().line_segment(
-                                                        [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
-                                                        egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
-                                                    );
-                                                }
-                                                if gcb.changed() {
-                                                    for name in names {
-                                                        pane.hull_visibility.insert(name.clone(), group_checked);
-                                                    }
-                                                    zone_changed = true;
-                                                }
-                                                ui.label(group);
-                                            })
-                                            .body(|ui| {
-                                                for name in names {
-                                                    let mut visible =
-                                                        pane.hull_visibility.get(name).copied().unwrap_or(false);
-                                                    if ui.checkbox(&mut visible, name.as_str()).changed() {
-                                                        pane.hull_visibility.insert(name.clone(), visible);
-                                                        zone_changed = true;
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    },
-                                );
+                                let (changed, hkey) = draw_hull_visibility_popover(ui, pane, &armor);
+                                if changed {
+                                    zone_changed = true;
+                                }
+                                if let Some(k) = hkey {
+                                    sidebar_hovered_key.set(Some(k));
+                                }
                             });
                     }
 
@@ -1450,7 +1436,7 @@ fn render_armor_pane(
         }
         if zone_changed {
             if let Some(armor) = pane.loaded_armor.take() {
-                upload_armor_to_viewport(pane, &armor, &render_state.device);
+                upload_armor_to_viewport(pane, &armor, &render_state.device, &render_state.queue, gpu_pipeline);
                 pane.loaded_armor = Some(armor);
             }
             // Re-upload trajectory visualizations (viewport.clear() destroyed them)
@@ -1503,6 +1489,38 @@ fn render_armor_pane(
                             let hl_mid = pane.viewport.add_overlay_mesh(&render_state.device, &hl_verts, &hl_indices);
                             pane.splash_mesh_ids.push(hl_mid);
                         }
+                    }
+                }
+            }
+        }
+
+        // Sidebar hover highlight lifecycle: compare new key with current, update overlay mesh.
+        {
+            let new_key = sidebar_hovered_key.into_inner();
+            let current_key = pane.sidebar_highlight.as_ref().map(|(k, _)| k.clone());
+            if new_key != current_key {
+                // Remove old highlight
+                if let Some((_, old_id)) = pane.sidebar_highlight.take() {
+                    pane.viewport.remove_mesh(old_id);
+                    pane.viewport.mark_dirty();
+                }
+                if let Some(key) = new_key {
+                    if let Some(armor) = pane.loaded_armor.take() {
+                        let device = &render_state.device;
+                        let mesh_id = match &key {
+                            SidebarHighlightKey::Zone(z) => upload_zone_highlight(pane, &armor, z, device),
+                            SidebarHighlightKey::Part(z, p) => upload_part_highlight(pane, &armor, z, p, device),
+                            SidebarHighlightKey::Plate(pk) => {
+                                upload_plate_highlight(pane, &armor, pk, device, SIDEBAR_HIGHLIGHT_COLOR)
+                            }
+                            SidebarHighlightKey::HullMeshes(names) => {
+                                let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                                upload_hull_highlight(pane, &armor, &name_refs, device)
+                            }
+                        };
+                        pane.sidebar_highlight = Some((key, mesh_id));
+                        pane.viewport.mark_dirty();
+                        pane.loaded_armor = Some(armor);
                     }
                 }
             }
@@ -2007,7 +2025,7 @@ fn render_armor_pane(
         // only catches zone-bar toggles; context menu sets zone_changed later).
         if zone_changed {
             if let Some(armor) = pane.loaded_armor.take() {
-                upload_armor_to_viewport(pane, &armor, &render_state.device);
+                upload_armor_to_viewport(pane, &armor, &render_state.device, &render_state.queue, gpu_pipeline);
                 pane.loaded_armor = Some(armor);
             }
             // Re-upload trajectory visualizations (viewport.clear() destroyed them)
@@ -2167,6 +2185,26 @@ fn load_ship_for_pane(
 
             tracing::debug!("Ship loaded: dock_y_offset={:?}, bounds Y=[{:.4}, {:.4}]", dock_y_offset, min[1], max[1]);
 
+            // Load hull albedo textures (DDS → RGBA8) for GPU texture sampling.
+            let mut hull_textures = std::collections::HashMap::new();
+            for mesh in &hull_meshes {
+                if let Some(mfm) = &mesh.mfm_path {
+                    if hull_textures.contains_key(mfm) {
+                        continue;
+                    }
+                    if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ctx.vfs(), mfm) {
+                        if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
+                            if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
+                                let w = img.width();
+                                let h = img.height();
+                                hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
+                                tracing::debug!("Loaded hull texture: {mfm} ({w}x{h})");
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut armor = LoadedShipArmor {
                 display_name: ship_display_name,
                 meshes,
@@ -2180,6 +2218,7 @@ fn load_ship_for_pane(
                 splash_data,
                 hit_locations,
                 waterline_dy: 0.0,
+                hull_textures,
             };
             armor.apply_waterline_offset();
             Ok(armor)
@@ -2369,7 +2408,7 @@ pub(crate) fn upload_plate_highlight(
                     pos[1] += norm[1] * normal_offset;
                     pos[2] += norm[2] * normal_offset;
 
-                    vertices.push(Vertex { position: pos, normal: norm, color: highlight_color });
+                    vertices.push(Vertex { position: pos, normal: norm, color: highlight_color, uv: [0.0, 0.0] });
                 }
             }
             indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
@@ -2377,6 +2416,261 @@ pub(crate) fn upload_plate_highlight(
     }
 
     pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+pub const SIDEBAR_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.35];
+
+/// Upload a highlight overlay for all visible armor triangles in a given zone.
+pub fn upload_zone_highlight(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    zone: &str,
+    device: &wgpu::Device,
+) -> MeshId {
+    let normal_offset = TRAJECTORY_NORMAL_OFFSET;
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if info.zone != zone {
+                continue;
+            }
+            if !pane.show_zero_mm && info.thickness_mm.abs() < 0.05 {
+                continue;
+            }
+            if pane.show_hidden_only && !info.hidden {
+                continue;
+            }
+            let part_key = (info.zone.clone(), info.material_name.clone());
+            if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
+                continue;
+            }
+            let thickness_key = (info.thickness_mm * 10.0).round() as i32;
+            let plate_key: PlateKey = (info.zone.clone(), info.material_name.clone(), thickness_key);
+            if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+            let new_base = vertices.len() as u32;
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx < mesh.positions.len() {
+                    let mut pos = mesh.positions[orig_idx];
+                    let mut norm = mesh.normals[orig_idx];
+                    if let Some(t) = &mesh.transform {
+                        pos = transform_point(t, pos);
+                        norm = transform_normal(t, norm);
+                    }
+                    pos[0] += norm[0] * normal_offset;
+                    pos[1] += norm[1] * normal_offset;
+                    pos[2] += norm[2] * normal_offset;
+                    vertices.push(Vertex {
+                        position: pos,
+                        normal: norm,
+                        color: SIDEBAR_HIGHLIGHT_COLOR,
+                        uv: [0.0, 0.0],
+                    });
+                }
+            }
+            indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
+        }
+    }
+
+    pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+/// Upload a highlight overlay for all visible armor triangles matching a (zone, part/material).
+pub fn upload_part_highlight(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    zone: &str,
+    part: &str,
+    device: &wgpu::Device,
+) -> MeshId {
+    let normal_offset = TRAJECTORY_NORMAL_OFFSET;
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for mesh in &armor.meshes {
+        for (tri_idx, info) in mesh.triangle_info.iter().enumerate() {
+            if info.zone != zone || info.material_name != part {
+                continue;
+            }
+            if !pane.show_zero_mm && info.thickness_mm.abs() < 0.05 {
+                continue;
+            }
+            if pane.show_hidden_only && !info.hidden {
+                continue;
+            }
+            let part_key = (info.zone.clone(), info.material_name.clone());
+            if !pane.part_visibility.get(&part_key).copied().unwrap_or(true) {
+                continue;
+            }
+            let thickness_key = (info.thickness_mm * 10.0).round() as i32;
+            let plate_key: PlateKey = (info.zone.clone(), info.material_name.clone(), thickness_key);
+            if !pane.plate_visibility.get(&plate_key).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let base_idx = tri_idx * 3;
+            if base_idx + 2 >= mesh.indices.len() {
+                continue;
+            }
+            let new_base = vertices.len() as u32;
+            for k in 0..3 {
+                let orig_idx = mesh.indices[base_idx + k] as usize;
+                if orig_idx < mesh.positions.len() {
+                    let mut pos = mesh.positions[orig_idx];
+                    let mut norm = mesh.normals[orig_idx];
+                    if let Some(t) = &mesh.transform {
+                        pos = transform_point(t, pos);
+                        norm = transform_normal(t, norm);
+                    }
+                    pos[0] += norm[0] * normal_offset;
+                    pos[1] += norm[1] * normal_offset;
+                    pos[2] += norm[2] * normal_offset;
+                    vertices.push(Vertex {
+                        position: pos,
+                        normal: norm,
+                        color: SIDEBAR_HIGHLIGHT_COLOR,
+                        uv: [0.0, 0.0],
+                    });
+                }
+            }
+            indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
+        }
+    }
+
+    pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+/// Upload a highlight overlay for a specific hull mesh by name.
+pub fn upload_hull_highlight(
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+    names: &[&str],
+    device: &wgpu::Device,
+) -> MeshId {
+    let normal_offset = TRAJECTORY_NORMAL_OFFSET;
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for mesh in &armor.hull_meshes {
+        if !names.contains(&mesh.name.as_str()) {
+            continue;
+        }
+        for tri_start in (0..mesh.indices.len()).step_by(3) {
+            if tri_start + 2 >= mesh.indices.len() {
+                break;
+            }
+            let new_base = vertices.len() as u32;
+            for k in 0..3 {
+                let orig_idx = mesh.indices[tri_start + k] as usize;
+                if orig_idx < mesh.positions.len() {
+                    let mut pos = mesh.positions[orig_idx];
+                    let mut norm = if orig_idx < mesh.normals.len() { mesh.normals[orig_idx] } else { [0.0, 1.0, 0.0] };
+                    if let Some(t) = &mesh.transform {
+                        pos = transform_point(t, pos);
+                        norm = transform_normal(t, norm);
+                    }
+                    pos[0] += norm[0] * normal_offset;
+                    pos[1] += norm[1] * normal_offset;
+                    pos[2] += norm[2] * normal_offset;
+                    vertices.push(Vertex {
+                        position: pos,
+                        normal: norm,
+                        color: SIDEBAR_HIGHLIGHT_COLOR,
+                        uv: [0.0, 0.0],
+                    });
+                }
+            }
+            indices.extend_from_slice(&[new_base, new_base + 1, new_base + 2]);
+        }
+    }
+
+    pane.viewport.add_overlay_mesh(device, &vertices, &indices)
+}
+
+/// Draw the hull visibility popover content (groups + individual meshes with hover detection).
+/// Returns `(zone_changed, hovered_key)`.
+pub(crate) fn draw_hull_visibility_popover(
+    ui: &mut egui::Ui,
+    pane: &mut ArmorPane,
+    armor: &LoadedShipArmor,
+) -> (bool, Option<SidebarHighlightKey>) {
+    let mut zone_changed = false;
+    let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
+
+    let all_hull_names: Vec<&String> = armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
+
+    ui.horizontal(|ui| {
+        if ui.small_button("All").clicked() {
+            for name in &all_hull_names {
+                pane.hull_visibility.insert((*name).clone(), true);
+            }
+            zone_changed = true;
+        }
+        if ui.small_button("None").clicked() {
+            for name in &all_hull_names {
+                pane.hull_visibility.insert((*name).clone(), false);
+            }
+            zone_changed = true;
+        }
+    });
+    ui.separator();
+
+    ui.set_min_width(220.0);
+    egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        for (group, names) in &armor.hull_part_groups {
+            let group_all_on = names.iter().all(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
+            let group_any_on = names.iter().any(|n| pane.hull_visibility.get(n).copied().unwrap_or(false));
+
+            let id = ui.make_persistent_id(("hull_group", group));
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                .show_header(ui, |ui| {
+                    let mut group_checked = group_all_on;
+                    let gcb = ui.checkbox(&mut group_checked, "");
+                    if group_any_on && !group_all_on {
+                        let c = gcb.rect.center();
+                        ui.painter().line_segment(
+                            [egui::pos2(c.x - 3.5, c.y), egui::pos2(c.x + 3.5, c.y)],
+                            egui::Stroke::new(2.0, ui.visuals().warn_fg_color),
+                        );
+                    }
+                    if gcb.changed() {
+                        for name in names {
+                            pane.hull_visibility.insert(name.clone(), group_checked);
+                        }
+                        zone_changed = true;
+                    }
+                    let lbl = ui.label(group);
+                    if gcb.hovered() || lbl.hovered() {
+                        hovered.set(Some(SidebarHighlightKey::HullMeshes(names.clone())));
+                    }
+                })
+                .body(|ui| {
+                    for name in names {
+                        let mut visible = pane.hull_visibility.get(name).copied().unwrap_or(false);
+                        let resp = ui.checkbox(&mut visible, name.as_str());
+                        if resp.changed() {
+                            pane.hull_visibility.insert(name.clone(), visible);
+                            zone_changed = true;
+                        }
+                        if resp.hovered() {
+                            hovered.set(Some(SidebarHighlightKey::HullMeshes(vec![name.clone()])));
+                        }
+                    }
+                });
+        }
+    });
+
+    (zone_changed, hovered.into_inner())
 }
 
 /// Add a line segment as two cross-shaped quads into the vertex/index buffers.
@@ -2396,10 +2690,10 @@ fn traj_line_segment(
 
     for offset in [offset1, offset2] {
         let b = vertices.len() as u32;
-        vertices.push(Vertex { position: sub(p0, offset), normal: perp1, color });
-        vertices.push(Vertex { position: add(p0, offset), normal: perp1, color });
-        vertices.push(Vertex { position: add(p1, offset), normal: perp1, color });
-        vertices.push(Vertex { position: sub(p1, offset), normal: perp1, color });
+        vertices.push(Vertex { position: sub(p0, offset), normal: perp1, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: add(p0, offset), normal: perp1, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: add(p1, offset), normal: perp1, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: sub(p1, offset), normal: perp1, color, uv: [0.0, 0.0] });
         indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
     }
 }
@@ -2439,9 +2733,9 @@ fn traj_marker(
         [bottom, back, left],
         [bottom, right, back],
     ] {
-        vertices.push(Vertex { position: a, normal: n, color });
-        vertices.push(Vertex { position: b, normal: n, color });
-        vertices.push(Vertex { position: c, normal: n, color });
+        vertices.push(Vertex { position: a, normal: n, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: b, normal: n, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: c, normal: n, color, uv: [0.0, 0.0] });
     }
 
     for i in 0..24 {
@@ -2771,10 +3065,15 @@ pub(crate) fn upload_trajectory_visualization(
             ];
 
             // Center vertex
-            vertices.push(Vertex { position: det_pos, normal: [0.0, 1.0, 0.0], color: burst_color });
+            vertices.push(Vertex { position: det_pos, normal: [0.0, 1.0, 0.0], color: burst_color, uv: [0.0, 0.0] });
 
             for offset in &offsets {
-                vertices.push(Vertex { position: add(det_pos, *offset), normal: [0.0, 1.0, 0.0], color: burst_color });
+                vertices.push(Vertex {
+                    position: add(det_pos, *offset),
+                    normal: [0.0, 1.0, 0.0],
+                    color: burst_color,
+                    uv: [0.0, 0.0],
+                });
             }
 
             // 8 triangular faces of the octahedron
@@ -2857,10 +3156,10 @@ pub(crate) fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: 
     let normal = [0.0, 1.0, 0.0];
 
     let vertices = vec![
-        Vertex { position: [cx - ex, y, cz - ez], normal, color },
-        Vertex { position: [cx + ex, y, cz - ez], normal, color },
-        Vertex { position: [cx + ex, y, cz + ez], normal, color },
-        Vertex { position: [cx - ex, y, cz + ez], normal, color },
+        Vertex { position: [cx - ex, y, cz - ez], normal, color, uv: [0.0, 0.0] },
+        Vertex { position: [cx + ex, y, cz - ez], normal, color, uv: [0.0, 0.0] },
+        Vertex { position: [cx + ex, y, cz + ez], normal, color, uv: [0.0, 0.0] },
+        Vertex { position: [cx - ex, y, cz + ez], normal, color, uv: [0.0, 0.0] },
     ];
     let indices = vec![0, 1, 2, 0, 2, 3];
 
@@ -3036,6 +3335,7 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
                         ],
                         normal: vert_normal,
                         color: edge_color,
+                        uv: [0.0, 0.0],
                     });
                 }
             }
@@ -3190,6 +3490,7 @@ fn upload_gap_edges(pane: &mut ArmorPane, armor: &LoadedShipArmor, device: &wgpu
                         ],
                         normal: vert_normal,
                         color: gap_color,
+                        uv: [0.0, 0.0],
                     });
                 }
             }
@@ -3226,14 +3527,16 @@ pub(crate) fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
 }
 
 /// Draw the Armor zone/material/plate visibility popover content.
-/// Returns true if any visibility changed.
+/// Returns `(zone_changed, hovered_key)` where `hovered_key` identifies the hovered item
+/// for sidebar highlight overlay.
 pub(crate) fn draw_armor_visibility_popover(
     ui: &mut egui::Ui,
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
     translate_part: &dyn Fn(&str) -> String,
-) -> bool {
+) -> (bool, Option<SidebarHighlightKey>) {
     let mut zone_changed = false;
+    let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
     ui.horizontal(|ui| {
         if ui.small_button("All").clicked() {
             pane.undo_stack.push(VisibilitySnapshot {
@@ -3326,7 +3629,10 @@ pub(crate) fn draw_armor_visibility_popover(
                         }
                         zone_changed = true;
                     }
-                    ui.label(zone).on_hover_text("Ctrl+click to solo");
+                    let lbl = ui.label(zone).on_hover_text("Ctrl+click to solo");
+                    if cb.hovered() || lbl.hovered() {
+                        hovered.set(Some(SidebarHighlightKey::Zone(zone.clone())));
+                    }
                 })
                 .body(|ui| {
                     for (part, plates) in parts_with_plates {
@@ -3342,7 +3648,8 @@ pub(crate) fn draw_armor_visibility_popover(
 
                         if visible_plates.len() <= 1 {
                             let mut v = part_on && !any_plate_hidden;
-                            if ui.checkbox(&mut v, &display).changed() {
+                            let resp = ui.checkbox(&mut v, &display);
+                            if resp.changed() {
                                 pane.undo_stack.push(VisibilitySnapshot {
                                     part_visibility: pane.part_visibility.clone(),
                                     plate_visibility: pane.plate_visibility.clone(),
@@ -3352,6 +3659,9 @@ pub(crate) fn draw_armor_visibility_popover(
                                     pane.plate_visibility.remove(&(zone.clone(), part.clone(), t));
                                 }
                                 zone_changed = true;
+                            }
+                            if resp.hovered() {
+                                hovered.set(Some(SidebarHighlightKey::Part(zone.clone(), part.clone())));
                             }
                         } else {
                             let mat_id = ui.make_persistent_id(("armor_mat", zone, part));
@@ -3377,19 +3687,23 @@ pub(crate) fn draw_armor_visibility_popover(
                                         }
                                         zone_changed = true;
                                     }
-                                    ui.label(&display);
+                                    let lbl = ui.label(&display);
+                                    if cb.hovered() || lbl.hovered() {
+                                        hovered.set(Some(SidebarHighlightKey::Part(zone.clone(), part.clone())));
+                                    }
                                 })
                                 .body(|ui| {
                                     for &thickness_i32 in &visible_plates {
                                         let pk: PlateKey = (zone.clone(), part.clone(), thickness_i32);
                                         let plate_on = pane.plate_visibility.get(&pk).copied().unwrap_or(true);
                                         let thickness_mm = thickness_i32 as f32 / 10.0;
-                                        ui.horizontal(|ui| {
+                                        let row = ui.horizontal(|ui| {
                                             let color =
                                                 wowsunpack::export::gltf_export::thickness_to_color(thickness_mm);
                                             paint_swatch(ui, color32_from_f32(color), 10.0);
                                             let mut v = part_on && plate_on;
-                                            if ui.checkbox(&mut v, format!("{:.0} mm", thickness_mm)).changed() {
+                                            let resp = ui.checkbox(&mut v, format!("{:.0} mm", thickness_mm));
+                                            if resp.changed() {
                                                 pane.undo_stack.push(VisibilitySnapshot {
                                                     part_visibility: pane.part_visibility.clone(),
                                                     plate_visibility: pane.plate_visibility.clone(),
@@ -3397,7 +3711,15 @@ pub(crate) fn draw_armor_visibility_popover(
                                                 pane.plate_visibility.insert(pk, !plate_on);
                                                 zone_changed = true;
                                             }
+                                            resp.hovered()
                                         });
+                                        if row.inner {
+                                            hovered.set(Some(SidebarHighlightKey::Plate((
+                                                zone.clone(),
+                                                part.clone(),
+                                                thickness_i32,
+                                            ))));
+                                        }
                                     }
                                 });
                         }
@@ -3405,7 +3727,7 @@ pub(crate) fn draw_armor_visibility_popover(
                 });
         }
     });
-    zone_changed
+    (zone_changed, hovered.into_inner())
 }
 
 /// Draw the Display settings popover content (plate edges, waterline, 0mm, opacity).

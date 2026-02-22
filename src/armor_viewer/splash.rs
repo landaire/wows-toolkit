@@ -395,10 +395,30 @@ pub fn build_splash_cube_mesh(center: [f32; 3], half_extent: ModelUnit, color: [
         let normal = [0.0, 1.0, 0.0]; // dummy normal for overlay
 
         let base = vertices.len() as u32;
-        vertices.push(Vertex { position: [pa[0] - perp_x, pa[1] - perp_y, pa[2] - perp_z], normal, color });
-        vertices.push(Vertex { position: [pa[0] + perp_x, pa[1] + perp_y, pa[2] + perp_z], normal, color });
-        vertices.push(Vertex { position: [pb[0] - perp_x, pb[1] - perp_y, pb[2] - perp_z], normal, color });
-        vertices.push(Vertex { position: [pb[0] + perp_x, pb[1] + perp_y, pb[2] + perp_z], normal, color });
+        vertices.push(Vertex {
+            position: [pa[0] - perp_x, pa[1] - perp_y, pa[2] - perp_z],
+            normal,
+            color,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex {
+            position: [pa[0] + perp_x, pa[1] + perp_y, pa[2] + perp_z],
+            normal,
+            color,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex {
+            position: [pb[0] - perp_x, pb[1] - perp_y, pb[2] - perp_z],
+            normal,
+            color,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex {
+            position: [pb[0] + perp_x, pb[1] + perp_y, pb[2] + perp_z],
+            normal,
+            color,
+            uv: [0.0, 0.0],
+        });
 
         indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
     }
@@ -480,16 +500,19 @@ pub fn build_splash_highlight_mesh(
                 position: [p0[0] + n0[0] * normal_offset, p0[1] + n0[1] * normal_offset, p0[2] + n0[2] * normal_offset],
                 normal: n0,
                 color,
+                uv: [0.0, 0.0],
             });
             vertices.push(Vertex {
                 position: [p1[0] + n1[0] * normal_offset, p1[1] + n1[1] * normal_offset, p1[2] + n1[2] * normal_offset],
                 normal: n1,
                 color,
+                uv: [0.0, 0.0],
             });
             vertices.push(Vertex {
                 position: [p2[0] + n2[0] * normal_offset, p2[1] + n2[1] * normal_offset, p2[2] + n2[2] * normal_offset],
                 normal: n2,
                 color,
+                uv: [0.0, 0.0],
             });
             indices.extend_from_slice(&[base, base + 1, base + 2]);
         }
