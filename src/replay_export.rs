@@ -12,6 +12,8 @@ use wows_replays::types::AccountId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
+use wows_replays::types::Relation;
+
 use crate::ui::replay_parser::Damage;
 use crate::ui::replay_parser::Hits;
 use crate::ui::replay_parser::PlayerReport;
@@ -144,8 +146,12 @@ where
 pub struct DamageInteraction {
     damage_dealt: u64,
     damage_dealt_percentage: f64,
+    /// % of the victim's total received damage that came from this player
+    damage_dealt_inverse_percentage: f64,
     damage_received: u64,
     damage_received_percentage: f64,
+    /// % of the attacker's total dealt damage that went to this player
+    damage_received_inverse_percentage: f64,
 }
 
 impl From<&crate::ui::replay_parser::DamageInteraction> for DamageInteraction {
@@ -153,9 +159,34 @@ impl From<&crate::ui::replay_parser::DamageInteraction> for DamageInteraction {
         DamageInteraction {
             damage_dealt: value.damage_dealt(),
             damage_dealt_percentage: value.damage_dealt_percentage(),
+            damage_dealt_inverse_percentage: value.damage_dealt_inverse_percentage,
             damage_received: value.damage_received(),
             damage_received_percentage: value.damage_received_percentage(),
+            damage_received_inverse_percentage: value.damage_received_inverse_percentage,
         }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ExportAchievement {
+    name: String,
+    count: usize,
+}
+
+#[derive(Serialize)]
+pub struct ExportRibbon {
+    name: String,
+    display_name: String,
+    count: u64,
+}
+
+fn relation_to_string(relation: Relation) -> String {
+    if relation.is_self() {
+        "self".to_string()
+    } else if relation.is_enemy() {
+        "enemy".to_string()
+    } else {
+        "ally".to_string()
     }
 }
 
@@ -236,6 +267,12 @@ pub struct FlattenedVehicle {
     highest_tier_skill: Option<usize>,
     num_tier_1_skills: Option<usize>,
     time_lived_secs: Option<u64>,
+    relation: String,
+    division_label: Option<String>,
+    personal_rating: Option<f64>,
+    personal_rating_category: Option<String>,
+    achievement_count: usize,
+    ribbon_count: usize,
 }
 
 impl From<Vehicle> for FlattenedVehicle {
@@ -256,6 +293,12 @@ impl From<Vehicle> for FlattenedVehicle {
             observed_results,
             skill_meta_info,
             time_lived_secs,
+            relation,
+            division_label,
+            achievements,
+            ribbons,
+            personal_rating,
+            personal_rating_category,
         } = value;
 
         let (modules, abilities, captain_skills) = if let Some(translated_config) = translated_build {
@@ -351,6 +394,12 @@ impl From<Vehicle> for FlattenedVehicle {
                 .as_ref()
                 .and_then(|results| results.hits_details.sap_secondaries_manual),
             hits_torps: server_results.as_ref().and_then(|results| results.hits_details.torps),
+            relation,
+            division_label,
+            personal_rating,
+            personal_rating_category,
+            achievement_count: achievements.len(),
+            ribbon_count: ribbons.len(),
         }
     }
 }
@@ -387,6 +436,18 @@ pub struct Vehicle {
     observed_results: Option<ObservedResults>,
     skill_meta_info: Option<SkillInfo>,
     time_lived_secs: Option<u64>,
+    /// Relation to the replay perspective player
+    relation: String,
+    /// Division label (e.g. "(A)", "(B)"), None if solo
+    division_label: Option<String>,
+    /// Achievements earned in this battle
+    achievements: Vec<ExportAchievement>,
+    /// Ribbons earned in this battle
+    ribbons: Vec<ExportRibbon>,
+    /// Personal Rating for this game
+    personal_rating: Option<f64>,
+    /// Personal Rating category name (e.g. "Unicum", "Great", etc.)
+    personal_rating_category: Option<String>,
 }
 
 impl Vehicle {
@@ -447,6 +508,20 @@ impl Vehicle {
             observed_results: Some(ObservedResults { damage: value.observed_damage(), kills: value.observed_kills() }),
             skill_meta_info: Some(value.skill_info().clone()),
             time_lived_secs: value.time_lived_secs(),
+            relation: relation_to_string(value.relation()),
+            division_label: value.division_label().cloned(),
+            achievements: value
+                .achievements
+                .iter()
+                .map(|a| ExportAchievement { name: a.display_name.clone(), count: a.count })
+                .collect(),
+            ribbons: value
+                .ribbons
+                .values()
+                .map(|r| ExportRibbon { name: r.name.clone(), display_name: r.display_name.clone(), count: r.count })
+                .collect(),
+            personal_rating: value.personal_rating().map(|pr| pr.pr),
+            personal_rating_category: value.personal_rating().map(|pr| pr.category.name().to_string()),
         }
     }
 }
