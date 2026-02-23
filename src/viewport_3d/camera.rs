@@ -141,6 +141,33 @@ impl ArcballCamera {
         self.azimuth += amount * 0.03;
     }
 
+    /// Project a world-space point to screen coordinates within the given viewport rect.
+    /// Returns `None` if the point is behind the camera.
+    pub fn project_to_screen(&self, world_pos: [f32; 3], viewport_rect: egui::Rect) -> Option<egui::Pos2> {
+        let aspect = viewport_rect.width() / viewport_rect.height().max(1.0);
+        let view = self.view_matrix();
+        let proj = self.projection_matrix(aspect);
+        let vp = mat4_mul(proj, view);
+
+        // Multiply: clip = vp * [x, y, z, 1]
+        let x = vp[0][0] * world_pos[0] + vp[1][0] * world_pos[1] + vp[2][0] * world_pos[2] + vp[3][0];
+        let y = vp[0][1] * world_pos[0] + vp[1][1] * world_pos[1] + vp[2][1] * world_pos[2] + vp[3][1];
+        let w = vp[0][3] * world_pos[0] + vp[1][3] * world_pos[1] + vp[2][3] * world_pos[2] + vp[3][3];
+
+        if w <= 0.0 {
+            return None; // behind camera
+        }
+
+        let ndc_x = x / w;
+        let ndc_y = y / w;
+
+        // NDC [-1,1] → screen coords
+        let sx = viewport_rect.left() + (ndc_x + 1.0) * 0.5 * viewport_rect.width();
+        let sy = viewport_rect.top() + (1.0 - ndc_y) * 0.5 * viewport_rect.height();
+
+        Some(egui::Pos2::new(sx, sy))
+    }
+
     /// Handle standard 3D navigation input on a UI response.
     /// Left-drag = orbit, scroll = zoom, middle-drag = pan, double-click = reset.
     /// WASD = move camera target forward/left/backward/right.

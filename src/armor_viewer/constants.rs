@@ -73,6 +73,10 @@ pub const GAP_COLOR: [f32; 4] = [1.0, 0.15, 0.1, 1.0];
 /// Maximum edge length before filtering out (mesh outer boundaries). World-space units.
 pub const MAX_GAP_EDGE_LENGTH: f32 = 5.0;
 
+/// Minimum gap width to display. Gaps narrower than this are filtered out.
+/// Based on Småland's 120mm shell diameter (0.12 model units).
+pub const MIN_GAP_WIDTH: f32 = 0.12;
+
 // ─── Trajectory Overlay ─────────────────────────────────────────────────────
 
 /// Normal offset for trajectory visualization overlays (z-fighting prevention).

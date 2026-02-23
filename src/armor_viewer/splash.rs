@@ -195,6 +195,8 @@ pub fn prettify_box_name(box_name: &str) -> String {
         "ss" => "Superstructure",
         "ssc" => "Superstructure (casemate)",
         "ruder" => "Steering Gear",
+        "cit_ammo" => "Magazine",
+        "cas" => "Casemate",
         other => other,
     };
 
@@ -519,4 +521,156 @@ pub fn build_splash_highlight_mesh(
     }
 
     (vertices, indices, total, penetrated)
+}
+
+/// Build splash box groups by splitting `CM_SB_{PARTS}_{NUM}` and grouping on `{PARTS}`.
+///
+/// Returns `Vec<(group_label, Vec<box_name>)>` sorted by group label.
+pub fn build_splash_box_groups(boxes: &[SplashBox]) -> Vec<(String, Vec<String>)> {
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+
+    for sbox in boxes {
+        // Strip "XX_SB_" prefix to get e.g. "gk_3_1"
+        let stripped = sbox.name.find("_SB_").map(|i| &sbox.name[i + 4..]).unwrap_or(&sbox.name);
+
+        // Extract alphabetic prefix as the group key (e.g. "gk", "bow", "engine")
+        let parts_key: String =
+            stripped.split('_').take_while(|s| s.chars().all(|c| c.is_alphabetic())).collect::<Vec<_>>().join("_");
+
+        let group_label = match parts_key.as_str() {
+            "gk" => "Turret",
+            "engine" => "Engine",
+            "bow" => "Bow",
+            "stern" => "Stern",
+            "cit" => "Citadel",
+            "ss" => "Superstructure",
+            "ssc" => "Superstructure (casemate)",
+            "ruder" => "Steering Gear",
+            "cit_ammo" => "Magazine",
+            "cas" => "Casemate",
+            other => other,
+        };
+
+        groups.entry(group_label.to_string()).or_default().push(sbox.name.clone());
+    }
+
+    groups.into_iter().collect()
+}
+
+/// Color for splash box AABB wireframes.
+pub const SPLASH_BOX_COLOR: [f32; 4] = [0.3, 0.7, 1.0, 0.6];
+
+/// Label info for a splash box: world-space position (top-center) and display name.
+pub struct SplashBoxLabel {
+    pub position: [f32; 3],
+    pub name: String,
+}
+
+/// Build wireframe meshes for all splash box AABBs.
+///
+/// Each box is rendered as 12 thin-quad edges, identical to [`build_splash_cube_mesh`]
+/// but using the box's own `min`/`max` bounds instead of center ± half-extent.
+///
+/// Also returns label positions (top-center of each box) for text overlay.
+pub fn build_splash_box_wireframes<B: std::borrow::Borrow<SplashBox>>(
+    boxes: &[B],
+) -> (Vec<Vertex>, Vec<u32>, Vec<SplashBoxLabel>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut labels = Vec::new();
+    let w = CUBE_EDGE_HALF_WIDTH;
+
+    for sbox_ref in boxes {
+        let sbox = sbox_ref.borrow();
+        let lo = sbox.min;
+        let hi = sbox.max;
+
+        // Label at top-center of box
+        labels.push(SplashBoxLabel {
+            position: [
+                (lo[0] + hi[0]) * 0.5,
+                hi[1], // top
+                (lo[2] + hi[2]) * 0.5,
+            ],
+            name: sbox.name.clone(),
+        });
+
+        let corners: [[f32; 3]; 8] = [
+            [lo[0], lo[1], lo[2]],
+            [hi[0], lo[1], lo[2]],
+            [hi[0], hi[1], lo[2]],
+            [lo[0], hi[1], lo[2]],
+            [lo[0], lo[1], hi[2]],
+            [hi[0], lo[1], hi[2]],
+            [hi[0], hi[1], hi[2]],
+            [lo[0], hi[1], hi[2]],
+        ];
+
+        let edges: [(usize, usize); 12] =
+            [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
+
+        for &(a, b) in &edges {
+            let pa = corners[a];
+            let pb = corners[b];
+
+            let dx = pb[0] - pa[0];
+            let dy = pb[1] - pa[1];
+            let dz = pb[2] - pa[2];
+
+            let (perp_x, perp_y, perp_z) = {
+                let ax = dx.abs();
+                let ay = dy.abs();
+                let az = dz.abs();
+                if ax <= ay && ax <= az {
+                    let cy = -dz;
+                    let cz = dy;
+                    let len = (cy * cy + cz * cz).sqrt().max(1e-10);
+                    (0.0, cy / len * w, cz / len * w)
+                } else if ay <= az {
+                    let cx = dz;
+                    let cz = -dx;
+                    let len = (cx * cx + cz * cz).sqrt().max(1e-10);
+                    (cx / len * w, 0.0, cz / len * w)
+                } else {
+                    let cx = -dy;
+                    let cy = dx;
+                    let len = (cx * cx + cy * cy).sqrt().max(1e-10);
+                    (cx / len * w, cy / len * w, 0.0)
+                }
+            };
+
+            let normal = [0.0, 1.0, 0.0];
+            let color = SPLASH_BOX_COLOR;
+
+            let base = vertices.len() as u32;
+            vertices.push(Vertex {
+                position: [pa[0] - perp_x, pa[1] - perp_y, pa[2] - perp_z],
+                normal,
+                color,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [pa[0] + perp_x, pa[1] + perp_y, pa[2] + perp_z],
+                normal,
+                color,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [pb[0] - perp_x, pb[1] - perp_y, pb[2] - perp_z],
+                normal,
+                color,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex {
+                position: [pb[0] + perp_x, pb[1] + perp_y, pb[2] + perp_z],
+                normal,
+                color,
+                uv: [0.0, 0.0],
+            });
+
+            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
+        }
+    }
+
+    (vertices, indices, labels)
 }

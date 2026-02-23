@@ -23,6 +23,8 @@ pub enum SidebarHighlightKey {
     Plate(PlateKey),
     /// One or more hull meshes by name.
     HullMeshes(Vec<String>),
+    /// One or more splash boxes by name.
+    SplashBoxes(Vec<String>),
 }
 
 /// Which tab is active in the unified analysis window.
@@ -44,6 +46,8 @@ pub struct ArmorViewerDefaults {
     pub armor_opacity: f32,
     pub waterline_opacity: f32,
     pub hull_opaque: bool,
+    pub hull_all_visible: bool,
+    pub show_splash_boxes: bool,
 }
 
 impl Default for ArmorViewerDefaults {
@@ -55,6 +59,8 @@ impl Default for ArmorViewerDefaults {
             armor_opacity: 1.0,
             waterline_opacity: 0.3,
             hull_opaque: false,
+            hull_all_visible: false,
+            show_splash_boxes: false,
         }
     }
 }
@@ -248,6 +254,8 @@ pub struct LoadedShipArmor {
     pub dock_y_offset: Option<f32>,
     /// Parsed splash box data for HE splash visualization.
     pub splash_data: Option<crate::armor_viewer::splash::ShipSplashData>,
+    /// Splash box names grouped by prefix (e.g. "Bow" → ["CM_SB_Bow_01", "CM_SB_Bow_02"]).
+    pub splash_box_groups: Vec<(String, Vec<String>)>,
     /// Hit location data from GameParams (zone name → HitLocation).
     pub hit_locations: Option<std::collections::HashMap<String, wowsunpack::game_params::types::HitLocation>>,
     /// Vertical offset applied by `apply_waterline_offset()`. World-space Y positions
@@ -256,19 +264,20 @@ pub struct LoadedShipArmor {
     /// Decoded hull textures: mfm_path → (width, height, RGBA8 pixels).
     /// Loaded on background thread, uploaded to GPU during `upload_armor_to_viewport`.
     pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// Number of LOD levels available for hull meshes.
+    pub hull_lod_count: usize,
+    /// The LOD level used to load the current hull meshes.
+    pub hull_lod: usize,
 }
 
 impl LoadedShipArmor {
     /// Shift all mesh vertex positions and bounds so the waterline sits at Y=0.
     ///
-    /// `dockYOffset` is normalized [-1, 1]: -1 = bbox bottom, 0 = pivot, +1 = bbox top.
-    /// Call this once after construction. All downstream consumers (upload, picking,
-    /// edges, trajectories, splash) then work in waterline-relative coordinates.
+    /// `dockYOffset` is the waterline Y position in model space (typically a small
+    /// negative value). Call this once after construction. All downstream consumers
+    /// (upload, picking, edges, trajectories, splash) then work in waterline-relative coordinates.
     pub fn apply_waterline_offset(&mut self) {
-        let dy = self.dock_y_offset.map_or(0.0, |offset| {
-            let waterline_y = if offset < 0.0 { offset * self.bounds.0[1].abs() } else { offset * self.bounds.1[1] };
-            -waterline_y
-        });
+        let dy = self.dock_y_offset.map_or(0.0, |offset| -offset);
         if dy.abs() < 1e-7 {
             return;
         }
@@ -375,6 +384,32 @@ pub struct ArmorPane {
     pub splash_result: Option<crate::armor_viewer::splash::SplashResult>,
     /// Overlay mesh IDs for the current splash visualization (cube + highlight).
     pub splash_mesh_ids: Vec<MeshId>,
+    /// Whether to show splash box AABBs as wireframe overlays.
+    pub show_splash_boxes: bool,
+    /// Overlay mesh IDs for splash box wireframes.
+    pub splash_box_mesh_ids: Vec<MeshId>,
+    /// Label positions for splash box wireframes (for text overlay).
+    pub splash_box_labels: Vec<crate::armor_viewer::splash::SplashBoxLabel>,
+    /// Per-splash-box visibility toggles. Absent = visible.
+    pub splash_box_visibility: HashMap<String, bool>,
+    /// Whether hull parts should default to all-visible when a new ship loads.
+    /// Carried from `ArmorViewerDefaults::hull_all_visible` at pane creation time.
+    pub default_hull_all_visible: bool,
+    /// Desired hull LOD level (0 = highest detail). Changed via the Hull popover dropdown.
+    pub hull_lod: usize,
+    /// GPU mesh IDs for uploaded hull meshes (so they can be selectively removed on LOD change).
+    pub hull_mesh_ids: Vec<MeshId>,
+    /// Receiver for background hull-only reload (LOD change).
+    pub hull_load_receiver: Option<Receiver<Result<HullReloadData, String>>>,
+}
+
+/// Data returned by a hull-only background reload (LOD change without full ship reload).
+pub struct HullReloadData {
+    pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
+    pub hull_part_groups: Vec<(String, Vec<String>)>,
+    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    pub hull_lod: usize,
+    pub hull_lod_count: usize,
 }
 
 impl ArmorPane {
@@ -418,6 +453,14 @@ impl ArmorPane {
             splash_mode: false,
             splash_result: None,
             splash_mesh_ids: Vec::new(),
+            show_splash_boxes: defaults.show_splash_boxes,
+            splash_box_mesh_ids: Vec::new(),
+            splash_box_labels: Vec::new(),
+            splash_box_visibility: HashMap::new(),
+            default_hull_all_visible: defaults.hull_all_visible,
+            hull_lod: 0,
+            hull_mesh_ids: Vec::new(),
+            hull_load_receiver: None,
         }
     }
 }

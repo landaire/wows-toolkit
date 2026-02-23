@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking::{self, PickableMesh};
+
+const MAT4_IDENTITY: [[f32; 4]; 4] =
+    [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 use crate::viewport_3d::types::{HitResult, MeshId, Uniforms, Vertex};
 
 const SHADER_SOURCE: &str = r#"
@@ -348,6 +351,8 @@ struct GpuMesh {
     layer: i32,
     /// Optional per-mesh texture bind group. When None, the fallback white texture is used.
     texture_bind_group: Option<wgpu::BindGroup>,
+    /// If true, this mesh is in world space and should NOT be affected by model_roll.
+    world_space: bool,
 }
 
 /// Offscreen render target (MSAA color + resolve color + depth).
@@ -374,10 +379,15 @@ pub struct Viewport3D {
     offscreen: Option<OffscreenTarget>,
     uniform_buffer: Option<wgpu::Buffer>,
     uniform_bind_group: Option<wgpu::BindGroup>,
+    /// Separate uniform buffer for world-space meshes (no model rotation).
+    world_uniform_buffer: Option<wgpu::Buffer>,
+    world_uniform_bind_group: Option<wgpu::BindGroup>,
     next_mesh_id: u64,
     pub clear_color: wgpu::Color,
     /// Whether the scene has changed and needs re-rendering.
     needs_redraw: bool,
+    /// Model roll angle in radians (rotation around the longitudinal/Z axis).
+    pub model_roll: f32,
 }
 
 impl Default for Viewport3D {
@@ -395,9 +405,12 @@ impl Viewport3D {
             offscreen: None,
             uniform_buffer: None,
             uniform_bind_group: None,
+            world_uniform_buffer: None,
+            world_uniform_bind_group: None,
             next_mesh_id: 0,
             clear_color: wgpu::Color { r: 0.12, g: 0.12, b: 0.18, a: 1.0 },
             needs_redraw: true,
+            model_roll: 0.0,
         }
     }
 
@@ -423,6 +436,7 @@ impl Viewport3D {
         self.meshes.insert(
             id,
             GpuMesh {
+                world_space: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -469,6 +483,7 @@ impl Viewport3D {
         self.meshes.insert(
             id,
             GpuMesh {
+                world_space: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -514,6 +529,49 @@ impl Viewport3D {
         self.meshes.insert(
             id,
             GpuMesh {
+                world_space: false,
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+                visible: true,
+                layer,
+                texture_bind_group: None,
+            },
+        );
+
+        self.needs_redraw = true;
+        id
+    }
+
+    /// Add a non-pickable mesh that stays in world space (unaffected by model_roll).
+    pub fn add_world_space_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+        layer: i32,
+    ) -> MeshId {
+        use wgpu::util::DeviceExt;
+
+        let id = MeshId(self.next_mesh_id);
+        self.next_mesh_id += 1;
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_ws_vb_{}", id.0)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("viewport_3d_ws_ib_{}", id.0)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        self.meshes.insert(
+            id,
+            GpuMesh {
+                world_space: true,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -556,6 +614,7 @@ impl Viewport3D {
         self.meshes.insert(
             id,
             GpuMesh {
+                world_space: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -591,6 +650,7 @@ impl Viewport3D {
         self.meshes.insert(
             id,
             GpuMesh {
+                world_space: false,
                 vertex_buffer,
                 index_buffer,
                 index_count: indices.len() as u32,
@@ -632,6 +692,13 @@ impl Viewport3D {
     /// Mark the viewport as needing a redraw (e.g. after camera change).
     pub fn mark_dirty(&mut self) {
         self.needs_redraw = true;
+    }
+
+    /// Mark a mesh as world-space (unaffected by model_roll).
+    pub fn set_world_space(&mut self, id: MeshId, world_space: bool) {
+        if let Some(mesh) = self.meshes.get_mut(&id) {
+            mesh.world_space = world_space;
+        }
     }
 
     /// Whether the viewport needs a redraw.
@@ -738,13 +805,25 @@ impl Viewport3D {
 
         // Create/update uniform buffer
         let aspect = size.0 as f32 / size.1 as f32;
+        let model_mat = if self.model_roll.abs() > 1e-6 {
+            // Rotation around Z axis (ship's longitudinal axis = model-space Z)
+            let (s, c) = self.model_roll.sin_cos();
+            [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+        } else {
+            MAT4_IDENTITY
+        };
         let view_mat = self.camera.view_matrix();
         let proj_mat = self.camera.projection_matrix(aspect);
-        let mvp = mat4_mul(proj_mat, view_mat);
+        let model_view = mat4_mul(view_mat, model_mat);
+        let mvp = mat4_mul(proj_mat, model_view);
 
         // Light follows camera: in view space the camera looks down -Z,
         // so light_dir = [0,0,1] means "light coming from the viewer".
-        let uniforms = Uniforms { mvp, model_view: view_mat, light_dir: [0.0, 0.0, 1.0, 0.0] };
+        let uniforms = Uniforms { mvp, model_view, light_dir: [0.0, 0.0, 1.0, 0.0] };
+
+        // World-space uniforms (no model rotation) — used for waterline etc.
+        let world_mvp = mat4_mul(proj_mat, view_mat);
+        let world_uniforms = Uniforms { mvp: world_mvp, model_view: view_mat, light_dir: [0.0, 0.0, 1.0, 0.0] };
 
         if self.uniform_buffer.is_none() {
             use wgpu::util::DeviceExt;
@@ -760,8 +839,22 @@ impl Viewport3D {
             });
             self.uniform_buffer = Some(buffer);
             self.uniform_bind_group = Some(bind_group);
+
+            let world_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewport_3d_world_uniforms"),
+                contents: bytemuck::bytes_of(&world_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let world_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewport_3d_world_uniform_bg"),
+                layout: &pipeline.uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: world_buffer.as_entire_binding() }],
+            });
+            self.world_uniform_buffer = Some(world_buffer);
+            self.world_uniform_bind_group = Some(world_bind_group);
         } else {
             queue.write_buffer(self.uniform_buffer.as_ref().unwrap(), 0, bytemuck::bytes_of(&uniforms));
+            queue.write_buffer(self.world_uniform_buffer.as_ref().unwrap(), 0, bytemuck::bytes_of(&world_uniforms));
         }
 
         // Render
@@ -785,7 +878,9 @@ impl Viewport3D {
                 ..Default::default()
             });
 
-            pass.set_bind_group(0, self.uniform_bind_group.as_ref().unwrap(), &[]);
+            let model_bg = self.uniform_bind_group.as_ref().unwrap();
+            let world_bg = self.world_uniform_bind_group.as_ref().unwrap();
+            pass.set_bind_group(0, model_bg, &[]);
             // Start with fallback texture; per-mesh textures override below.
             pass.set_bind_group(1, &pipeline.fallback_texture_bind_group, &[]);
 
@@ -796,6 +891,7 @@ impl Viewport3D {
 
             let mut current_layer_kind: i32 = -1; // force first set_pipeline
             let mut has_custom_texture = false; // track whether we need to rebind fallback
+            let mut current_world_space = false;
             for (_id, mesh) in sorted {
                 let layer_kind = if mesh.layer <= LAYER_OPAQUE_MAX {
                     0 // opaque
@@ -811,6 +907,12 @@ impl Viewport3D {
                         _ => pass.set_pipeline(&pipeline.pipeline_overlay),
                     }
                     current_layer_kind = layer_kind;
+                }
+
+                // Switch uniform bind group for world-space vs model-space meshes
+                if mesh.world_space != current_world_space {
+                    pass.set_bind_group(0, if mesh.world_space { world_bg } else { model_bg }, &[]);
+                    current_world_space = mesh.world_space;
                 }
 
                 // Bind per-mesh texture or fallback

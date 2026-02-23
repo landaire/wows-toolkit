@@ -116,7 +116,7 @@ pub struct RealtimeArmorViewer {
     auto_scroll: bool,
 
     /// Last clock we auto-scrolled to (avoids redundant scrolls).
-    last_auto_scroll_clock: f32,
+    last_auto_scroll_clock: GameClock,
 }
 
 /// Identifies a salvo firing event. Shells with `salvo: None` get unique unmatched keys.
@@ -140,6 +140,8 @@ struct ShellEntry {
     /// Server vs simulation comparison (AP only).
     comparison: Option<ServerVsSimComparison>,
     server_outcome: ServerOutcome,
+    /// Victim ship roll at impact time (radians). Used to set viewport model roll on selection.
+    victim_roll: f32,
 }
 
 /// All shells from one salvo firing event, grouped together.
@@ -226,12 +228,18 @@ impl RealtimeArmorViewer {
             shot_timeline: None,
             timeline_ingested: false,
             auto_scroll: true,
-            last_auto_scroll_clock: 0.0,
+            last_auto_scroll_clock: GameClock(0.0),
         }
     }
 
     /// Load the target ship's armor model (called once, on first frame).
     fn start_ship_load(&mut self) {
+        self.start_ship_load_with_lod(self.pane.hull_lod);
+    }
+
+    /// Load the target ship's armor model at the given LOD level.
+    fn start_ship_load_with_lod(&mut self, lod: usize) {
+        self.pane.hull_lod = lod;
         let vehicle = self.target_vehicle.clone();
         let ship_assets = self.ship_assets.clone();
         let display_name = {
@@ -247,6 +255,7 @@ impl RealtimeArmorViewer {
         self.pane.loading = true;
 
         let (tx, rx) = mpsc::channel();
+        let requested_lod = lod;
 
         std::thread::spawn(move || {
             let result = (|| {
@@ -261,8 +270,12 @@ impl RealtimeArmorViewer {
                         .and_then(|c| c.dock_y_offset())
                 });
 
-                let options =
-                    wowsunpack::export::ship::ShipExportOptions { lod: 0, hull: None, textures: false, damaged: false };
+                let options = wowsunpack::export::ship::ShipExportOptions {
+                    lod: requested_lod,
+                    hull: None,
+                    textures: false,
+                    damaged: false,
+                };
                 let ctx = ship_assets.load_ship_from_vehicle(&v, &options).map_err(|e| format!("{e:?}"))?;
                 let meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
 
@@ -352,7 +365,9 @@ impl RealtimeArmorViewer {
                         if hull_textures.contains_key(mfm) {
                             continue;
                         }
-                        if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ctx.vfs(), mfm) {
+                        if let Some(dds_bytes) =
+                            wowsunpack::export::texture::load_base_albedo_bytes(ship_assets.vfs(), mfm)
+                        {
                             if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
                                 if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
                                     let w = img.width();
@@ -365,6 +380,8 @@ impl RealtimeArmorViewer {
                     }
                 }
 
+                let hull_lod_count = ctx.hull_lod_count();
+
                 let mut armor = LoadedShipArmor {
                     display_name,
                     meshes,
@@ -376,9 +393,12 @@ impl RealtimeArmorViewer {
                     hull_part_groups,
                     dock_y_offset,
                     splash_data: None,
+                    splash_box_groups: Vec::new(),
                     hit_locations: None,
                     waterline_dy: 0.0,
                     hull_textures,
+                    hull_lod_count,
+                    hull_lod: requested_lod,
                 };
                 armor.apply_waterline_offset();
                 Ok(armor)
@@ -439,26 +459,47 @@ impl RealtimeArmorViewer {
         }
     }
 
-    /// Transform a world-space position to model-space given ship position and yaw.
+    /// Build the inverse ship rotation matrix: Rz(-roll) * Rx(-pitch) * Ry(-yaw).
+    /// Transforms world-space vectors into ship model-space.
+    fn inverse_ship_rotation(yaw: f32, pitch: f32, roll: f32) -> [[f32; 3]; 3] {
+        let (sy, cy) = (-yaw).sin_cos();
+        let (sp, cp) = (-pitch).sin_cos();
+        let (sr, cr) = (-roll).sin_cos();
+        // Rz(-roll) * Rx(-pitch) * Ry(-yaw)
+        [
+            [cr * cy + sr * sp * sy, sr * cp, -cr * sy + sr * sp * cy],
+            [-sr * cy + cr * sp * sy, cr * cp, sr * sy + cr * sp * cy],
+            [cp * sy, -sp, cp * cy],
+        ]
+    }
+
+    /// Multiply a 3x3 rotation matrix by a 3-element vector.
+    fn rotate_vec(m: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
+        [
+            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+        ]
+    }
+
+    /// Transform a world-space position to model-space given ship position and
+    /// the inverse rotation matrix (from `inverse_ship_rotation`).
     fn world_to_model(
         world_pos: &WorldPos,
         ship_pos: &WorldPos,
-        neg_yaw_cos: f32,
-        neg_yaw_sin: f32,
+        rot: &[[f32; 3]; 3],
         model_center: &[f32; 3],
         bounds: Option<&([f32; 3], [f32; 3])>,
     ) -> [f32; 3] {
-        let offset_x = world_pos.x - ship_pos.x;
-        let offset_z = world_pos.z - ship_pos.z;
-        let unrotated_x = offset_x * neg_yaw_cos - offset_z * neg_yaw_sin;
-        let unrotated_z = offset_x * neg_yaw_sin + offset_z * neg_yaw_cos;
+        let offset = [world_pos.x - ship_pos.x, world_pos.y - ship_pos.y, world_pos.z - ship_pos.z];
+        let unrotated = Self::rotate_vec(rot, offset);
         // model_x = world_z, model_z = world_x
-        let model_x = model_center[0] + unrotated_z;
-        // ship_pos.y is at the waterline (sea surface), so world_pos.y - ship_pos.y
-        // already gives height above waterline. No additional offset needed since
-        // apply_waterline_offset() shifted the mesh so Y=0 = waterline.
-        let model_y = world_pos.y - ship_pos.y;
-        let model_z = model_center[2] + unrotated_x;
+        // ship_pos.y is at the waterline (sea surface), so the Y offset
+        // already gives height above waterline. apply_waterline_offset()
+        // shifted the mesh so Y=0 = waterline.
+        let model_x = model_center[0] + unrotated[2];
+        let model_y = unrotated[1];
+        let model_z = model_center[2] + unrotated[0];
         if let Some((min, max)) = bounds {
             [model_x.clamp(min[0], max[0]), model_y, model_z.clamp(min[2], max[2])]
         } else {
@@ -528,6 +569,7 @@ impl RealtimeArmorViewer {
             trajectory_id,
             comparison,
             server_outcome,
+            victim_roll: hit.victim_roll,
         };
 
         if let Some(&idx) = self.salvo_group_index.get(&key) {
@@ -650,8 +692,7 @@ impl RealtimeArmorViewer {
             let firing_range: Meters =
                 matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
 
-            let neg_yaw_cos = (-ship_yaw).cos();
-            let neg_yaw_sin = (-ship_yaw).sin();
+            let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
 
             // Determine shell direction: prefer terminal ballistics if available,
             // otherwise compute from salvo origin → actual impact position.
@@ -662,26 +703,31 @@ impl RealtimeArmorViewer {
                     continue;
                 }
                 let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
-                let local_dir_x = world_dir[0] * neg_yaw_cos - world_dir[2] * neg_yaw_sin;
-                let local_dir_z = world_dir[0] * neg_yaw_sin + world_dir[2] * neg_yaw_cos;
-                normalize([local_dir_z, world_dir[1], local_dir_x])
+                let local = Self::rotate_vec(&rot, world_dir);
+                // model_x = world_z, model_z = world_x
+                normalize([local[2], local[1], local[0]])
             } else if let Some(shot) = matched_shot {
                 let dx = impact_pos.x - shot.origin.x;
                 let dz = impact_pos.z - shot.origin.z;
-                let azimuth = dz.atan2(dx);
-                let relative_angle = azimuth - ship_yaw;
-                let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
+                let horiz_len = (dx * dx + dz * dz).sqrt();
+                let world_dir = if horiz_len > 0.001 {
+                    [dx / horiz_len, 0.0, dz / horiz_len]
+                } else {
+                    continue;
+                };
 
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
                 let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-                if let Some(ref imp) = impact_result {
+                let world_dir_3d = if let Some(ref imp) = impact_result {
                     let horiz_angle = imp.impact_angle_horizontal as f32;
                     let cos_h = horiz_angle.cos();
                     let sin_h = horiz_angle.sin();
-                    normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h])
+                    [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
                 } else {
-                    normalize([approach_xz[0], 0.0, approach_xz[2]])
-                }
+                    world_dir
+                };
+                let local = Self::rotate_vec(&rot, world_dir_3d);
+                normalize([local[2], local[1], local[0]])
             } else {
                 continue;
             };
@@ -700,14 +746,7 @@ impl RealtimeArmorViewer {
                 .unwrap_or([0.0; 3]);
 
             let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
-            let model_impact = Self::world_to_model(
-                &impact_pos,
-                &ship_world_pos,
-                neg_yaw_cos,
-                neg_yaw_sin,
-                &model_center,
-                bounds.as_ref(),
-            );
+            let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
             let ray_through = [model_impact[0], 0.0, model_impact[2]];
 
             // Cast ray from far behind the through-point along shell_dir
@@ -829,15 +868,7 @@ impl RealtimeArmorViewer {
 
                     // Compute exit divergence for overpenetrations
                     let exit_divergence = if group.server_outcome == ServerOutcome::Overpenetration {
-                        self.compute_exit_divergence(
-                            group,
-                            &sim,
-                            &traj_hits,
-                            &ship_world_pos,
-                            neg_yaw_cos,
-                            neg_yaw_sin,
-                            &model_center,
-                        )
+                        self.compute_exit_divergence(group, &sim, &traj_hits, &ship_world_pos, &rot, &model_center)
                     } else {
                         None
                     };
@@ -975,8 +1006,7 @@ impl RealtimeArmorViewer {
         sim: &crate::armor_viewer::penetration::ShellSimResult,
         traj_hits: &[crate::armor_viewer::penetration::TrajectoryHit],
         ship_world_pos: &WorldPos,
-        neg_yaw_cos: f32,
-        neg_yaw_sin: f32,
+        rot: &[[f32; 3]; 3],
         model_center: &[f32; 3],
     ) -> Option<ExitDivergence> {
         // Server exit position from the ExitOverpenetration hit's terminal ballistics
@@ -985,14 +1015,8 @@ impl RealtimeArmorViewer {
             exit_tb.map(|tb| tb.position).or_else(|| group.exit.as_ref().map(|e| e.hit.position))?;
 
         let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
-        let server_exit_model = Self::world_to_model(
-            &server_exit_world,
-            ship_world_pos,
-            neg_yaw_cos,
-            neg_yaw_sin,
-            model_center,
-            bounds.as_ref(),
-        );
+        let server_exit_model =
+            Self::world_to_model(&server_exit_world, ship_world_pos, rot, model_center, bounds.as_ref());
 
         // Simulated exit: the last plate the shell passed through
         let sim_exit_pos = if sim.stopped_at.is_none() && !traj_hits.is_empty() {
@@ -1079,6 +1103,28 @@ impl RealtimeArmorViewer {
             }
         }
 
+        // Poll hull-only LOD reload
+        if let Some(ref rx) = self.pane.hull_load_receiver {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(data) => {
+                        crate::ui::armor_viewer::apply_hull_reload(
+                            &mut self.pane,
+                            data,
+                            &self.render_state.device,
+                            &self.render_state.queue,
+                            &self.gpu_pipeline,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to reload hull LOD: {e}");
+                    }
+                }
+                self.pane.hull_load_receiver = None;
+                self.needs_repaint = true;
+            }
+        }
+
         // Poll for pre-computed shot timeline from the bridge
         if self.shot_timeline.is_none() {
             let bridge = self.bridge.lock();
@@ -1110,6 +1156,29 @@ impl RealtimeArmorViewer {
         if self.needs_repaint {
             warn!("needs repaint");
         }
+    }
+
+    /// Get the victim_roll from the currently selected shell, or 0.0 if nothing is selected.
+    fn selected_shell_roll(&self) -> f32 {
+        let tid = match &self.selection {
+            Some(SalvoSelection::Shell { trajectory_id, .. }) => Some(*trajectory_id),
+            Some(SalvoSelection::Group(key)) => {
+                // For single-shell groups, use that shell's roll
+                self.salvo_group_index.get(key).and_then(|&idx| {
+                    let g = &self.salvo_groups[idx];
+                    if g.shells.len() == 1 { g.shells[0].trajectory_id } else { None }
+                })
+            }
+            None => None,
+        };
+        tid.and_then(|tid| {
+            self.salvo_groups
+                .iter()
+                .flat_map(|g| &g.shells)
+                .find(|s| s.trajectory_id == Some(tid))
+                .map(|s| s.victim_roll)
+        })
+        .unwrap_or(0.0)
     }
 
     /// Compute the display color and line-width multiplier for a trajectory
@@ -1316,8 +1385,7 @@ impl RealtimeArmorViewer {
             let firing_range: Meters =
                 matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
 
-            let neg_yaw_cos = (-ship_yaw).cos();
-            let neg_yaw_sin = (-ship_yaw).sin();
+            let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
 
             // Determine shell direction
             let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
@@ -1327,37 +1395,34 @@ impl RealtimeArmorViewer {
                     continue;
                 }
                 let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
-                let local_dir_x = world_dir[0] * neg_yaw_cos - world_dir[2] * neg_yaw_sin;
-                let local_dir_z = world_dir[0] * neg_yaw_sin + world_dir[2] * neg_yaw_cos;
-                normalize([local_dir_z, world_dir[1], local_dir_x])
+                let local = Self::rotate_vec(&rot, world_dir);
+                normalize([local[2], local[1], local[0]])
             } else if let Some(shot) = matched_shot {
                 let dx = impact_pos.x - shot.origin.x;
                 let dz = impact_pos.z - shot.origin.z;
-                let azimuth = dz.atan2(dx);
-                let relative_angle = azimuth - ship_yaw;
-                let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
+                let horiz_len = (dx * dx + dz * dz).sqrt();
+                let world_dir = if horiz_len > 0.001 {
+                    [dx / horiz_len, 0.0, dz / horiz_len]
+                } else {
+                    continue;
+                };
                 let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
                 let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-                if let Some(ref imp) = impact_result {
+                let world_dir_3d = if let Some(ref imp) = impact_result {
                     let horiz_angle = imp.impact_angle_horizontal as f32;
                     let cos_h = horiz_angle.cos();
                     let sin_h = horiz_angle.sin();
-                    normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h])
+                    [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
                 } else {
-                    normalize([approach_xz[0], 0.0, approach_xz[2]])
-                }
+                    world_dir
+                };
+                let local = Self::rotate_vec(&rot, world_dir_3d);
+                normalize([local[2], local[1], local[0]])
             } else {
                 continue;
             };
 
-            let model_impact = Self::world_to_model(
-                &impact_pos,
-                &ship_world_pos,
-                neg_yaw_cos,
-                neg_yaw_sin,
-                &model_center,
-                bounds.as_ref(),
-            );
+            let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
             let ray_through = [model_impact[0], 0.0, model_impact[2]];
             let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
             let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
@@ -1683,6 +1748,7 @@ impl RealtimeArmorViewer {
         // Toolbar
         let prev_marker_opacity = self.pane.marker_opacity;
         let sidebar_hovered_key: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
+        let lod_change_signal: std::cell::Cell<Option<usize>> = std::cell::Cell::new(None);
         if let Some(armor) = self.pane.loaded_armor.take() {
             if !armor.zone_parts.is_empty() {
                 ui.horizontal(|ui| {
@@ -1709,13 +1775,41 @@ impl RealtimeArmorViewer {
                     // Hull Model button with popover
                     if !armor.hull_part_groups.is_empty() {
                         let hull_btn = ui
-                            .button(icon_str!(icons::CUBE, "Hull"))
+                            .button(icon_str!(icons::THREE_D, "Hull"))
                             .on_hover_text("Toggle hull model part visibility");
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey) =
+                                let (changed, hkey, new_lod) =
                                     crate::ui::armor_viewer::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
+                                if changed {
+                                    zone_changed = true;
+                                }
+                                if let Some(k) = hkey {
+                                    sidebar_hovered_key.set(Some(k));
+                                }
+                                if new_lod.is_some() {
+                                    lod_change_signal.set(new_lod);
+                                }
+                            });
+                    }
+
+                    // ── Splash Boxes button with popover ──
+                    if !armor.splash_box_groups.is_empty() {
+                        let splash_label = if self.pane.show_splash_boxes {
+                            format!("{} Splash \u{25CF}", icons::CUBE)
+                        } else {
+                            icon_str!(icons::CUBE, "Splash").to_string()
+                        };
+                        let splash_btn = ui.button(splash_label).on_hover_text("Toggle splash box visibility");
+                        egui::Popup::from_toggle_button_response(&splash_btn)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                let (changed, hkey) = crate::ui::armor_viewer::draw_splash_box_visibility_popover(
+                                    ui,
+                                    &mut self.pane,
+                                    &armor,
+                                );
                                 if changed {
                                     zone_changed = true;
                                 }
@@ -1743,10 +1837,26 @@ impl RealtimeArmorViewer {
                                 });
                             }
                         });
+
+                    // ── Roll slider ──
+                    ui.separator();
+                    crate::ui::armor_viewer::draw_roll_slider(ui, &mut self.pane.viewport);
                 });
                 ui.separator();
             }
             self.pane.loaded_armor = Some(armor);
+        }
+
+        // Handle LOD change from hull popover — hull-only reload
+        if let Some(new_lod) = lod_change_signal.into_inner() {
+            if let Some(param_index) = self.pane.selected_ship.clone() {
+                crate::ui::armor_viewer::start_hull_lod_reload(
+                    &mut self.pane,
+                    &self.ship_assets,
+                    &param_index,
+                    new_lod,
+                );
+            }
         }
 
         // Sidebar hover highlight lifecycle: compare new key with current, update overlay mesh.
@@ -1782,6 +1892,14 @@ impl RealtimeArmorViewer {
                                     &mut self.pane,
                                     &armor,
                                     &name_refs,
+                                    device,
+                                )
+                            }
+                            SidebarHighlightKey::SplashBoxes(names) => {
+                                crate::ui::armor_viewer::upload_splash_box_highlight(
+                                    &mut self.pane,
+                                    &armor,
+                                    names,
                                     device,
                                 )
                             }
@@ -1825,6 +1943,12 @@ impl RealtimeArmorViewer {
             ) {
                 zone_changed = true;
             }
+
+            // Draw splash box labels on top of the viewport
+            crate::ui::armor_viewer::draw_splash_box_labels(&self.pane, ui.painter(), response.rect);
+
+            // Draw disclaimer watermark
+            crate::ui::armor_viewer::draw_viewport_watermark(ui.painter(), response.rect);
         }
 
         // Re-upload armor and trajectories if visibility changed
@@ -1842,6 +1966,9 @@ impl RealtimeArmorViewer {
                 );
                 self.pane.loaded_armor = Some(armor);
             }
+
+            // Re-upload splash box wireframes if toggled on
+            crate::ui::armor_viewer::upload_splash_box_wireframes(&mut self.pane, &self.render_state.device);
         }
 
         if needs_traj_reupload && !self.pane.trajectories.is_empty() {
@@ -1882,7 +2009,7 @@ impl RealtimeArmorViewer {
 
     /// Draw the health timeline strip: health line + shot ticks + current time marker.
     /// Returns `Some(clock)` if the user clicked to seek to a specific time.
-    fn draw_health_timeline(&self, ui: &mut egui::Ui) -> Option<f32> {
+    fn draw_health_timeline(&self, ui: &mut egui::Ui) -> Option<GameClock> {
         let timeline = self.shot_timeline.as_ref()?;
         if timeline.health_history.is_empty() {
             return None;
@@ -1937,7 +2064,7 @@ impl RealtimeArmorViewer {
         }
 
         // Current time marker (white vertical line)
-        let current_x = map_x(current_clock);
+        let current_x = map_x(current_clock.seconds());
         painter.line_segment(
             [egui::pos2(current_x, rect.top()), egui::pos2(current_x, rect.bottom())],
             egui::Stroke::new(1.5, egui::Color32::WHITE),
@@ -1968,7 +2095,7 @@ impl RealtimeArmorViewer {
             if let Some(pos) = response.interact_pointer_pos() {
                 let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 let seek_clock = first_clock + t * time_span;
-                return Some(seek_clock);
+                return Some(GameClock(seek_clock));
             }
         }
 
@@ -2046,7 +2173,7 @@ impl RealtimeArmorViewer {
                 shell_index: usize,
             },
             /// Seek replay to a specific clock time.
-            SeekTo(f32),
+            SeekTo(GameClock),
         }
         let mut click_action: Option<ClickAction> = None;
 
@@ -2058,15 +2185,16 @@ impl RealtimeArmorViewer {
         let current_clock = self.bridge.lock().last_clock;
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.auto_scroll, "Auto-scroll");
-            let cm = (current_clock / 60.0).floor() as i32;
-            let cs = (current_clock % 60.0) as i32;
+            let cs_f = current_clock.seconds();
+            let cm = (cs_f / 60.0).floor() as i32;
+            let cs = (cs_f % 60.0) as i32;
             ui.label(egui::RichText::new(format!("{}:{:02}", cm, cs)).small().weak());
         });
 
         // Find the target group for auto-scroll (last group with first_clock <= current_clock)
         let auto_scroll_target = if self.auto_scroll && (current_clock - self.last_auto_scroll_clock).abs() > 0.5 {
             self.last_auto_scroll_clock = current_clock;
-            self.salvo_groups.iter().rposition(|g| g.first_clock.seconds() <= current_clock)
+            self.salvo_groups.iter().rposition(|g| g.first_clock <= current_clock)
         } else {
             None
         };
@@ -2084,7 +2212,7 @@ impl RealtimeArmorViewer {
                     let clock_secs = group.first_clock.seconds();
 
                     // Is this salvo "active" (within 2s of current clock)?
-                    let is_active = (clock_secs - current_clock).abs() < 2.0;
+                    let is_active = (group.first_clock - current_clock).abs() < 2.0;
                     let time_min = (clock_secs / 60.0).floor() as i32;
                     let time_sec = (clock_secs % 60.0) as i32;
 
@@ -2132,7 +2260,7 @@ impl RealtimeArmorViewer {
                                     .on_hover_text("Seek to salvo")
                                     .clicked()
                                 {
-                                    click_action = Some(ClickAction::SeekTo(clock_secs));
+                                    click_action = Some(ClickAction::SeekTo(group.first_clock));
                                 }
                                 ui.label(egui::RichText::new(&header_text).strong().small());
                             });
@@ -2169,7 +2297,7 @@ impl RealtimeArmorViewer {
                                     .on_hover_text("Seek to salvo")
                                     .clicked()
                                 {
-                                    click_action = Some(ClickAction::SeekTo(clock_secs));
+                                    click_action = Some(ClickAction::SeekTo(group.first_clock));
                                 }
                                 // Select All / Deselect button
                                 let btn_label = if group_selected { "Deselect" } else { "Select All" };
@@ -2277,6 +2405,13 @@ impl RealtimeArmorViewer {
                         let _ = tx.send(crate::replay_renderer::PlaybackCommand::Seek(clock));
                     }
                 }
+            }
+
+            // Update viewport model roll from the selected shell's victim_roll
+            let roll = self.selected_shell_roll();
+            if (self.pane.viewport.model_roll - roll).abs() > 1e-6 {
+                self.pane.viewport.model_roll = roll;
+                self.pane.viewport.mark_dirty();
             }
         }
 
