@@ -39,8 +39,10 @@ use wowsunpack::game_params::types::ParamData;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
+use crate::session_stats::DivisionFilter;
 use crate::session_stats::PerGameStat;
 use crate::session_stats::PerformanceInfo;
+use crate::session_stats::SerializableAchievement;
 use crate::settings::ReplayGrouping;
 use crate::settings::ReplaySettings;
 use crate::tab_state::ChartMode;
@@ -3781,10 +3783,6 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        let Some(metadata_provider) = self.metadata_provider() else {
-            return;
-        };
-
         let ctx = ui.ctx();
 
         egui::Window::new("Session Stats").open(&mut self.tab_state.show_session_stats).show(ctx, |ui| {
@@ -3813,17 +3811,68 @@ impl ToolkitTabViewer<'_> {
                 {
                     self.tab_state.settings.session_stats_game_count = value as usize;
                 }
-                self.tab_state.session_stats.game_count_limit = if self.tab_state.settings.session_stats_limit_enabled {
-                    Some(self.tab_state.settings.session_stats_game_count)
-                } else {
-                    None
-                };
+                self.tab_state.settings.session_stats.game_count_limit =
+                    if self.tab_state.settings.session_stats_limit_enabled {
+                        Some(self.tab_state.settings.session_stats_game_count)
+                    } else {
+                        None
+                    };
             });
 
-            let wins = self.tab_state.session_stats.games_won();
-            let losses = self.tab_state.session_stats.games_lost();
-            let draws = self.tab_state.session_stats.games_drawn();
-            let win_rate = self.tab_state.session_stats.win_rate().unwrap_or_default();
+            // Division filter
+            ui.horizontal(|ui| {
+                ui.label("Division:");
+                ui.selectable_value(
+                    &mut self.tab_state.settings.session_stats_division_filter,
+                    DivisionFilter::All,
+                    "All",
+                );
+                ui.selectable_value(
+                    &mut self.tab_state.settings.session_stats_division_filter,
+                    DivisionFilter::SoloOnly,
+                    "Solo",
+                );
+                ui.selectable_value(
+                    &mut self.tab_state.settings.session_stats_division_filter,
+                    DivisionFilter::DivOnly,
+                    "Div",
+                );
+            });
+            self.tab_state.settings.session_stats.division_filter =
+                self.tab_state.settings.session_stats_division_filter;
+
+            // Game mode filter
+            let all_modes = self.tab_state.settings.session_stats.all_match_groups();
+            if all_modes.len() > 1 {
+                ui.horizontal(|ui| {
+                    ui.label("Game Mode:");
+                    if ui
+                        .selectable_label(self.tab_state.settings.session_stats_game_mode_filter.is_empty(), "All")
+                        .clicked()
+                    {
+                        self.tab_state.settings.session_stats_game_mode_filter.clear();
+                    }
+                    for mode in &all_modes {
+                        let display = crate::session_stats::match_group_display_name(mode);
+                        let mut is_selected = self.tab_state.settings.session_stats_game_mode_filter.contains(mode);
+                        if ui.selectable_label(is_selected, display).clicked() {
+                            is_selected = !is_selected;
+                            if is_selected {
+                                self.tab_state.settings.session_stats_game_mode_filter.insert(mode.clone());
+                            } else {
+                                self.tab_state.settings.session_stats_game_mode_filter.remove(mode);
+                            }
+                        }
+                    }
+                });
+            }
+            self.tab_state.settings.session_stats.game_mode_filter =
+                self.tab_state.settings.session_stats_game_mode_filter.iter().cloned().collect();
+
+            let wins = self.tab_state.settings.session_stats.games_won();
+            let losses = self.tab_state.settings.session_stats.games_lost();
+            let draws = self.tab_state.settings.session_stats.games_drawn();
+            let win_rate = self.tab_state.settings.session_stats.win_rate().unwrap_or_default();
             ui.horizontal(|ui| {
                 ui.strong("Win Rate:");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3837,7 +3886,7 @@ impl ToolkitTabViewer<'_> {
 
             // Session PR
             if let Some(pr_result) =
-                self.tab_state.session_stats.calculate_pr(&self.tab_state.personal_rating_data.read())
+                self.tab_state.settings.session_stats.calculate_pr(&self.tab_state.personal_rating_data.read())
             {
                 ui.horizontal(|ui| {
                     ui.strong("Personal Rating:");
@@ -3850,7 +3899,7 @@ impl ToolkitTabViewer<'_> {
                 });
             }
 
-            let total_frags = self.tab_state.session_stats.total_frags(&metadata_provider);
+            let total_frags = self.tab_state.settings.session_stats.total_frags();
             ui.horizontal(|ui| {
                 ui.strong("Total Frags:");
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3858,7 +3907,7 @@ impl ToolkitTabViewer<'_> {
                 });
             });
 
-            if let Some((ship_name, max_frags)) = self.tab_state.session_stats.max_frags(&metadata_provider) {
+            if let Some((ship_name, max_frags)) = self.tab_state.settings.session_stats.max_frags() {
                 ui.strong("Max Frags:");
                 ui.horizontal(|ui| {
                     ui.label(ship_name);
@@ -3868,7 +3917,7 @@ impl ToolkitTabViewer<'_> {
                 });
             }
 
-            if let Some((ship_name, max_damage)) = self.tab_state.session_stats.max_damage(&metadata_provider) {
+            if let Some((ship_name, max_damage)) = self.tab_state.settings.session_stats.max_damage() {
                 ui.strong("Max Damage:");
                 ui.horizontal(|ui| {
                     ui.label(ship_name);
@@ -3878,23 +3927,15 @@ impl ToolkitTabViewer<'_> {
                 });
             }
 
-            let mut all_achievements: Vec<Achievement> = Vec::new();
-            for replay in self.tab_state.session_stats.recent_replays() {
-                let replay = replay.read();
-                let Some(self_report) = replay
-                    .ui_report
-                    .as_ref()
-                    .and_then(|report| report.player_reports().iter().find(|report| report.relation().is_self()))
-                else {
-                    continue;
-                };
-
-                for achievement in self_report.achievements.as_slice() {
-                    match all_achievements.iter_mut().find(|existing_achievement| {
-                        existing_achievement.game_param.id() == achievement.game_param.id()
-                    }) {
-                        Some(existing_achievement) => {
-                            existing_achievement.count += achievement.count;
+            let mut all_achievements: Vec<SerializableAchievement> = Vec::new();
+            for game in self.tab_state.settings.session_stats.filtered_games() {
+                for achievement in &game.achievements {
+                    match all_achievements
+                        .iter_mut()
+                        .find(|existing| existing.game_param_id == achievement.game_param_id)
+                    {
+                        Some(existing) => {
+                            existing.count += achievement.count;
                         }
                         None => all_achievements.push(achievement.clone()),
                     }
@@ -3954,10 +3995,8 @@ impl ToolkitTabViewer<'_> {
 
             ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                 let mut battle_results: Vec<(String, PerformanceInfo)> =
-                    self.tab_state.session_stats.ship_stats(&metadata_provider).drain().collect();
-                battle_results.sort_by(|a, b| {
-                    (Reverse(a.1.wins()), a.1.losses(), &a.0).cmp(&(Reverse(b.1.wins()), b.1.losses(), &b.0))
-                });
+                    self.tab_state.settings.session_stats.ship_stats_per_ship_limited().drain().collect();
+                battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()));
                 for (ship_name, perf_info) in battle_results {
                     if perf_info.win_rate().is_none() {
                         continue;
@@ -3968,21 +4007,15 @@ impl ToolkitTabViewer<'_> {
                     let ship_pr = perf_info.calculate_pr(&pr_data);
                     drop(pr_data);
 
-                    let header = if let Some(ref pr) = ship_pr {
-                        format!(
-                            "{ship_name} {}W/{}L ({:.0}%) - PR: {:.0}",
-                            perf_info.wins(),
-                            perf_info.losses(),
-                            perf_info.win_rate().unwrap(),
-                            pr.pr
-                        )
+                    let wld = if perf_info.draws() > 0 {
+                        format!("{}W/{}L/{}D", perf_info.wins(), perf_info.losses(), perf_info.draws())
                     } else {
-                        format!(
-                            "{ship_name} {}W/{}L ({:.0}%)",
-                            perf_info.wins(),
-                            perf_info.losses(),
-                            perf_info.win_rate().unwrap()
-                        )
+                        format!("{}W/{}L", perf_info.wins(), perf_info.losses())
+                    };
+                    let header = if let Some(ref pr) = ship_pr {
+                        format!("{ship_name} {wld} ({:.0}%) - PR: {:.0}", perf_info.win_rate().unwrap(), pr.pr)
+                    } else {
+                        format!("{ship_name} {wld} ({:.0}%)", perf_info.win_rate().unwrap())
                     };
 
                     ui.collapsing(header, |ui| {
@@ -4082,21 +4115,29 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        let Some(metadata_provider) = self.metadata_provider() else {
-            return;
+        // Sync filters before reading stats
+        self.tab_state.settings.session_stats.game_count_limit = if self.tab_state.settings.session_stats_limit_enabled
+        {
+            Some(self.tab_state.settings.session_stats_game_count)
+        } else {
+            None
         };
+        self.tab_state.settings.session_stats.division_filter = self.tab_state.settings.session_stats_division_filter;
+        self.tab_state.settings.session_stats.game_mode_filter =
+            self.tab_state.settings.session_stats_game_mode_filter.iter().cloned().collect();
 
-        // Get ship stats for bar chart (average data)
+        // Get ship stats for bar chart — per-ship count limits
         let ship_stats: Vec<(String, PerformanceInfo)> = self
             .tab_state
+            .settings
             .session_stats
-            .ship_stats(&metadata_provider)
+            .ship_stats_per_ship_limited()
             .into_iter()
             .filter(|(_, perf)| perf.win_rate().is_some())
             .collect();
 
-        // Get per-game data for line chart
-        let per_game_data = self.tab_state.session_stats.per_game_stats(&metadata_provider);
+        // Get per-game data for line chart — per-ship count limits
+        let per_game_data = self.tab_state.settings.session_stats.per_ship_limited_games();
 
         // Get PR data for calculations
         let pr_data = self.tab_state.personal_rating_data.read();
@@ -4234,7 +4275,7 @@ impl ToolkitTabViewer<'_> {
                     ChartMode::Line => {
                         // Filter per-game data to selected ships
                         let filtered_data: Vec<&PerGameStat> =
-                            per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
+                            per_game_data.iter().copied().filter(|g| selected_ships.contains(&g.ship_name)).collect();
 
                         if !filtered_data.is_empty() {
                             let rolling_average = self.tab_state.session_stats_chart_config.rolling_average;
@@ -4335,7 +4376,7 @@ impl ToolkitTabViewer<'_> {
                 self.open_replay_controls_window();
             }
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
-                self.tab_state.session_stats.clear();
+                self.tab_state.settings.session_stats.clear();
             }
             crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
                 self.tab_state.replays_for_session_reset = Some(replays);

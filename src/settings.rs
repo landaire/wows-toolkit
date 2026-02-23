@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,6 +9,8 @@ use serde::Serialize;
 
 use wows_minimap_renderer::ShipConfigFilter;
 
+use crate::session_stats::DivisionFilter;
+use crate::session_stats::SessionStats;
 use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::ui::player_tracker::PlayerTracker;
@@ -285,6 +288,16 @@ pub struct Settings {
     /// Number of most recent games to show when limit is enabled.
     #[serde(default = "default_session_stats_game_count")]
     pub session_stats_game_count: usize,
+    /// Division filter for session stats.
+    #[serde(default)]
+    pub session_stats_division_filter: DivisionFilter,
+    /// Game mode filter — set of match_group strings to include.
+    /// Empty means show all game modes.
+    #[serde(default)]
+    pub session_stats_game_mode_filter: BTreeSet<String>,
+    /// Persisted session stats data.
+    #[serde(default)]
+    pub session_stats: SessionStats,
     /// If true, suppress the warning dialog when GPU video encoding is unavailable.
     #[serde(default)]
     pub suppress_gpu_encoder_warning: bool,
@@ -322,6 +335,9 @@ impl Default for Settings {
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,
+            session_stats_division_filter: DivisionFilter::default(),
+            session_stats_game_mode_filter: BTreeSet::default(),
+            session_stats: SessionStats::default(),
             suppress_gpu_encoder_warning: false,
             enable_logging: true,
         }

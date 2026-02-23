@@ -348,6 +348,9 @@ impl WowsToolkitApp {
                 std::sync::atomic::Ordering::Relaxed,
             );
 
+            // Ensure session stats are sorted correctly (backfills sort_key for legacy data)
+            saved_state.tab_state.settings.session_stats.sort_games();
+
             if !saved_state.tab_state.settings.wows_dir.is_empty() {
                 let task = Some(
                     saved_state
@@ -620,7 +623,14 @@ impl WowsToolkitApp {
                                     track_session_stats,
                                 } => {
                                     if track_session_stats {
-                                        self.tab_state.session_stats.add_replay(replay.clone());
+                                        let replay_guard = replay.read();
+                                        if let Some(stat) = crate::session_stats::PerGameStat::from_replay(
+                                            &replay_guard,
+                                            &replay_guard.resource_loader,
+                                        ) {
+                                            self.tab_state.settings.session_stats.add_game(stat);
+                                        }
+                                        drop(replay_guard);
                                     }
                                     if !skip_ui_update {
                                         {

@@ -23,7 +23,7 @@ use wowsunpack::vfs::VfsPath;
 
 use crate::personal_rating::PersonalRatingData;
 use crate::plaintext_viewer::PlaintextFileViewer;
-use crate::session_stats::SessionStats;
+use crate::session_stats::PerGameStat;
 use crate::settings::Settings;
 use crate::settings::default_bool;
 use crate::task::BackgroundParserThread;
@@ -254,8 +254,6 @@ pub struct TabState {
     #[serde(skip)]
     pub show_session_stats_chart: bool,
     #[serde(skip)]
-    pub session_stats: SessionStats,
-    #[serde(skip)]
     pub session_stats_chart_config: SessionStatsChartConfig,
     #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
@@ -357,7 +355,6 @@ impl Default for TabState {
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
             show_session_stats: false,
             show_session_stats_chart: false,
-            session_stats: Default::default(),
             session_stats_chart_config: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
@@ -506,7 +503,7 @@ impl TabState {
         self.replay_files = None;
         self.filtered_file_list = None;
         self.used_filter = None;
-        self.session_stats.clear();
+        self.settings.session_stats.clear();
         self.show_session_stats = false;
         self.show_session_stats_chart = false;
         self.session_stats_chart_config = Default::default();
@@ -528,13 +525,24 @@ impl TabState {
         };
 
         // Clear current session stats
-        self.session_stats.clear();
+        self.settings.session_stats.clear();
 
         // Upgrade weak references and add to session stats
         for weak_replay in weak_replays {
             if let Some(replay) = weak_replay.upgrade() {
+                let replay_guard = replay.read();
+
                 // Check if the replay needs parsing (no ui_report means not parsed)
-                let needs_parsing = replay.read().ui_report.is_none();
+                let needs_parsing = replay_guard.ui_report.is_none();
+
+                // If already parsed, extract stats and add immediately
+                if !needs_parsing {
+                    if let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader) {
+                        self.settings.session_stats.add_game(stat);
+                    }
+                }
+
+                drop(replay_guard);
 
                 if needs_parsing {
                     // Queue the replay for parsing (skip UI update since this is batch loading)
@@ -545,9 +553,6 @@ impl TabState {
                         );
                     }
                 }
-
-                // Add the replay to session stats (it will be updated when parsing completes)
-                self.session_stats.add_replay(replay);
             }
         }
 
