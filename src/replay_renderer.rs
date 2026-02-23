@@ -771,6 +771,9 @@ pub struct RealtimeArmorBridge {
     /// Incremented each time salvos are cleared (seek/rebuild). Consumers use
     /// this to detect that their cursor into `salvos` is stale.
     pub generation: u64,
+    /// Pre-computed shot timeline for this target ship (entire replay).
+    /// Set after the shot extraction pass completes.
+    pub shot_timeline: Option<Arc<ShipShotTimeline>>,
 }
 
 impl RealtimeArmorBridge {
@@ -782,6 +785,7 @@ impl RealtimeArmorBridge {
             last_clock: 0.0,
             target_entity_id,
             generation: 0,
+            shot_timeline: None,
         }
     }
 
@@ -798,6 +802,8 @@ pub struct ArmorViewerRequest {
     pub target_entity_id: EntityId,
     pub target_ship_name: String,
     pub bridge: Arc<Mutex<RealtimeArmorBridge>>,
+    /// Sender for playback commands (seek, etc.) back to the replay thread.
+    pub command_tx: mpsc::Sender<PlaybackCommand>,
 }
 
 /// Raw RGBA asset data loaded on the background thread.
@@ -861,6 +867,9 @@ pub struct SharedRendererState {
     pub armor_bridges: Vec<Arc<Mutex<RealtimeArmorBridge>>>,
     /// Pending requests to open realtime armor viewer windows (consumed by app.rs).
     pub pending_armor_viewers: Vec<ArmorViewerRequest>,
+    /// Pre-computed shot timelines per target ship (entire replay).
+    /// Set after the shot extraction pass completes.
+    pub shot_timelines: Option<HashMap<EntityId, Arc<ShipShotTimeline>>>,
     /// Parsed replay/spectator keybinding groups from `commands.scheme.xml`.
     pub replay_controls: Option<Vec<CommandGroup>>,
 }
@@ -961,6 +970,7 @@ pub fn launch_replay_renderer(
         game_fonts_registered: false,
         armor_bridges: Vec::new(),
         pending_armor_viewers: Vec::new(),
+        shot_timelines: None,
         replay_controls: None,
     }));
 
@@ -1103,6 +1113,7 @@ fn playback_thread(
     // 4. Create controller and renderer
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
+    controller.set_track_shots(false); // No shot data needed for frame building
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
     renderer.set_fonts(game_fonts.clone());
@@ -1176,17 +1187,43 @@ fn playback_thread(
     let actual_total_frames = frame_snapshots.len();
     let actual_game_duration = frame_snapshots.last().map(|s| s.clock).unwrap_or(game_duration);
 
-    // 4. Event extraction pass — second full parse for timeline events
-    let (timeline_events, battle_start) = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
+    // 4. Event extraction pass — second full parse for timeline events + shot counting + health
+    let timeline_result = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
         .ok()
-        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)))
-        .unwrap_or_default();
+        .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)));
+    let (timeline_events, battle_start, shot_counts, health_histories) = match timeline_result {
+        Some(r) => (r.events, r.battle_start, r.shot_counts, r.health_histories),
+        None => (Vec::new(), 0.0, HashMap::new(), HashMap::new()),
+    };
     {
         let mut state = shared_state.lock();
         state.timeline_events = Some(timeline_events);
         state.battle_start = battle_start;
         state.actual_game_duration = Some(actual_game_duration);
         state.self_player_name = Some(replay_file.meta.playerName.clone());
+    }
+
+    // 4b. Shot extraction pass — third full parse, pre-allocated from counts
+    let shot_timelines = extract_all_shots(
+        &raw_meta,
+        &packet_data,
+        &*game_metadata,
+        Some(&game_constants),
+        &shot_counts,
+        health_histories,
+    );
+    {
+        let mut state = shared_state.lock();
+        let timeline_map: HashMap<EntityId, Arc<ShipShotTimeline>> =
+            shot_timelines.into_iter().map(|(k, v)| (k, Arc::new(v))).collect();
+        // Push timelines to any already-open armor bridges
+        for bridge in &state.armor_bridges {
+            let mut b = bridge.lock();
+            if let Some(tl) = timeline_map.get(&b.target_entity_id) {
+                b.shot_timeline = Some(tl.clone());
+            }
+        }
+        state.shot_timelines = Some(timeline_map);
     }
 
     // Mark as ready
@@ -1901,6 +1938,42 @@ pub(crate) struct TimelineEvent {
     kind: TimelineEventKind,
 }
 
+// ── Shot Timeline Data Structures ───────────────────────────────────────────
+
+/// Health snapshot for a ship entity at a point in time.
+#[derive(Clone, Debug)]
+pub struct HealthSnapshot {
+    pub health: f32,
+    pub max_health: f32,
+}
+
+/// Pre-extracted shot hit for a target ship (full replay).
+#[derive(Clone, Debug)]
+pub struct PreExtractedHit {
+    pub clock: GameClock,
+    pub hit: ResolvedShotHit,
+}
+
+/// Counts from the timeline pass used to pre-allocate buffers in pass 3.
+#[derive(Clone, Debug, Default)]
+pub struct ShotCountHints {
+    /// Number of individual shell impacts against this ship.
+    pub shell_count: usize,
+    /// Number of distinct salvos that hit this ship.
+    pub salvo_count: usize,
+}
+
+/// Per-ship shot timeline, pre-computed from the full replay.
+#[derive(Clone, Debug)]
+pub struct ShipShotTimeline {
+    pub target_entity_id: EntityId,
+    pub hits: Vec<PreExtractedHit>,
+    /// Health over time, keyed by GameClock. BTreeMap allows efficient
+    /// lookup of health at any game clock via range queries.
+    pub health_history: std::collections::BTreeMap<GameClock, HealthSnapshot>,
+    pub salvo_count: usize,
+}
+
 fn event_color(is_friendly: bool) -> Color32 {
     if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
 }
@@ -1946,11 +2019,21 @@ fn format_timeline_event(event: &TimelineEvent) -> String {
 /// Parse the entire replay and extract significant game events for the timeline.
 /// Returns `(events, battle_start)` where `battle_start` is the absolute game clock
 /// at which the battle started. Event clocks are adjusted to elapsed time.
+/// Result from the timeline extraction pass (pass 2).
+struct TimelineExtractionResult {
+    events: Vec<TimelineEvent>,
+    battle_start: f32,
+    /// Per-ship shot/salvo counts for pre-allocating buffers in pass 3.
+    shot_counts: HashMap<EntityId, ShotCountHints>,
+    /// Per-ship health history captured during the pass.
+    health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
+}
+
 fn extract_timeline_events(
     replay_file: &ReplayFile,
     game_metadata: &GameMetadataProvider,
     game_constants: Option<&GameConstants>,
-) -> (Vec<TimelineEvent>, f32) {
+) -> TimelineExtractionResult {
     let mut events = Vec::new();
     let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
@@ -1964,6 +2047,14 @@ fn extract_timeline_events(
 
     // Health tracking: entity → (window_start_clock, health_at_window_start)
     let mut health_windows: HashMap<EntityId, (f32, f32)> = HashMap::new();
+
+    // Shot counting for pre-allocation hints
+    let mut shot_counts: HashMap<EntityId, ShotCountHints> = HashMap::new();
+    let mut seen_salvos: HashSet<(EntityId, u32)> = HashSet::new();
+
+    // Health history: per-entity health snapshots on every change
+    let mut health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>> = HashMap::new();
+    let mut last_health: HashMap<EntityId, f32> = HashMap::new();
 
     // Kill tracking
     let mut last_kill_count: usize = 0;
@@ -2328,6 +2419,39 @@ fn extract_timeline_events(
                 }
 
                 controller.process(&packet);
+
+                // --- Shot counting (for pre-allocation in pass 3) ---
+                for hit in controller.shot_hits() {
+                    let counts = shot_counts.entry(hit.victim_entity_id).or_default();
+                    counts.shell_count += 1;
+                    if let Some(ref salvo) = hit.salvo {
+                        if seen_salvos.insert((salvo.owner_id, salvo.salvo_id)) {
+                            counts.salvo_count += 1;
+                        }
+                    }
+                }
+
+                // --- Health history snapshots (on every change) ---
+                for (entity_id, entity) in controller.entities_by_id() {
+                    if let Some(vehicle_rc) = entity.vehicle_ref() {
+                        let vehicle = vehicle_rc.borrow();
+                        let props = vehicle.props();
+                        let current_hp = props.health();
+                        let max_hp = props.max_health();
+                        if max_hp <= 0.0 {
+                            continue;
+                        }
+                        let prev_hp = last_health.get(entity_id).copied();
+                        if prev_hp.is_none() || (current_hp - prev_hp.unwrap()).abs() > 0.1 {
+                            last_health.insert(*entity_id, current_hp);
+                            health_histories
+                                .entry(*entity_id)
+                                .or_default()
+                                .insert(packet.clock, HealthSnapshot { health: current_hp, max_health: max_hp });
+                        }
+                    }
+                }
+
                 remaining = rest;
             }
             Err(_) => break,
@@ -2366,7 +2490,97 @@ fn extract_timeline_events(
 
     // Sort events by clock time
     events.sort_by(|a, b| a.clock.partial_cmp(&b.clock).unwrap_or(std::cmp::Ordering::Equal));
-    (events, battle_start)
+    TimelineExtractionResult { events, battle_start, shot_counts, health_histories }
+}
+
+// ─── Shot Extraction (Pass 3) ────────────────────────────────────────────────
+
+/// Parse the entire replay and extract all `ResolvedShotHit`s per ship.
+/// Uses `shot_count_hints` from pass 2 to pre-allocate buffers.
+/// Health histories from pass 2 are merged into the returned timelines.
+fn extract_all_shots(
+    raw_meta: &[u8],
+    packet_data: &[u8],
+    game_metadata: &GameMetadataProvider,
+    game_constants: Option<&GameConstants>,
+    shot_count_hints: &HashMap<EntityId, ShotCountHints>,
+    health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>>,
+) -> HashMap<EntityId, ShipShotTimeline> {
+    use wows_replays::analyzer::battle_controller::BattleController;
+
+    let replay_file = match ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec()) {
+        Ok(rf) => rf,
+        Err(e) => {
+            tracing::error!("extract_all_shots: failed to parse replay: {:?}", e);
+            return HashMap::new();
+        }
+    };
+    let mut controller = BattleController::new(&replay_file.meta, game_metadata, game_constants);
+    // shot tracking ON (default)
+    let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+
+    // Pre-allocate per-ship timelines from hints
+    let mut timelines: HashMap<EntityId, ShipShotTimeline> = shot_count_hints
+        .iter()
+        .map(|(&eid, hints)| {
+            (
+                eid,
+                ShipShotTimeline {
+                    target_entity_id: eid,
+                    hits: Vec::with_capacity(hints.shell_count),
+                    health_history: health_histories.get(&eid).cloned().unwrap_or_default(),
+                    salvo_count: hints.salvo_count,
+                },
+            )
+        })
+        .collect();
+
+    // Also create timelines for ships that had health changes but no shot hits
+    for (eid, hh) in health_histories {
+        timelines.entry(eid).or_insert_with(|| ShipShotTimeline {
+            target_entity_id: eid,
+            hits: Vec::new(),
+            health_history: hh,
+            salvo_count: 0,
+        });
+    }
+
+    let mut remaining = &replay_file.packet_data[..];
+    while !remaining.is_empty() {
+        match parser.parse_packet(remaining) {
+            Ok((rest, packet)) => {
+                controller.process(&packet);
+
+                // Accumulate all shot_hits (cleared each packet by the controller)
+                for hit in controller.shot_hits() {
+                    if let Some(timeline) = timelines.get_mut(&hit.victim_entity_id) {
+                        timeline.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
+                    } else {
+                        // Ship not in hints (e.g. friendly fire) — create on demand
+                        let mut tl = ShipShotTimeline {
+                            target_entity_id: hit.victim_entity_id,
+                            hits: Vec::with_capacity(100),
+                            health_history: std::collections::BTreeMap::new(),
+                            salvo_count: 0,
+                        };
+                        tl.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
+                        timelines.insert(hit.victim_entity_id, tl);
+                    }
+                }
+
+                remaining = rest;
+            }
+            Err(_) => break,
+        }
+    }
+
+    tracing::info!(
+        "extract_all_shots: {} ships, {} total hits",
+        timelines.len(),
+        timelines.values().map(|t| t.hits.len()).sum::<usize>(),
+    );
+
+    timelines
 }
 
 // ─── Video Export ────────────────────────────────────────────────────────────
@@ -5960,13 +6174,19 @@ impl ReplayRendererViewer {
                                             // ── Realtime Armor Viewer ──
                                             ui.separator();
                                             if ui.button(icon_str!(icons::SHIELD, "Show Realtime Armor")).clicked() {
-                                                let bridge = Arc::new(Mutex::new(RealtimeArmorBridge::new(ship_eid)));
+                                                let mut new_bridge = RealtimeArmorBridge::new(ship_eid);
                                                 let mut state = shared_state.lock();
+                                                // Attach pre-computed shot timeline if available
+                                                if let Some(ref timelines) = state.shot_timelines {
+                                                    new_bridge.shot_timeline = timelines.get(&ship_eid).cloned();
+                                                }
+                                                let bridge = Arc::new(Mutex::new(new_bridge));
                                                 state.armor_bridges.push(bridge.clone());
                                                 state.pending_armor_viewers.push(ArmorViewerRequest {
                                                     target_entity_id: ship_eid,
                                                     target_ship_name: ship_name.clone(),
                                                     bridge,
+                                                    command_tx: command_tx.clone(),
                                                 });
                                                 // Seek to current position to populate the new bridge
                                                 let current_clock = state

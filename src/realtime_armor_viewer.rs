@@ -102,6 +102,21 @@ pub struct RealtimeArmorViewer {
     /// Set by any method that changes visible state. Checked and cleared by
     /// the viewport closure to decide whether to request a repaint.
     needs_repaint: bool,
+
+    /// Sender for playback commands (seek) back to the replay thread.
+    command_tx: Option<std::sync::mpsc::Sender<crate::replay_renderer::PlaybackCommand>>,
+
+    /// Pre-computed shot timeline for this target ship (entire replay).
+    shot_timeline: Option<Arc<crate::replay_renderer::ShipShotTimeline>>,
+
+    /// Whether the pre-computed timeline has been ingested into salvo_groups.
+    timeline_ingested: bool,
+
+    /// Auto-scroll the salvo log to the current clock position.
+    auto_scroll: bool,
+
+    /// Last clock we auto-scrolled to (avoids redundant scrolls).
+    last_auto_scroll_clock: f32,
 }
 
 /// Identifies a salvo firing event. Shells with `salvo: None` get unique unmatched keys.
@@ -171,6 +186,7 @@ impl RealtimeArmorViewer {
         ship_assets: Arc<ShipAssets>,
         gpu_pipeline: Arc<GpuPipeline>,
         render_state: eframe::egui_wgpu::RenderState,
+        command_tx: Option<std::sync::mpsc::Sender<crate::replay_renderer::PlaybackCommand>>,
     ) -> Self {
         let title =
             Arc::new(format!("Armor Viewer — {} ({})", target_player.username, target_player.ship_display_name));
@@ -206,6 +222,11 @@ impl RealtimeArmorViewer {
             is_main_battery: HashMap::new(),
             processed_hit_count: 0,
             needs_repaint: true,
+            command_tx,
+            shot_timeline: None,
+            timeline_ingested: false,
+            auto_scroll: true,
+            last_auto_scroll_clock: 0.0,
         }
     }
 
@@ -383,10 +404,36 @@ impl RealtimeArmorViewer {
                 bridge.last_clock,
             );
             if bridge.shot_hits.len() < self.processed_hit_count {
-                tracing::debug!("RealtimeArmorViewer: seek backward detected, clearing and reprocessing");
-                self.processed_hit_count = 0;
+                tracing::debug!("RealtimeArmorViewer: seek detected, resetting live-edge state");
                 drop(bridge);
-                self.clear_and_reprocess();
+
+                if self.timeline_ingested {
+                    // Pre-computed timeline covers the full replay — keep salvo groups,
+                    // just clear GPU trajectories and reset live-edge cursor.
+                    for traj in &self.pane.trajectories {
+                        if let Some(mesh_id) = traj.mesh_id {
+                            self.pane.viewport.remove_mesh(mesh_id);
+                        }
+                    }
+                    self.pane.trajectories.clear();
+                    self.pane.viewport.mark_dirty();
+
+                    // Reset trajectory_id on all shells (GPU meshes were removed)
+                    for group in &mut self.salvo_groups {
+                        for shell in &mut group.shells {
+                            shell.trajectory_id = None;
+                            shell.comparison = None;
+                        }
+                    }
+
+                    self.selection = None;
+                    self.selection_dirty = false;
+                    self.processed_hit_count = self.bridge.lock().shot_hits.len();
+                } else {
+                    // No pre-computed timeline yet — full clear and reprocess
+                    self.processed_hit_count = 0;
+                    self.clear_and_reprocess();
+                }
                 self.needs_repaint = true;
             }
         }
@@ -1032,11 +1079,25 @@ impl RealtimeArmorViewer {
             }
         }
 
+        // Poll for pre-computed shot timeline from the bridge
+        if self.shot_timeline.is_none() {
+            let bridge = self.bridge.lock();
+            if let Some(ref tl) = bridge.shot_timeline {
+                self.shot_timeline = Some(tl.clone());
+            }
+        }
+
         // Process shot hits if ship is loaded
         if self.ship_loaded {
             self.check_bridge_generation();
+            // Ingest pre-computed timeline once available (replaces sliding window)
+            if !self.timeline_ingested {
+                if let Some(ref _tl) = self.shot_timeline {
+                    self.ingest_precomputed_timeline();
+                    self.timeline_ingested = true;
+                }
+            }
             self.process_new_shot_hits();
-            self.expire_old_salvos();
         } else {
             // Log occasionally that we're waiting for ship load
             static TICK_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -1051,11 +1112,6 @@ impl RealtimeArmorViewer {
         }
     }
 
-    /// Sliding window duration in seconds. Trajectories older than this
-    /// (relative to the current replay clock) are removed.
-    const SLIDING_WINDOW_SECS: f32 = 5.0;
-
-    /// Remove trajectories and log entries older than the sliding window.
     /// Compute the display color and line-width multiplier for a trajectory
     /// based on the current selection state.
     fn trajectory_display_params(&self, trajectory_id: u64, base_color: [f32; 4]) -> ([f32; 4], f32) {
@@ -1099,65 +1155,405 @@ impl RealtimeArmorViewer {
         }
     }
 
-    fn expire_old_salvos(&mut self) {
-        let current_clock = GameClock(self.bridge.lock().last_clock);
-        let cutoff = GameClock(current_clock.seconds() - Self::SLIDING_WINDOW_SECS);
-
-        // Collect trajectory IDs from groups whose latest shell is expired
-        let mut expired_traj_ids: Vec<u64> = Vec::new();
-        let mut expired_keys: Vec<SalvoKey> = Vec::new();
-
-        for group in &self.salvo_groups {
-            if group.latest_clock < cutoff {
-                expired_keys.push(group.key.clone());
-                for shell in &group.shells {
-                    if let Some(tid) = shell.trajectory_id {
-                        expired_traj_ids.push(tid);
-                    }
-                }
-            }
-        }
-
-        if expired_keys.is_empty() {
+    /// Ingest all pre-computed shot hits from the timeline into salvo groups.
+    /// Shells are added without trajectory simulation (lazy — done on selection).
+    fn ingest_precomputed_timeline(&mut self) {
+        let timeline = match self.shot_timeline {
+            Some(ref tl) => Arc::clone(tl),
+            None => return,
+        };
+        let hits = &timeline.hits;
+        if hits.is_empty() {
             return;
         }
 
-        // Check if selection is being removed
-        let selection_expired = match &self.selection {
-            Some(SalvoSelection::Group(key)) => expired_keys.contains(key),
-            Some(SalvoSelection::Shell { group_key, .. }) => expired_keys.contains(group_key),
-            None => false,
-        };
-        if selection_expired {
-            self.selection = None;
-            self.selection_dirty = true;
-        }
+        let bridge = self.bridge.lock();
+        let players = bridge.players.clone();
+        drop(bridge);
 
-        // Remove expired groups
-        self.salvo_groups.retain(|g| g.latest_clock >= cutoff);
+        for pre_hit in hits.iter() {
+            let hit = &pre_hit.hit;
 
-        // Rebuild index
-        self.salvo_group_index.clear();
-        for (i, group) in self.salvo_groups.iter().enumerate() {
-            self.salvo_group_index.insert(group.key.clone(), i);
-        }
-
-        // Remove expired trajectories and their GPU meshes
-        let mut removed_any = false;
-        for expired_traj_id in expired_traj_ids {
-            if let Some(pos) = self.pane.trajectories.iter().position(|t| t.meta.id == expired_traj_id) {
-                let traj = self.pane.trajectories.remove(pos);
-                if let Some(mesh_id) = traj.mesh_id {
-                    self.pane.viewport.remove_mesh(mesh_id);
+            // Filter by selected attacker
+            if let Some(ref sel) = self.selected_attacker {
+                if hit.hit.owner_id != *sel {
+                    continue;
                 }
-                removed_any = true;
+            } else {
+                // "All Enemies" mode: skip shots from the target's own team
+                let same_team = players
+                    .iter()
+                    .find(|p| p.entity_id == hit.hit.owner_id)
+                    .map(|p| p.team_id == self.target_team_id)
+                    .unwrap_or(true);
+                if same_team {
+                    continue;
+                }
+            }
+
+            // Resolve shell info from the matched salvo's params_id
+            let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
+                self.shell_cache
+                    .entry(pid)
+                    .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
+                    .clone()
+            });
+
+            let Some(shell) = shell_info else {
+                continue;
+            };
+
+            // Filter out secondary armament shells unless the toggle is on.
+            if !self.show_secondaries && !self.is_main_battery.is_empty() {
+                if let Some(salvo) = &hit.salvo {
+                    if !self.is_main_battery.contains_key(&salvo.params_id) {
+                        continue;
+                    }
+                }
+            }
+
+            let firing_range: Meters = hit
+                .salvo
+                .as_ref()
+                .and_then(|s| s.shots.iter().find(|sh| sh.shot_id == hit.hit.shot_id))
+                .map(|s| s.origin.distance_xz(&hit.hit.position))
+                .unwrap_or(Meters::new(0.0));
+
+            // Group hits by (owner_id, shot_id) — but for ingestion we process one at a time
+            // and rely on insert_shell_into_group to handle grouping.
+            let server_outcome = ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit);
+            self.insert_shell_into_group(hit, &shell, firing_range, None, None, server_outcome, &players);
+        }
+
+        // Update processed_hit_count so live-edge process_new_shot_hits doesn't re-add
+        self.processed_hit_count = self.bridge.lock().shot_hits.len();
+        self.needs_repaint = true;
+
+        tracing::info!(
+            "RealtimeArmorViewer: ingested {} pre-computed hits into {} salvo groups",
+            hits.len(),
+            self.salvo_groups.len(),
+        );
+    }
+
+    /// Simulate trajectories for all un-simulated shells in the given salvo group.
+    /// Called lazily when the user selects a group or shell.
+    fn ensure_trajectories_simulated(&mut self, key: &SalvoKey) {
+        use crate::viewport_3d::camera::{normalize, scale, sub};
+
+        let group_idx = match self.salvo_group_index.get(key) {
+            Some(&idx) => idx,
+            None => return,
+        };
+
+        // Check if any shells need simulation
+        let needs_sim: Vec<usize> = self.salvo_groups[group_idx]
+            .shells
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.trajectory_id.is_none())
+            .map(|(i, _)| i)
+            .collect();
+
+        if needs_sim.is_empty() {
+            return;
+        }
+
+        // We need the pre-computed timeline to get the full ResolvedShotHit data
+        let timeline = match &self.shot_timeline {
+            Some(tl) => Arc::clone(tl),
+            None => return,
+        };
+
+        // Collect the shot_ids we need to simulate
+        let shot_ids_to_sim: Vec<ShotId> =
+            needs_sim.iter().map(|&i| self.salvo_groups[group_idx].shells[i].shot_id).collect();
+
+        // Find matching PreExtractedHits from the timeline
+        let mut hit_map: HashMap<ShotId, &crate::replay_renderer::PreExtractedHit> = HashMap::new();
+        for pre_hit in &timeline.hits {
+            if shot_ids_to_sim.contains(&pre_hit.hit.hit.shot_id) {
+                hit_map.insert(pre_hit.hit.hit.shot_id, pre_hit);
             }
         }
 
-        if removed_any {
-            self.pane.viewport.mark_dirty();
-            self.needs_repaint = true;
+        let model_center = self
+            .pane
+            .loaded_armor
+            .as_ref()
+            .map(|a| {
+                [
+                    (a.bounds.0[0] + a.bounds.1[0]) * 0.5,
+                    (a.bounds.0[1] + a.bounds.1[1]) * 0.5,
+                    (a.bounds.0[2] + a.bounds.1[2]) * 0.5,
+                ]
+            })
+            .unwrap_or([0.0; 3]);
+        let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
+
+        for &shell_idx in &needs_sim {
+            let shot_id = self.salvo_groups[group_idx].shells[shell_idx].shot_id;
+            let pre_hit = match hit_map.get(&shot_id) {
+                Some(ph) => ph,
+                None => continue,
+            };
+            let hit = &pre_hit.hit;
+
+            // Resolve shell info
+            let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
+                self.shell_cache
+                    .entry(pid)
+                    .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
+                    .clone()
+            });
+            let Some(shell) = shell_info else { continue };
+
+            let ship_yaw = hit.victim_yaw;
+            let ship_world_pos = hit.victim_position;
+            let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
+            let impact_pos = hit.hit.position;
+            let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
+            let firing_range: Meters =
+                matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
+
+            let neg_yaw_cos = (-ship_yaw).cos();
+            let neg_yaw_sin = (-ship_yaw).sin();
+
+            // Determine shell direction
+            let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
+                let vel = tb.velocity;
+                let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
+                if speed < 1.0 {
+                    continue;
+                }
+                let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
+                let local_dir_x = world_dir[0] * neg_yaw_cos - world_dir[2] * neg_yaw_sin;
+                let local_dir_z = world_dir[0] * neg_yaw_sin + world_dir[2] * neg_yaw_cos;
+                normalize([local_dir_z, world_dir[1], local_dir_x])
+            } else if let Some(shot) = matched_shot {
+                let dx = impact_pos.x - shot.origin.x;
+                let dz = impact_pos.z - shot.origin.z;
+                let azimuth = dz.atan2(dx);
+                let relative_angle = azimuth - ship_yaw;
+                let approach_xz = [relative_angle.sin(), 0.0_f32, relative_angle.cos()];
+                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
+                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
+                if let Some(ref imp) = impact_result {
+                    let horiz_angle = imp.impact_angle_horizontal as f32;
+                    let cos_h = horiz_angle.cos();
+                    let sin_h = horiz_angle.sin();
+                    normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h])
+                } else {
+                    normalize([approach_xz[0], 0.0, approach_xz[2]])
+                }
+            } else {
+                continue;
+            };
+
+            let model_impact = Self::world_to_model(
+                &impact_pos,
+                &ship_world_pos,
+                neg_yaw_cos,
+                neg_yaw_sin,
+                &model_center,
+                bounds.as_ref(),
+            );
+            let ray_through = [model_impact[0], 0.0, model_impact[2]];
+            let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
+            let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
+
+            if all_hits.is_empty() {
+                // No armor hit — leave trajectory_id as None
+                continue;
+            }
+
+            // Build trajectory hits
+            let mut traj_hits = Vec::new();
+            let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
+            for (armor_hit, normal) in &all_hits {
+                let tooltip = self
+                    .pane
+                    .mesh_triangle_info
+                    .iter()
+                    .find(|(id, _)| *id == armor_hit.mesh_id)
+                    .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
+                if let Some(info) = tooltip {
+                    let angle = crate::armor_viewer::penetration::impact_angle_deg(&shell_dir, normal);
+                    traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
+                        position: armor_hit.world_position,
+                        thickness_mm: info.thickness_mm,
+                        zone: info.zone.clone(),
+                        material: info.material_name.clone(),
+                        angle_deg: angle,
+                        distance_from_start: armor_hit.distance - first_dist,
+                    });
+                }
+            }
+
+            // Build ImpactResult
+            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
+            let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
+                let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
+                    &params,
+                    tb.velocity.x as f64,
+                    tb.velocity.y as f64,
+                    tb.velocity.z as f64,
+                );
+                imp.distance = firing_range.value() as f64;
+                Some(imp)
+            } else if matched_shot.is_some() {
+                crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
+            } else {
+                None
+            };
+
+            // AP simulation + comparison
+            let mut detonation_points = Vec::new();
+            let mut last_visible_hit: Option<usize> = None;
+            let mut comparison: Option<ServerVsSimComparison> = None;
+            let server_outcome = self.salvo_groups[group_idx].shells[shell_idx].server_outcome.clone();
+
+            if shell.ammo_type == AmmoType::AP {
+                if let Some(ref imp) = impact {
+                    let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                        &params, imp, &traj_hits, &shell_dir,
+                    );
+                    if let Some(ref det) = sim.detonation {
+                        detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
+                            position: det.position,
+                            ship_index: 0,
+                        });
+                    }
+                    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
+                        (Some(d), Some(s)) => Some(d.min(s)),
+                        (Some(d), None) => Some(d),
+                        (None, Some(s)) => Some(s),
+                        (None, None) => None,
+                    };
+                    if let Some(idx) = shell_stop {
+                        last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+                    }
+
+                    let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
+                    let first_thickness =
+                        traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
+                    let verdict = crate::armor_viewer::penetration::compare_with_server(
+                        &sim,
+                        &traj_hits,
+                        &server_outcome,
+                        &params,
+                        first_angle,
+                        first_thickness,
+                    );
+
+                    // For exit divergence we'd need a ShellHitGroup with entry+exit paired.
+                    // For lazy sim we skip exit divergence (it's minor detail).
+                    comparison = Some(ServerVsSimComparison {
+                        server_outcome: server_outcome.clone(),
+                        sim,
+                        verdict,
+                        exit_divergence: None,
+                    });
+                }
+            }
+
+            // Build ballistic arc
+            let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
+            let approach_len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
+            let approach_xz = if approach_len > 0.001 {
+                [approach_xz[0] / approach_len, 0.0, approach_xz[2] / approach_len]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
+            let model_extent = self
+                .pane
+                .loaded_armor
+                .as_ref()
+                .map(|a| {
+                    let dx = a.bounds.1[0] - a.bounds.0[0];
+                    let dz = a.bounds.1[2] - a.bounds.0[2];
+                    dx.max(dz)
+                })
+                .unwrap_or(10.0);
+            let arc_horiz_extent = model_extent * 2.0;
+            let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(model_center);
+
+            let mut ship_arcs = Vec::new();
+            if let Some(ref imp) = impact {
+                let (arc_2d, height_ratio) =
+                    crate::armor_viewer::ballistics::simulate_arc_points(&params, imp.launch_angle, 60);
+                let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
+                let arc_points_3d: Vec<[f32; 3]> = arc_2d
+                    .iter()
+                    .map(|(xf, yf)| {
+                        let xf = *xf as f32;
+                        let yf = *yf as f32;
+                        let along = (1.0 - xf) * arc_horiz_extent;
+                        [
+                            first_hit_pos[0] - approach_xz[0] * along,
+                            first_hit_pos[1] + yf * arc_height_extent,
+                            first_hit_pos[2] - approach_xz[2] * along,
+                        ]
+                    })
+                    .collect();
+                ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                    ship_index: 0,
+                    arc_points_3d,
+                    ballistic_impact: Some(imp.clone()),
+                });
+            }
+
+            let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+            let traj_id = self.pane.next_trajectory_id;
+            self.pane.next_trajectory_id += 1;
+
+            let result = crate::armor_viewer::penetration::TrajectoryResult {
+                origin: ray_origin,
+                direction: shell_dir,
+                hits: traj_hits,
+                total_armor_mm: total_armor,
+                ship_arcs,
+                detonation_points,
+            };
+
+            let attacker_color_idx =
+                self.enemy_players.iter().position(|p| p.entity_id == hit.hit.owner_id).unwrap_or(0);
+            let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
+
+            let cam_dist = self.pane.viewport.camera.distance;
+            let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
+            let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
+                &mut self.pane.viewport,
+                &result,
+                &self.render_state.device,
+                upload_color,
+                last_visible_hit,
+                cam_dist,
+                self.pane.marker_opacity,
+                upload_lw,
+            );
+
+            self.pane.trajectories.push(StoredTrajectory {
+                meta: crate::armor_viewer::penetration::TrajectoryMeta {
+                    id: traj_id,
+                    color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
+                    range: firing_range.to_km(),
+                },
+                result,
+                mesh_id: Some(mesh_id),
+                last_visible_hit,
+                marker_cam_dist: cam_dist,
+                show_plates_active: false,
+                show_zones_active: false,
+            });
+
+            // Update the shell entry with the trajectory id and comparison
+            self.salvo_groups[group_idx].shells[shell_idx].trajectory_id = Some(traj_id);
+            self.salvo_groups[group_idx].shells[shell_idx].comparison = comparison;
         }
+
+        self.selection_dirty = true;
+        self.needs_repaint = true;
     }
 }
 
@@ -1484,9 +1880,112 @@ impl RealtimeArmorViewer {
         }
     }
 
+    /// Draw the health timeline strip: health line + shot ticks + current time marker.
+    /// Returns `Some(clock)` if the user clicked to seek to a specific time.
+    fn draw_health_timeline(&self, ui: &mut egui::Ui) -> Option<f32> {
+        let timeline = self.shot_timeline.as_ref()?;
+        if timeline.health_history.is_empty() {
+            return None;
+        }
+
+        let current_clock = self.bridge.lock().last_clock;
+
+        // Determine time range from health history
+        let first_clock = timeline.health_history.keys().next()?.seconds();
+        let last_clock = timeline.health_history.keys().next_back()?.seconds();
+        let time_span = (last_clock - first_clock).max(1.0);
+
+        let desired_size = egui::vec2(ui.available_width(), 60.0);
+        let (response, painter) = ui.allocate_painter(desired_size, egui::Sense::click());
+        let rect = response.rect;
+
+        // Background
+        painter.rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+
+        let map_x = |clock: f32| -> f32 {
+            let t = ((clock - first_clock) / time_span).clamp(0.0, 1.0);
+            rect.left() + t * rect.width()
+        };
+
+        // Draw shot impact ticks (red vertical lines at bottom)
+        let tick_height = rect.height() * 0.2;
+        for pre_hit in &timeline.hits {
+            let x = map_x(pre_hit.clock.seconds());
+            painter.line_segment(
+                [egui::pos2(x, rect.bottom() - tick_height), egui::pos2(x, rect.bottom())],
+                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 60, 60, 140)),
+            );
+        }
+
+        // Draw health line (green)
+        let health_points: Vec<egui::Pos2> = timeline
+            .health_history
+            .iter()
+            .map(|(clock, snap)| {
+                let x = map_x(clock.seconds());
+                let ratio = if snap.max_health > 0.0 { snap.health / snap.max_health } else { 1.0 };
+                let y = rect.bottom() - tick_height - ratio * (rect.height() - tick_height);
+                egui::pos2(x, y)
+            })
+            .collect();
+
+        if health_points.len() >= 2 {
+            for window in health_points.windows(2) {
+                painter
+                    .line_segment([window[0], window[1]], egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 220, 80)));
+            }
+        }
+
+        // Current time marker (white vertical line)
+        let current_x = map_x(current_clock);
+        painter.line_segment(
+            [egui::pos2(current_x, rect.top()), egui::pos2(current_x, rect.bottom())],
+            egui::Stroke::new(1.5, egui::Color32::WHITE),
+        );
+
+        // Time labels
+        let start_min = (first_clock / 60.0).floor() as i32;
+        let start_sec = (first_clock % 60.0) as i32;
+        let end_min = (last_clock / 60.0).floor() as i32;
+        let end_sec = (last_clock % 60.0) as i32;
+        painter.text(
+            rect.left_top() + egui::vec2(2.0, 1.0),
+            egui::Align2::LEFT_TOP,
+            format!("{}:{:02}", start_min, start_sec),
+            egui::FontId::proportional(9.0),
+            egui::Color32::from_gray(160),
+        );
+        painter.text(
+            rect.right_top() + egui::vec2(-2.0, 1.0),
+            egui::Align2::RIGHT_TOP,
+            format!("{}:{:02}", end_min, end_sec),
+            egui::FontId::proportional(9.0),
+            egui::Color32::from_gray(160),
+        );
+
+        // Click to seek
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let t = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                let seek_clock = first_clock + t * time_span;
+                return Some(seek_clock);
+            }
+        }
+
+        None
+    }
+
     /// Draw the side panel with attacker selector and salvo log.
     fn draw_side_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Incoming Fire");
+        ui.separator();
+
+        // Health timeline strip
+        if let Some(seek_clock) = self.draw_health_timeline(ui) {
+            if let Some(ref tx) = self.command_tx {
+                let _ = tx.send(crate::replay_renderer::PlaybackCommand::Seek(seek_clock));
+            }
+        }
         ui.separator();
 
         // Attacker selector
@@ -1537,12 +2036,40 @@ impl RealtimeArmorViewer {
         #[derive(Clone)]
         enum ClickAction {
             SelectAllInGroup(SalvoKey),
-            SelectShell { group_key: SalvoKey, trajectory_id: u64 },
+            SelectShell {
+                group_key: SalvoKey,
+                trajectory_id: u64,
+            },
+            /// Select a shell by index (used when trajectory_id is not yet computed).
+            SelectShellByIndex {
+                group_key: SalvoKey,
+                shell_index: usize,
+            },
+            /// Seek replay to a specific clock time.
+            SeekTo(f32),
         }
         let mut click_action: Option<ClickAction> = None;
 
         let sel_bg = ui.visuals().selection.bg_fill;
         let normal_bg = ui.visuals().widgets.noninteractive.bg_fill;
+        let active_bg = egui::Color32::from_rgba_unmultiplied(255, 200, 60, 30);
+
+        // Auto-scroll toggle + current clock
+        let current_clock = self.bridge.lock().last_clock;
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.auto_scroll, "Auto-scroll");
+            let cm = (current_clock / 60.0).floor() as i32;
+            let cs = (current_clock % 60.0) as i32;
+            ui.label(egui::RichText::new(format!("{}:{:02}", cm, cs)).small().weak());
+        });
+
+        // Find the target group for auto-scroll (last group with first_clock <= current_clock)
+        let auto_scroll_target = if self.auto_scroll && (current_clock - self.last_auto_scroll_clock).abs() > 0.5 {
+            self.last_auto_scroll_clock = current_clock;
+            self.salvo_groups.iter().rposition(|g| g.first_clock.seconds() <= current_clock)
+        } else {
+            None
+        };
 
         egui::ScrollArea::vertical()
             .id_salt("salvo_log_scroll")
@@ -1555,6 +2082,9 @@ impl RealtimeArmorViewer {
                     let shell_count = group.shells.len();
 
                     let clock_secs = group.first_clock.seconds();
+
+                    // Is this salvo "active" (within 2s of current clock)?
+                    let is_active = (clock_secs - current_clock).abs() < 2.0;
                     let time_min = (clock_secs / 60.0).floor() as i32;
                     let time_sec = (clock_secs % 60.0) as i32;
 
@@ -1588,19 +2118,39 @@ impl RealtimeArmorViewer {
 
                     if shell_count <= 1 {
                         // Single-shell group: just a clickable frame, no collapsing
-                        let header_bg = if group_selected { sel_bg } else { normal_bg };
+                        let header_bg = if group_selected {
+                            sel_bg
+                        } else if is_active {
+                            active_bg
+                        } else {
+                            normal_bg
+                        };
                         let resp = egui::Frame::group(ui.style()).fill(header_bg).show(ui, |ui| {
-                            ui.label(egui::RichText::new(&header_text).strong().small());
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .small_button(icon_str!(icons::CLOCK_COUNTER_CLOCKWISE, ""))
+                                    .on_hover_text("Seek to salvo")
+                                    .clicked()
+                                {
+                                    click_action = Some(ClickAction::SeekTo(clock_secs));
+                                }
+                                ui.label(egui::RichText::new(&header_text).strong().small());
+                            });
                             if let Some(shell) = group.shells.first() {
                                 let outcome_str = shell.server_outcome.display_name();
                                 ui.label(egui::RichText::new(format!("  {}", outcome_str)).small());
                             }
                         });
                         if resp.response.interact(egui::Sense::click()).clicked() {
-                            // For single-shell, select the shell directly
+                            // For single-shell, select the shell directly (trigger sim if needed)
                             if let Some(tid) = group.shells.first().and_then(|s| s.trajectory_id) {
                                 click_action =
                                     Some(ClickAction::SelectShell { group_key: group_key.clone(), trajectory_id: tid });
+                            } else {
+                                click_action = Some(ClickAction::SelectShellByIndex {
+                                    group_key: group_key.clone(),
+                                    shell_index: 0,
+                                });
                             }
                         }
                     } else {
@@ -1614,6 +2164,13 @@ impl RealtimeArmorViewer {
 
                         state
                             .show_header(ui, |ui| {
+                                if ui
+                                    .small_button(icon_str!(icons::CLOCK_COUNTER_CLOCKWISE, ""))
+                                    .on_hover_text("Seek to salvo")
+                                    .clicked()
+                                {
+                                    click_action = Some(ClickAction::SeekTo(clock_secs));
+                                }
                                 // Select All / Deselect button
                                 let btn_label = if group_selected { "Deselect" } else { "Select All" };
                                 if ui.small_button(btn_label).clicked() {
@@ -1632,20 +2189,12 @@ impl RealtimeArmorViewer {
 
                                     let outcome_str = shell.server_outcome.display_name();
                                     let range_km = shell.range.to_km().value();
-                                    let label = if shell.trajectory_id.is_some() {
-                                        format!(
-                                            "Shell #{} \u{2022} {:.1}km \u{2022} {}",
-                                            shell_idx + 1,
-                                            range_km,
-                                            outcome_str
-                                        )
-                                    } else {
-                                        format!(
-                                            "Shell #{} \u{2022} {:.1}km \u{2022} (no armor hit)",
-                                            shell_idx + 1,
-                                            range_km
-                                        )
-                                    };
+                                    let label = format!(
+                                        "Shell #{} \u{2022} {:.1}km \u{2022} {}",
+                                        shell_idx + 1,
+                                        range_km,
+                                        outcome_str,
+                                    );
 
                                     let shell_resp = egui::Frame::group(ui.style())
                                         .fill(shell_bg)
@@ -1654,16 +2203,26 @@ impl RealtimeArmorViewer {
                                             ui.label(egui::RichText::new(label).small());
                                         });
 
-                                    if let Some(tid) = shell.trajectory_id {
-                                        if shell_resp.response.interact(egui::Sense::click()).clicked() {
+                                    if shell_resp.response.interact(egui::Sense::click()).clicked() {
+                                        if let Some(tid) = shell.trajectory_id {
                                             click_action = Some(ClickAction::SelectShell {
                                                 group_key: group_key.clone(),
                                                 trajectory_id: tid,
+                                            });
+                                        } else {
+                                            click_action = Some(ClickAction::SelectShellByIndex {
+                                                group_key: group_key.clone(),
+                                                shell_index: shell_idx,
                                             });
                                         }
                                     }
                                 }
                             });
+                    }
+
+                    // Auto-scroll: scroll this group into view if it's the target
+                    if auto_scroll_target == Some(group_idx) {
+                        ui.scroll_to_cursor(Some(egui::Align::Center));
                     }
                 }
             });
@@ -1676,8 +2235,10 @@ impl RealtimeArmorViewer {
                     if already_selected {
                         self.selection = None;
                     } else {
+                        self.ensure_trajectories_simulated(&key);
                         self.selection = Some(SalvoSelection::Group(key));
                     }
+                    self.auto_scroll = false;
                     self.selection_dirty = true;
                     self.needs_repaint = true;
                 }
@@ -1691,8 +2252,30 @@ impl RealtimeArmorViewer {
                     } else {
                         self.selection = Some(SalvoSelection::Shell { group_key, trajectory_id });
                     }
+                    self.auto_scroll = false;
                     self.selection_dirty = true;
                     self.needs_repaint = true;
+                }
+                ClickAction::SelectShellByIndex { group_key, shell_index } => {
+                    // Trigger lazy simulation, then select by the now-populated trajectory_id
+                    self.ensure_trajectories_simulated(&group_key);
+                    if let Some(&idx) = self.salvo_group_index.get(&group_key) {
+                        if let Some(shell) = self.salvo_groups[idx].shells.get(shell_index) {
+                            if let Some(tid) = shell.trajectory_id {
+                                self.selection = Some(SalvoSelection::Shell { group_key, trajectory_id: tid });
+                            } else {
+                                // Simulation didn't produce a trajectory (no armor hit)
+                                self.selection = Some(SalvoSelection::Group(group_key));
+                            }
+                        }
+                    }
+                    self.selection_dirty = true;
+                    self.needs_repaint = true;
+                }
+                ClickAction::SeekTo(clock) => {
+                    if let Some(ref tx) = self.command_tx {
+                        let _ = tx.send(crate::replay_renderer::PlaybackCommand::Seek(clock));
+                    }
                 }
             }
         }
@@ -1980,6 +2563,7 @@ impl RealtimeArmorViewer {
         self.selection = None;
         self.selection_dirty = false;
         self.processed_hit_count = 0;
-        // Next tick() will call process_new_shot_hits() to reprocess.
+        self.timeline_ingested = false;
+        // Next tick() will re-ingest the pre-computed timeline and/or call process_new_shot_hits().
     }
 }

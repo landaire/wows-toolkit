@@ -1161,6 +1161,7 @@ impl WowsToolkitApp {
                                 ship_assets,
                                 gpu_pipeline,
                                 render_state,
+                                Some(request.command_tx.clone()),
                             );
                             drop(bridge);
                             self.realtime_armor_viewers.push(Arc::new(egui::mutex::Mutex::new(viewer)));
