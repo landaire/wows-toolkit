@@ -41,7 +41,7 @@ use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
-use wows_replays::types::GameClock;
+use wows_replays::types::{ElapsedClock, GameClock};
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -709,7 +709,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
 pub enum PlaybackCommand {
     Play,
     Pause,
-    Seek(f32),
+    Seek(GameClock),
     SetSpeed(f32),
     Stop,
 }
@@ -717,7 +717,7 @@ pub enum PlaybackCommand {
 /// A single frame's rendering data, shared from background to UI thread.
 pub struct PlaybackFrame {
     pub commands: Vec<DrawCommand>,
-    pub clock_seconds: f32,
+    pub clock: GameClock,
     pub frame_index: usize,
     pub total_frames: usize,
     pub game_duration: f32,
@@ -728,9 +728,9 @@ pub struct PlaybackFrame {
 /// A salvo event extracted from the replay for the realtime armor viewer.
 #[derive(Clone, Debug)]
 pub struct ReplaySalvoEvent {
-    pub clock: f32,
+    pub clock: GameClock,
     /// Estimated time the shells reach the target (fire time + flight time).
-    pub estimated_impact_clock: f32,
+    pub estimated_impact_clock: GameClock,
     pub target_entity_id: EntityId,
     pub attacker_entity_id: EntityId,
     pub params_id: wowsunpack::game_types::GameParamId,
@@ -765,7 +765,7 @@ pub struct RealtimeArmorBridge {
     pub salvos: Vec<ReplaySalvoEvent>,
     /// Resolved shot hits from ShotKills packets, matched to originating salvos.
     pub shot_hits: Vec<ResolvedShotHit>,
-    pub last_clock: f32,
+    pub last_clock: GameClock,
     /// The entity this bridge tracks (the ship whose armor viewer is open).
     pub target_entity_id: EntityId,
     /// Incremented each time salvos are cleared (seek/rebuild). Consumers use
@@ -782,7 +782,7 @@ impl RealtimeArmorBridge {
             players: Vec::new(),
             salvos: Vec::new(),
             shot_hits: Vec::new(),
-            last_clock: 0.0,
+            last_clock: GameClock(0.0),
             target_entity_id,
             generation: 0,
             shot_timeline: None,
@@ -792,7 +792,7 @@ impl RealtimeArmorBridge {
     pub fn clear_salvos(&mut self) {
         self.salvos.clear();
         self.shot_hits.clear();
-        self.last_clock = 0.0;
+        self.last_clock = GameClock(0.0);
         self.generation += 1;
     }
 }
@@ -852,7 +852,7 @@ pub struct SharedRendererState {
     pub(crate) timeline_events: Option<Vec<TimelineEvent>>,
     /// Absolute game clock at which the battle started (after pre-battle countdown).
     /// Used to convert between absolute clock (used by seeking) and elapsed time (used by timeline).
-    pub battle_start: f32,
+    pub battle_start: GameClock,
     /// Actual game duration from the last packet's clock (may differ from metadata duration).
     pub actual_game_duration: Option<f32>,
     /// The replay owner's player name (from replay metadata).
@@ -962,7 +962,7 @@ pub fn launch_replay_renderer(
         show_dead_ships: saved_options.show_dead_ships,
         viewport_ctx: None,
         timeline_events: None,
-        battle_start: 0.0,
+        battle_start: GameClock(0.0),
         actual_game_duration: None,
         self_player_name: None,
         self_entity_id: None,
@@ -1144,15 +1144,14 @@ fn playback_thread(
                     while last_rendered_frame < target_frame {
                         last_rendered_frame += 1;
                         let commands = renderer.draw_frame(&controller);
-                        frame_snapshots
-                            .push(FrameSnapshot { packet_offset: offset_before, clock: prev_clock.seconds() });
+                        frame_snapshots.push(FrameSnapshot { packet_offset: offset_before, clock: prev_clock });
 
                         // Store the first frame immediately
                         if frame_snapshots.len() == 1 {
                             let mut state = shared_state.lock();
                             state.frame = Some(PlaybackFrame {
                                 commands,
-                                clock_seconds: prev_clock.seconds(),
+                                clock: prev_clock,
                                 frame_index: 0,
                                 total_frames: estimated_frames,
                                 game_duration,
@@ -1179,13 +1178,13 @@ fn playback_thread(
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
         while last_rendered_frame < target_frame {
             last_rendered_frame += 1;
-            frame_snapshots.push(FrameSnapshot { packet_offset: full_packet_data.len(), clock: prev_clock.seconds() });
+            frame_snapshots.push(FrameSnapshot { packet_offset: full_packet_data.len(), clock: prev_clock });
         }
     }
     controller.finish();
 
     let actual_total_frames = frame_snapshots.len();
-    let actual_game_duration = frame_snapshots.last().map(|s| s.clock).unwrap_or(game_duration);
+    let actual_game_duration = frame_snapshots.last().map(|s| s.clock.seconds()).unwrap_or(game_duration);
 
     // 4. Event extraction pass — second full parse for timeline events + shot counting + health
     let timeline_result = ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone())
@@ -1193,7 +1192,7 @@ fn playback_thread(
         .map(|event_replay| extract_timeline_events(&event_replay, &game_metadata, Some(&game_constants)));
     let (timeline_events, battle_start, shot_counts, health_histories) = match timeline_result {
         Some(r) => (r.events, r.battle_start, r.shot_counts, r.health_histories),
-        None => (Vec::new(), 0.0, HashMap::new(), HashMap::new()),
+        None => (Vec::new(), GameClock(0.0), HashMap::new(), HashMap::new()),
     };
     {
         let mut state = shared_state.lock();
@@ -1305,7 +1304,7 @@ fn playback_thread(
         target_entity_id: EntityId,
         salvos: Vec<ReplaySalvoEvent>,
         shot_hits: Vec<ResolvedShotHit>,
-        last_clock: f32,
+        last_clock: GameClock,
     }
 
     /// Initialize staging vecs from the current set of bridges (reads target_entity_id only).
@@ -1318,7 +1317,7 @@ fn playback_thread(
                     target_entity_id: locked.target_entity_id,
                     salvos: Vec::new(),
                     shot_hits: Vec::new(),
-                    last_clock: 0.0,
+                    last_clock: GameClock(0.0),
                 }
             })
             .collect()
@@ -1357,7 +1356,7 @@ fn playback_thread(
     fn push_salvos_to_staging(
         controller: &BattleController<'_, '_, GameMetadataProvider>,
         staging: &mut [BridgeStaging],
-        clock: f32,
+        clock: GameClock,
         cursor: &mut usize,
     ) {
         if staging.is_empty() {
@@ -1593,7 +1592,7 @@ fn playback_thread(
         mut prev_clock: GameClock,
         controller: &mut BattleController<'_, '_, GameMetadataProvider>,
         renderer: &mut MinimapRenderer<'_>,
-        target_clock: f32,
+        target_clock: GameClock,
         frame_duration: f32,
         staging: &mut [BridgeStaging],
         salvo_cursor: &mut usize,
@@ -1604,7 +1603,7 @@ fn playback_thread(
         while !remaining.is_empty() {
             match parser.parse_packet(remaining) {
                 Ok((rest, packet)) => {
-                    if packet.clock.seconds() > target_clock + frame_duration {
+                    if packet.clock > target_clock + frame_duration {
                         break;
                     }
                     // Stop if clock resets to 0 after game started — those are post-game packets
@@ -1630,7 +1629,7 @@ fn playback_thread(
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
-                    push_salvos_to_staging(controller, staging, packet.clock.seconds(), salvo_cursor);
+                    push_salvos_to_staging(controller, staging, packet.clock, salvo_cursor);
                     push_shot_hits_to_staging(controller, staging, hit_cursor);
                     remaining = rest;
                 }
@@ -1715,13 +1714,14 @@ fn playback_thread(
                     current_bridge_count,
                 );
                 last_bridge_count = current_bridge_count;
-                let target_clock = frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration);
+                let target_clock =
+                    frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
                 rebuild_live_state!(target_clock);
                 live_renderer.options = shared_state.lock().options.clone();
                 let commands = live_renderer.draw_frame(&live_controller);
                 shared_state.lock().frame = Some(PlaybackFrame {
                     commands,
-                    clock_seconds: target_clock,
+                    clock: target_clock,
                     frame_index: current_frame,
                     total_frames: actual_total_frames,
                     game_duration: actual_game_duration,
@@ -1748,9 +1748,9 @@ fn playback_thread(
                         .unwrap_or(actual_total_frames.saturating_sub(1));
                     current_frame = target;
                     let target_clock =
-                        frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration);
+                        frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
 
-                    if target_clock < live_clock.seconds() {
+                    if target_clock < live_clock {
                         // Seeking backward — must rebuild from scratch
                         rebuild_live_state!(target_clock);
                     } else {
@@ -1778,7 +1778,7 @@ fn playback_thread(
                     let commands = live_renderer.draw_frame(&live_controller);
                     shared_state.lock().frame = Some(PlaybackFrame {
                         commands,
-                        clock_seconds: target_clock,
+                        clock: target_clock,
                         frame_index: current_frame,
                         total_frames: actual_total_frames,
                         game_duration: actual_game_duration,
@@ -1812,7 +1812,7 @@ fn playback_thread(
                 let target_clock = if current_frame < frame_snapshots.len() {
                     frame_snapshots[current_frame].clock
                 } else {
-                    actual_game_duration
+                    GameClock(actual_game_duration)
                 };
 
                 // Forward playback — always incremental, never rebuild
@@ -1838,7 +1838,7 @@ fn playback_thread(
                 let commands = live_renderer.draw_frame(&live_controller);
                 shared_state.lock().frame = Some(PlaybackFrame {
                     commands,
-                    clock_seconds: target_clock,
+                    clock: target_clock,
                     frame_index: current_frame,
                     total_frames: actual_total_frames,
                     game_duration: actual_game_duration,
@@ -1866,7 +1866,10 @@ fn playback_thread(
                 let commands = live_renderer.draw_frame(&live_controller);
                 shared_state.lock().frame = Some(PlaybackFrame {
                     commands,
-                    clock_seconds: frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(actual_game_duration),
+                    clock: frame_snapshots
+                        .get(current_frame)
+                        .map(|s| s.clock)
+                        .unwrap_or(GameClock(actual_game_duration)),
                     frame_index: current_frame,
                     total_frames: actual_total_frames,
                     game_duration: actual_game_duration,
@@ -1883,7 +1886,7 @@ fn playback_thread(
 struct FrameSnapshot {
     #[allow(dead_code)]
     packet_offset: usize,
-    clock: f32,
+    clock: GameClock,
 }
 
 // ─── Event Timeline ──────────────────────────────────────────────────────────
@@ -1934,7 +1937,7 @@ pub(crate) enum TimelineEventKind {
 }
 
 pub(crate) struct TimelineEvent {
-    clock: f32,
+    clock: ElapsedClock,
     kind: TimelineEventKind,
 }
 
@@ -1979,8 +1982,8 @@ fn event_color(is_friendly: bool) -> Color32 {
 }
 
 fn format_timeline_event(event: &TimelineEvent) -> String {
-    let mins = event.clock as u32 / 60;
-    let secs = event.clock as u32 % 60;
+    let mins = event.clock.seconds() as u32 / 60;
+    let secs = event.clock.seconds() as u32 % 60;
     let time = format!("{:02}:{:02}", mins, secs);
     let desc = match &event.kind {
         TimelineEventKind::HealthLost { ship_name, player_name, percent_lost, old_hp, new_hp, max_hp, .. } => {
@@ -2022,7 +2025,7 @@ fn format_timeline_event(event: &TimelineEvent) -> String {
 /// Result from the timeline extraction pass (pass 2).
 struct TimelineExtractionResult {
     events: Vec<TimelineEvent>,
-    battle_start: f32,
+    battle_start: GameClock,
     /// Per-ship shot/salvo counts for pre-allocating buffers in pass 3.
     shot_counts: HashMap<EntityId, ShotCountHints>,
     /// Per-ship health history captured during the pass.
@@ -2046,7 +2049,7 @@ fn extract_timeline_events(
     let mut players_populated = false;
 
     // Health tracking: entity → (window_start_clock, health_at_window_start)
-    let mut health_windows: HashMap<EntityId, (f32, f32)> = HashMap::new();
+    let mut health_windows: HashMap<EntityId, (GameClock, f32)> = HashMap::new();
 
     // Shot counting for pre-allocation hints
     let mut shot_counts: HashMap<EntityId, ShotCountHints> = HashMap::new();
@@ -2073,7 +2076,7 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::TeamState;
     use wows_minimap_renderer::advantage::{self};
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
-    let mut advantage_check_clock: f32 = 0.0;
+    let mut advantage_check_clock = GameClock(0.0);
 
     let mut remaining = &replay_file.packet_data[..];
     let mut prev_clock = GameClock(0.0);
@@ -2106,7 +2109,7 @@ fn extract_timeline_events(
                         }
                     }
 
-                    let clock = prev_clock.seconds();
+                    let clock = prev_clock;
 
                     // --- Health loss detection ---
                     for (entity_id, entity) in controller.entities_by_id() {
@@ -2128,7 +2131,7 @@ fn extract_timeline_events(
                                         let pname = player_names.get(entity_id).cloned().unwrap_or_default();
                                         let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
                                         events.push(TimelineEvent {
-                                            clock,
+                                            clock: ElapsedClock(clock.seconds()),
                                             kind: TimelineEventKind::HealthLost {
                                                 ship_name: sname,
                                                 player_name: pname,
@@ -2159,7 +2162,7 @@ fn extract_timeline_events(
                             let killer_ship = ship_names.get(&kill.killer).cloned().unwrap_or_default();
                             let killer_player = player_names.get(&kill.killer).cloned().unwrap_or_default();
                             events.push(TimelineEvent {
-                                clock: kill.clock.seconds(),
+                                clock: ElapsedClock(kill.clock.seconds()),
                                 kind: TimelineEventKind::Death {
                                     ship_name: victim_ship,
                                     player_name: victim_player,
@@ -2187,7 +2190,7 @@ fn extract_timeline_events(
                         let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
                         if cap.both_inside && !prev_contested {
                             events.push(TimelineEvent {
-                                clock,
+                                clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::CapContested {
                                     cap_label: cap_label.clone(),
                                     owner_is_friendly: cap.team_id == viewer_team,
@@ -2201,7 +2204,7 @@ fn extract_timeline_events(
                         let prev_invader = cap_prev_invader_team.get(&cap_idx).copied().unwrap_or(-1);
                         if cap.invader_team >= 0 && prev_invader < 0 && !cap.both_inside {
                             events.push(TimelineEvent {
-                                clock,
+                                clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::CapBeingCaptured {
                                     cap_label: cap_label.clone(),
                                     capturer_is_friendly: cap.invader_team == viewer_team,
@@ -2216,7 +2219,7 @@ fn extract_timeline_events(
                             && cap.team_id >= 0
                         {
                             events.push(TimelineEvent {
-                                clock,
+                                clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::CapFlipped {
                                     cap_label,
                                     capturer_is_friendly: cap.team_id == viewer_team,
@@ -2236,7 +2239,7 @@ fn extract_timeline_events(
                             let pname = player_names.get(entity_id).cloned().unwrap_or_default();
                             let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
                             events.push(TimelineEvent {
-                                clock,
+                                clock: ElapsedClock(clock.seconds()),
                                 kind: TimelineEventKind::RadarUsed {
                                     ship_name: sname,
                                     player_name: pname,
@@ -2405,7 +2408,7 @@ fn extract_timeline_events(
                                     },
                                 };
                                 events.push(TimelineEvent {
-                                    clock,
+                                    clock: ElapsedClock(clock.seconds()),
                                     kind: TimelineEventKind::AdvantageChanged { label, is_friendly },
                                 });
                             }
@@ -2470,7 +2473,7 @@ fn extract_timeline_events(
                     let pname = player_names.get(entity_id).cloned().unwrap_or_default();
                     let friendly = is_friendly.get(entity_id).copied().unwrap_or(false);
                     events.push(TimelineEvent {
-                        clock: info.at_game_duration().as_secs_f32(),
+                        clock: ElapsedClock(info.at_game_duration().as_secs_f32()),
                         kind: TimelineEventKind::Disconnected {
                             ship_name: sname,
                             player_name: pname,
@@ -2483,13 +2486,16 @@ fn extract_timeline_events(
     }
 
     // Translate event times from absolute game clock to elapsed time since battle start
-    let battle_start = controller.battle_start_clock().map(|c| c.seconds()).unwrap_or(0.0);
+    let battle_start = controller.battle_start_clock().unwrap_or(GameClock(0.0));
     for event in &mut events {
-        event.clock = controller.game_clock_to_elapsed(event.clock);
+        // Events were created with GameClock values stored as ElapsedClock(abs_seconds).
+        // Convert to real elapsed time.
+        let abs = GameClock(event.clock.seconds());
+        event.clock = abs.to_elapsed(battle_start);
     }
 
     // Sort events by clock time
-    events.sort_by(|a, b| a.clock.partial_cmp(&b.clock).unwrap_or(std::cmp::Ordering::Equal));
+    events.sort_by(|a, b| a.clock.cmp(&b.clock));
     TimelineExtractionResult { events, battle_start, shot_counts, health_histories }
 }
 
@@ -3803,7 +3809,7 @@ fn draw_command_to_shapes(
 
         DrawCommand::Timer { time_remaining, elapsed } => {
             // Don't show until battle has started (pre-battle uses PreBattleCountdown)
-            if *elapsed <= 0.0 {
+            if elapsed.seconds() <= 0.0 {
                 return shapes;
             }
             let canvas_w = transform.screen_canvas_width();
@@ -3819,7 +3825,7 @@ fn draw_command_to_shapes(
                 let r = (*remaining).max(0) as u32;
                 let remaining_text = format!("{:02}:{:02}", r / 60, r % 60);
                 let small_font = game_font(11.0 * ws);
-                let e = elapsed.max(0.0) as u32;
+                let e = elapsed.seconds().max(0.0) as u32;
                 let elapsed_text = format!("+{:02}:{:02}", e / 60, e % 60);
                 let gray = Color32::from_rgb(180, 180, 180);
 
@@ -3851,7 +3857,7 @@ fn draw_command_to_shapes(
                 shapes.push(Shape::galley(Pos2::new(e_x, elapsed_pos.y), eg, gray));
             } else {
                 // Fallback: just show elapsed time centered
-                let e = elapsed.max(0.0) as u32;
+                let e = elapsed.seconds().max(0.0) as u32;
                 let text = format!("{:02}:{:02}", e / 60, e % 60);
                 let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text, main_font, Color32::WHITE));
                 let text_w = galley.size().x;
@@ -4809,7 +4815,7 @@ impl ReplayRendererViewer {
                 let battle_start = state.battle_start;
                 let actual_game_duration = state.actual_game_duration;
                 let frame_data =
-                    state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock_seconds, f.game_duration));
+                    state.frame.as_ref().map(|f| (f.frame_index, f.total_frames, f.clock, f.game_duration));
                 // Resolve self entity ID from draw commands (once)
                 let self_entity_id = if state.self_entity_id.is_some() {
                     state.self_entity_id
@@ -5799,21 +5805,21 @@ impl ReplayRendererViewer {
                             // Left/Right arrows: seek +/-10 seconds
                             let shift = ctx.input(|i| i.modifiers.shift);
                             if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-                                let target = (clock_secs - 10.0).max(0.0);
+                                let target = (clock_secs - 10.0).max(GameClock(0.0));
                                 let _ = command_tx.send(PlaybackCommand::Seek(target));
                             }
                             if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-                                let target = (clock_secs + 10.0).min(game_dur);
+                                let target = (clock_secs + 10.0).min(GameClock(game_dur));
                                 let _ = command_tx.send(PlaybackCommand::Seek(target));
                             }
 
                             // Shift+Left/Right: skip to prev/next timeline event
-                            let elapsed = (clock_secs - battle_start).max(0.0);
+                            let elapsed = clock_secs.to_elapsed(battle_start);
                             if shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events
                                     && let Some(event) = events.iter().rev().find(|e| e.clock < elapsed - 0.5) {
-                                        let seek_clock = event.clock + battle_start;
+                                        let seek_clock = event.clock.to_absolute(battle_start);
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -5824,7 +5830,7 @@ impl ReplayRendererViewer {
                                 let state = shared_state.lock();
                                 if let Some(ref events) = state.timeline_events
                                     && let Some(event) = events.iter().find(|e| e.clock > elapsed) {
-                                        let seek_clock = event.clock + battle_start;
+                                        let seek_clock = event.clock.to_absolute(battle_start);
                                         let desc = format_timeline_event(event);
                                         drop(state);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -6192,8 +6198,8 @@ impl ReplayRendererViewer {
                                                 let current_clock = state
                                                     .frame
                                                     .as_ref()
-                                                    .map(|f| f.clock_seconds)
-                                                    .unwrap_or(0.0);
+                                                    .map(|f| f.clock)
+                                                    .unwrap_or(GameClock(0.0));
                                                 drop(state);
                                                 let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
                                                 ann.show_context_menu = false;
@@ -6501,13 +6507,13 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_BACK));
                                                 if btn.on_hover_text("Jump to start").clicked() {
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(0.0));
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(0.0)));
                                                 }
                                             }
 
                                             // Skip to previous event
                                             if let Some((_fi, _tf, clock_secs, _gd)) = frame_data {
-                                                let elapsed = (clock_secs - battle_start).max(0.0);
+                                                let elapsed = clock_secs.to_elapsed(battle_start);
                                                 let btn = tui
                                                     .tui()
                                                     .style(fixed_style.clone())
@@ -6518,7 +6524,7 @@ impl ReplayRendererViewer {
                                                         && let Some(event) =
                                                             events.iter().rev().find(|e| e.clock < elapsed - 0.5)
                                                         {
-                                                            let seek_clock = event.clock + battle_start;
+                                                            let seek_clock = event.clock.to_absolute(battle_start);
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -6534,7 +6540,7 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
                                                 if btn.on_hover_text("Back 10s (Left)").clicked() {
-                                                    let target = (clock_secs - 10.0).max(0.0);
+                                                    let target = (clock_secs - 10.0).max(GameClock(0.0));
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
                                             }
@@ -6569,7 +6575,7 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
                                                 if btn.on_hover_text("Forward 10s (Right)").clicked() {
-                                                    let target = (clock_secs + 10.0).min(game_dur);
+                                                    let target = (clock_secs + 10.0).min(GameClock(game_dur));
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
                                             }
@@ -6581,13 +6587,13 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::FAST_FORWARD));
                                                 if btn.on_hover_text("Next event (Shift+Right)").clicked() {
-                                                    let elapsed = (clock_secs - battle_start).max(0.0);
+                                                    let elapsed = clock_secs.to_elapsed(battle_start);
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events
                                                         && let Some(event) =
                                                             events.iter().find(|e| e.clock > elapsed)
                                                         {
-                                                            let seek_clock = event.clock + battle_start;
+                                                            let seek_clock = event.clock.to_absolute(battle_start);
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
@@ -6603,14 +6609,14 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_FORWARD));
                                                 if btn.on_hover_text("Jump to end").clicked() {
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(game_dur));
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(game_dur)));
                                                 }
                                             }
 
                                             // Seek slider (flex_grow: 1.0 — fills remaining space)
                                             if let Some((_frame_idx, _total_frames, clock_secs, game_dur)) = frame_data
                                             {
-                                                let mut seek_time = clock_secs;
+                                                let mut seek_time = clock_secs.seconds();
                                                 let mut seek_changed = false;
                                                 tui.tui().style(grow_style.clone()).ui(|ui| {
                                                     ui.spacing_mut().slider_width = ui.available_width();
@@ -6619,10 +6625,10 @@ impl ReplayRendererViewer {
                                                     seek_changed = ui.add(slider).changed();
                                                 });
                                                 if seek_changed {
-                                                    let _ = command_tx.send(PlaybackCommand::Seek(seek_time));
+                                                    let _ = command_tx.send(PlaybackCommand::Seek(GameClock(seek_time)));
                                                 }
 
-                                                let elapsed_secs = (clock_secs - battle_start).max(0.0) as u32;
+                                                let elapsed_secs = clock_secs.to_elapsed(battle_start).seconds().max(0.0) as u32;
                                                 let mins = elapsed_secs / 60;
                                                 let secs = elapsed_secs % 60;
                                                 tui.tui()
@@ -6795,7 +6801,7 @@ impl ReplayRendererViewer {
                                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                         .show(|ui| {
                                             ui.set_min_width(180.0);
-                                            egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
+                                            let scroll_out = egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
                                             let mut opts = options.clone();
                                             let mut show_dead = show_dead_ships;
                                             let mut changed = false;
@@ -6905,7 +6911,10 @@ impl ReplayRendererViewer {
                                                 state.options = opts.clone();
                                                 state.show_dead_ships = show_dead;
                                             }
+                                            (opts, show_dead)
+                                            });
 
+                                            let (opts, show_dead) = scroll_out.inner;
                                             ui.separator();
                                             if ui.button("Save Defaults").clicked() {
                                                 let mut saved = saved_from_render_options(&opts);
@@ -6919,7 +6928,6 @@ impl ReplayRendererViewer {
                                                 }
                                                 *pending_save.lock() = Some(saved);
                                             }
-                                            });
                                         });
 
                                     // Timeline popup
@@ -6960,8 +6968,8 @@ impl ReplayRendererViewer {
                                                     egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                                                         ui.set_width(ui.available_width());
                                                         for event in events {
-                                                            let mins = event.clock as u32 / 60;
-                                                            let secs = event.clock as u32 % 60;
+                                                            let mins = event.clock.seconds() as u32 / 60;
+                                                            let secs = event.clock.seconds() as u32 % 60;
                                                             let timestamp = format!("{:02}:{:02}", mins, secs);
 
                                                             let row = ui.horizontal(|ui| {
@@ -7056,7 +7064,7 @@ impl ReplayRendererViewer {
                                                             });
                                                             if row.inner {
                                                                 let _ =
-                                                                    command_tx.send(PlaybackCommand::Seek(event.clock + battle_start));
+                                                                    command_tx.send(PlaybackCommand::Seek(event.clock.to_absolute(battle_start)));
                                                             }
                                                         }
                                                     });

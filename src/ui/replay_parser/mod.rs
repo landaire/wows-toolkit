@@ -302,7 +302,14 @@ impl UiReport {
             } else {
                 None
             };
-            let name_text = RichText::new(player_state.username()).color(name_color);
+            let display_name = if player_state.is_bot() && player_state.username().starts_with("IDS_") {
+                metadata_provider
+                    .localized_name_from_id(player_state.username())
+                    .unwrap_or_else(|| player_state.username().to_string())
+            } else {
+                player_state.username().to_string()
+            };
+            let name_text = RichText::new(&display_name).color(name_color);
 
             // Look up this player's resolved results by db_id
             let player_results = resolved_results
@@ -3073,26 +3080,36 @@ impl ToolkitTabViewer<'_> {
             let group_id_to_paths_fallback = group_id_to_paths.clone();
             let group_id_to_replays_fallback = group_id_to_replays.clone();
 
+            let group_id_to_child_ids_fallback = group_id_to_child_ids.clone();
+
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays and paths from selected nodes (both leaf and group nodes)
+                    // Collect all replays and paths from selected nodes (both leaf and group nodes).
+                    // When a group and its children are both selected (e.g. shift-click range),
+                    // skip leaf nodes already covered by a selected group to avoid double-counting.
+                    let mut covered_by_group: std::collections::HashSet<egui::Id> = std::collections::HashSet::new();
                     let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
                     let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
                     for id in selected_ids {
                         // Check if it's a group node
                         if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
                             selected_replays.extend(group_replays.iter().cloned());
+                            if let Some(child_ids) = group_id_to_child_ids_fallback.get(id) {
+                                covered_by_group.extend(child_ids.iter().copied());
+                            }
                         }
                         if let Some(paths) = group_id_to_paths_fallback.get(id) {
                             selected_paths.extend(paths.iter().cloned());
                         }
-                        // Check if it's a leaf node
-                        if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
-                            selected_replays.push(replay_weak.clone());
-                        }
-                        if let Some(path) = id_to_path_fallback.get(id) {
-                            selected_paths.push(path.clone());
+                        // Check if it's a leaf node not already covered by a selected group
+                        if !covered_by_group.contains(id) {
+                            if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
+                                selected_replays.push(replay_weak.clone());
+                            }
+                            if let Some(path) = id_to_path_fallback.get(id) {
+                                selected_paths.push(path.clone());
+                            }
                         }
                     }
 
@@ -3402,27 +3419,36 @@ impl ToolkitTabViewer<'_> {
             let id_to_path_fallback = id_to_path.clone();
             let group_id_to_paths_fallback = group_id_to_paths.clone();
             let group_id_to_replays_fallback = group_id_to_replays.clone();
+            let group_id_to_child_ids_fallback = group_id_to_child_ids.clone();
 
             let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"))
                 .allow_multi_selection(true)
                 .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays and paths from selected nodes (both leaf and group nodes)
+                    // Collect all replays and paths from selected nodes (both leaf and group nodes).
+                    // When a group and its children are both selected (e.g. shift-click range),
+                    // skip leaf nodes already covered by a selected group to avoid double-counting.
+                    let mut covered_by_group: std::collections::HashSet<egui::Id> = std::collections::HashSet::new();
                     let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
                     let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
                     for id in selected_ids {
                         // Check if it's a group node
                         if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
                             selected_replays.extend(group_replays.iter().cloned());
+                            if let Some(child_ids) = group_id_to_child_ids_fallback.get(id) {
+                                covered_by_group.extend(child_ids.iter().copied());
+                            }
                         }
                         if let Some(paths) = group_id_to_paths_fallback.get(id) {
                             selected_paths.extend(paths.iter().cloned());
                         }
-                        // Check if it's a leaf node
-                        if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
-                            selected_replays.push(replay_weak.clone());
-                        }
-                        if let Some(path) = id_to_path_fallback.get(id) {
-                            selected_paths.push(path.clone());
+                        // Check if it's a leaf node not already covered by a selected group
+                        if !covered_by_group.contains(id) {
+                            if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
+                                selected_replays.push(replay_weak.clone());
+                            }
+                            if let Some(path) = id_to_path_fallback.get(id) {
+                                selected_paths.push(path.clone());
+                            }
                         }
                     }
 

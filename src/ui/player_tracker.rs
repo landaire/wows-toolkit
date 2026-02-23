@@ -80,6 +80,12 @@ impl PlayerTracker {
 
             for player in report.players() {
                 let player_state = player.initial_state();
+
+                // Skip bots
+                if player_state.is_bot() {
+                    continue;
+                }
+
                 if let Some(self_player) = self_player {
                     let self_state = self_player.initial_state();
                     // Ignore ourselves and people in our division
