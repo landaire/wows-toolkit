@@ -1129,8 +1129,9 @@ pub(crate) fn upload_armor_to_viewport(
 
             let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
             let color = if has_texture {
-                // Texture provides albedo; vertex color is white with desired alpha.
-                [1.0, 1.0, 1.0, hull_alpha]
+                // Boost hull textures — ship textures are painted dark; compensate
+                // for the uniform 0.7 brightness in the shader.
+                [1.8, 1.8, 1.8, hull_alpha]
             } else if has_baked_colors {
                 let c = mesh.colors[i];
                 [c[0], c[1], c[2], hull_alpha]
@@ -1143,9 +1144,9 @@ pub(crate) fn upload_armor_to_viewport(
         if !mesh.indices.is_empty() {
             if let Some((w, h, rgba)) = texture_data.filter(|_| has_uvs) {
                 let tex_bg = pipeline.create_texture_bind_group(device, queue, rgba, *w, *h);
-                pane.viewport.add_textured_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg);
+                pane.viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bg);
             } else {
-                pane.viewport.add_mesh(device, &vertices, &mesh.indices, hull_layer);
+                pane.viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer);
             }
         }
     }
@@ -2163,6 +2164,30 @@ fn load_ship_for_pane(
 
             // Load hull visual meshes
             let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
+
+            // DEBUG: dump UV statistics for each hull mesh
+            for mesh in &hull_meshes {
+                if !mesh.uvs.is_empty() {
+                    let (mut u_min, mut u_max) = (f32::MAX, f32::MIN);
+                    let (mut v_min, mut v_max) = (f32::MAX, f32::MIN);
+                    for uv in &mesh.uvs {
+                        u_min = u_min.min(uv[0]);
+                        u_max = u_max.max(uv[0]);
+                        v_min = v_min.min(uv[1]);
+                        v_max = v_max.max(uv[1]);
+                    }
+                    tracing::debug!(
+                        "Hull mesh '{}': {} verts, UV range: u=[{:.4}, {:.4}] v=[{:.4}, {:.4}] mfm={:?}",
+                        mesh.name,
+                        mesh.uvs.len(),
+                        u_min,
+                        u_max,
+                        v_min,
+                        v_max,
+                        mesh.mfm_path
+                    );
+                }
+            }
 
             // Include hull meshes in bounding box
             for mesh in &hull_meshes {
@@ -3186,9 +3211,9 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
         if a < b { (a, b) } else { (b, a) }
     }
 
-    // For each edge, store the thickness and face normal from each side.
+    // For each edge, store the plate identity and face normal from each side.
     struct EdgeInfo {
-        thickness: f32,
+        plate_key: PlateKey,
         normal: [f32; 3],
         // Original (non-quantized) positions for rendering
         p0: [f32; 3],
@@ -3253,7 +3278,7 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
                 let edge_key = make_edge_key(qa, qb);
 
                 edge_map.entry(edge_key).or_default().push(EdgeInfo {
-                    thickness: info.thickness_mm,
+                    plate_key: plate_key.clone(),
                     normal: face_normal,
                     p0: tri_pos[a],
                     p1: tri_pos[b],
@@ -3262,19 +3287,26 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
         }
     }
 
-    // Now find boundary edges: edges shared by triangles with different thickness values
+    // Find boundary edges: mesh silhouettes or edges between different plates.
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
     for (_edge_key, infos) in &edge_map {
-        if infos.len() < 2 {
-            continue; // boundary edge of mesh, not a plate boundary
-        }
-
-        // Check if there are different thickness values on this edge
-        let first_thickness = infos[0].thickness;
-        let has_boundary = infos.iter().any(|i| (i.thickness - first_thickness).abs() > 0.1);
-        if !has_boundary {
+        // Draw edges that form plate outlines:
+        //  - mesh boundary edges (only 1 triangle) — silhouette of each armor piece
+        //  - edges between different plates (zone, material, or thickness)
+        //  - crease edges where adjacent face normals differ sharply (e.g. box corners)
+        let is_mesh_boundary = infos.len() == 1;
+        let first_plate = &infos[0].plate_key;
+        let is_plate_boundary = infos.len() >= 2 && infos.iter().any(|i| i.plate_key != *first_plate);
+        let is_crease = infos.len() >= 2 && {
+            let n0 = &infos[0].normal;
+            infos[1..].iter().any(|i| {
+                let dot = n0[0] * i.normal[0] + n0[1] * i.normal[1] + n0[2] * i.normal[2];
+                dot < 0.7 // ~45 degrees
+            })
+        };
+        if !is_mesh_boundary && !is_plate_boundary && !is_crease {
             continue;
         }
 
@@ -3305,8 +3337,10 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
             continue;
         }
 
-        // Tangent perpendicular to edge, in the surface plane
-        // tangent = normalize(cross(edge_dir, avg_normal))
+        // Build edge quads in two perpendicular orientations so edges are
+        // visible from any viewing angle:
+        //  1. Expand along the face normal (visible when surface is edge-on)
+        //  2. Expand along the in-plane tangent (visible when looking at the surface)
         let tx = edge_dir[1] * avg_normal[2] - edge_dir[2] * avg_normal[1];
         let ty = edge_dir[2] * avg_normal[0] - edge_dir[0] * avg_normal[2];
         let tz = edge_dir[0] * avg_normal[1] - edge_dir[1] * avg_normal[0];
@@ -3316,10 +3350,10 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
         }
         let tangent = [tx / t_len, ty / t_len, tz / t_len];
 
-        // Build two thin quads: one offset +normal (front), one -normal (back)
+        // Emit edge quads on both sides of the surface (+/- normal offset).
         for &n_sign in &[1.0_f32, -1.0] {
             let base = vertices.len() as u32;
-            let offset_normal = [
+            let offset = [
                 avg_normal[0] * normal_offset * n_sign,
                 avg_normal[1] * normal_offset * n_sign,
                 avg_normal[2] * normal_offset * n_sign,
@@ -3329,9 +3363,9 @@ pub(crate) fn upload_plate_boundary_edges(pane: &mut ArmorPane, armor: &LoadedSh
                 for &sign in &[-1.0_f32, 1.0] {
                     vertices.push(Vertex {
                         position: [
-                            p[0] + tangent[0] * edge_half_width * sign + offset_normal[0],
-                            p[1] + tangent[1] * edge_half_width * sign + offset_normal[1],
-                            p[2] + tangent[2] * edge_half_width * sign + offset_normal[2],
+                            p[0] + tangent[0] * edge_half_width * sign + offset[0],
+                            p[1] + tangent[1] * edge_half_width * sign + offset[1],
+                            p[2] + tangent[2] * edge_half_width * sign + offset[2],
                         ],
                         normal: vert_normal,
                         color: edge_color,
@@ -3756,13 +3790,15 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         zone_changed = true;
     }
     if !armor.hull_meshes.is_empty() {
-        if ui.checkbox(&mut pane.show_hull, "Ship Hull").changed() {
+        let any_hull_on = pane.hull_visibility.values().any(|&v| v);
+        let mut hull_checked = any_hull_on;
+        if ui.checkbox(&mut hull_checked, "Ship Hull").changed() {
             for (_, vis) in pane.hull_visibility.iter_mut() {
-                *vis = pane.show_hull;
+                *vis = hull_checked;
             }
             zone_changed = true;
         }
-        if pane.show_hull {
+        if any_hull_on {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
                 if ui.checkbox(&mut pane.hull_opaque, "Opaque Hull").changed() {

@@ -50,36 +50,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
     let base_color = tex_color * in.color;
 
-    // View direction (camera is at origin in view space)
+    // Uniform lighting: flat brightness with subtle shading for depth perception.
     let V = normalize(-in.position_vs);
-
-    // Double-sided normal: flip toward camera
     var n = normalize(in.normal_vs);
     if (dot(n, V) < 0.0) {
         n = -n;
     }
 
-    // Key light
-    let l = normalize(uniforms.light_dir.xyz);
-    let NdotL = max(dot(n, l), 0.0);
-    let diffuse1 = NdotL * 0.7;
-
-    // Fill light (opposite side, dimmer)
-    let l2 = normalize(vec3(-0.4, -0.3, -0.6));
-    let diffuse2 = max(dot(n, l2), 0.0) * 0.2;
-
-    // Blinn-Phong specular (key light only)
-    let H = normalize(l + V);
-    let spec = pow(max(dot(n, H), 0.0), 32.0) * 0.3;
-
-    // Hemisphere ambient (sky=0.35, ground=0.15)
-    let ambient = mix(0.15, 0.35, n.y * 0.5 + 0.5);
-
-    // Rim/fresnel glow
-    let rim = pow(1.0 - max(dot(n, V), 0.0), 3.0) * 0.15;
-
-    let brightness = ambient + diffuse1 + diffuse2 + rim;
-    let color = base_color.rgb * brightness + vec3(spec);
+    // Uniform lighting — constant brightness, no directional dependence.
+    let color = base_color.rgb * 0.7;
 
     return vec4(color, base_color.a);
 }

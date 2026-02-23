@@ -325,8 +325,6 @@ pub struct ArmorPane {
     pub part_visibility: HashMap<(String, String), bool>,
     /// Per hull render set visibility (name → visible). Defaults to all false.
     pub hull_visibility: HashMap<String, bool>,
-    /// Whether to show non-armor hull parts (future).
-    pub show_hull: bool,
     /// When true, hull renders fully opaque with depth writes (like armor plates).
     pub hull_opaque: bool,
     /// Selected camouflage (future).
@@ -395,7 +393,6 @@ impl ArmorPane {
             hovered_info: None,
             part_visibility: HashMap::new(),
             hull_visibility: HashMap::new(),
-            show_hull: false,
             hull_opaque: defaults.hull_opaque,
             selected_camo: None,
             mesh_triangle_info: Vec::new(),
