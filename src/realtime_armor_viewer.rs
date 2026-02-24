@@ -20,7 +20,7 @@ use wowsunpack::recognized::Recognized;
 
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::{ComparisonVerdict, ExitDivergence, ServerOutcome, ServerVsSimComparison};
-use crate::armor_viewer::state::{ArmorPane, LoadedShipArmor, SidebarHighlightKey, StoredTrajectory};
+use crate::armor_viewer::state::{ArmorPane, SidebarHighlightKey, StoredTrajectory};
 use crate::icon_str;
 use crate::icons;
 use crate::replay_renderer::{RealtimeArmorBridge, ReplayPlayerInfo};
@@ -274,188 +274,18 @@ impl RealtimeArmorViewer {
                 let param = ship_assets.metadata().game_param_by_index(vehicle.index());
                 let v =
                     param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "No vehicle found".to_string())?;
-                let dock_y_offset = param.as_ref().and_then(|p| {
-                    p.vehicle()
-                        .and_then(|v| v.hull_upgrades())
-                        .and_then(|upgrades| {
-                            if let Some(sel) = &selected_hull {
-                                upgrades.get(sel)
-                            } else {
-                                let mut keys: Vec<&String> = upgrades.keys().collect();
-                                keys.sort();
-                                keys.first().and_then(|k| upgrades.get(*k))
-                            }
-                        })
-                        .and_then(|c| c.dock_y_offset())
-                });
 
-                // Build sorted hull upgrade list for the UI, with diff-based labels
-                let hull_upgrade_names: Vec<(String, String)> = param
-                    .as_ref()
-                    .and_then(|p| p.vehicle())
-                    .and_then(|v| v.hull_upgrades())
-                    .map(|upgrades| {
-                        use wowsunpack::game_params::keys::ComponentType;
-                        let mut sorted: Vec<_> = upgrades.iter().collect();
-                        sorted.sort_by_key(|(k, _)| (*k).clone());
-                        let base = &sorted[0].1;
-                        sorted
-                            .iter()
-                            .enumerate()
-                            .map(|(i, (k, config))| {
-                                let letter = (b'A' + i as u8) as char;
-                                let diffs: Vec<String> = ComponentType::ALL
-                                    .iter()
-                                    .filter(|&&ct| ct != ComponentType::Hull)
-                                    .filter(|&&ct| config.component_name(ct) != base.component_name(ct))
-                                    .map(|ct| ct.to_string())
-                                    .collect();
-                                let label = if diffs.is_empty() || i == 0 {
-                                    format!("{letter}")
-                                } else {
-                                    format!("{letter} ({})", diffs.join(", "))
-                                };
-                                ((*k).clone(), label)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let options = wowsunpack::export::ship::ShipExportOptions {
+                let dock_y_offset = crate::armor_viewer::common::resolve_dock_y_offset(&v, &selected_hull);
+                let hull_upgrade_names = crate::armor_viewer::common::build_hull_upgrade_names(&v);
+                let load_opts = crate::armor_viewer::common::ShipLoadOptions {
+                    display_name,
                     lod: requested_lod,
-                    hull: selected_hull.clone(),
-                    textures: false,
-                    damaged: false,
+                    selected_hull,
+                    hull_upgrade_names,
+                    dock_y_offset,
                     ..Default::default()
                 };
-                let ctx = ship_assets.load_ship_from_vehicle(&v, &options).map_err(|e| format!("{e:?}"))?;
-                let meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
-
-                let mut min = [f32::MAX; 3];
-                let mut max = [f32::MIN; 3];
-                for mesh in &meshes {
-                    for pos in &mesh.positions {
-                        let p = if let Some(t) = &mesh.transform {
-                            crate::ui::armor_viewer::transform_point(t, *pos)
-                        } else {
-                            *pos
-                        };
-                        for i in 0..3 {
-                            min[i] = min[i].min(p[i]);
-                            max[i] = max[i].max(p[i]);
-                        }
-                    }
-                }
-
-                // Build zone info
-                let mut zone_parts_map: std::collections::HashMap<String, std::collections::HashSet<String>> =
-                    std::collections::HashMap::new();
-                let mut zone_part_plates_map: std::collections::HashMap<
-                    String,
-                    std::collections::HashMap<String, std::collections::BTreeSet<i32>>,
-                > = std::collections::HashMap::new();
-                for mesh in &meshes {
-                    for info in &mesh.triangle_info {
-                        zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material_name.clone());
-                        let thickness_key = (info.thickness_mm * 10.0).round() as i32;
-                        zone_part_plates_map
-                            .entry(info.zone.clone())
-                            .or_default()
-                            .entry(info.material_name.clone())
-                            .or_default()
-                            .insert(thickness_key);
-                    }
-                }
-                let mut zone_parts: Vec<(String, Vec<String>)> = zone_parts_map
-                    .into_iter()
-                    .map(|(zone, parts)| {
-                        let mut parts: Vec<String> = parts.into_iter().collect();
-                        parts.sort();
-                        (zone, parts)
-                    })
-                    .collect();
-                zone_parts.sort_by(|a, b| a.0.cmp(&b.0));
-                let zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)> = zone_parts
-                    .iter()
-                    .map(|(zone, parts)| {
-                        let parts_with_plates: Vec<(String, Vec<i32>)> = parts
-                            .iter()
-                            .map(|part| {
-                                let plates = zone_part_plates_map
-                                    .get(zone)
-                                    .and_then(|m| m.get(part))
-                                    .map(|s| s.iter().copied().collect())
-                                    .unwrap_or_default();
-                                (part.clone(), plates)
-                            })
-                            .collect();
-                        (zone.clone(), parts_with_plates)
-                    })
-                    .collect();
-                let zones: Vec<String> = zone_parts.iter().map(|(z, _)| z.clone()).collect();
-
-                let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
-                for mesh in &hull_meshes {
-                    for pos in &mesh.positions {
-                        let p = if let Some(t) = &mesh.transform {
-                            crate::ui::armor_viewer::transform_point(t, *pos)
-                        } else {
-                            *pos
-                        };
-                        for i in 0..3 {
-                            min[i] = min[i].min(p[i]);
-                            max[i] = max[i].max(p[i]);
-                        }
-                    }
-                }
-                let hull_part_groups = crate::ui::armor_viewer::build_hull_part_groups(&hull_meshes);
-
-                // Load hull albedo textures (DDS → RGBA8) for GPU texture sampling.
-                let mut hull_textures = std::collections::HashMap::new();
-                for mesh in &hull_meshes {
-                    if let Some(mfm) = &mesh.mfm_path {
-                        if hull_textures.contains_key(mfm) {
-                            continue;
-                        }
-                        if let Some(dds_bytes) =
-                            wowsunpack::export::texture::load_base_albedo_bytes(ship_assets.vfs(), mfm)
-                        {
-                            if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
-                                if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
-                                    let w = img.width();
-                                    let h = img.height();
-                                    hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let hull_lod_count = ctx.hull_lod_count();
-
-                let mut armor = LoadedShipArmor {
-                    display_name,
-                    meshes,
-                    bounds: (min, max),
-                    zones,
-                    zone_parts,
-                    zone_part_plates,
-                    hull_meshes,
-                    hull_part_groups,
-                    dock_y_offset,
-                    splash_data: None,
-                    splash_box_groups: Vec::new(),
-                    hit_locations: None,
-                    waterline_dy: 0.0,
-                    hull_textures,
-                    hull_lod_count,
-                    hull_lod: requested_lod,
-                    hull_upgrade_names,
-                    loaded_hull: selected_hull,
-                    module_alternatives: Vec::new(),
-                };
-                armor.apply_waterline_offset();
-                Ok(armor)
+                crate::armor_viewer::common::load_ship_armor(&v, &ship_assets, load_opts)
             })();
             let _ = tx.send(result);
         });
@@ -1125,61 +955,25 @@ impl RealtimeArmorViewer {
             self.needs_repaint = true;
         }
 
-        // Check if ship load completed
-        if let Some(ref rx) = self.pane.load_receiver {
-            if let Ok(result) = rx.try_recv() {
-                match result {
-                    Ok(armor) => {
-                        tracing::debug!(
-                            "RealtimeArmorViewer: ship loaded — bounds min=[{:.1},{:.1},{:.1}] max=[{:.1},{:.1},{:.1}]",
-                            armor.bounds.0[0],
-                            armor.bounds.0[1],
-                            armor.bounds.0[2],
-                            armor.bounds.1[0],
-                            armor.bounds.1[1],
-                            armor.bounds.1[2],
-                        );
-                        crate::ui::armor_viewer::init_armor_viewport(
-                            &mut self.pane,
-                            &armor,
-                            &self.render_state.device,
-                            &self.render_state.queue,
-                            &self.gpu_pipeline,
-                        );
-                        self.pane.loaded_armor = Some(armor);
-                        self.pane.loading = false;
-                        self.ship_loaded = true;
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to load ship armor: {e}");
-                        self.pane.loading = false;
-                    }
-                }
-                self.pane.load_receiver = None;
-                warn!("Ship loaded! we need repaint");
-                self.needs_repaint = true;
-            }
-        }
-
-        // Poll hull-only LOD reload
-        if let Some(ref rx) = self.pane.hull_load_receiver {
-            if let Ok(result) = rx.try_recv() {
-                match result {
-                    Ok(data) => {
-                        crate::ui::armor_viewer::apply_hull_reload(
-                            &mut self.pane,
-                            data,
-                            &self.render_state.device,
-                            &self.render_state.queue,
-                            &self.gpu_pipeline,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to reload hull LOD: {e}");
-                    }
-                }
-                self.pane.hull_load_receiver = None;
-                self.needs_repaint = true;
+        // Poll ship load and hull LOD reload
+        if crate::armor_viewer::common::poll_pane_load_receivers(
+            &mut self.pane,
+            &self.render_state.device,
+            &self.render_state.queue,
+            &self.gpu_pipeline,
+        ) {
+            self.ship_loaded = true;
+            self.needs_repaint = true;
+            if let Some(ref armor) = self.pane.loaded_armor {
+                tracing::debug!(
+                    "RealtimeArmorViewer: ship loaded — bounds min=[{:.1},{:.1},{:.1}] max=[{:.1},{:.1},{:.1}]",
+                    armor.bounds.0[0],
+                    armor.bounds.0[1],
+                    armor.bounds.0[2],
+                    armor.bounds.1[0],
+                    armor.bounds.1[1],
+                    armor.bounds.1[2],
+                );
             }
         }
 
@@ -1777,33 +1571,8 @@ impl RealtimeArmorViewer {
         let translate_part = |name: &str| -> String { name.to_string() };
 
         // Undo/redo keyboard shortcuts
-        {
-            let wants_undo = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z) && !i.modifiers.shift);
-            let wants_redo = ui.input(|i| {
-                i.modifiers.command
-                    && (i.key_pressed(egui::Key::R) || (i.key_pressed(egui::Key::Z) && i.modifiers.shift))
-            });
-            if wants_undo {
-                let current = crate::armor_viewer::state::VisibilitySnapshot {
-                    part_visibility: self.pane.part_visibility.clone(),
-                    plate_visibility: self.pane.plate_visibility.clone(),
-                };
-                if let Some(prev) = self.pane.undo_stack.undo(current) {
-                    self.pane.part_visibility = prev.part_visibility;
-                    self.pane.plate_visibility = prev.plate_visibility;
-                    zone_changed = true;
-                }
-            } else if wants_redo {
-                let current = crate::armor_viewer::state::VisibilitySnapshot {
-                    part_visibility: self.pane.part_visibility.clone(),
-                    plate_visibility: self.pane.plate_visibility.clone(),
-                };
-                if let Some(next) = self.pane.undo_stack.redo(current) {
-                    self.pane.part_visibility = next.part_visibility;
-                    self.pane.plate_visibility = next.plate_visibility;
-                    zone_changed = true;
-                }
-            }
+        if crate::armor_viewer::common::handle_undo_redo(ui, &mut self.pane) {
+            zone_changed = true;
         }
 
         // Toolbar
@@ -1929,57 +1698,15 @@ impl RealtimeArmorViewer {
             }
         }
 
-        // Sidebar hover highlight lifecycle: compare new key with current, update overlay mesh.
-        {
-            let new_key = sidebar_hovered_key.into_inner();
-            let current_key = self.pane.sidebar_highlight.as_ref().map(|(k, _)| k.clone());
-            if new_key != current_key {
-                // Remove old highlight
-                if let Some((_, old_id)) = self.pane.sidebar_highlight.take() {
-                    self.pane.viewport.remove_mesh(old_id);
-                    self.pane.viewport.mark_dirty();
-                }
-                if let Some(key) = new_key {
-                    if let Some(armor) = self.pane.loaded_armor.take() {
-                        let device = &self.render_state.device;
-                        let mesh_id = match &key {
-                            SidebarHighlightKey::Zone(z) => {
-                                crate::ui::armor_viewer::upload_zone_highlight(&mut self.pane, &armor, z, device)
-                            }
-                            SidebarHighlightKey::Part(z, p) => {
-                                crate::ui::armor_viewer::upload_part_highlight(&mut self.pane, &armor, z, p, device)
-                            }
-                            SidebarHighlightKey::Plate(pk) => crate::ui::armor_viewer::upload_plate_highlight(
-                                &mut self.pane,
-                                &armor,
-                                pk,
-                                device,
-                                crate::ui::armor_viewer::SIDEBAR_HIGHLIGHT_COLOR,
-                            ),
-                            SidebarHighlightKey::HullMeshes(names) => {
-                                let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-                                crate::ui::armor_viewer::upload_hull_highlight(
-                                    &mut self.pane,
-                                    &armor,
-                                    &name_refs,
-                                    device,
-                                )
-                            }
-                            SidebarHighlightKey::SplashBoxes(names) => {
-                                crate::ui::armor_viewer::upload_splash_box_highlight(
-                                    &mut self.pane,
-                                    &armor,
-                                    names,
-                                    device,
-                                )
-                            }
-                        };
-                        self.pane.sidebar_highlight = Some((key, mesh_id));
-                        self.pane.viewport.mark_dirty();
-                        self.pane.loaded_armor = Some(armor);
-                    }
-                }
-            }
+        // Sidebar hover highlight lifecycle
+        if let Some(armor) = self.pane.loaded_armor.take() {
+            crate::armor_viewer::common::update_sidebar_highlight(
+                &mut self.pane,
+                &armor,
+                sidebar_hovered_key.into_inner(),
+                &self.render_state.device,
+            );
+            self.pane.loaded_armor = Some(armor);
         }
 
         // Viewport rendering
