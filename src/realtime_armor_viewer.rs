@@ -425,7 +425,6 @@ impl RealtimeArmorViewer {
                                     let w = img.width();
                                     let h = img.height();
                                     hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
-                                    tracing::debug!("Loaded hull texture: {mfm} ({w}x{h})");
                                 }
                             }
                         }

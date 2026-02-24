@@ -700,6 +700,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_chat: opts.show_chat,
         show_advantage: opts.show_advantage,
         show_score_timer: opts.show_score_timer,
+        prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
     }
 }
 
@@ -919,6 +920,8 @@ pub struct ReplayRendererViewer {
     pub suppress_gpu_warning: Arc<AtomicBool>,
     /// Active GPU encoder warning dialog, if any.
     gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
+    /// User preference: prefer CPU (software) encoder for video export.
+    prefer_cpu_encoder: Arc<AtomicBool>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -1011,6 +1014,7 @@ pub fn launch_replay_renderer(
         })),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
+        prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -4790,6 +4794,7 @@ impl ReplayRendererViewer {
         let annotation_arc = self.annotation_state.clone();
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
+        let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let parent_ctx = ctx.clone();
 
         ctx.show_viewport_deferred(
@@ -6707,14 +6712,14 @@ impl ReplayRendererViewer {
                                                         .save_file()
                                                     {
                                                         let status = wows_minimap_renderer::check_encoder();
-                                                        let prefer_cpu = !status.gpu_available;
+                                                        let prefer_cpu = prefer_cpu_encoder.load(Ordering::Relaxed) || !status.gpu_available;
                                                         let action = PendingVideoExport::SaveToFile {
                                                             output_path: path.to_string_lossy().to_string(),
                                                             options: opts,
                                                             prefer_cpu,
                                                             actual_game_duration,
                                                         };
-                                                        if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                        if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                             execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                         } else {
                                                             *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
@@ -6747,9 +6752,9 @@ impl ReplayRendererViewer {
                                                         }));
                                                     }
                                                     let status = wows_minimap_renderer::check_encoder();
-                                                    let prefer_cpu = !status.gpu_available;
+                                                    let prefer_cpu = prefer_cpu_encoder.load(Ordering::Relaxed) || !status.gpu_available;
                                                     let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, actual_game_duration };
-                                                    if status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                    if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                         execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                     } else {
                                                         *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
@@ -6910,6 +6915,15 @@ impl ReplayRendererViewer {
                                                 changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
                                             });
 
+                                            // ── Export Settings ──
+                                            ui.label(egui::RichText::new("Export Settings").small().strong());
+                                            ui.indent("export_settings", |ui| {
+                                                let mut cpu = prefer_cpu_encoder.load(Ordering::Relaxed);
+                                                if ui.checkbox(&mut cpu, "Prefer CPU Encoder").on_hover_text("Use software (CPU) encoder instead of GPU for video export").changed() {
+                                                    prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
+                                                }
+                                            });
+
                                             if changed {
                                                 let mut state = shared_state.lock();
                                                 state.options = opts.clone();
@@ -6923,6 +6937,7 @@ impl ReplayRendererViewer {
                                             if ui.button("Save Defaults").clicked() {
                                                 let mut saved = saved_from_render_options(&opts);
                                                 saved.show_dead_ships = show_dead;
+                                                saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
                                                 // Persist self range flags from annotation overrides
                                                 if let Some(self_eid) = self_entity_id {
                                                     let ann = annotation_arc.lock();
