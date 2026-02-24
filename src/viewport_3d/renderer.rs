@@ -806,8 +806,9 @@ impl Viewport3D {
         // Create/update uniform buffer
         let aspect = size.0 as f32 / size.1 as f32;
         let model_mat = if self.model_roll.abs() > 1e-6 {
-            // Rotation around Z axis (ship's longitudinal axis = model-space Z)
-            let (s, c) = self.model_roll.sin_cos();
+            // Rotation around Z axis (ship's longitudinal axis).
+            // Negated because mesh Z is reversed (RH coords: +Z = stern).
+            let (s, c) = (-self.model_roll).sin_cos();
             [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
         } else {
             MAT4_IDENTITY
