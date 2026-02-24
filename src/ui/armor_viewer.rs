@@ -1248,7 +1248,13 @@ pub(crate) fn upload_hull_meshes_to_viewport(
         let texture_data = mesh.mfm_path.as_ref().and_then(|p| armor.hull_textures.get(p));
         let has_texture = texture_data.is_some() && has_uvs;
 
-        let fallback_color: [f32; 4] = [0.6, 0.6, 0.65, hull_alpha];
+        // Brightness boost compensates for the shader's 0.7 ambient multiplier.
+        // Textured:  3.5 * 0.7 ≈ 2.45 effective (vivid hull textures).
+        // Baked/flat: 2.0 * 0.7 ≈ 1.40 effective.
+        let hull_brightness: f32 = 2.0;
+        let tex_brightness: f32 = 3.5;
+        let fallback_color: [f32; 4] =
+            [0.6 * hull_brightness, 0.6 * hull_brightness, 0.65 * hull_brightness, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
         let mut vertices: Vec<Vertex> = Vec::with_capacity(mesh.positions.len());
         for i in 0..mesh.positions.len() {
@@ -1262,10 +1268,10 @@ pub(crate) fn upload_hull_meshes_to_viewport(
 
             let uv = if has_uvs { mesh.uvs[i] } else { [0.0, 0.0] };
             let color = if has_texture {
-                [1.8, 1.8, 1.8, hull_alpha]
+                [tex_brightness, tex_brightness, tex_brightness, hull_alpha]
             } else if has_baked_colors {
                 let c = mesh.colors[i];
-                [c[0], c[1], c[2], hull_alpha]
+                [c[0] * hull_brightness, c[1] * hull_brightness, c[2] * hull_brightness, hull_alpha]
             } else {
                 fallback_color
             };
@@ -3321,6 +3327,9 @@ pub(crate) fn draw_hull_visibility_popover(
             for name in &all_hull_names {
                 pane.hull_visibility.insert((*name).clone(), false);
             }
+            result.zone_changed = true;
+        }
+        if ui.checkbox(&mut pane.hull_opaque, "Opaque").changed() {
             result.zone_changed = true;
         }
     });
