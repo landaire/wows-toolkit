@@ -873,7 +873,8 @@ The `Cd` (water drag coefficient) should be available in GameParams shell data
 | Penetration | Server-only | wows_shell formula (community) | Unverifiable |
 | Normalization/ricochet | Server-only | Community constants | Unverifiable |
 | Fuse mechanics | Server-only | Community formula | Unverifiable |
-| HE splash geometry | AABB boxes + BVH | Not implemented | N/A (documented) |
+| HE splash geometry | AABB boxes + BVH | AABB overlap + pen check | **Partial** (no effective armor averaging) |
+| Splash zone damage | Per-zone pen check, splashDamageCoeff | Per-zone pen check (flat thickness) | **Partial** (documented in §13) |
 | Underwater drag model | Quadratic drag, K=392.94*d²*Cd/m | Not yet implemented | **Yes** (formulas extracted) |
 | Underwater closed-form solutions | 3 functions (dist, velo, time) | Not yet implemented | **Yes** (fully RE'd) |
 
@@ -885,3 +886,254 @@ the game client and our implementation. The main differences are:
 1. **3D vs 2D** — the game does full 3D, we do 2D planar (sufficient for range/impact calculations)
 2. **Euler vs RK4** — the game uses cheaper Euler with adaptive step, we use more accurate RK4 with fixed step
 3. **Penetration is server-only** — our penetration formulas come from community reverse engineering (jcw780) and cannot be verified from the client binary
+
+---
+
+## 13. Splash Zone Damage Mechanics
+
+This section documents how HE/SAP splash damage interacts with ship damage zones
+("hit locations"). The splash geometry system (`PySplashMesh`) is documented in
+Section 10; this section covers **what happens after** the splash geometry
+identifies which zones are affected.
+
+### Overview
+
+When an HE or SAP shell detonates (either on contact or after penetrating armor),
+the game evaluates splash damage separately from the direct hit. The splash damage
+system uses named AABBs ("splash boxes") associated with each ship's hit location
+zones to determine which parts of the ship receive splash damage and how much.
+
+The game distinguishes two terminal damage types for shell hits (from
+`TerminalDamageType` in game scripts):
+- **`DIRECT`** — the shell physically hits the armor plate and the damage is
+  applied to the zone where it strikes
+- **`SPLASH`** — the detonation's blast radius overlaps nearby zones, dealing
+  damage to each based on penetration checks against zone plating thickness
+
+A third type, **`DEPTH_SPLASH`**, exists for depth charges against submarines.
+
+### Shell hit types
+
+From the game's `ShellInfoFlags` and hit type constants (decompiled from game
+scripts):
+
+```python
+SHELL_HIT_TYPE_NORMAL         = 0  # Regular penetration (33% alphaDamage)
+SHELL_HIT_TYPE_RICOCHET       = 1  # Bounce, 0 damage
+SHELL_HIT_TYPE_MAJORHIT       = 2  # Citadel hit (100% alphaDamage)
+SHELL_HIT_TYPE_NOPENETRATION  = 3  # Shatter/non-pen, 0 direct damage
+SHELL_HIT_TYPE_OVERPENETRATION = 4 # Overpen (10% alphaDamage)
+
+# ShellInfoFlags bit flags:
+isSplasched = bit 6  # Set when the hit includes splash damage
+```
+
+### Splash box geometry
+
+Each ship hull has a `.splash` file containing named AABBs in model-local
+coordinates. These boxes are grouped by hit location zone — each `HitLocation`
+in GameParams has a `splashBoxes` field listing which box names belong to it.
+
+```
+HitLocation "Bow" → splashBoxes: ["CM_SB_bow_1_1", "CM_SB_bow_1_2", ...]
+HitLocation "Citadel" → splashBoxes: ["CM_SB_cit_1_1", "CM_SB_cit_1_2", ...]
+```
+
+At runtime, the game constructs a `Lesta.SplashMesh` C++ object per gun
+(in `SplashMeshGun.initGunSplashMesh()`), loading the `.splash` file and
+combining it with turret-specific transform matrices so that splash box
+positions account for turret rotation.
+
+### Splash cube construction
+
+When a shell detonates, the game creates a **splash cube** — an axis-aligned
+cube centered on the detonation point:
+
+```
+half_extent = bulletDiametr / 6.0   (in meters, maps directly to model units)
+splash_min = impact_point - half_extent
+splash_max = impact_point + half_extent
+```
+
+The `bulletDiametr` is the shell caliber in meters (e.g., 0.460 for Yamato's
+460mm guns → half_extent = 0.0767). This cube is passed to the C++ splash
+mesh system for zone intersection.
+
+### Zone identification — `getIntersectedBoxes` and `getSplashBoxNameAtPoint`
+
+The game uses two complementary methods:
+
+1. **Direct hit box** (`getSplashBoxNameAtPoint`): determines which splash box
+   contains the exact impact point. This identifies the "direct hit zone" — the
+   zone that receives the primary shell damage. Boxes with the `marked` flag set
+   are excluded from this query.
+
+2. **Splash overlap** (`getIntersectedBoxes` / `splashMeshBoxCast`): finds all
+   splash boxes whose AABBs overlap the splash cube. The method is called with
+   `origin ± radius` to form the query AABB:
+
+   ```python
+   # From ArtilleryGun.splashMeshBoxCast():
+   e = Vector3(origin.x - radius, origin.y - radius, origin.z - radius)
+   f = Vector3(origin.x + radius, origin.y + radius, origin.z + radius)
+   return self.splashMeshes.getIntersectedBoxes(e, f)
+   ```
+
+   For each candidate box (found via BVH traversal), the C++ code computes:
+   - The clipped intersection volume between the query AABB and the box AABB
+   - The Manhattan distance between the query center and the box center
+   - Whether the query center is inside the box
+
+### Splash effective armor — `getSplashEffectiveArmor`
+
+For each zone overlapped by the splash, the game computes an **effective armor
+thickness** using a distance-weighted average (see Section 10 for the full
+binary RE). The core formula from `sub_1403a1b10`:
+
+```
+For each axis i in {x, y, z}:
+    penetration_dist[i] = abs(splash_pos[i]) - half_extent[i]
+
+total_dist = sum(clamped penetration distances)
+
+effective_armor = (dist_y * weight_y + dist_x * weight_x + dist_z * weight_z)
+                  / total_dist
+```
+
+This produces a single effective armor thickness that represents how much armor
+the splash must penetrate to damage that zone. Zones that are farther from the
+detonation point (requiring the blast to travel through more material) have
+higher effective armor.
+
+### Penetration check
+
+The splash penetration check is simpler than AP shell-armor interaction:
+
+- **HE**: penetration = `alphaPiercingHE` (fixed mm value, caliber-dependent).
+  With IFHE commander skill: penetration × 1.25.
+- **SAP**: penetration = `alphaPiercingCS` (fixed mm value).
+
+The shell's splash penetration is compared against the effective armor of each
+zone. If `penetration >= effective_armor`, the splash penetrates that zone and
+deals damage. There is no angle-of-impact consideration for splash — it is
+purely a thickness check.
+
+### Damage attribution
+
+**Key question: does splash into a citadel zone count as a citadel hit?**
+
+Based on the game's architecture:
+
+- Each splash box maps to a specific `HitLocation` zone via the `splashBoxes`
+  field. The zone has a `type` field identifying it (from `m82148c1a`):
+
+  ```python
+  HIT_LOCATION       = 0  # Generic hull section (bow, stern, etc.)
+  CITADEL             = 3
+  SUPERSTRUCTURE      = 4
+  ENGINE              = 5
+  CASEMATE            = 7
+  # ... etc
+  ```
+
+- The `TerminalDamageType.SPLASH` distinguishes splash damage from direct hits.
+  Splash damage is applied to the specific zone whose splash box was penetrated.
+
+- **Splash damage to a citadel zone does NOT produce a citadel hit ribbon.**
+  The game treats splash as a separate damage channel. While the HP is deducted
+  from the citadel zone's health pool, it is categorized as splash damage (not
+  `SHELL_HIT_TYPE_MAJORHIT`). Only a direct AP/SAP shell that fuzes inside the
+  citadel (or an HE shell that directly penetrates through to the citadel armor)
+  produces a citadel hit.
+
+- Splash damage dealt to each zone follows the standard damage formula:
+  `damage = alphaDamage × splashDamageCoeff` where `splashDamageCoeff` is a
+  per-ammo-type coefficient. The base values from GameParams modifiers:
+  - `heSplashDamageCoeff` — for HE shells
+  - `SAPSplashDamageCoeff` — for SAP shells
+  - `alphaPiercingHESplashDamageCoeff` — variant for specific HE subtypes
+  - `alphaPiercingCSSplashDamageCoeff` — variant for specific SAP subtypes
+
+### Splash radius vs splash cube
+
+Two related but distinct concepts exist:
+
+- **Splash cube** (`splashCubeSize` / `bulletDiametr / 6.0`): the AABB used for
+  zone intersection and the `getSplashEffectiveArmor` computation. This determines
+  **which zones** are hit and the effective armor check.
+
+- **Splash radius** (`heSplashRadiusCoeff`, `SAPSplashRadiusCoeff`): a modifier
+  coefficient that scales the splash effect radius. This appears in the modifier
+  system and may control the visual blast radius or damage falloff distance. The
+  relationship between the splash radius coefficient and the splash cube size is
+  not fully established from the client binary alone.
+
+### Modifier coefficients
+
+The game's modifier system defines several splash-related coefficients (from
+`strings.csv`):
+
+| Coefficient | Description |
+|-------------|-------------|
+| `heSplashCoeff` | General HE splash multiplier |
+| `heSplashDamageCoeff` | HE splash damage fraction of alphaDamage |
+| `heSplashRadiusCoeff` | HE splash radius scaling |
+| `SAPSplashCoeff` | General SAP splash multiplier |
+| `SAPSplashDamageCoeff` | SAP splash damage fraction of alphaDamage |
+| `SAPSplashRadiusCoeff` | SAP splash radius scaling |
+| `splashArmorCoeff` | Armor effectiveness against splash |
+| `splashDamageCoeff` | Base splash damage coefficient |
+| `splashCubeSize` | Override for splash cube dimensions |
+| `heAccelSplash` | HE acceleration splash (likely relates to blast propagation) |
+| `heAccelSplashCoeff` | Coefficient for HE acceleration splash |
+| `heAccelSplashDecrCoeff` | Decrement/falloff for HE acceleration splash |
+
+These coefficients are applied through the game's modifier/modernization system
+and can be altered by commander skills (e.g., IFHE affects penetration but not
+splash coefficients), upgrades, and ship-specific parameters. Their exact
+default values and interaction formulas are server-side.
+
+### Saturation interaction
+
+Each hit location zone has:
+- `maxHP`: maximum hit points for the zone
+- `health`: current hit points
+- `regeneratedHpPart`: fraction of HP that can regenerate
+
+When a zone's health reaches 0, it becomes "saturated" — further hits to that
+zone deal reduced damage. This applies to both direct and splash damage. The
+saturation mechanic means that splash into an already-depleted bow section, for
+example, will deal less damage than splash into a fresh superstructure section.
+
+### Summary of splash damage flow
+
+```
+1. Shell detonates at impact_point
+2. Splash cube constructed: impact_point ± (bulletDiametr / 6.0)
+3. Direct hit zone identified via getSplashBoxNameAtPoint(impact_point)
+   → Direct damage applied to this zone (DIRECT terminal damage type)
+4. All overlapping zones found via getIntersectedBoxes(splash_min, splash_max)
+5. For each overlapping zone (excluding the direct hit zone):
+   a. Effective armor computed via getSplashEffectiveArmor()
+      (distance-weighted average of armor thicknesses along each axis)
+   b. Penetration check: shell_pen_mm >= effective_armor?
+   c. If penetrates: damage = alphaDamage × splashDamageCoeff
+      → Applied to that zone's HP pool (SPLASH terminal damage type)
+   d. If doesn't penetrate: no splash damage to this zone
+6. Fire/flooding rolls (HE only, independent of splash penetration)
+```
+
+### What our implementation does
+
+Our armor viewer (`splash.rs`) implements steps 1-5b:
+- Splash cube construction from caliber
+- Zone identification via AABB overlap
+- Per-triangle penetration visualization (green = pen, red = no pen)
+- Zone thickness display from `HitLocation.thickness`
+
+We do **not** implement:
+- Actual damage values (we don't know the exact `splashDamageCoeff` values)
+- The `getSplashEffectiveArmor` distance-weighted averaging (we use the zone's
+  flat `thickness` value instead, which is the zone's default plating)
+- Saturation / HP tracking
+- Fire/flooding chance computation
