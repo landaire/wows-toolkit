@@ -428,7 +428,6 @@ fn parse_replay_data_in_background(
                     let mut build_uploaded_successfully = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
-                            debug!("replay parsed successfully");
                             let battle_type =
                                 wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
                             let is_valid_game_type_for_shipbuilds = matches!(
@@ -442,7 +441,6 @@ fn parse_replay_data_in_background(
                                 debug!("game type is: {}", &game_type);
                             }
                             if !replay_parsed_before {
-                                debug!("we've never seen this replay before");
                                 if data.should_send_replays && is_valid_game_type_for_shipbuilds {
                                     // Send the replay builds to the remote server
                                     for player in report.players() {

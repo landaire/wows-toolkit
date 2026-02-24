@@ -1230,7 +1230,7 @@ pub(crate) fn init_armor_viewport(
     upload_armor_to_viewport(pane, armor, device, queue, pipeline);
 
     // Upload splash box wireframes if enabled
-    upload_splash_box_wireframes(pane, device);
+    upload_splash_box_wireframes(pane, device, Some(armor));
 
     // Frame camera on the model
     pane.viewport.camera = crate::viewport_3d::ArcballCamera::from_bounds(armor.bounds.0, armor.bounds.1);
@@ -4228,8 +4228,8 @@ pub(crate) fn draw_splash_box_visibility_popover(
     egui::ScrollArea::vertical().max_height(ui.ctx().content_rect().height() * 0.6).show(ui, |ui| {
         ui.set_width(ui.available_width());
         for (group, names) in &armor.splash_box_groups {
-            let group_all_on = names.iter().all(|n| pane.splash_box_visibility.get(n).copied().unwrap_or(true));
-            let group_any_on = names.iter().any(|n| pane.splash_box_visibility.get(n).copied().unwrap_or(true));
+            let group_all_on = names.iter().all(|n| pane.splash_box_visibility.get(n).copied().unwrap_or(false));
+            let group_any_on = names.iter().any(|n| pane.splash_box_visibility.get(n).copied().unwrap_or(false));
 
             let id = ui.make_persistent_id(("splash_box_group", group));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
@@ -4249,7 +4249,7 @@ pub(crate) fn draw_splash_box_visibility_popover(
                         }
                         // Sync show_splash_boxes from any-visible state
                         pane.show_splash_boxes =
-                            all_names.iter().any(|n| pane.splash_box_visibility.get(*n).copied().unwrap_or(true));
+                            all_names.iter().any(|n| pane.splash_box_visibility.get(*n).copied().unwrap_or(false));
                         zone_changed = true;
                     }
                     let lbl = ui.label(format!("{} ({})", group, names.len()));
@@ -4259,14 +4259,14 @@ pub(crate) fn draw_splash_box_visibility_popover(
                 })
                 .body(|ui| {
                     for name in names {
-                        let mut visible = pane.splash_box_visibility.get(name).copied().unwrap_or(true);
+                        let mut visible = pane.splash_box_visibility.get(name).copied().unwrap_or(false);
                         let display = crate::armor_viewer::splash::prettify_box_name(name);
                         let resp = ui.checkbox(&mut visible, display);
                         if resp.changed() {
                             pane.splash_box_visibility.insert(name.clone(), visible);
                             // Sync show_splash_boxes from any-visible state
                             pane.show_splash_boxes =
-                                all_names.iter().any(|n| pane.splash_box_visibility.get(*n).copied().unwrap_or(true));
+                                all_names.iter().any(|n| pane.splash_box_visibility.get(*n).copied().unwrap_or(false));
                             zone_changed = true;
                         }
                         if resp.hovered() {
@@ -4359,7 +4359,15 @@ pub(crate) fn upload_splash_box_highlight(
 
 /// Upload (or clear) splash box wireframe overlays based on `pane.show_splash_boxes`.
 /// Called after viewport.clear() to rebuild overlay meshes.
-pub(crate) fn upload_splash_box_wireframes(pane: &mut ArmorPane, device: &wgpu::Device) {
+///
+/// If `armor_override` is provided, splash data is read from it instead of
+/// `pane.loaded_armor`. This is needed during initial load when `loaded_armor`
+/// has not been set on the pane yet.
+pub(crate) fn upload_splash_box_wireframes(
+    pane: &mut ArmorPane,
+    device: &wgpu::Device,
+    armor_override: Option<&LoadedShipArmor>,
+) {
     // Remove old meshes
     for mid in pane.splash_box_mesh_ids.drain(..) {
         pane.viewport.remove_mesh(mid);
@@ -4370,12 +4378,13 @@ pub(crate) fn upload_splash_box_wireframes(pane: &mut ArmorPane, device: &wgpu::
         return;
     }
 
-    let visible_boxes: Vec<_> = pane
-        .loaded_armor
-        .as_ref()
+    let splash_data = armor_override
         .and_then(|a| a.splash_data.as_ref())
+        .or_else(|| pane.loaded_armor.as_ref().and_then(|a| a.splash_data.as_ref()));
+
+    let visible_boxes: Vec<_> = splash_data
         .map(|sd| {
-            sd.boxes.iter().filter(|b| pane.splash_box_visibility.get(&b.name).copied().unwrap_or(true)).collect()
+            sd.boxes.iter().filter(|b| pane.splash_box_visibility.get(&b.name).copied().unwrap_or(false)).collect()
         })
         .unwrap_or_default();
 

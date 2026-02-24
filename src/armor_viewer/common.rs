@@ -159,7 +159,7 @@ pub(crate) fn reupload_after_zone_change(
     reupload_splash_overlays(pane, device, comparison_ships, ifhe_enabled);
 
     // 4. Re-upload splash box wireframes if enabled
-    crate::ui::armor_viewer::upload_splash_box_wireframes(pane, device);
+    crate::ui::armor_viewer::upload_splash_box_wireframes(pane, device, None);
 }
 
 /// Load a ship's armor model on the current thread (intended to run inside
