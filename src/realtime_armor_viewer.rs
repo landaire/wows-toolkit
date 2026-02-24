@@ -289,18 +289,32 @@ impl RealtimeArmorViewer {
                         .and_then(|c| c.dock_y_offset())
                 });
 
-                // Build sorted hull upgrade list for the UI
+                // Build sorted hull upgrade list for the UI, with diff-based labels
                 let hull_upgrade_names: Vec<(String, String)> = param
                     .as_ref()
                     .and_then(|p| p.vehicle())
                     .and_then(|v| v.hull_upgrades())
                     .map(|upgrades| {
-                        let mut keys: Vec<&String> = upgrades.keys().collect();
-                        keys.sort();
-                        keys.iter()
+                        use wowsunpack::game_params::keys::ComponentType;
+                        let mut sorted: Vec<_> = upgrades.iter().collect();
+                        sorted.sort_by_key(|(k, _)| (*k).clone());
+                        let base = &sorted[0].1;
+                        sorted
+                            .iter()
                             .enumerate()
-                            .map(|(i, k)| {
-                                let label = format!("Hull {}", (b'A' + i as u8) as char);
+                            .map(|(i, (k, config))| {
+                                let letter = (b'A' + i as u8) as char;
+                                let diffs: Vec<String> = ComponentType::ALL
+                                    .iter()
+                                    .filter(|&&ct| ct != ComponentType::Hull)
+                                    .filter(|&&ct| config.component_name(ct) != base.component_name(ct))
+                                    .map(|ct| ct.to_string())
+                                    .collect();
+                                let label = if diffs.is_empty() || i == 0 {
+                                    format!("{letter}")
+                                } else {
+                                    format!("{letter} ({})", diffs.join(", "))
+                                };
                                 ((*k).clone(), label)
                             })
                             .collect()
@@ -312,6 +326,7 @@ impl RealtimeArmorViewer {
                     hull: selected_hull.clone(),
                     textures: false,
                     damaged: false,
+                    ..Default::default()
                 };
                 let ctx = ship_assets.load_ship_from_vehicle(&v, &options).map_err(|e| format!("{e:?}"))?;
                 let meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
@@ -438,6 +453,7 @@ impl RealtimeArmorViewer {
                     hull_lod: requested_lod,
                     hull_upgrade_names,
                     loaded_hull: selected_hull,
+                    module_alternatives: Vec::new(),
                 };
                 armor.apply_waterline_offset();
                 Ok(armor)
@@ -1823,18 +1839,18 @@ impl RealtimeArmorViewer {
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey, new_lod, hull_changed) =
+                                let hull_result =
                                     crate::ui::armor_viewer::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
-                                if changed {
+                                if hull_result.zone_changed {
                                     zone_changed = true;
                                 }
-                                if let Some(k) = hkey {
+                                if let Some(k) = hull_result.hovered_key {
                                     sidebar_hovered_key.set(Some(k));
                                 }
-                                if new_lod.is_some() {
-                                    lod_change_signal.set(new_lod);
+                                if hull_result.new_lod.is_some() {
+                                    lod_change_signal.set(hull_result.new_lod);
                                 }
-                                if hull_changed {
+                                if hull_result.hull_changed {
                                     hull_change_signal.set(true);
                                 }
                             });

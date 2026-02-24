@@ -8,8 +8,9 @@ use crate::armor_viewer::constants::*;
 use crate::armor_viewer::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
 use crate::armor_viewer::state::{
-    AnalysisTab, ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, CompareSettings, HullReloadData,
-    LoadedShipArmor, PlateKey, ShipAssetsState, SidebarHighlightKey, VisibilitySnapshot,
+    AnalysisTab, ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, CompareSettings, ExportRequest,
+    HullPopoverResult, HullReloadData, LoadedShipArmor, PlateKey, ShipAssetsState, SidebarHighlightKey,
+    UpgradeReloadData, VisibilitySnapshot,
 };
 use crate::icon_str;
 use crate::icons;
@@ -24,7 +25,7 @@ struct ArmorPaneViewer<'a> {
     mirror_camera_signal: &'a std::cell::Cell<Option<u64>>,
     active_pane_signal: &'a std::cell::Cell<Option<u64>>,
     save_defaults_signal: &'a std::cell::Cell<Option<ArmorViewerDefaults>>,
-    export_signal: &'a std::cell::Cell<Option<(String, String)>>,
+    export_signal: &'a std::cell::Cell<Option<ExportRequest>>,
     pen_check_toggle: &'a std::cell::Cell<bool>,
     analysis_tab_signal: &'a std::cell::Cell<Option<AnalysisTab>>,
     comparison_ships: &'a [crate::armor_viewer::penetration::ComparisonShip],
@@ -204,7 +205,14 @@ impl ToolkitTabViewer<'_> {
             wd.ship_icons.clone()
         };
         // Poll per-pane ship loading receivers
-        poll_pane_loads(&mut state.dock_state, &render_state.device, &render_state.queue, &gpu_pipeline);
+        poll_pane_loads(
+            &mut state.dock_state,
+            &render_state.device,
+            &render_state.queue,
+            &gpu_pipeline,
+            &state.comparison_ships,
+            state.ifhe_enabled,
+        );
 
         // If all tabs were closed, create a fresh empty pane so the user isn't stuck.
         if state.dock_state.main_surface().num_tabs() == 0 {
@@ -317,7 +325,7 @@ impl ToolkitTabViewer<'_> {
                 let deferred_compare: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
                 let deferred_compare_ref = &deferred_compare;
                 // Deferred export action from context menu.
-                let deferred_export: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
+                let deferred_export: std::cell::Cell<Option<ExportRequest>> = std::cell::Cell::new(None);
                 let deferred_export_ref = &deferred_export;
 
                 let tree_id = sidebar_ui.make_persistent_id("armor_ship_tree");
@@ -439,10 +447,11 @@ impl ToolkitTabViewer<'_> {
                                                         .button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export Ship Model"))
                                                         .clicked()
                                                     {
-                                                        deferred_export_ref.set(Some((
-                                                            export_param_idx.clone(),
-                                                            export_display_name.clone(),
-                                                        )));
+                                                        deferred_export_ref.set(Some(ExportRequest {
+                                                            param_index: export_param_idx.clone(),
+                                                            display_name: export_display_name.clone(),
+                                                            selected_hull: None,
+                                                        }));
                                                         ui.close();
                                                     }
                                                 });
@@ -541,7 +550,7 @@ impl ToolkitTabViewer<'_> {
         // Render dock area with armor panes
         let save_defaults_cell: std::cell::Cell<Option<ArmorViewerDefaults>> = std::cell::Cell::new(None);
         let save_defaults_ref = &save_defaults_cell;
-        let export_cell: std::cell::Cell<Option<(String, String)>> = std::cell::Cell::new(None);
+        let export_cell: std::cell::Cell<Option<ExportRequest>> = std::cell::Cell::new(None);
         let export_ref = &export_cell;
         let pen_check_toggle_cell: std::cell::Cell<bool> = std::cell::Cell::new(false);
         let pen_check_toggle_ref = &pen_check_toggle_cell;
@@ -705,12 +714,18 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // Handle hull upgrade change signal — full ship reload with new hull
+        // Handle hull upgrade change signal — incremental reload (turrets + turret armor only)
         if let Some(pane_id) = hull_change_cell.get() {
             if let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id) {
                 if let Some(param_index) = pane.selected_ship.clone() {
-                    let display_name = pane.loaded_armor.as_ref().map(|a| a.display_name.clone()).unwrap_or_default();
-                    load_ship_for_pane_with_lod(pane, &param_index, &display_name, &ship_assets, pane.hull_lod);
+                    if pane.loaded_armor.is_some() {
+                        start_upgrade_reload(pane, &ship_assets, &param_index);
+                    } else {
+                        // No armor loaded yet — fall back to full load
+                        let display_name =
+                            pane.loaded_armor.as_ref().map(|a| a.display_name.clone()).unwrap_or_default();
+                        load_ship_for_pane_with_lod(pane, &param_index, &display_name, &ship_assets, pane.hull_lod);
+                    }
                 }
             }
         }
@@ -969,9 +984,10 @@ impl ToolkitTabViewer<'_> {
 
         // ── Export confirmation dialog ──
         let mut close_export_dialog = false;
-        if let Some((ref param_index, ref display_name)) = state.export_confirm {
-            let param_index = param_index.clone();
-            let display_name = display_name.clone();
+        if let Some(ref export_req) = state.export_confirm {
+            let param_index = export_req.param_index.clone();
+            let display_name = export_req.display_name.clone();
+            let selected_hull = export_req.selected_hull.clone();
             egui::Window::new("Export Ship Model")
                 .collapsible(false)
                 .resizable(false)
@@ -991,6 +1007,7 @@ impl ToolkitTabViewer<'_> {
                                 let toasts = self.tab_state.toasts.clone();
                                 let ship_name = display_name.clone();
                                 let param_idx = param_index.clone();
+                                let hull = selected_hull.clone();
                                 std::thread::spawn(move || {
                                     let result = (|| -> Result<(), String> {
                                         use wowsunpack::game_params::types::GameParamProvider;
@@ -1001,9 +1018,10 @@ impl ToolkitTabViewer<'_> {
                                             .ok_or_else(|| "Vehicle not found".to_string())?;
                                         let options = wowsunpack::export::ship::ShipExportOptions {
                                             lod: 0,
-                                            hull: None,
+                                            hull,
                                             textures: true,
                                             damaged: false,
+                                            ..Default::default()
                                         };
                                         let ctx = assets
                                             .load_ship_from_vehicle(&vehicle, &options)
@@ -1044,6 +1062,8 @@ fn poll_pane_loads(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     pipeline: &GpuPipeline,
+    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
 ) {
     for (_, pane) in dock_state.iter_all_tabs_mut() {
         if let Some(rx) = &pane.load_receiver {
@@ -1074,6 +1094,21 @@ fn poll_pane_loads(
                     }
                 }
                 pane.hull_load_receiver = None;
+            }
+        }
+
+        // Poll upgrade-only reload (hull upgrade change)
+        if let Some(rx) = &pane.upgrade_load_receiver {
+            if let Ok(result) = rx.try_recv() {
+                match result {
+                    Ok(data) => {
+                        apply_upgrade_reload(pane, data, device, queue, pipeline, comparison_ships, ifhe_enabled);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to reload hull upgrade: {e}");
+                    }
+                }
+                pane.upgrade_load_receiver = None;
             }
         }
     }
@@ -1306,7 +1341,7 @@ fn render_armor_pane(
     mirror_camera_signal: &std::cell::Cell<Option<u64>>,
     active_pane_signal: &std::cell::Cell<Option<u64>>,
     save_defaults_signal: &std::cell::Cell<Option<ArmorViewerDefaults>>,
-    export_signal: &std::cell::Cell<Option<(String, String)>>,
+    export_signal: &std::cell::Cell<Option<ExportRequest>>,
     pen_check_toggle: &std::cell::Cell<bool>,
     analysis_tab_signal: &std::cell::Cell<Option<AnalysisTab>>,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
@@ -1388,17 +1423,17 @@ fn render_armor_pane(
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey, lod, hull_changed) = draw_hull_visibility_popover(ui, pane, &armor);
-                                if changed {
+                                let hull_result = draw_hull_visibility_popover(ui, pane, &armor);
+                                if hull_result.zone_changed {
                                     zone_changed = true;
                                 }
-                                if let Some(k) = hkey {
+                                if let Some(k) = hull_result.hovered_key {
                                     sidebar_hovered_key.set(Some(k));
                                 }
-                                if let Some(new_lod) = lod {
+                                if let Some(new_lod) = hull_result.new_lod {
                                     hull_lod_signal.set(Some((pane_id, new_lod)));
                                 }
-                                if hull_changed {
+                                if hull_result.hull_changed || hull_result.module_changed {
                                     hull_change_signal.set(Some(pane_id));
                                 }
                             });
@@ -1511,7 +1546,11 @@ fn render_armor_pane(
                             .clicked()
                         {
                             let display_name = armor.display_name.clone();
-                            export_signal.set(Some((param_index.clone(), display_name)));
+                            export_signal.set(Some(ExportRequest {
+                                param_index: param_index.clone(),
+                                display_name,
+                                selected_hull: pane.selected_hull.clone(),
+                            }));
                         }
                     }
 
@@ -2266,18 +2305,33 @@ fn load_ship_for_pane_with_lod(
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
     let selected_hull = pane.selected_hull.clone();
+    let module_overrides = pane.selected_modules.clone();
 
-    // Build sorted hull upgrade list for the UI
+    // Build sorted hull upgrade list for the UI, with diff-based labels
     let hull_upgrade_names: Vec<(String, String)> = vehicle
         .as_ref()
         .and_then(|v| v.hull_upgrades())
         .map(|upgrades| {
-            let mut keys: Vec<&String> = upgrades.keys().collect();
-            keys.sort();
-            keys.iter()
+            use wowsunpack::game_params::keys::ComponentType;
+            let mut sorted: Vec<_> = upgrades.iter().collect();
+            sorted.sort_by_key(|(k, _)| (*k).clone());
+            let base = &sorted[0].1;
+            sorted
+                .iter()
                 .enumerate()
-                .map(|(i, k)| {
-                    let label = format!("Hull {}", (b'A' + i as u8) as char);
+                .map(|(i, (k, config))| {
+                    let letter = (b'A' + i as u8) as char;
+                    let diffs: Vec<String> = ComponentType::ALL
+                        .iter()
+                        .filter(|&&ct| ct != ComponentType::Hull)
+                        .filter(|&&ct| config.component_name(ct) != base.component_name(ct))
+                        .map(|ct| ct.to_string())
+                        .collect();
+                    let label = if diffs.is_empty() || i == 0 {
+                        format!("{letter}")
+                    } else {
+                        format!("{letter} ({})", diffs.join(", "))
+                    };
                     ((*k).clone(), label)
                 })
                 .collect()
@@ -2300,6 +2354,24 @@ fn load_ship_for_pane_with_lod(
             .and_then(|c| c.dock_y_offset())
     });
 
+    // Extract module alternatives from the selected hull upgrade config.
+    // Only includes component types with >1 option (e.g. artillery, torpedoes).
+    let module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)> = param
+        .as_ref()
+        .and_then(|p| {
+            p.vehicle().and_then(|v| v.hull_upgrades()).and_then(|upgrades| {
+                let config = if let Some(sel) = &selected_hull {
+                    upgrades.get(sel)
+                } else {
+                    let mut keys: Vec<&String> = upgrades.keys().collect();
+                    keys.sort();
+                    keys.first().and_then(|k| upgrades.get(*k))
+                };
+                config.map(|c| c.component_alternatives.iter().map(|(k, v)| (*k, v.clone())).collect())
+            })
+        })
+        .unwrap_or_default();
+
     std::thread::spawn(move || {
         let result = (|| {
             let vehicle = vehicle.ok_or_else(|| format!("No vehicle found for param index"))?;
@@ -2308,6 +2380,7 @@ fn load_ship_for_pane_with_lod(
                 hull: selected_hull.clone(),
                 textures: false,
                 damaged: false,
+                module_overrides,
             };
 
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
@@ -2470,6 +2543,7 @@ fn load_ship_for_pane_with_lod(
                 hull_lod: requested_lod,
                 hull_upgrade_names,
                 loaded_hull: selected_hull,
+                module_alternatives,
             };
             armor.apply_waterline_offset();
             Ok(armor)
@@ -2500,6 +2574,7 @@ pub(crate) fn start_hull_lod_reload(
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
     let waterline_dy = pane.loaded_armor.as_ref().map(|a| a.waterline_dy).unwrap_or(0.0);
     let selected_hull = pane.selected_hull.clone();
+    let module_overrides = pane.selected_modules.clone();
 
     std::thread::spawn(move || {
         let result = (|| {
@@ -2509,6 +2584,7 @@ pub(crate) fn start_hull_lod_reload(
                 hull: selected_hull,
                 textures: false,
                 damaged: false,
+                module_overrides,
             };
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
             let mut hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
@@ -2583,6 +2659,278 @@ pub(crate) fn apply_hull_reload(
         upload_hull_meshes_to_viewport(pane, &armor_ref, device, queue, pipeline);
         pane.loaded_armor = Some(armor_ref);
     }
+}
+
+/// Start a background upgrade-only reload: re-exports with the new hull selection,
+/// replacing turret models and turret armor without a full ship reload.
+/// The caller should poll `pane.upgrade_load_receiver` each frame and call `apply_upgrade_reload` when data arrives.
+fn start_upgrade_reload(
+    pane: &mut ArmorPane,
+    ship_assets: &Arc<wowsunpack::export::ship::ShipAssets>,
+    param_index: &str,
+) {
+    let assets = ship_assets.clone();
+    let (tx, rx) = mpsc::channel();
+    let selected_hull = pane.selected_hull.clone();
+    let module_overrides = pane.selected_modules.clone();
+    let lod = pane.hull_lod;
+    let waterline_dy = pane.loaded_armor.as_ref().map(|a| a.waterline_dy).unwrap_or(0.0);
+
+    use wowsunpack::game_params::types::GameParamProvider;
+    let param = ship_assets.metadata().game_param_by_index(param_index);
+    let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
+
+    std::thread::spawn(move || {
+        let result = (|| {
+            let vehicle = vehicle.ok_or_else(|| "No vehicle found for param index".to_string())?;
+            let options = wowsunpack::export::ship::ShipExportOptions {
+                lod,
+                hull: selected_hull.clone(),
+                textures: false,
+                damaged: false,
+                module_overrides,
+            };
+            let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
+
+            // Reload armor meshes (hull armor unchanged, turret armor re-mounted)
+            let mut armor_meshes = ctx.interactive_armor_meshes().map_err(|e| format!("{e:?}"))?;
+
+            // Apply waterline offset to match existing shifted coordinates
+            if waterline_dy.abs() > 1e-7 {
+                for mesh in &mut armor_meshes {
+                    for pos in &mut mesh.positions {
+                        pos[1] += waterline_dy;
+                    }
+                }
+            }
+
+            // Build zone/part/plate metadata from new armor meshes
+            let mut zone_parts_map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+                std::collections::HashMap::new();
+            let mut zone_part_plates_map: std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, std::collections::BTreeSet<i32>>,
+            > = std::collections::HashMap::new();
+            for mesh in &armor_meshes {
+                for info in &mesh.triangle_info {
+                    zone_parts_map.entry(info.zone.clone()).or_default().insert(info.material_name.clone());
+                    let thickness_key = (info.thickness_mm * 10.0).round() as i32;
+                    zone_part_plates_map
+                        .entry(info.zone.clone())
+                        .or_default()
+                        .entry(info.material_name.clone())
+                        .or_default()
+                        .insert(thickness_key);
+                }
+            }
+            let mut zone_parts: Vec<(String, Vec<String>)> = zone_parts_map
+                .into_iter()
+                .map(|(zone, parts)| {
+                    let mut parts: Vec<String> = parts.into_iter().collect();
+                    parts.sort();
+                    (zone, parts)
+                })
+                .collect();
+            zone_parts.sort_by(|a, b| a.0.cmp(&b.0));
+
+            let zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)> = zone_parts
+                .iter()
+                .map(|(zone, parts)| {
+                    let parts_with_plates: Vec<(String, Vec<i32>)> = parts
+                        .iter()
+                        .map(|part| {
+                            let plates = zone_part_plates_map
+                                .get(zone)
+                                .and_then(|m| m.get(part))
+                                .map(|s| s.iter().copied().collect())
+                                .unwrap_or_default();
+                            (part.clone(), plates)
+                        })
+                        .collect();
+                    (zone.clone(), parts_with_plates)
+                })
+                .collect();
+
+            let zones: Vec<String> = zone_parts.iter().map(|(z, _)| z.clone()).collect();
+
+            // Reload hull visual meshes
+            let mut hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
+
+            // Apply waterline offset
+            if waterline_dy.abs() > 1e-7 {
+                for mesh in &mut hull_meshes {
+                    for pos in &mut mesh.positions {
+                        pos[1] += waterline_dy;
+                    }
+                }
+            }
+
+            let hull_part_groups = build_hull_part_groups(&hull_meshes);
+
+            // Load hull albedo textures for any new turret mfm paths
+            let mut hull_textures = std::collections::HashMap::new();
+            for mesh in &hull_meshes {
+                if let Some(mfm) = &mesh.mfm_path {
+                    if hull_textures.contains_key(mfm) {
+                        continue;
+                    }
+                    if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(assets.vfs(), mfm) {
+                        if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
+                            if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
+                                let w = img.width();
+                                let h = img.height();
+                                hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Extract module alternatives from the selected hull upgrade config.
+            let module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)> = vehicle
+                .hull_upgrades()
+                .and_then(|upgrades| {
+                    let config = if let Some(sel) = &selected_hull {
+                        upgrades.get(sel)
+                    } else {
+                        let mut keys: Vec<&String> = upgrades.keys().collect();
+                        keys.sort();
+                        keys.first().and_then(|k| upgrades.get(*k))
+                    };
+                    config.map(|c| c.component_alternatives.iter().map(|(k, v)| (*k, v.clone())).collect())
+                })
+                .unwrap_or_default();
+
+            Ok(UpgradeReloadData {
+                armor_meshes,
+                zones,
+                zone_parts,
+                zone_part_plates,
+                hull_meshes,
+                hull_part_groups,
+                hull_textures,
+                loaded_hull: selected_hull,
+                module_alternatives,
+            })
+        })();
+        let _ = tx.send(result);
+    });
+
+    pane.upgrade_load_receiver = Some(rx);
+}
+
+/// Apply upgrade reload data to an existing LoadedShipArmor and re-upload meshes to the viewport.
+/// Preserves camera, trajectories, splash overlays, and display settings.
+fn apply_upgrade_reload(
+    pane: &mut ArmorPane,
+    data: UpgradeReloadData,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &GpuPipeline,
+    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
+    ifhe_enabled: bool,
+) {
+    if let Some(armor) = &mut pane.loaded_armor {
+        // Update armor mesh data
+        armor.meshes = data.armor_meshes;
+        armor.zones = data.zones;
+        armor.zone_parts = data.zone_parts;
+        armor.zone_part_plates = data.zone_part_plates;
+
+        // Update hull mesh data
+        armor.hull_meshes = data.hull_meshes;
+        armor.hull_part_groups = data.hull_part_groups;
+        armor.hull_textures = data.hull_textures;
+        armor.loaded_hull = data.loaded_hull;
+        armor.module_alternatives = data.module_alternatives;
+
+        // Preserve visibility for parts that still exist, default new parts to visible
+        pane.part_visibility
+            .retain(|key, _| armor.zone_parts.iter().any(|(zone, parts)| zone == &key.0 && parts.contains(&key.1)));
+        for (zone, parts) in &armor.zone_parts {
+            for part in parts {
+                pane.part_visibility.entry((zone.clone(), part.clone())).or_insert(true);
+            }
+        }
+        pane.plate_visibility.retain(|key, _| {
+            armor.zone_part_plates.iter().any(|(zone, parts_with_plates)| {
+                zone == &key.0
+                    && parts_with_plates.iter().any(|(part, plates)| part == &key.1 && plates.contains(&key.2))
+            })
+        });
+        pane.undo_stack.clear();
+
+        // Update hull visibility map (retain existing, add new with default)
+        let hull_default = pane.hull_visibility.values().any(|&v| v);
+        pane.hull_visibility.retain(|name, _| armor.hull_part_groups.iter().any(|(_, names)| names.contains(name)));
+        for (_group, names) in &armor.hull_part_groups {
+            for name in names {
+                pane.hull_visibility.entry(name.clone()).or_insert(hull_default);
+            }
+        }
+    }
+
+    // Re-upload armor + hull to viewport
+    if let Some(armor) = pane.loaded_armor.take() {
+        upload_armor_to_viewport(pane, &armor, device, queue, pipeline);
+        pane.loaded_armor = Some(armor);
+    }
+
+    // Re-upload trajectory visualizations (viewport.clear() in upload_armor_to_viewport destroyed them)
+    let cam_dist = pane.viewport.camera.distance;
+    for traj in &mut pane.trajectories {
+        let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+        let mesh_id = upload_trajectory_visualization(
+            &mut pane.viewport,
+            &traj.result,
+            device,
+            color,
+            traj.last_visible_hit,
+            cam_dist,
+            pane.marker_opacity,
+            1.0,
+        );
+        traj.mesh_id = Some(mesh_id);
+        traj.marker_cam_dist = cam_dist;
+    }
+
+    // Re-upload splash overlays if active
+    if let Some(ref splash_result) = pane.splash_result {
+        pane.splash_mesh_ids.clear();
+        let shell =
+            comparison_ships.iter().flat_map(|s| s.shells.iter()).find(|s| s.ammo_type == AmmoType::HE).or_else(|| {
+                comparison_ships.iter().flat_map(|s| s.shells.iter()).find(|s| s.ammo_type == AmmoType::SAP)
+            });
+        if let Some(shell) = shell {
+            let (cube_verts, cube_indices) = crate::armor_viewer::splash::build_splash_cube_mesh(
+                splash_result.impact_point,
+                splash_result.half_extent,
+                crate::armor_viewer::splash::SPLASH_CUBE_COLOR,
+            );
+            if !cube_verts.is_empty() {
+                let cube_mid = pane.viewport.add_overlay_mesh(device, &cube_verts, &cube_indices);
+                pane.viewport.set_world_space(cube_mid, true);
+                pane.splash_mesh_ids.push(cube_mid);
+            }
+            if let Some(ref armor) = pane.loaded_armor {
+                let (hl_verts, hl_indices, _, _) = crate::armor_viewer::splash::build_splash_highlight_mesh(
+                    &armor.meshes,
+                    splash_result.impact_point,
+                    splash_result.half_extent,
+                    shell,
+                    ifhe_enabled,
+                );
+                if !hl_verts.is_empty() {
+                    let hl_mid = pane.viewport.add_overlay_mesh(device, &hl_verts, &hl_indices);
+                    pane.viewport.set_world_space(hl_mid, true);
+                    pane.splash_mesh_ids.push(hl_mid);
+                }
+            }
+        }
+    }
+
+    // Re-upload splash box wireframes if enabled
+    upload_splash_box_wireframes(pane, device);
 }
 
 /// Helper to create an egui Color32 from an [f32; 4] RGBA color.
@@ -2952,16 +3300,12 @@ pub fn upload_hull_highlight(
 }
 
 /// Draw the hull visibility popover content (groups + individual meshes with hover detection).
-/// Returns `(zone_changed, hovered_key, new_lod, hull_changed)` where `new_lod` is `Some(lod)` if the user
-/// selected a different LOD level, and `hull_changed` is true if the user selected a different hull upgrade.
 pub(crate) fn draw_hull_visibility_popover(
     ui: &mut egui::Ui,
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
-) -> (bool, Option<SidebarHighlightKey>, Option<usize>, bool) {
-    let mut zone_changed = false;
-    let mut new_lod: Option<usize> = None;
-    let mut hull_changed = false;
+) -> HullPopoverResult {
+    let mut result = HullPopoverResult::default();
     let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
 
     let all_hull_names: Vec<&String> = armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
@@ -2971,29 +3315,47 @@ pub(crate) fn draw_hull_visibility_popover(
             for name in &all_hull_names {
                 pane.hull_visibility.insert((*name).clone(), true);
             }
-            zone_changed = true;
+            result.zone_changed = true;
         }
         if ui.small_button("None").clicked() {
             for name in &all_hull_names {
                 pane.hull_visibility.insert((*name).clone(), false);
             }
-            zone_changed = true;
+            result.zone_changed = true;
         }
     });
 
     // Hull upgrade selector
     if armor.hull_upgrade_names.len() > 1 {
         ui.horizontal(|ui| {
-            ui.label("Hull:");
+            ui.label("Upgrade:");
             for (key, label) in &armor.hull_upgrade_names {
                 let is_selected = pane.selected_hull.as_ref() == Some(key)
                     || (pane.selected_hull.is_none() && *key == armor.hull_upgrade_names[0].0);
                 if ui.selectable_label(is_selected, label).clicked() && !is_selected {
                     pane.selected_hull = Some(key.clone());
-                    hull_changed = true;
+                    pane.selected_modules.clear(); // alternatives may differ per hull
+                    result.hull_changed = true;
                 }
             }
         });
+    }
+
+    // Module alternative selectors (e.g. artillery, torpedoes with multiple options)
+    for (ct, alternatives) in &armor.module_alternatives {
+        if alternatives.len() > 1 {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}:", ct));
+                for (i, name) in alternatives.iter().enumerate() {
+                    let is_selected = pane.selected_modules.get(ct).map_or(i == 0, |sel| sel == name);
+                    let label = format!("{} {}", ct, (b'A' + i as u8) as char);
+                    if ui.selectable_label(is_selected, &label).on_hover_text(name).clicked() && !is_selected {
+                        pane.selected_modules.insert(*ct, name.clone());
+                        result.module_changed = true;
+                    }
+                }
+            });
+        }
     }
 
     // LOD selector
@@ -3004,7 +3366,7 @@ pub(crate) fn draw_hull_visibility_popover(
                 let label = if i == 0 { "0 (highest)".to_string() } else { format!("{}", i) };
                 if ui.selectable_label(pane.hull_lod == i, label).clicked() && pane.hull_lod != i {
                     pane.hull_lod = i;
-                    new_lod = Some(i);
+                    result.new_lod = Some(i);
                 }
             }
         });
@@ -3035,7 +3397,7 @@ pub(crate) fn draw_hull_visibility_popover(
                         for name in names {
                             pane.hull_visibility.insert(name.clone(), group_checked);
                         }
-                        zone_changed = true;
+                        result.zone_changed = true;
                     }
                     let lbl = ui.label(group);
                     if gcb.hovered() || lbl.hovered() {
@@ -3048,7 +3410,7 @@ pub(crate) fn draw_hull_visibility_popover(
                         let resp = ui.checkbox(&mut visible, name.as_str());
                         if resp.changed() {
                             pane.hull_visibility.insert(name.clone(), visible);
-                            zone_changed = true;
+                            result.zone_changed = true;
                         }
                         if resp.hovered() {
                             hovered.set(Some(SidebarHighlightKey::HullMeshes(vec![name.clone()])));
@@ -3058,7 +3420,8 @@ pub(crate) fn draw_hull_visibility_popover(
         }
     });
 
-    (zone_changed, hovered.into_inner(), new_lod, hull_changed)
+    result.hovered_key = hovered.into_inner();
+    result
 }
 
 /// Add a line segment as two cross-shaped quads into the vertex/index buffers.

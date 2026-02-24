@@ -27,6 +27,21 @@ pub enum SidebarHighlightKey {
     SplashBoxes(Vec<String>),
 }
 
+/// Result of drawing the hull visibility popover.
+#[derive(Default)]
+pub struct HullPopoverResult {
+    /// Whether hull/part visibility toggles changed (requires mesh re-upload).
+    pub zone_changed: bool,
+    /// Sidebar item currently hovered for highlight purposes.
+    pub hovered_key: Option<SidebarHighlightKey>,
+    /// New LOD level selected by the user, if changed.
+    pub new_lod: Option<usize>,
+    /// Whether the hull upgrade selection changed.
+    pub hull_changed: bool,
+    /// Whether a module alternative selection changed.
+    pub module_changed: bool,
+}
+
 /// Which tab is active in the unified analysis window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AnalysisTab {
@@ -139,6 +154,16 @@ pub struct CompareSettings {
     pub hull_visibility: HashMap<String, bool>,
 }
 
+/// A pending ship model export request.
+pub struct ExportRequest {
+    /// GameParam index key for the ship.
+    pub param_index: String,
+    /// Human-readable ship name.
+    pub display_name: String,
+    /// Selected hull upgrade key, or `None` for stock.
+    pub selected_hull: Option<String>,
+}
+
 /// Top-level state for the Armor Viewer tab.
 #[allow(dead_code)]
 pub struct ArmorViewerState {
@@ -154,8 +179,8 @@ pub struct ArmorViewerState {
     pub next_pane_id: u64,
     /// Cached nation flag assets (raw PNG bytes), keyed by nation name.
     pub nation_flag_textures: HashMap<String, Arc<crate::wows_data::GameAsset>>,
-    /// Pending export confirmation: (param_index, display_name).
-    pub export_confirm: Option<(String, String)>,
+    /// Pending export confirmation dialog.
+    pub export_confirm: Option<ExportRequest>,
     /// When true, all split panes share the same camera.
     pub mirror_cameras: bool,
     /// When true, armor/hull visibility is synced across all panes.
@@ -273,6 +298,9 @@ pub struct LoadedShipArmor {
     pub hull_upgrade_names: Vec<(String, String)>,
     /// The hull upgrade key that was used to load this armor data.
     pub loaded_hull: Option<String>,
+    /// Module alternatives: component type -> list of component names.
+    /// Only populated for types that have more than one option in the current hull upgrade.
+    pub module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)>,
 }
 
 impl LoadedShipArmor {
@@ -406,8 +434,13 @@ pub struct ArmorPane {
     pub hull_mesh_ids: Vec<MeshId>,
     /// Receiver for background hull-only reload (LOD change).
     pub hull_load_receiver: Option<Receiver<Result<HullReloadData, String>>>,
+    /// Receiver for background upgrade-only reload (hull upgrade change without full ship reload).
+    pub upgrade_load_receiver: Option<Receiver<Result<UpgradeReloadData, String>>>,
     /// Selected hull upgrade name (GameParam key). `None` = stock (first alphabetically).
     pub selected_hull: Option<String>,
+    /// Selected module overrides: component type -> component name.
+    /// When a module type has alternatives, this stores the user's selection.
+    pub selected_modules: HashMap<wowsunpack::game_params::keys::ComponentType, String>,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -417,6 +450,24 @@ pub struct HullReloadData {
     pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
     pub hull_lod: usize,
     pub hull_lod_count: usize,
+}
+
+/// Data returned by an upgrade-only background reload (hull upgrade change without full ship reload).
+pub struct UpgradeReloadData {
+    /// Replacement armor meshes (hull armor unchanged, turret armor re-mounted).
+    pub armor_meshes: Vec<wowsunpack::export::gltf_export::InteractiveArmorMesh>,
+    /// Updated zone/part/plate metadata derived from the new armor meshes.
+    pub zones: Vec<String>,
+    pub zone_parts: Vec<(String, Vec<String>)>,
+    pub zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)>,
+    /// New hull visual meshes (hull parts + mounted turrets with new mount transforms).
+    pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
+    pub hull_part_groups: Vec<(String, Vec<String>)>,
+    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// Which hull upgrade key was loaded.
+    pub loaded_hull: Option<String>,
+    /// Updated module alternatives for the new hull upgrade.
+    pub module_alternatives: Vec<(wowsunpack::game_params::keys::ComponentType, Vec<String>)>,
 }
 
 impl ArmorPane {
@@ -468,7 +519,9 @@ impl ArmorPane {
             hull_lod: 0,
             hull_mesh_ids: Vec::new(),
             hull_load_receiver: None,
+            upgrade_load_receiver: None,
             selected_hull: None,
+            selected_modules: HashMap::new(),
         }
     }
 }
