@@ -386,7 +386,6 @@ impl AnalysisPaneViewer<'_> {
         ui.separator();
 
         let traj_count = pane.trajectories.len();
-        let comparison_ships = self.comparison_ships;
         let ifhe_enabled = self.ifhe_enabled;
         let translate_part = self.translate_part;
 
@@ -476,59 +475,16 @@ impl AnalysisPaneViewer<'_> {
                 }
             }
 
-            // Compute shell simulations for this trajectory
-            let range_meters = traj.meta.range.to_meters();
-
-            struct ShellSim {
-                ship_name: String,
-                ship_index: usize,
-                shell: ShellInfo,
-                sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
-            }
-
-            let shell_sims: Vec<ShellSim> = comparison_ships
-                .iter()
-                .enumerate()
-                .flat_map(|(si, ship)| {
-                    ship.shells.iter().map(move |shell| {
-                        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-                        let impact = if shell.ammo_type == AmmoType::AP && range_meters.value() > 0.0 {
-                            crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
-                        } else {
-                            None
-                        };
-                        let sim = if shell.ammo_type == AmmoType::AP {
-                            impact.as_ref().map(|imp| {
-                                crate::armor_viewer::penetration::simulate_shell_through_hits(
-                                    &params,
-                                    imp,
-                                    &result.hits,
-                                    &result.direction,
-                                )
-                            })
-                        } else {
-                            None
-                        };
-                        ShellSim { ship_name: ship.display_name.clone(), ship_index: si, shell: shell.clone(), sim }
-                    })
-                })
-                .collect();
-
-            // Find last visible hit (earliest terminating event across all shells)
-            let last_visible_hit: Option<usize> = shell_sims
-                .iter()
-                .filter_map(|ss| {
-                    ss.sim.as_ref().and_then(|s| match (s.detonated_at, s.stopped_at) {
-                        (Some(d), Some(s)) => Some(d.min(s)),
-                        (Some(d), None) => Some(d),
-                        (None, Some(s)) => Some(s),
-                        (None, None) => None,
-                    })
-                })
-                .min();
+            // Use cached shell simulation results (populated by update_shell_sim_cache
+            // when trajectory is created, range changes, or comparison ships change).
+            let empty_sims: Vec<crate::armor_viewer::state::CachedShellSim> = Vec::new();
+            let (shell_sims, last_visible_hit) = match &traj.shell_sim_cache {
+                Some(cache) => (&cache.sims, cache.last_visible_hit),
+                None => (&empty_sims, None),
+            };
 
             // Outcome badges per shell
-            for ss in &shell_sims {
+            for ss in shell_sims {
                 let ammo = ss.shell.ammo_type.display_name();
                 let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber.value());
                 if let Some(ref sim) = ss.sim {
@@ -631,7 +587,7 @@ impl AnalysisPaneViewer<'_> {
                 );
 
                 if !is_post_detonation {
-                    for ss in &shell_sims {
+                    for ss in shell_sims {
                         if let Some(ref sim) = ss.sim {
                             if let Some(plate) = sim.plates.get(i) {
                                 use crate::armor_viewer::penetration::PlateOutcome;
@@ -764,7 +720,7 @@ impl AnalysisPaneViewer<'_> {
                 }
 
                 // Inline detonation markers
-                for ss in &shell_sims {
+                for ss in shell_sims {
                     if let Some(ref sim) = ss.sim {
                         if sim.detonated_at == Some(i) {
                             if let Some(ref det) = sim.detonation {

@@ -53,15 +53,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(diffuse_texture, diffuse_sampler, in.uv);
     let base_color = tex_color * in.color;
 
-    // Uniform lighting: flat brightness with subtle shading for depth perception.
-    let V = normalize(-in.position_vs);
-    var n = normalize(in.normal_vs);
-    if (dot(n, V) < 0.0) {
-        n = -n;
-    }
-
-    // Uniform lighting — constant brightness, no directional dependence.
-    let color = base_color.rgb * 0.7;
+    // Flat lighting — uniform brightness, no directional shading.
+    let color = base_color.rgb;
 
     return vec4(color, base_color.a);
 }
@@ -308,6 +301,7 @@ impl GpuPipeline {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -319,6 +313,7 @@ impl GpuPipeline {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * width), rows_per_image: Some(height) },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
+
         let view = texture.create_view(&Default::default());
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport_3d_texture_bg"),
@@ -388,6 +383,8 @@ pub struct Viewport3D {
     needs_redraw: bool,
     /// Model roll angle in radians (rotation around the longitudinal/Z axis).
     pub model_roll: f32,
+    /// Cursor position in NDC ([-1,1] range), updated each frame for flashlight lighting.
+    pub cursor_ndc: Option<[f32; 2]>,
 }
 
 impl Default for Viewport3D {
@@ -411,6 +408,7 @@ impl Viewport3D {
             clear_color: wgpu::Color { r: 0.12, g: 0.12, b: 0.18, a: 1.0 },
             needs_redraw: true,
             model_roll: 0.0,
+            cursor_ndc: None,
         }
     }
 
@@ -818,13 +816,14 @@ impl Viewport3D {
         let model_view = mat4_mul(view_mat, model_mat);
         let mvp = mat4_mul(proj_mat, model_view);
 
-        // Light follows camera: in view space the camera looks down -Z,
-        // so light_dir = [0,0,1] means "light coming from the viewer".
-        let uniforms = Uniforms { mvp, model_view, light_dir: [0.0, 0.0, 1.0, 0.0] };
+        // light_dir is kept in the uniform struct for layout compatibility but
+        // the shader now uses a uniform camera-forward headlamp instead.
+        let light_dir = [0.0_f32, 0.0, -1.0, 0.0];
+        let uniforms = Uniforms { mvp, model_view, light_dir };
 
         // World-space uniforms (no model rotation) — used for waterline etc.
         let world_mvp = mat4_mul(proj_mat, view_mat);
-        let world_uniforms = Uniforms { mvp: world_mvp, model_view: view_mat, light_dir: [0.0, 0.0, 1.0, 0.0] };
+        let world_uniforms = Uniforms { mvp: world_mvp, model_view: view_mat, light_dir };
 
         if self.uniform_buffer.is_none() {
             use wgpu::util::DeviceExt;

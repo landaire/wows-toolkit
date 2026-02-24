@@ -62,6 +62,7 @@ pub struct ArmorViewerDefaults {
     pub waterline_opacity: f32,
     pub hull_opaque: bool,
     pub hull_all_visible: bool,
+    pub armor_all_visible: bool,
     pub show_splash_boxes: bool,
 }
 
@@ -75,6 +76,7 @@ impl Default for ArmorViewerDefaults {
             waterline_opacity: 0.3,
             hull_opaque: false,
             hull_all_visible: false,
+            armor_all_visible: true,
             show_splash_boxes: false,
         }
     }
@@ -331,6 +333,26 @@ impl LoadedShipArmor {
     }
 }
 
+/// Cached per-shell simulation results for the analysis panel display.
+/// Avoids recomputing `solve_for_range` + `simulate_shell_through_hits` every frame.
+pub struct CachedShellSim {
+    pub ship_name: String,
+    pub ship_index: usize,
+    pub shell: wowsunpack::game_params::types::ShellInfo,
+    pub sim: Option<crate::armor_viewer::penetration::ShellSimResult>,
+}
+
+/// Cached shell simulation data for a trajectory, invalidated when range or comparison ships change.
+pub struct ShellSimCache {
+    pub sims: Vec<CachedShellSim>,
+    /// Last visible hit index derived from the cached sims.
+    pub last_visible_hit: Option<usize>,
+    /// Range at which these sims were computed.
+    pub range_km: Km,
+    /// Comparison ships version when these sims were computed.
+    pub comparison_ships_version: u64,
+}
+
 /// A trajectory with its metadata and visualization mesh.
 pub struct StoredTrajectory {
     pub meta: crate::armor_viewer::penetration::TrajectoryMeta,
@@ -345,6 +367,11 @@ pub struct StoredTrajectory {
     pub show_plates_active: bool,
     /// Whether this arc's hit zones are isolated in the visibility filter.
     pub show_zones_active: bool,
+    /// Cached shell simulation results for the analysis panel.
+    pub shell_sim_cache: Option<ShellSimCache>,
+    /// The `model_roll` (radians) at which this trajectory was ray-cast.
+    /// Used to rotate the ray into model space when roll changes.
+    pub created_at_roll: f32,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -428,6 +455,9 @@ pub struct ArmorPane {
     /// Whether hull parts should default to all-visible when a new ship loads.
     /// Carried from `ArmorViewerDefaults::hull_all_visible` at pane creation time.
     pub default_hull_all_visible: bool,
+    /// Whether armor parts should default to all-visible when a new ship loads.
+    /// Carried from `ArmorViewerDefaults::armor_all_visible` at pane creation time.
+    pub default_armor_all_visible: bool,
     /// Desired hull LOD level (0 = highest detail). Changed via the Hull popover dropdown.
     pub hull_lod: usize,
     /// GPU mesh IDs for uploaded hull meshes (so they can be selectively removed on LOD change).
@@ -516,6 +546,7 @@ impl ArmorPane {
             splash_box_labels: Vec::new(),
             splash_box_visibility: HashMap::new(),
             default_hull_all_visible: defaults.hull_all_visible,
+            default_armor_all_visible: defaults.armor_all_visible,
             hull_lod: 0,
             hull_mesh_ids: Vec::new(),
             hull_load_receiver: None,

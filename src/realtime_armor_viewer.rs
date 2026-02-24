@@ -1039,6 +1039,8 @@ impl RealtimeArmorViewer {
                 marker_cam_dist: cam_dist,
                 show_plates_active: false,
                 show_zones_active: false,
+                shell_sim_cache: None,
+                created_at_roll: self.pane.viewport.model_roll,
             });
 
             // Log entry — insert into salvo group
@@ -1668,6 +1670,8 @@ impl RealtimeArmorViewer {
                 marker_cam_dist: cam_dist,
                 show_plates_active: false,
                 show_zones_active: false,
+                shell_sim_cache: None,
+                created_at_roll: self.pane.viewport.model_roll,
             });
 
             // Update the shell entry with the trajectory id and comparison
