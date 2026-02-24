@@ -604,11 +604,19 @@ impl WowsToolkitApp {
                                     self.tab_state.selected_browser_build = build_number;
 
                                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
+                                    let no_replays = replays.as_ref().map_or(true, |r| r.is_empty());
                                     self.tab_state.replay_files = replays;
                                     self.tab_state.filtered_file_list = None;
                                     self.tab_state.used_filter = None;
 
                                     self.tab_state.toasts.lock().success("Successfully loaded game data");
+
+                                    if no_replays {
+                                        self.tab_state.toasts.lock().warning(
+                                            "No replays detected \u{2014} is your WoWs directory properly configured?",
+                                        );
+                                    }
+
                                     self.check_constants_version_mismatch();
                                 }
                                 BackgroundTaskCompletion::BuildDataLoaded { build } => {
@@ -709,6 +717,13 @@ impl WowsToolkitApp {
                                     .is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
                             Err(e) => {
                                 error!("Background task error: {e:?}");
+
+                                if e.downcast_current_context::<ToolkitError>()
+                                    .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
+                                {
+                                    self.tab_state.settings_needs_attention = true;
+                                }
+
                                 self.tab_state.toasts.lock().error(format!("{e}"));
                             }
                         }
@@ -945,8 +960,17 @@ impl WowsToolkitApp {
         // Update settings_needs_attention based on WoWs directory validity and twitch token state
         {
             let wows_dir = Path::new(&self.tab_state.settings.wows_dir);
-            let wows_dir_invalid =
-                !(self.tab_state.settings.wows_dir.is_empty() || wows_dir.exists() && wows_dir.join("bin").exists());
+            let wows_dir_invalid = if self.tab_state.settings.wows_dir.is_empty() {
+                false
+            } else if !wows_dir.exists() {
+                true
+            } else {
+                // Must have at least one of: WorldOfWarships.exe, bin/, replays/
+                let has_exe = wows_dir.join("WorldOfWarships.exe").exists();
+                let has_bin = wows_dir.join("bin").exists();
+                let has_replays = wows_dir.join("replays").exists();
+                !has_exe && !has_bin && !has_replays
+            };
 
             let twitch_token_failed = self.tab_state.settings.twitch_token.is_some()
                 && self.tab_state.twitch_state.read().token_validation_failed;

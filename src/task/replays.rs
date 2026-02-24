@@ -289,11 +289,27 @@ pub fn load_wows_files(
     locale: &str,
     fallback_constants: &serde_json::Value,
 ) -> Result<BackgroundTaskCompletion, Report> {
-    let bin_dir = wows_directory.join("bin");
-    if !wows_directory.exists() || !bin_dir.exists() {
-        debug!("WoWs or WoWs bin directory does not exist");
+    if !wows_directory.exists() {
+        debug!("WoWs directory does not exist: {:?}", wows_directory);
         Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
-            .context("World of Warships directory does not exist or is missing the bin/ folder")?;
+            .context("World of Warships directory does not exist")?;
+    }
+
+    // Check for telltale signs of a valid WoWs installation
+    let has_exe = wows_directory.join("WorldOfWarships.exe").exists();
+    let has_bin = wows_directory.join("bin").exists();
+    let has_replays = wows_directory.join("replays").exists();
+
+    if !has_exe && !has_bin && !has_replays {
+        debug!("WoWs directory missing expected contents: {:?}", wows_directory);
+        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+            .context("Invalid World of Warships directory. Make sure it's set to the game's root directory (containing WorldOfWarships.exe).")?;
+    }
+
+    if !has_bin {
+        debug!("WoWs bin directory does not exist");
+        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+            .context("World of Warships directory is missing the bin/ folder")?;
     }
 
     // Discover all available builds
@@ -343,14 +359,18 @@ pub fn load_wows_files(
 
     debug!("Loading replays");
     let replays = replay_filepaths(&replays_dir).map(|replays| {
-        let iter = replays.into_iter().filter_map(|path| {
-            let replay_file = ReplayFile::from_file(&path).ok()?;
-            let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
-            replay.game_constants = Some(Arc::clone(&game_constants));
-            replay.source_path = Some(path.clone());
-            let replay = Arc::new(RwLock::new(replay));
-
-            Some((path, replay))
+        let iter = replays.into_iter().filter_map(|path| match ReplayFile::from_file(&path) {
+            Ok(replay_file) => {
+                let mut replay = Replay::new(replay_file, metadata_provider.clone().unwrap());
+                replay.game_constants = Some(Arc::clone(&game_constants));
+                replay.source_path = Some(path.clone());
+                let replay = Arc::new(RwLock::new(replay));
+                Some((path, replay))
+            }
+            Err(e) => {
+                error!("Failed to parse replay {}: {:?}", path.display(), e);
+                None
+            }
         });
 
         HashMap::from_iter(iter)

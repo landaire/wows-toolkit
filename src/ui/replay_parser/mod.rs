@@ -3946,47 +3946,47 @@ impl ToolkitTabViewer<'_> {
                 .sort_by(|a, b| (Reverse(a.count), &b.display_name).cmp(&(Reverse(b.count), &b.display_name)));
 
             if !all_achievements.is_empty() {
-                ui.strong("Achievements");
+                ui.collapsing(format!("Achievements ({})", all_achievements.len()), |ui| {
+                    let wows_data_lock = self.tab_state.world_of_warships_data.as_ref().unwrap();
 
-                let wows_data_lock = self.tab_state.world_of_warships_data.as_ref().unwrap();
+                    // Resolve icons: read lock for cache hits, write lock only on cache misses
+                    let icons: Vec<Option<Arc<GameAsset>>> = {
+                        let wows_data = wows_data_lock.read();
+                        all_achievements.iter().map(|a| wows_data.cached_achievement_icon(&a.icon_key)).collect()
+                    };
 
-                // Resolve icons: read lock for cache hits, write lock only on cache misses
-                let icons: Vec<Option<Arc<GameAsset>>> = {
-                    let wows_data = wows_data_lock.read();
-                    all_achievements.iter().map(|a| wows_data.cached_achievement_icon(&a.icon_key)).collect()
-                };
+                    // Load any cache misses (only takes write lock if needed)
+                    let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+                        let mut wows_data = wows_data_lock.write();
+                        all_achievements
+                            .iter()
+                            .zip(icons)
+                            .map(|(a, cached)| cached.or_else(|| wows_data.load_achievement_icon(&a.icon_key)))
+                            .collect()
+                    } else {
+                        icons
+                    };
 
-                // Load any cache misses (only takes write lock if needed)
-                let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
-                    let mut wows_data = wows_data_lock.write();
-                    all_achievements
-                        .iter()
-                        .zip(icons)
-                        .map(|(a, cached)| cached.or_else(|| wows_data.load_achievement_icon(&a.icon_key)))
-                        .collect()
-                } else {
-                    icons
-                };
+                    for (achievement, icon) in all_achievements.iter().zip(icons) {
+                        ui.horizontal(|ui| {
+                            if let Some(icon) = icon {
+                                let image = Image::new(ImageSource::Bytes {
+                                    uri: icon.path.clone().into(),
+                                    bytes: icon.data.clone().into(),
+                                })
+                                .fit_to_exact_size((32.0, 32.0).into());
+                                ui.add(image).on_hover_text(&achievement.description);
+                            }
 
-                for (achievement, icon) in all_achievements.iter().zip(icons) {
-                    ui.horizontal(|ui| {
-                        if let Some(icon) = icon {
-                            let image = Image::new(ImageSource::Bytes {
-                                uri: icon.path.clone().into(),
-                                bytes: icon.data.clone().into(),
-                            })
-                            .fit_to_exact_size((32.0, 32.0).into());
-                            ui.add(image).on_hover_text(&achievement.description);
-                        }
+                            let response = ui.label(&achievement.display_name);
+                            response.on_hover_text(&achievement.description);
 
-                        let response = ui.label(&achievement.display_name);
-                        response.on_hover_text(&achievement.description);
-
-                        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(format!("{}", achievement.count));
+                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(format!("{}", achievement.count));
+                            });
                         });
-                    });
-                }
+                    }
+                });
             }
 
             ui.separator();
