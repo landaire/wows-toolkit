@@ -252,26 +252,10 @@ pub struct Settings {
     pub check_for_updates: bool,
     #[serde(default = "default_bool::<false>")]
     pub send_replay_data: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_default_value_fix_015: bool,
     #[serde(default = "default_sent_replays")]
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     #[serde(default = "default_bool::<false>")]
-    pub has_019_game_params_update: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_037_crew_skills_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_038_game_params_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_041_game_params_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_047_game_params_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_047_ship_config_fix: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_047_game_params_fix_for_buffs: bool,
-    #[serde(default = "default_bool::<false>")]
-    pub has_047_game_params_fix_for_torp_range: bool,
+    pub has_052_game_params_fix: bool,
     #[serde(default)]
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     #[serde(default)]
@@ -320,22 +304,14 @@ impl Default for Settings {
             replay_settings: Default::default(),
             check_for_updates: true,
             send_replay_data: false,
-            has_default_value_fix_015: true,
             sent_replays: Default::default(),
-            has_019_game_params_update: true,
             player_tracker: Default::default(),
             twitch_token: Default::default(),
             twitch_monitored_channel: Default::default(),
             constants_file_commit: None,
             debug_mode: false,
             build_consent_window_shown: false,
-            has_037_crew_skills_fix: true,
-            has_038_game_params_fix: true,
-            has_041_game_params_fix: true,
-            has_047_game_params_fix: true,
-            has_047_ship_config_fix: true,
-            has_047_game_params_fix_for_buffs: true,
-            has_047_game_params_fix_for_torp_range: true,
+            has_052_game_params_fix: true,
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,
             session_stats_game_count: 20,

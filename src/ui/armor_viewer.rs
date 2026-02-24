@@ -50,24 +50,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        render_armor_pane(
-            ui,
-            tab,
-            self.render_state,
-            self.gpu_pipeline,
-            self.mirror_camera_signal,
-            self.active_pane_signal,
-            self.save_defaults_signal,
-            self.export_signal,
-            self.pen_check_toggle,
-            self.analysis_tab_signal,
-            self.comparison_ships,
-            self.ifhe_enabled,
-            self.translate_part,
-            self.comparison_ships_version,
-            self.hull_lod_signal,
-            self.hull_change_signal,
-        );
+        render_armor_pane(ui, tab, self);
     }
 
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
@@ -911,79 +894,17 @@ impl ToolkitTabViewer<'_> {
                         pane.part_visibility.clear();
                         pane.plate_visibility.clear();
                     }
-                    // Re-upload armor after visibility change
-                    if let Some(armor) = pane.loaded_armor.take() {
-                        upload_armor_to_viewport(
-                            pane,
-                            &armor,
-                            &render_state.device,
-                            &render_state.queue,
-                            &gpu_pipeline,
-                        );
-                        pane.loaded_armor = Some(armor);
-                    }
-
-                    // Re-upload trajectory visualizations (viewport.clear() destroyed them)
-                    let cam_dist = pane.viewport.camera.distance;
-                    for traj in &mut pane.trajectories {
-                        let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                        let mesh_id = upload_trajectory_visualization(
-                            &mut pane.viewport,
-                            &traj.result,
-                            &render_state.device,
-                            color,
-                            traj.last_visible_hit,
-                            cam_dist,
-                            pane.marker_opacity,
-                            1.0,
-                        );
-                        traj.mesh_id = Some(mesh_id);
-                        traj.marker_cam_dist = cam_dist;
-                    }
-
-                    // Re-upload splash overlays (viewport.clear() destroyed them)
-                    if let Some(ref splash_result) = pane.splash_result {
-                        pane.splash_mesh_ids.clear();
-                        let shell = comparison_ships_snapshot
-                            .iter()
-                            .flat_map(|s| s.shells.iter())
-                            .find(|s| s.ammo_type == AmmoType::HE)
-                            .or_else(|| {
-                                comparison_ships_snapshot
-                                    .iter()
-                                    .flat_map(|s| s.shells.iter())
-                                    .find(|s| s.ammo_type == AmmoType::SAP)
-                            });
-                        if let Some(shell) = shell {
-                            let (cube_verts, cube_indices) = crate::armor_viewer::splash::build_splash_cube_mesh(
-                                splash_result.impact_point,
-                                splash_result.half_extent,
-                                crate::armor_viewer::splash::SPLASH_CUBE_COLOR,
-                            );
-                            if !cube_verts.is_empty() {
-                                let cube_mid =
-                                    pane.viewport.add_overlay_mesh(&render_state.device, &cube_verts, &cube_indices);
-                                pane.viewport.set_world_space(cube_mid, true);
-                                pane.splash_mesh_ids.push(cube_mid);
-                            }
-                            if let Some(ref armor) = pane.loaded_armor {
-                                let (hl_verts, hl_indices, _, _) =
-                                    crate::armor_viewer::splash::build_splash_highlight_mesh(
-                                        &armor.meshes,
-                                        splash_result.impact_point,
-                                        splash_result.half_extent,
-                                        shell,
-                                        state.ifhe_enabled,
-                                    );
-                                if !hl_verts.is_empty() {
-                                    let hl_mid =
-                                        pane.viewport.add_overlay_mesh(&render_state.device, &hl_verts, &hl_indices);
-                                    pane.viewport.set_world_space(hl_mid, true);
-                                    pane.splash_mesh_ids.push(hl_mid);
-                                }
-                            }
-                        }
-                    }
+                    // Re-upload armor + overlays after visibility change
+                    let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+                    crate::armor_viewer::common::reupload_after_zone_change(
+                        pane,
+                        &render_state.device,
+                        &render_state.queue,
+                        &gpu_pipeline,
+                        &comparison_ships_snapshot,
+                        state.ifhe_enabled,
+                        &dp,
+                    );
                 }
             }
         }
@@ -1317,24 +1238,21 @@ pub(crate) fn init_armor_viewport(
 }
 
 /// Render a single armor pane (viewport only, no sidebar — sidebar is rendered once at the top level).
-fn render_armor_pane(
-    ui: &mut egui::Ui,
-    pane: &mut ArmorPane,
-    render_state: &eframe::egui_wgpu::RenderState,
-    gpu_pipeline: &GpuPipeline,
-    mirror_camera_signal: &std::cell::Cell<Option<u64>>,
-    active_pane_signal: &std::cell::Cell<Option<u64>>,
-    save_defaults_signal: &std::cell::Cell<Option<ArmorViewerDefaults>>,
-    export_signal: &std::cell::Cell<Option<ExportRequest>>,
-    pen_check_toggle: &std::cell::Cell<bool>,
-    analysis_tab_signal: &std::cell::Cell<Option<AnalysisTab>>,
-    comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
-    ifhe_enabled: bool,
-    translate_part: &dyn Fn(&str) -> String,
-    comparison_ships_version: u64,
-    hull_lod_signal: &std::cell::Cell<Option<(u64, usize)>>,
-    hull_change_signal: &std::cell::Cell<Option<u64>>,
-) {
+fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneViewer<'_>) {
+    let render_state = ctx.render_state;
+    let gpu_pipeline = ctx.gpu_pipeline;
+    let mirror_camera_signal = ctx.mirror_camera_signal;
+    let active_pane_signal = ctx.active_pane_signal;
+    let save_defaults_signal = ctx.save_defaults_signal;
+    let export_signal = ctx.export_signal;
+    let pen_check_toggle = ctx.pen_check_toggle;
+    let analysis_tab_signal = ctx.analysis_tab_signal;
+    let comparison_ships = ctx.comparison_ships;
+    let ifhe_enabled = ctx.ifhe_enabled;
+    let translate_part = ctx.translate_part;
+    let comparison_ships_version = ctx.comparison_ships_version;
+    let hull_lod_signal = ctx.hull_lod_signal;
+    let hull_change_signal = ctx.hull_change_signal;
     let pane_id = pane.id;
 
     // Full viewport area (no sidebar)
@@ -1596,68 +1514,16 @@ fn render_armor_pane(
             pane.loaded_armor = Some(armor);
         }
         if zone_changed {
-            if let Some(armor) = pane.loaded_armor.take() {
-                upload_armor_to_viewport(pane, &armor, &render_state.device, &render_state.queue, gpu_pipeline);
-                pane.loaded_armor = Some(armor);
-            }
-            // Re-upload trajectory visualizations (viewport.clear() destroyed them)
-            let cam_dist = pane.viewport.camera.distance;
-            for traj in &mut pane.trajectories {
-                let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                let mesh_id = upload_trajectory_visualization(
-                    &mut pane.viewport,
-                    &traj.result,
-                    &render_state.device,
-                    color,
-                    traj.last_visible_hit,
-                    cam_dist,
-                    pane.marker_opacity,
-                    1.0,
-                );
-                traj.mesh_id = Some(mesh_id);
-                traj.marker_cam_dist = cam_dist;
-            }
-
-            // Re-upload splash overlays if active (viewport.clear() destroyed them)
-            if let Some(ref splash_result) = pane.splash_result {
-                pane.splash_mesh_ids.clear();
-                let shell = comparison_ships
-                    .iter()
-                    .flat_map(|s| s.shells.iter())
-                    .find(|s| s.ammo_type == AmmoType::HE)
-                    .or_else(|| {
-                        comparison_ships.iter().flat_map(|s| s.shells.iter()).find(|s| s.ammo_type == AmmoType::SAP)
-                    });
-                if let Some(shell) = shell {
-                    let (cube_verts, cube_indices) = crate::armor_viewer::splash::build_splash_cube_mesh(
-                        splash_result.impact_point,
-                        splash_result.half_extent,
-                        crate::armor_viewer::splash::SPLASH_CUBE_COLOR,
-                    );
-                    if !cube_verts.is_empty() {
-                        let cube_mid = pane.viewport.add_overlay_mesh(&render_state.device, &cube_verts, &cube_indices);
-                        pane.viewport.set_world_space(cube_mid, true);
-                        pane.splash_mesh_ids.push(cube_mid);
-                    }
-                    if let Some(ref armor) = pane.loaded_armor {
-                        let (hl_verts, hl_indices, _, _) = crate::armor_viewer::splash::build_splash_highlight_mesh(
-                            &armor.meshes,
-                            splash_result.impact_point,
-                            splash_result.half_extent,
-                            shell,
-                            ifhe_enabled,
-                        );
-                        if !hl_verts.is_empty() {
-                            let hl_mid = pane.viewport.add_overlay_mesh(&render_state.device, &hl_verts, &hl_indices);
-                            pane.viewport.set_world_space(hl_mid, true);
-                            pane.splash_mesh_ids.push(hl_mid);
-                        }
-                    }
-                }
-            }
-
-            // Re-upload splash box wireframes if toggled on
-            upload_splash_box_wireframes(pane, &render_state.device);
+            let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+            crate::armor_viewer::common::reupload_after_zone_change(
+                pane,
+                &render_state.device,
+                &render_state.queue,
+                gpu_pipeline,
+                comparison_ships,
+                ifhe_enabled,
+                &dp,
+            );
         }
 
         // Sidebar hover highlight lifecycle
@@ -1710,23 +1576,8 @@ fn render_armor_pane(
                             ratio < 0.7 || ratio > 1.4
                         });
                     if needs_rescale {
-                        for traj in &mut pane.trajectories {
-                            if let Some(old_mid) = traj.mesh_id.take() {
-                                pane.viewport.remove_mesh(old_mid);
-                            }
-                            let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                            traj.mesh_id = Some(upload_trajectory_visualization(
-                                &mut pane.viewport,
-                                &traj.result,
-                                &render_state.device,
-                                color,
-                                traj.last_visible_hit,
-                                cam_dist,
-                                pane.marker_opacity,
-                                1.0,
-                            ));
-                            traj.marker_cam_dist = cam_dist;
-                        }
+                        let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+                        crate::armor_viewer::common::reupload_trajectory_meshes(pane, &render_state.device, &dp, true);
                     }
                 }
 
@@ -1820,39 +1671,14 @@ fn render_armor_pane(
                             let relevant_hits = &all_hits[start_idx..];
 
                             // Build trajectory result from hits
-                            let mut traj_hits = Vec::new();
-                            let first_dist = relevant_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
-                            for (hit, normal) in relevant_hits {
-                                let tooltip = pane
-                                    .mesh_triangle_info
-                                    .iter()
-                                    .find(|(id, _)| *id == hit.mesh_id)
-                                    .and_then(|(_, infos)| infos.get(hit.triangle_index));
-
-                                if let Some(info) = tooltip {
-                                    let angle = crate::armor_viewer::penetration::impact_angle_deg(&shell_dir, normal);
-                                    traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
-                                        position: hit.world_position,
-                                        thickness_mm: info.thickness_mm,
-                                        zone: info.zone.clone(),
-                                        material: info.material_name.clone(),
-                                        angle_deg: angle,
-                                        distance_from_start: hit.distance - first_dist,
-                                    });
-                                }
-                            }
+                            let traj_hits = crate::armor_viewer::common::build_traj_hits(
+                                relevant_hits,
+                                &pane.mesh_triangle_info,
+                                &shell_dir,
+                            );
 
                             // Generate per-ship 3D arc points
-                            let model_extent = pane
-                                .loaded_armor
-                                .as_ref()
-                                .map(|a| {
-                                    let dx = a.bounds.1[0] - a.bounds.0[0];
-                                    let dz = a.bounds.1[2] - a.bounds.0[2];
-                                    dx.max(dz)
-                                })
-                                .unwrap_or(10.0);
-                            let arc_horiz_extent = model_extent * 2.0;
+                            let model_extent = pane.loaded_armor.as_ref().map(|a| a.max_extent_xz()).unwrap_or(10.0);
                             let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(click_point);
 
                             let mut ship_arcs: Vec<crate::armor_viewer::penetration::ShipArc> = Vec::new();
@@ -1869,26 +1695,13 @@ fn render_armor_pane(
                                         if let Some(impact) =
                                             crate::armor_viewer::ballistics::solve_for_range(&params, range_meters)
                                         {
-                                            let (arc_2d, height_ratio) =
-                                                crate::armor_viewer::ballistics::simulate_arc_points(
-                                                    &params,
-                                                    impact.launch_angle,
-                                                    60,
-                                                );
-                                            let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                                            let arc_points_3d: Vec<[f32; 3]> = arc_2d
-                                                .iter()
-                                                .map(|(xf, yf)| {
-                                                    let xf = *xf as f32;
-                                                    let yf = *yf as f32;
-                                                    let along = (1.0 - xf) * arc_horiz_extent;
-                                                    [
-                                                        first_hit_pos[0] - approach_xz[0] * along,
-                                                        first_hit_pos[1] + yf * arc_height_extent,
-                                                        first_hit_pos[2] - approach_xz[2] * along,
-                                                    ]
-                                                })
-                                                .collect();
+                                            let arc_points_3d = crate::armor_viewer::common::build_ballistic_arc_3d(
+                                                &params,
+                                                &impact,
+                                                approach_xz,
+                                                first_hit_pos,
+                                                model_extent,
+                                            );
                                             ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
                                                 ship_index: ship_idx,
                                                 arc_points_3d,
@@ -1915,25 +1728,18 @@ fn render_armor_pane(
                                         None
                                     };
                                     if let Some(ref impact) = shell_impact {
-                                        let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
+                                        let ap = crate::armor_viewer::common::simulate_ap_shell(
                                             &params, impact, &traj_hits, &shell_dir,
                                         );
-                                        if let Some(det) = sim.detonation {
+                                        if let Some(pos) = ap.detonation_point {
                                             detonation_points.push(
                                                 crate::armor_viewer::penetration::DetonationMarker {
-                                                    position: det.position,
+                                                    position: pos,
                                                     ship_index: ship_idx,
                                                 },
                                             );
                                         }
-                                        // Earliest terminating event: detonation or ricochet/shatter
-                                        let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                                            (Some(d), Some(s)) => Some(d.min(s)),
-                                            (Some(d), None) => Some(d),
-                                            (None, Some(s)) => Some(s),
-                                            (None, None) => None,
-                                        };
-                                        if let Some(idx) = shell_stop {
+                                        if let Some(idx) = ap.last_visible_hit {
                                             last_visible_hit =
                                                 Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
                                         }
@@ -2147,25 +1953,8 @@ fn render_armor_pane(
                 // Handle marker opacity change — re-upload all trajectory meshes
                 let marker_opacity_changed = (pane.marker_opacity - prev_marker_opacity).abs() > 0.001;
                 if marker_opacity_changed && !pane.trajectories.is_empty() {
-                    let cam_dist = pane.viewport.camera.distance;
-                    let mo = pane.marker_opacity;
-                    for traj in &mut pane.trajectories {
-                        if let Some(old_mid) = traj.mesh_id.take() {
-                            pane.viewport.remove_mesh(old_mid);
-                        }
-                        let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                        traj.mesh_id = Some(upload_trajectory_visualization(
-                            &mut pane.viewport,
-                            &traj.result,
-                            &render_state.device,
-                            color,
-                            traj.last_visible_hit,
-                            cam_dist,
-                            mo,
-                            1.0,
-                        ));
-                        traj.marker_cam_dist = cam_dist;
-                    }
+                    let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+                    crate::armor_viewer::common::reupload_trajectory_meshes(pane, &render_state.device, &dp, true);
                 }
 
                 // Draw splash box labels on top of the viewport
@@ -2185,30 +1974,16 @@ fn render_armor_pane(
         // Re-upload after context menu changes (the check at the top of this function
         // only catches zone-bar toggles; context menu sets zone_changed later).
         if zone_changed {
-            if let Some(armor) = pane.loaded_armor.take() {
-                upload_armor_to_viewport(pane, &armor, &render_state.device, &render_state.queue, gpu_pipeline);
-                pane.loaded_armor = Some(armor);
-            }
-            // Re-upload trajectory visualizations (viewport.clear() destroyed them)
-            let cam_dist = pane.viewport.camera.distance;
-            for traj in &mut pane.trajectories {
-                let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-                let mesh_id = upload_trajectory_visualization(
-                    &mut pane.viewport,
-                    &traj.result,
-                    &render_state.device,
-                    color,
-                    traj.last_visible_hit,
-                    cam_dist,
-                    pane.marker_opacity,
-                    1.0,
-                );
-                traj.mesh_id = Some(mesh_id);
-                traj.marker_cam_dist = cam_dist;
-            }
-
-            // Re-upload splash box wireframes if toggled on
-            upload_splash_box_wireframes(pane, &render_state.device);
+            let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+            crate::armor_viewer::common::reupload_after_zone_change(
+                pane,
+                &render_state.device,
+                &render_state.queue,
+                gpu_pipeline,
+                comparison_ships,
+                ifhe_enabled,
+                &dp,
+            );
         }
     }
 }
@@ -2634,67 +2409,17 @@ fn apply_upgrade_reload(
         }
     }
 
-    // Re-upload armor + hull to viewport
-    if let Some(armor) = pane.loaded_armor.take() {
-        upload_armor_to_viewport(pane, &armor, device, queue, pipeline);
-        pane.loaded_armor = Some(armor);
-    }
-
-    // Re-upload trajectory visualizations (viewport.clear() in upload_armor_to_viewport destroyed them)
-    let cam_dist = pane.viewport.camera.distance;
-    for traj in &mut pane.trajectories {
-        let color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-        let mesh_id = upload_trajectory_visualization(
-            &mut pane.viewport,
-            &traj.result,
-            device,
-            color,
-            traj.last_visible_hit,
-            cam_dist,
-            pane.marker_opacity,
-            1.0,
-        );
-        traj.mesh_id = Some(mesh_id);
-        traj.marker_cam_dist = cam_dist;
-    }
-
-    // Re-upload splash overlays if active
-    if let Some(ref splash_result) = pane.splash_result {
-        pane.splash_mesh_ids.clear();
-        let shell =
-            comparison_ships.iter().flat_map(|s| s.shells.iter()).find(|s| s.ammo_type == AmmoType::HE).or_else(|| {
-                comparison_ships.iter().flat_map(|s| s.shells.iter()).find(|s| s.ammo_type == AmmoType::SAP)
-            });
-        if let Some(shell) = shell {
-            let (cube_verts, cube_indices) = crate::armor_viewer::splash::build_splash_cube_mesh(
-                splash_result.impact_point,
-                splash_result.half_extent,
-                crate::armor_viewer::splash::SPLASH_CUBE_COLOR,
-            );
-            if !cube_verts.is_empty() {
-                let cube_mid = pane.viewport.add_overlay_mesh(device, &cube_verts, &cube_indices);
-                pane.viewport.set_world_space(cube_mid, true);
-                pane.splash_mesh_ids.push(cube_mid);
-            }
-            if let Some(ref armor) = pane.loaded_armor {
-                let (hl_verts, hl_indices, _, _) = crate::armor_viewer::splash::build_splash_highlight_mesh(
-                    &armor.meshes,
-                    splash_result.impact_point,
-                    splash_result.half_extent,
-                    shell,
-                    ifhe_enabled,
-                );
-                if !hl_verts.is_empty() {
-                    let hl_mid = pane.viewport.add_overlay_mesh(device, &hl_verts, &hl_indices);
-                    pane.viewport.set_world_space(hl_mid, true);
-                    pane.splash_mesh_ids.push(hl_mid);
-                }
-            }
-        }
-    }
-
-    // Re-upload splash box wireframes if enabled
-    upload_splash_box_wireframes(pane, device);
+    // Re-upload armor + all overlays (viewport.clear() destroys everything)
+    let dp = crate::armor_viewer::common::default_trajectory_display_params(&pane.trajectories);
+    crate::armor_viewer::common::reupload_after_zone_change(
+        pane,
+        device,
+        queue,
+        pipeline,
+        comparison_ships,
+        ifhe_enabled,
+        &dp,
+    );
 }
 
 /// Helper to create an egui Color32 from an [f32; 4] RGBA color.
@@ -3303,13 +3028,7 @@ fn recompute_trajectory_for_range(
     }
 
     // Recompute per-ship arcs
-    let model_extent = loaded_armor
-        .map(|a| {
-            let dx = a.bounds.1[0] - a.bounds.0[0];
-            let dz = a.bounds.1[2] - a.bounds.0[2];
-            dx.max(dz)
-        })
-        .unwrap_or(10.0);
+    let model_extent = loaded_armor.map(|a| a.max_extent_xz()).unwrap_or(10.0);
     let arc_horiz_extent = model_extent * 2.0;
     let first_hit_pos = result.hits.first().map(|h| h.position).unwrap_or(result.origin);
 

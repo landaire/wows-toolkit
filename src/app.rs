@@ -278,63 +278,8 @@ impl WowsToolkitApp {
                 Default::default()
             };
 
-            if !saved_state.tab_state.settings.has_default_value_fix_015 {
-                saved_state.tab_state.settings.check_for_updates = true;
-                saved_state.tab_state.settings.send_replay_data = false;
-                saved_state.tab_state.settings.has_default_value_fix_015 = true;
-            }
-
-            if !saved_state.tab_state.settings.has_019_game_params_update {
-                saved_state.tab_state.settings.has_019_game_params_update = true;
-
-                // Remove the old game params
-                let _ = std::fs::remove_file(old_game_params_bin_path());
-            }
-
-            if !saved_state.tab_state.settings.has_037_crew_skills_fix {
-                saved_state.tab_state.settings.has_037_crew_skills_fix = true;
-
-                // Remove the old game params
-                let _ = std::fs::remove_file(old_game_params_bin_path());
-            }
-
-            if !saved_state.tab_state.settings.has_038_game_params_fix {
-                saved_state.tab_state.settings.has_038_game_params_fix = true;
-
-                // Remove the old game params
-                let _ = std::fs::remove_file(old_game_params_bin_path());
-            }
-
-            // Added the Achievements to GameParams
-            if !saved_state.tab_state.settings.has_041_game_params_fix {
-                saved_state.tab_state.settings.has_041_game_params_fix = true;
-
-                // Remove the old game params
-                let _ = std::fs::remove_file(old_game_params_bin_path());
-            }
-
-            // Added Aircraft to GameParams
-            if !saved_state.tab_state.settings.has_047_game_params_fix {
-                saved_state.tab_state.settings.has_047_game_params_fix = true;
-
-                // Remove the old game params
-                let _ = std::fs::remove_file(old_game_params_bin_path());
-            }
-
-            // Added ShipConfigData (hull/artillery/ATBA ranges) to Vehicle
-            if !saved_state.tab_state.settings.has_047_ship_config_fix {
-                saved_state.tab_state.settings.has_047_ship_config_fix = true;
-                crate::game_params::clear_all_game_params_caches();
-            }
-
-            // Added ShipConfigData (hull/artillery/ATBA ranges) to Vehicle
-            if !saved_state.tab_state.settings.has_047_game_params_fix_for_buffs {
-                saved_state.tab_state.settings.has_047_game_params_fix_for_buffs = true;
-                crate::game_params::clear_all_game_params_caches();
-            }
-
-            if !saved_state.tab_state.settings.has_047_game_params_fix_for_torp_range {
-                saved_state.tab_state.settings.has_047_game_params_fix_for_torp_range = true;
+            if !saved_state.tab_state.settings.has_052_game_params_fix {
+                saved_state.tab_state.settings.has_052_game_params_fix = true;
                 crate::game_params::clear_all_game_params_caches();
             }
 

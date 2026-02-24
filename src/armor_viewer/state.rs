@@ -331,6 +331,22 @@ impl LoadedShipArmor {
         self.bounds.1[1] += dy;
         self.waterline_dy = dy;
     }
+
+    /// Bounding-box center in model space.
+    pub fn center(&self) -> [f32; 3] {
+        [
+            (self.bounds.0[0] + self.bounds.1[0]) * 0.5,
+            (self.bounds.0[1] + self.bounds.1[1]) * 0.5,
+            (self.bounds.0[2] + self.bounds.1[2]) * 0.5,
+        ]
+    }
+
+    /// Maximum extent in the XZ plane (max of width, depth).
+    pub fn max_extent_xz(&self) -> f32 {
+        let dx = self.bounds.1[0] - self.bounds.0[0];
+        let dz = self.bounds.1[2] - self.bounds.0[2];
+        dx.max(dz)
+    }
 }
 
 /// Cached per-shell simulation results for the analysis panel display.

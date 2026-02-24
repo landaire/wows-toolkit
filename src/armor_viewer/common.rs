@@ -133,6 +133,35 @@ impl Default for ShipLoadOptions {
     }
 }
 
+/// Full re-upload sequence after a zone/visibility change.
+///
+/// `upload_armor_to_viewport` calls `viewport.clear()` which destroys all uploaded meshes,
+/// so trajectories, splash overlays, and splash-box wireframes must be re-uploaded.
+pub(crate) fn reupload_after_zone_change(
+    pane: &mut ArmorPane,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &crate::viewport_3d::GpuPipeline,
+    comparison_ships: &[super::penetration::ComparisonShip],
+    ifhe_enabled: bool,
+    traj_display_params: &[TrajectoryDisplayParams],
+) {
+    // 1. Re-upload armor meshes (calls viewport.clear() internally)
+    if let Some(armor) = pane.loaded_armor.take() {
+        crate::ui::armor_viewer::upload_armor_to_viewport(pane, &armor, device, queue, pipeline);
+        pane.loaded_armor = Some(armor);
+    }
+
+    // 2. Re-upload trajectory visualizations (viewport.clear() destroyed them)
+    reupload_trajectory_meshes(pane, device, traj_display_params, false);
+
+    // 3. Re-upload splash overlays if active
+    reupload_splash_overlays(pane, device, comparison_ships, ifhe_enabled);
+
+    // 4. Re-upload splash box wireframes if enabled
+    crate::ui::armor_viewer::upload_splash_box_wireframes(pane, device);
+}
+
 /// Load a ship's armor model on the current thread (intended to run inside
 /// `std::thread::spawn`). Returns [`LoadedShipArmor`] on success.
 ///
@@ -394,4 +423,216 @@ pub(crate) fn poll_pane_load_receivers(
     }
 
     ship_loaded
+}
+
+// ---------------------------------------------------------------------------
+// Trajectory building helpers
+// ---------------------------------------------------------------------------
+
+/// Build [`TrajectoryHit`] entries from ray-cast results against the armor mesh.
+///
+/// `all_hits` is the output of `viewport.pick_all_ray()`: pairs of (HitResult, surface_normal).
+/// `mesh_triangle_info` is the per-mesh, per-triangle metadata from the pane.
+pub(crate) fn build_traj_hits(
+    all_hits: &[(crate::viewport_3d::types::HitResult, [f32; 3])],
+    mesh_triangle_info: &[(crate::viewport_3d::MeshId, Vec<super::state::ArmorTriangleTooltip>)],
+    shell_dir: &[f32; 3],
+) -> Vec<super::penetration::TrajectoryHit> {
+    let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
+    let mut traj_hits = Vec::new();
+    for (armor_hit, normal) in all_hits {
+        let tooltip = mesh_triangle_info
+            .iter()
+            .find(|(id, _)| *id == armor_hit.mesh_id)
+            .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
+        if let Some(info) = tooltip {
+            let angle = super::penetration::impact_angle_deg(shell_dir, normal);
+            traj_hits.push(super::penetration::TrajectoryHit {
+                position: armor_hit.world_position,
+                thickness_mm: info.thickness_mm,
+                zone: info.zone.clone(),
+                material: info.material_name.clone(),
+                angle_deg: angle,
+                distance_from_start: armor_hit.distance - first_dist,
+            });
+        }
+    }
+    traj_hits
+}
+
+/// Result of AP shell simulation through armor hits.
+pub(crate) struct ApSimResult {
+    pub detonation_point: Option<[f32; 3]>,
+    pub last_visible_hit: Option<usize>,
+    pub sim: super::penetration::ShellSimResult,
+}
+
+/// Simulate a single AP shell through armor hits. Returns detonation point,
+/// the earliest terminating event index, and the full simulation result.
+pub(crate) fn simulate_ap_shell(
+    params: &super::ballistics::ShellParams,
+    impact: &super::ballistics::ImpactResult,
+    traj_hits: &[super::penetration::TrajectoryHit],
+    shell_dir: &[f32; 3],
+) -> ApSimResult {
+    let sim = super::penetration::simulate_shell_through_hits(params, impact, traj_hits, shell_dir);
+    let detonation_point = sim.detonation.as_ref().map(|det| det.position);
+    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
+        (Some(d), Some(s)) => Some(d.min(s)),
+        (Some(d), None) => Some(d),
+        (None, Some(s)) => Some(s),
+        (None, None) => None,
+    };
+    ApSimResult { detonation_point, last_visible_hit: shell_stop, sim }
+}
+
+/// Build a 3D ballistic arc for visualization.
+///
+/// `approach_xz` is the normalized XZ approach direction (shell_dir projected to horizontal).
+/// `first_hit_pos` is the first armor hit position (arc end point).
+/// `model_extent` is the max(dx, dz) of the ship bounding box.
+pub(crate) fn build_ballistic_arc_3d(
+    params: &super::ballistics::ShellParams,
+    impact: &super::ballistics::ImpactResult,
+    approach_xz: [f32; 3],
+    first_hit_pos: [f32; 3],
+    model_extent: f32,
+) -> Vec<[f32; 3]> {
+    let arc_horiz_extent = model_extent * 2.0;
+    let (arc_2d, height_ratio) = super::ballistics::simulate_arc_points(params, impact.launch_angle, 60);
+    let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
+    arc_2d
+        .iter()
+        .map(|(xf, yf)| {
+            let xf = *xf as f32;
+            let yf = *yf as f32;
+            let along = (1.0 - xf) * arc_horiz_extent;
+            [
+                first_hit_pos[0] - approach_xz[0] * along,
+                first_hit_pos[1] + yf * arc_height_extent,
+                first_hit_pos[2] - approach_xz[2] * along,
+            ]
+        })
+        .collect()
+}
+
+/// Normalize the XZ approach direction from a shell direction vector.
+/// Returns `[1.0, 0.0, 0.0]` if the XZ component is too small.
+pub(crate) fn approach_xz_from_shell_dir(shell_dir: &[f32; 3]) -> [f32; 3] {
+    let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
+    let len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
+    if len > 0.001 { [approach_xz[0] / len, 0.0, approach_xz[2] / len] } else { [1.0, 0.0, 0.0] }
+}
+
+// ---------------------------------------------------------------------------
+// Trajectory re-upload helpers
+// ---------------------------------------------------------------------------
+
+/// Per-trajectory display parameters for re-upload.
+pub(crate) struct TrajectoryDisplayParams {
+    pub color: [f32; 4],
+    pub line_width_mult: f32,
+}
+
+/// Build default display params (palette color, lw=1.0) for every trajectory.
+pub(crate) fn default_trajectory_display_params(
+    trajectories: &[super::state::StoredTrajectory],
+) -> Vec<TrajectoryDisplayParams> {
+    trajectories
+        .iter()
+        .map(|traj| {
+            let color = super::constants::TRAJECTORY_PALETTE
+                [traj.meta.color_index % super::constants::TRAJECTORY_PALETTE.len()];
+            TrajectoryDisplayParams { color, line_width_mult: 1.0 }
+        })
+        .collect()
+}
+
+/// Re-upload all trajectory visualization meshes on a pane.
+///
+/// `display_params` must have the same length as `pane.trajectories`.
+/// When `remove_old` is true, removes existing `mesh_id` before uploading
+/// (needed when old meshes still exist). When false, assumes `viewport.clear()`
+/// already removed them.
+pub(crate) fn reupload_trajectory_meshes(
+    pane: &mut ArmorPane,
+    device: &wgpu::Device,
+    display_params: &[TrajectoryDisplayParams],
+    remove_old: bool,
+) {
+    let cam_dist = pane.viewport.camera.distance;
+    let marker_opacity = pane.marker_opacity;
+    for (i, traj) in pane.trajectories.iter_mut().enumerate() {
+        if remove_old {
+            if let Some(old_mid) = traj.mesh_id.take() {
+                pane.viewport.remove_mesh(old_mid);
+            }
+        }
+        let dp = &display_params[i];
+        traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(
+            &mut pane.viewport,
+            &traj.result,
+            device,
+            dp.color,
+            traj.last_visible_hit,
+            cam_dist,
+            marker_opacity,
+            dp.line_width_mult,
+        ));
+        traj.marker_cam_dist = cam_dist;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Splash overlay re-upload
+// ---------------------------------------------------------------------------
+
+/// Re-upload splash visualization overlays (cube + penetration highlight).
+///
+/// No-op if `pane.splash_result` is `None` or no HE/SAP shell is found.
+/// Call after `upload_armor_to_viewport` which destroys existing splash meshes.
+pub(crate) fn reupload_splash_overlays(
+    pane: &mut ArmorPane,
+    device: &wgpu::Device,
+    comparison_ships: &[super::penetration::ComparisonShip],
+    ifhe_enabled: bool,
+) {
+    // Read splash data into locals before mutating pane
+    let (impact_point, half_extent) = match pane.splash_result {
+        Some(ref sr) => (sr.impact_point, sr.half_extent),
+        None => return,
+    };
+
+    pane.splash_mesh_ids.clear();
+
+    let shell = comparison_ships
+        .iter()
+        .flat_map(|s| s.shells.iter())
+        .find(|s| s.ammo_type == wowsunpack::game_params::types::AmmoType::HE)
+        .or_else(|| {
+            comparison_ships
+                .iter()
+                .flat_map(|s| s.shells.iter())
+                .find(|s| s.ammo_type == wowsunpack::game_params::types::AmmoType::SAP)
+        });
+
+    let Some(shell) = shell else { return };
+
+    let (cube_verts, cube_indices) =
+        super::splash::build_splash_cube_mesh(impact_point, half_extent, super::splash::SPLASH_CUBE_COLOR);
+    if !cube_verts.is_empty() {
+        let cube_mid = pane.viewport.add_overlay_mesh(device, &cube_verts, &cube_indices);
+        pane.viewport.set_world_space(cube_mid, true);
+        pane.splash_mesh_ids.push(cube_mid);
+    }
+
+    if let Some(ref armor) = pane.loaded_armor {
+        let (hl_verts, hl_indices, _, _) =
+            super::splash::build_splash_highlight_mesh(&armor.meshes, impact_point, half_extent, shell, ifhe_enabled);
+        if !hl_verts.is_empty() {
+            let hl_mid = pane.viewport.add_overlay_mesh(device, &hl_verts, &hl_indices);
+            pane.viewport.set_world_space(hl_mid, true);
+            pane.splash_mesh_ids.push(hl_mid);
+        }
+    }
 }

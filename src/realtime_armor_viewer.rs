@@ -177,6 +177,14 @@ struct ShellHitGroup {
     server_outcome: ServerOutcome,
 }
 
+/// Output from [`RealtimeArmorViewer::simulate_and_upload_trajectory`].
+struct TrajectorySimResult {
+    traj_id: u64,
+    comparison: Option<ServerVsSimComparison>,
+    traj_hits: Vec<crate::armor_viewer::penetration::TrajectoryHit>,
+    firing_range: Meters,
+}
+
 impl RealtimeArmorViewer {
     /// Create a new realtime armor viewer.
     ///
@@ -493,13 +501,252 @@ impl RealtimeArmorViewer {
         }
     }
 
+    /// Filter a shot hit by the current attacker/team/secondary settings.
+    /// Returns `Some(shell)` if the hit should be processed, `None` to skip.
+    fn filter_hit(&mut self, hit: &ResolvedShotHit, players: &[ReplayPlayerInfo]) -> Option<ShellInfo> {
+        // Filter by selected attacker
+        if let Some(ref sel) = self.selected_attacker {
+            if hit.hit.owner_id != *sel {
+                return None;
+            }
+        } else {
+            // "All Enemies" mode: skip shots from the target's own team
+            let same_team = players
+                .iter()
+                .find(|p| p.entity_id == hit.hit.owner_id)
+                .map(|p| p.team_id == self.target_team_id)
+                .unwrap_or(true);
+            if same_team {
+                return None;
+            }
+        }
+
+        // Resolve shell info from the matched salvo's params_id
+        let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
+            self.shell_cache
+                .entry(pid)
+                .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
+                .clone()
+        });
+
+        let shell = shell_info?;
+
+        // Filter out secondary armament shells unless the toggle is on.
+        if !self.show_secondaries && !self.is_main_battery.is_empty() {
+            if let Some(salvo) = &hit.salvo {
+                if !self.is_main_battery.contains_key(&salvo.params_id) {
+                    return None;
+                }
+            }
+        }
+
+        Some(shell)
+    }
+
+    /// Shared trajectory simulation core: given a resolved hit and shell info,
+    /// ray-cast through the model, run AP simulation, build the arc, upload the
+    /// trajectory visualization, and push a `StoredTrajectory`.
+    ///
+    /// Returns `None` if the ray misses the model entirely (or shell direction
+    /// can't be determined). `comparison.exit_divergence` is always `None` —
+    /// caller patches it in if needed.
+    fn simulate_and_upload_trajectory(
+        &mut self,
+        hit: &ResolvedShotHit,
+        shell: &ShellInfo,
+        server_outcome: &ServerOutcome,
+    ) -> Option<TrajectorySimResult> {
+        use crate::viewport_3d::camera::{normalize, scale, sub};
+
+        let ship_yaw = hit.victim_yaw;
+        let ship_world_pos = hit.victim_position;
+        let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
+        let impact_pos = hit.hit.position;
+        let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
+        let firing_range: Meters = matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
+
+        let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
+
+        // Determine shell direction: prefer terminal ballistics if available,
+        // otherwise compute from salvo origin → actual impact position.
+        let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
+            let vel = tb.velocity;
+            let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
+            if speed < 1.0 {
+                return None;
+            }
+            let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
+            let local = Self::rotate_vec(&rot, world_dir);
+            normalize([-local[2], local[1], -local[0]])
+        } else if let Some(shot) = matched_shot {
+            let dx = impact_pos.x - shot.origin.x;
+            let dz = impact_pos.z - shot.origin.z;
+            let horiz_len = (dx * dx + dz * dz).sqrt();
+            let world_dir = if horiz_len > 0.001 {
+                [dx / horiz_len, 0.0, dz / horiz_len]
+            } else {
+                return None;
+            };
+            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+            let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
+            let world_dir_3d = if let Some(ref imp) = impact_result {
+                let horiz_angle = imp.impact_angle_horizontal as f32;
+                let cos_h = horiz_angle.cos();
+                let sin_h = horiz_angle.sin();
+                [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
+            } else {
+                world_dir
+            };
+            let local = Self::rotate_vec(&rot, world_dir_3d);
+            normalize([-local[2], local[1], -local[0]])
+        } else {
+            return None;
+        };
+
+        let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or([0.0; 3]);
+        let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
+        let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
+        let ray_through = [model_impact[0], 0.0, model_impact[2]];
+        let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
+        let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
+
+        if all_hits.is_empty() {
+            return None;
+        }
+
+        // Build trajectory hits
+        let traj_hits =
+            crate::armor_viewer::common::build_traj_hits(&all_hits, &self.pane.mesh_triangle_info, &shell_dir);
+
+        // Build ImpactResult: use terminal ballistics if available, otherwise simulate.
+        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+        let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
+            let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
+                &params,
+                tb.velocity.x as f64,
+                tb.velocity.y as f64,
+                tb.velocity.z as f64,
+            );
+            imp.distance = firing_range.value() as f64;
+            Some(imp)
+        } else if matched_shot.is_some() {
+            crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
+        } else {
+            None
+        };
+
+        // AP simulation + comparison
+        let mut detonation_points = Vec::new();
+        let mut last_visible_hit: Option<usize> = None;
+        let mut comparison: Option<ServerVsSimComparison> = None;
+
+        if shell.ammo_type == AmmoType::AP {
+            if let Some(ref imp) = impact {
+                let ap = crate::armor_viewer::common::simulate_ap_shell(&params, imp, &traj_hits, &shell_dir);
+                if let Some(pos) = ap.detonation_point {
+                    detonation_points
+                        .push(crate::armor_viewer::penetration::DetonationMarker { position: pos, ship_index: 0 });
+                }
+                if let Some(idx) = ap.last_visible_hit {
+                    last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
+                }
+
+                let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
+                let first_thickness =
+                    traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
+                let verdict = crate::armor_viewer::penetration::compare_with_server(
+                    &ap.sim,
+                    &traj_hits,
+                    server_outcome,
+                    &params,
+                    first_angle,
+                    first_thickness,
+                );
+
+                comparison = Some(ServerVsSimComparison {
+                    server_outcome: server_outcome.clone(),
+                    sim: ap.sim,
+                    verdict,
+                    exit_divergence: None,
+                });
+            }
+        }
+
+        // Build ballistic arc
+        let approach_xz = crate::armor_viewer::common::approach_xz_from_shell_dir(&shell_dir);
+        let model_extent = self.pane.loaded_armor.as_ref().map(|a| a.max_extent_xz()).unwrap_or(10.0);
+        let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(model_center);
+
+        let mut ship_arcs = Vec::new();
+        if let Some(ref imp) = impact {
+            let arc_points_3d = crate::armor_viewer::common::build_ballistic_arc_3d(
+                &params,
+                imp,
+                approach_xz,
+                first_hit_pos,
+                model_extent,
+            );
+            ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
+                ship_index: 0,
+                arc_points_3d,
+                ballistic_impact: Some(imp.clone()),
+            });
+        }
+
+        let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
+        let traj_id = self.pane.next_trajectory_id;
+        self.pane.next_trajectory_id += 1;
+
+        let result = crate::armor_viewer::penetration::TrajectoryResult {
+            origin: ray_origin,
+            direction: shell_dir,
+            hits: traj_hits.clone(),
+            total_armor_mm: total_armor,
+            ship_arcs,
+            detonation_points,
+        };
+
+        // Pick trajectory color based on attacker
+        let attacker_color_idx = self.enemy_players.iter().position(|p| p.entity_id == hit.hit.owner_id).unwrap_or(0);
+        let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
+
+        let cam_dist = self.pane.viewport.camera.distance;
+        let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
+        let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
+            &mut self.pane.viewport,
+            &result,
+            &self.render_state.device,
+            upload_color,
+            last_visible_hit,
+            cam_dist,
+            self.pane.marker_opacity,
+            upload_lw,
+        );
+
+        self.pane.trajectories.push(StoredTrajectory {
+            meta: crate::armor_viewer::penetration::TrajectoryMeta {
+                id: traj_id,
+                color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
+                range: firing_range.to_km(),
+            },
+            result,
+            mesh_id: Some(mesh_id),
+            last_visible_hit,
+            marker_cam_dist: cam_dist,
+            show_plates_active: false,
+            show_zones_active: false,
+            shell_sim_cache: None,
+            created_at_roll: self.pane.viewport.model_roll,
+        });
+
+        Some(TrajectorySimResult { traj_id, comparison, traj_hits, firing_range })
+    }
+
     /// Each `ResolvedShotHit` contains the actual world-space impact position and
     /// (optionally) terminal ballistics info (velocity, impact angle, detonator state).
     /// Hits are grouped by `shot_id` to pair entry + exit (for overpenetrations).
     /// We compare our simulation result against the server's authoritative outcome.
     fn process_new_shot_hits(&mut self) {
-        use crate::viewport_3d::camera::{normalize, scale, sub};
-
         let bridge = self.bridge.lock();
 
         let new_count = bridge.shot_hits.len();
@@ -518,371 +765,55 @@ impl RealtimeArmorViewer {
         for group in &groups {
             let hit = &group.entry;
 
-            // Filter by selected attacker
-            if let Some(ref sel) = self.selected_attacker {
-                if hit.hit.owner_id != *sel {
-                    continue;
-                }
-            } else {
-                // "All Enemies" mode: skip shots from the target's own team
-                let same_team = players
-                    .iter()
-                    .find(|p| p.entity_id == hit.hit.owner_id)
-                    .map(|p| p.team_id == self.target_team_id)
-                    .unwrap_or(true);
-                if same_team {
-                    continue;
+            let Some(shell) = self.filter_hit(hit, &players) else {
+                continue;
+            };
+
+            let mut sim = self.simulate_and_upload_trajectory(hit, &shell, &group.server_outcome);
+
+            // Compute exit divergence for AP overpenetrations
+            if let Some(ref sim_result) = sim {
+                if group.server_outcome == ServerOutcome::Overpenetration {
+                    if let Some(ref cmp) = sim_result.comparison {
+                        let rot = Self::inverse_ship_rotation(hit.victim_yaw, hit.victim_pitch, hit.victim_roll);
+                        let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or([0.0; 3]);
+                        let exit_div = self.compute_exit_divergence(
+                            group,
+                            &cmp.sim,
+                            &sim_result.traj_hits,
+                            &hit.victim_position,
+                            &rot,
+                            &model_center,
+                        );
+                        // Patch exit divergence into the comparison
+                        if let Some(ref mut s) = sim {
+                            if let Some(ref mut c) = s.comparison {
+                                c.exit_divergence = exit_div;
+                            }
+                        }
+                    }
                 }
             }
 
-            // Resolve shell info from the matched salvo's params_id
-            let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
-                self.shell_cache
-                    .entry(pid)
-                    .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
-                    .clone()
+            let firing_range = sim.as_ref().map(|s| s.firing_range).unwrap_or_else(|| {
+                hit.salvo
+                    .as_ref()
+                    .and_then(|s| s.shots.iter().find(|sh| sh.shot_id == hit.hit.shot_id))
+                    .map(|s| s.origin.distance_xz(&hit.hit.position))
+                    .unwrap_or(Meters::new(0.0))
             });
+            let traj_id = sim.as_ref().map(|s| s.traj_id);
+            let comparison = sim.and_then(|s| s.comparison);
 
-            let Some(shell) = shell_info else {
-                continue;
-            };
-
-            // Filter out secondary armament shells unless the toggle is on.
-            // If params_id is not in is_main_battery and the cache is populated, it's secondary.
-            if !self.show_secondaries && !self.is_main_battery.is_empty() {
-                if let Some(salvo) = &hit.salvo {
-                    if !self.is_main_battery.contains_key(&salvo.params_id) {
-                        continue;
-                    }
-                }
-            }
-
-            // Victim ship position and yaw come directly from the ResolvedShotHit
-            // (captured at impact time by the controller).
-            let ship_yaw = hit.victim_yaw;
-            let ship_world_pos = hit.victim_position;
-            let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
-
-            let impact_pos = hit.hit.position;
-
-            // Find the exact barrel origin for this shell by matching shot_id.
-            let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
-            if !salvo_shots.is_empty() && matched_shot.is_none() {
-                tracing::warn!(
-                    "RealtimeArmorViewer: shot_id {:?} not found in salvo ({} shots) for owner {:?}",
-                    hit.hit.shot_id,
-                    salvo_shots.len(),
-                    hit.hit.owner_id,
-                );
-            }
-            let firing_range: Meters =
-                matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
-
-            let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
-
-            // Determine shell direction: prefer terminal ballistics if available,
-            // otherwise compute from salvo origin → actual impact position.
-            let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
-                let vel = tb.velocity;
-                let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
-                if speed < 1.0 {
-                    continue;
-                }
-                let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
-                let local = Self::rotate_vec(&rot, world_dir);
-                // model_x = -world_z, model_z = -world_x (RH mesh coords)
-                normalize([-local[2], local[1], -local[0]])
-            } else if let Some(shot) = matched_shot {
-                let dx = impact_pos.x - shot.origin.x;
-                let dz = impact_pos.z - shot.origin.z;
-                let horiz_len = (dx * dx + dz * dz).sqrt();
-                let world_dir = if horiz_len > 0.001 {
-                    [dx / horiz_len, 0.0, dz / horiz_len]
-                } else {
-                    continue;
-                };
-
-                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-                let world_dir_3d = if let Some(ref imp) = impact_result {
-                    let horiz_angle = imp.impact_angle_horizontal as f32;
-                    let cos_h = horiz_angle.cos();
-                    let sin_h = horiz_angle.sin();
-                    [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
-                } else {
-                    world_dir
-                };
-                let local = Self::rotate_vec(&rot, world_dir_3d);
-                normalize([-local[2], local[1], -local[0]])
-            } else {
-                continue;
-            };
-
-            let model_center = self
-                .pane
-                .loaded_armor
-                .as_ref()
-                .map(|a| {
-                    [
-                        (a.bounds.0[0] + a.bounds.1[0]) * 0.5,
-                        (a.bounds.0[1] + a.bounds.1[1]) * 0.5,
-                        (a.bounds.0[2] + a.bounds.1[2]) * 0.5,
-                    ]
-                })
-                .unwrap_or([0.0; 3]);
-
-            let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
-            let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
-            let ray_through = [model_impact[0], 0.0, model_impact[2]];
-
-            // Cast ray from far behind the through-point along shell_dir
-            let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
-            let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
-
-            tracing::info!(
-                "RealtimeArmorViewer: shot_hit ray — shell={} dir=[{:.3},{:.3},{:.3}] world_impact=({:.1},{:.1},{:.1}) model_impact=({:.3},{:.3},{:.3}) ship_pos=({:.1},{:.1},{:.1}) hits={} has_tb={} server={}",
-                shell.name,
-                shell_dir[0],
-                shell_dir[1],
-                shell_dir[2],
-                impact_pos.x,
-                impact_pos.y,
-                impact_pos.z,
-                model_impact[0],
-                model_impact[1],
-                model_impact[2],
-                ship_world_pos.x,
-                ship_world_pos.y,
-                ship_world_pos.z,
-                all_hits.len(),
-                hit.hit.terminal_ballistics.is_some(),
-                group.server_outcome.display_name(),
-            );
-
-            if all_hits.is_empty() {
-                self.insert_shell_into_group(
-                    hit,
-                    &shell,
-                    firing_range,
-                    None,
-                    None,
-                    group.server_outcome.clone(),
-                    &players,
-                );
-                continue;
-            }
-
-            // Build trajectory hits
-            let mut traj_hits = Vec::new();
-            let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
-            for (armor_hit, normal) in &all_hits {
-                let tooltip = self
-                    .pane
-                    .mesh_triangle_info
-                    .iter()
-                    .find(|(id, _)| *id == armor_hit.mesh_id)
-                    .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
-
-                if let Some(info) = tooltip {
-                    let angle = crate::armor_viewer::penetration::impact_angle_deg(&shell_dir, normal);
-                    traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
-                        position: armor_hit.world_position,
-                        thickness_mm: info.thickness_mm,
-                        zone: info.zone.clone(),
-                        material: info.material_name.clone(),
-                        angle_deg: angle,
-                        distance_from_start: armor_hit.distance - first_dist,
-                    });
-                }
-            }
-
-            // Build ImpactResult: use terminal ballistics if available, otherwise simulate.
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-            let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
-                let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
-                    &params,
-                    tb.velocity.x as f64,
-                    tb.velocity.y as f64,
-                    tb.velocity.z as f64,
-                );
-                imp.distance = firing_range.value() as f64;
-                Some(imp)
-            } else if matched_shot.is_some() {
-                crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
-            } else {
-                None
-            };
-
-            // Run simulation and build comparison
-            let mut detonation_points = Vec::new();
-            let mut last_visible_hit: Option<usize> = None;
-            let mut comparison: Option<ServerVsSimComparison> = None;
-
-            if shell.ammo_type == AmmoType::AP {
-                if let Some(ref imp) = impact {
-                    let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
-                        &params, imp, &traj_hits, &shell_dir,
-                    );
-                    if let Some(ref det) = sim.detonation {
-                        detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
-                            position: det.position,
-                            ship_index: 0,
-                        });
-                    }
-                    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                        (Some(d), Some(s)) => Some(d.min(s)),
-                        (Some(d), None) => Some(d),
-                        (None, Some(s)) => Some(s),
-                        (None, None) => None,
-                    };
-                    if let Some(idx) = shell_stop {
-                        last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
-                    }
-
-                    // Compare simulation with server outcome
-                    let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
-                    let first_thickness =
-                        traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
-                    let verdict = crate::armor_viewer::penetration::compare_with_server(
-                        &sim,
-                        &traj_hits,
-                        &group.server_outcome,
-                        &params,
-                        first_angle,
-                        first_thickness,
-                    );
-
-                    // Compute exit divergence for overpenetrations
-                    let exit_divergence = if group.server_outcome == ServerOutcome::Overpenetration {
-                        self.compute_exit_divergence(group, &sim, &traj_hits, &ship_world_pos, &rot, &model_center)
-                    } else {
-                        None
-                    };
-
-                    tracing::info!(
-                        "RealtimeArmorViewer: comparison — server={} verdict={:?}{}",
-                        group.server_outcome.display_name(),
-                        verdict,
-                        exit_divergence
-                            .as_ref()
-                            .and_then(|d| d.distance)
-                            .map(|d| format!(" exit_div={d:.2}"))
-                            .unwrap_or_default(),
-                    );
-
-                    comparison = Some(ServerVsSimComparison {
-                        server_outcome: group.server_outcome.clone(),
-                        sim,
-                        verdict,
-                        exit_divergence,
-                    });
-                }
-            }
-
-            // Build arc from approach direction
-            let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
-            let approach_len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
-            let approach_xz = if approach_len > 0.001 {
-                [approach_xz[0] / approach_len, 0.0, approach_xz[2] / approach_len]
-            } else {
-                [1.0, 0.0, 0.0]
-            };
-            let model_extent = self
-                .pane
-                .loaded_armor
-                .as_ref()
-                .map(|a| {
-                    let dx = a.bounds.1[0] - a.bounds.0[0];
-                    let dz = a.bounds.1[2] - a.bounds.0[2];
-                    dx.max(dz)
-                })
-                .unwrap_or(10.0);
-            let arc_horiz_extent = model_extent * 2.0;
-            let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(model_center);
-
-            let mut ship_arcs = Vec::new();
-            if let Some(ref imp) = impact {
-                let (arc_2d, height_ratio) =
-                    crate::armor_viewer::ballistics::simulate_arc_points(&params, imp.launch_angle, 60);
-                let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                let arc_points_3d: Vec<[f32; 3]> = arc_2d
-                    .iter()
-                    .map(|(xf, yf)| {
-                        let xf = *xf as f32;
-                        let yf = *yf as f32;
-                        let along = (1.0 - xf) * arc_horiz_extent;
-                        [
-                            first_hit_pos[0] - approach_xz[0] * along,
-                            first_hit_pos[1] + yf * arc_height_extent,
-                            first_hit_pos[2] - approach_xz[2] * along,
-                        ]
-                    })
-                    .collect();
-                ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                    ship_index: 0,
-                    arc_points_3d,
-                    ballistic_impact: Some(imp.clone()),
-                });
-            }
-
-            let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
-            let traj_id = self.pane.next_trajectory_id;
-            self.pane.next_trajectory_id += 1;
-
-            let result = crate::armor_viewer::penetration::TrajectoryResult {
-                origin: ray_origin,
-                direction: shell_dir,
-                hits: traj_hits,
-                total_armor_mm: total_armor,
-                ship_arcs,
-                detonation_points,
-            };
-
-            // Pick trajectory color based on attacker
-            let attacker_color_idx =
-                self.enemy_players.iter().position(|p| p.entity_id == hit.hit.owner_id).unwrap_or(0);
-            let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
-
-            let cam_dist = self.pane.viewport.camera.distance;
-            let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
-            let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
-                &mut self.pane.viewport,
-                &result,
-                &self.render_state.device,
-                upload_color,
-                last_visible_hit,
-                cam_dist,
-                self.pane.marker_opacity,
-                upload_lw,
-            );
-
-            self.pane.trajectories.push(StoredTrajectory {
-                meta: crate::armor_viewer::penetration::TrajectoryMeta {
-                    id: traj_id,
-                    color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
-                    range: firing_range.to_km(),
-                },
-                result,
-                mesh_id: Some(mesh_id),
-                last_visible_hit,
-                marker_cam_dist: cam_dist,
-                show_plates_active: false,
-                show_zones_active: false,
-                shell_sim_cache: None,
-                created_at_roll: self.pane.viewport.model_roll,
-            });
-
-            // Log entry — insert into salvo group
             self.insert_shell_into_group(
                 hit,
                 &shell,
                 firing_range,
-                Some(traj_id),
+                traj_id,
                 comparison,
                 group.server_outcome.clone(),
                 &players,
             );
-
             self.needs_repaint = true;
         }
     }
@@ -1095,43 +1026,9 @@ impl RealtimeArmorViewer {
         for pre_hit in hits.iter() {
             let hit = &pre_hit.hit;
 
-            // Filter by selected attacker
-            if let Some(ref sel) = self.selected_attacker {
-                if hit.hit.owner_id != *sel {
-                    continue;
-                }
-            } else {
-                // "All Enemies" mode: skip shots from the target's own team
-                let same_team = players
-                    .iter()
-                    .find(|p| p.entity_id == hit.hit.owner_id)
-                    .map(|p| p.team_id == self.target_team_id)
-                    .unwrap_or(true);
-                if same_team {
-                    continue;
-                }
-            }
-
-            // Resolve shell info from the matched salvo's params_id
-            let shell_info = hit.salvo.as_ref().map(|s| s.params_id).and_then(|pid| {
-                self.shell_cache
-                    .entry(pid)
-                    .or_insert_with(|| self.ship_assets.metadata().resolve_shell_from_param_id(pid))
-                    .clone()
-            });
-
-            let Some(shell) = shell_info else {
+            let Some(shell) = self.filter_hit(hit, &players) else {
                 continue;
             };
-
-            // Filter out secondary armament shells unless the toggle is on.
-            if !self.show_secondaries && !self.is_main_battery.is_empty() {
-                if let Some(salvo) = &hit.salvo {
-                    if !self.is_main_battery.contains_key(&salvo.params_id) {
-                        continue;
-                    }
-                }
-            }
 
             let firing_range: Meters = hit
                 .salvo
@@ -1160,8 +1057,6 @@ impl RealtimeArmorViewer {
     /// Simulate trajectories for all un-simulated shells in the given salvo group.
     /// Called lazily when the user selects a group or shell.
     fn ensure_trajectories_simulated(&mut self, key: &SalvoKey) {
-        use crate::viewport_3d::camera::{normalize, scale, sub};
-
         let group_idx = match self.salvo_group_index.get(key) {
             Some(&idx) => idx,
             None => return,
@@ -1198,20 +1093,6 @@ impl RealtimeArmorViewer {
             }
         }
 
-        let model_center = self
-            .pane
-            .loaded_armor
-            .as_ref()
-            .map(|a| {
-                [
-                    (a.bounds.0[0] + a.bounds.1[0]) * 0.5,
-                    (a.bounds.0[1] + a.bounds.1[1]) * 0.5,
-                    (a.bounds.0[2] + a.bounds.1[2]) * 0.5,
-                ]
-            })
-            .unwrap_or([0.0; 3]);
-        let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
-
         for &shell_idx in &needs_sim {
             let shot_id = self.salvo_groups[group_idx].shells[shell_idx].shot_id;
             let pre_hit = match hit_map.get(&shot_id) {
@@ -1229,247 +1110,11 @@ impl RealtimeArmorViewer {
             });
             let Some(shell) = shell_info else { continue };
 
-            let ship_yaw = hit.victim_yaw;
-            let ship_world_pos = hit.victim_position;
-            let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
-            let impact_pos = hit.hit.position;
-            let matched_shot = salvo_shots.iter().find(|s| s.shot_id == hit.hit.shot_id);
-            let firing_range: Meters =
-                matched_shot.map(|s| s.origin.distance_xz(&impact_pos)).unwrap_or(Meters::new(0.0));
-
-            let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
-
-            // Determine shell direction
-            let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
-                let vel = tb.velocity;
-                let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
-                if speed < 1.0 {
-                    continue;
-                }
-                let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
-                let local = Self::rotate_vec(&rot, world_dir);
-                // model_x = -world_z, model_z = -world_x (RH mesh coords)
-                normalize([-local[2], local[1], -local[0]])
-            } else if let Some(shot) = matched_shot {
-                let dx = impact_pos.x - shot.origin.x;
-                let dz = impact_pos.z - shot.origin.z;
-                let horiz_len = (dx * dx + dz * dz).sqrt();
-                let world_dir = if horiz_len > 0.001 {
-                    [dx / horiz_len, 0.0, dz / horiz_len]
-                } else {
-                    continue;
-                };
-                let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-                let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-                let world_dir_3d = if let Some(ref imp) = impact_result {
-                    let horiz_angle = imp.impact_angle_horizontal as f32;
-                    let cos_h = horiz_angle.cos();
-                    let sin_h = horiz_angle.sin();
-                    [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
-                } else {
-                    world_dir
-                };
-                let local = Self::rotate_vec(&rot, world_dir_3d);
-                normalize([-local[2], local[1], -local[0]])
-            } else {
-                continue;
-            };
-
-            let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
-            let ray_through = [model_impact[0], 0.0, model_impact[2]];
-            let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
-            let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
-
-            if all_hits.is_empty() {
-                // No armor hit — leave trajectory_id as None
-                continue;
-            }
-
-            // Build trajectory hits
-            let mut traj_hits = Vec::new();
-            let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
-            for (armor_hit, normal) in &all_hits {
-                let tooltip = self
-                    .pane
-                    .mesh_triangle_info
-                    .iter()
-                    .find(|(id, _)| *id == armor_hit.mesh_id)
-                    .and_then(|(_, infos)| infos.get(armor_hit.triangle_index));
-                if let Some(info) = tooltip {
-                    let angle = crate::armor_viewer::penetration::impact_angle_deg(&shell_dir, normal);
-                    traj_hits.push(crate::armor_viewer::penetration::TrajectoryHit {
-                        position: armor_hit.world_position,
-                        thickness_mm: info.thickness_mm,
-                        zone: info.zone.clone(),
-                        material: info.material_name.clone(),
-                        angle_deg: angle,
-                        distance_from_start: armor_hit.distance - first_dist,
-                    });
-                }
-            }
-
-            // Build ImpactResult
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(&shell);
-            let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
-                let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
-                    &params,
-                    tb.velocity.x as f64,
-                    tb.velocity.y as f64,
-                    tb.velocity.z as f64,
-                );
-                imp.distance = firing_range.value() as f64;
-                Some(imp)
-            } else if matched_shot.is_some() {
-                crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
-            } else {
-                None
-            };
-
-            // AP simulation + comparison
-            let mut detonation_points = Vec::new();
-            let mut last_visible_hit: Option<usize> = None;
-            let mut comparison: Option<ServerVsSimComparison> = None;
             let server_outcome = self.salvo_groups[group_idx].shells[shell_idx].server_outcome.clone();
-
-            if shell.ammo_type == AmmoType::AP {
-                if let Some(ref imp) = impact {
-                    let sim = crate::armor_viewer::penetration::simulate_shell_through_hits(
-                        &params, imp, &traj_hits, &shell_dir,
-                    );
-                    if let Some(ref det) = sim.detonation {
-                        detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
-                            position: det.position,
-                            ship_index: 0,
-                        });
-                    }
-                    let shell_stop = match (sim.detonated_at, sim.stopped_at) {
-                        (Some(d), Some(s)) => Some(d.min(s)),
-                        (Some(d), None) => Some(d),
-                        (None, Some(s)) => Some(s),
-                        (None, None) => None,
-                    };
-                    if let Some(idx) = shell_stop {
-                        last_visible_hit = Some(last_visible_hit.map_or(idx, |prev: usize| prev.min(idx)));
-                    }
-
-                    let first_angle = traj_hits.first().map(|h| h.angle_deg).unwrap_or(0.0);
-                    let first_thickness =
-                        traj_hits.first().map(|h| Millimeters::new(h.thickness_mm)).unwrap_or(Millimeters::new(0.0));
-                    let verdict = crate::armor_viewer::penetration::compare_with_server(
-                        &sim,
-                        &traj_hits,
-                        &server_outcome,
-                        &params,
-                        first_angle,
-                        first_thickness,
-                    );
-
-                    // For exit divergence we'd need a ShellHitGroup with entry+exit paired.
-                    // For lazy sim we skip exit divergence (it's minor detail).
-                    comparison = Some(ServerVsSimComparison {
-                        server_outcome: server_outcome.clone(),
-                        sim,
-                        verdict,
-                        exit_divergence: None,
-                    });
-                }
+            if let Some(sim) = self.simulate_and_upload_trajectory(hit, &shell, &server_outcome) {
+                self.salvo_groups[group_idx].shells[shell_idx].trajectory_id = Some(sim.traj_id);
+                self.salvo_groups[group_idx].shells[shell_idx].comparison = sim.comparison;
             }
-
-            // Build ballistic arc
-            let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
-            let approach_len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
-            let approach_xz = if approach_len > 0.001 {
-                [approach_xz[0] / approach_len, 0.0, approach_xz[2] / approach_len]
-            } else {
-                [1.0, 0.0, 0.0]
-            };
-            let model_extent = self
-                .pane
-                .loaded_armor
-                .as_ref()
-                .map(|a| {
-                    let dx = a.bounds.1[0] - a.bounds.0[0];
-                    let dz = a.bounds.1[2] - a.bounds.0[2];
-                    dx.max(dz)
-                })
-                .unwrap_or(10.0);
-            let arc_horiz_extent = model_extent * 2.0;
-            let first_hit_pos = traj_hits.first().map(|h| h.position).unwrap_or(model_center);
-
-            let mut ship_arcs = Vec::new();
-            if let Some(ref imp) = impact {
-                let (arc_2d, height_ratio) =
-                    crate::armor_viewer::ballistics::simulate_arc_points(&params, imp.launch_angle, 60);
-                let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                let arc_points_3d: Vec<[f32; 3]> = arc_2d
-                    .iter()
-                    .map(|(xf, yf)| {
-                        let xf = *xf as f32;
-                        let yf = *yf as f32;
-                        let along = (1.0 - xf) * arc_horiz_extent;
-                        [
-                            first_hit_pos[0] - approach_xz[0] * along,
-                            first_hit_pos[1] + yf * arc_height_extent,
-                            first_hit_pos[2] - approach_xz[2] * along,
-                        ]
-                    })
-                    .collect();
-                ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
-                    ship_index: 0,
-                    arc_points_3d,
-                    ballistic_impact: Some(imp.clone()),
-                });
-            }
-
-            let total_armor: f32 = traj_hits.iter().map(|h| h.thickness_mm).sum();
-            let traj_id = self.pane.next_trajectory_id;
-            self.pane.next_trajectory_id += 1;
-
-            let result = crate::armor_viewer::penetration::TrajectoryResult {
-                origin: ray_origin,
-                direction: shell_dir,
-                hits: traj_hits,
-                total_armor_mm: total_armor,
-                ship_arcs,
-                detonation_points,
-            };
-
-            let attacker_color_idx =
-                self.enemy_players.iter().position(|p| p.entity_id == hit.hit.owner_id).unwrap_or(0);
-            let traj_color = TRAJECTORY_PALETTE[attacker_color_idx % TRAJECTORY_PALETTE.len()];
-
-            let cam_dist = self.pane.viewport.camera.distance;
-            let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
-            let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
-                &mut self.pane.viewport,
-                &result,
-                &self.render_state.device,
-                upload_color,
-                last_visible_hit,
-                cam_dist,
-                self.pane.marker_opacity,
-                upload_lw,
-            );
-
-            self.pane.trajectories.push(StoredTrajectory {
-                meta: crate::armor_viewer::penetration::TrajectoryMeta {
-                    id: traj_id,
-                    color_index: attacker_color_idx % TRAJECTORY_PALETTE.len(),
-                    range: firing_range.to_km(),
-                },
-                result,
-                mesh_id: Some(mesh_id),
-                last_visible_hit,
-                marker_cam_dist: cam_dist,
-                show_plates_active: false,
-                show_zones_active: false,
-                shell_sim_cache: None,
-                created_at_roll: self.pane.viewport.model_roll,
-            });
-
-            // Update the shell entry with the trajectory id and comparison
-            self.salvo_groups[group_idx].shells[shell_idx].trajectory_id = Some(traj_id);
-            self.salvo_groups[group_idx].shells[shell_idx].comparison = comparison;
         }
 
         self.selection_dirty = true;
@@ -1752,52 +1397,38 @@ impl RealtimeArmorViewer {
         let marker_opacity_changed = (self.pane.marker_opacity - prev_marker_opacity).abs() > 0.001;
         let needs_traj_reupload = zone_changed || marker_opacity_changed || self.selection_dirty;
 
-        if zone_changed {
-            if let Some(armor) = self.pane.loaded_armor.take() {
-                crate::ui::armor_viewer::upload_armor_to_viewport(
-                    &mut self.pane,
-                    &armor,
-                    &self.render_state.device,
-                    &self.render_state.queue,
-                    &self.gpu_pipeline,
-                );
-                self.pane.loaded_armor = Some(armor);
-            }
-
-            // Re-upload splash box wireframes if toggled on
-            crate::ui::armor_viewer::upload_splash_box_wireframes(&mut self.pane, &self.render_state.device);
-        }
-
-        if needs_traj_reupload && !self.pane.trajectories.is_empty() {
-            // Pre-compute display params per trajectory (avoids borrow conflict in mutable loop)
-            let display_params: Vec<(u64, [f32; 4], f32)> = self
+        if needs_traj_reupload {
+            // Pre-compute display params per trajectory (selection-aware color + line width)
+            let dp: Vec<crate::armor_viewer::common::TrajectoryDisplayParams> = self
                 .pane
                 .trajectories
                 .iter()
                 .map(|traj| {
                     let base_color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
                     let (color, lw) = self.trajectory_display_params(traj.meta.id, base_color);
-                    (traj.meta.id, color, lw)
+                    crate::armor_viewer::common::TrajectoryDisplayParams { color, line_width_mult: lw }
                 })
                 .collect();
 
-            let cam_dist = self.pane.viewport.camera.distance;
-            for (i, traj) in self.pane.trajectories.iter_mut().enumerate() {
-                if let Some(old_mid) = traj.mesh_id.take() {
-                    self.pane.viewport.remove_mesh(old_mid);
-                }
-                let (_, color, lw_mult) = display_params[i];
-                traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(
-                    &mut self.pane.viewport,
-                    &traj.result,
+            if zone_changed {
+                // Full re-upload: armor + trajectories + splash wireframes
+                crate::armor_viewer::common::reupload_after_zone_change(
+                    &mut self.pane,
                     &self.render_state.device,
-                    color,
-                    traj.last_visible_hit,
-                    cam_dist,
-                    self.pane.marker_opacity,
-                    lw_mult,
-                ));
-                traj.marker_cam_dist = cam_dist;
+                    &self.render_state.queue,
+                    &self.gpu_pipeline,
+                    &[],
+                    false,
+                    &dp,
+                );
+            } else if !self.pane.trajectories.is_empty() {
+                // Only trajectories need re-upload (marker opacity or selection change)
+                crate::armor_viewer::common::reupload_trajectory_meshes(
+                    &mut self.pane,
+                    &self.render_state.device,
+                    &dp,
+                    true,
+                );
             }
             self.selection_dirty = false;
             self.needs_repaint = true;
