@@ -33,6 +33,8 @@ struct ArmorPaneViewer<'a> {
     comparison_ships_version: u64,
     /// Signal: (pane_id, new_lod) when user changes hull LOD in a popover.
     hull_lod_signal: &'a std::cell::Cell<Option<(u64, usize)>>,
+    /// Signal: pane_id when user changes hull upgrade selection in a popover.
+    hull_change_signal: &'a std::cell::Cell<Option<u64>>,
 }
 
 impl TabViewer for ArmorPaneViewer<'_> {
@@ -63,6 +65,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
             self.translate_part,
             self.comparison_ships_version,
             self.hull_lod_signal,
+            self.hull_change_signal,
         );
     }
 
@@ -546,6 +549,8 @@ impl ToolkitTabViewer<'_> {
         let analysis_tab_ref = &analysis_tab_cell;
         let hull_lod_cell: std::cell::Cell<Option<(u64, usize)>> = std::cell::Cell::new(None);
         let hull_lod_ref = &hull_lod_cell;
+        let hull_change_cell: std::cell::Cell<Option<u64>> = std::cell::Cell::new(None);
+        let hull_change_ref = &hull_change_cell;
         let comparison_ships_snapshot = &state.comparison_ships;
         let ifhe_snapshot = state.ifhe_enabled;
         {
@@ -563,6 +568,7 @@ impl ToolkitTabViewer<'_> {
                 translate_part: translate_part_ref,
                 comparison_ships_version: state.comparison_ships_version,
                 hull_lod_signal: hull_lod_ref,
+                hull_change_signal: hull_change_ref,
             };
             let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).id_salt("armor_content"));
             DockArea::new(&mut state.dock_state)
@@ -695,6 +701,16 @@ impl ToolkitTabViewer<'_> {
             if let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id) {
                 if let Some(param_index) = pane.selected_ship.clone() {
                     start_hull_lod_reload(pane, &ship_assets, &param_index, new_lod);
+                }
+            }
+        }
+
+        // Handle hull upgrade change signal — full ship reload with new hull
+        if let Some(pane_id) = hull_change_cell.get() {
+            if let Some((_, pane)) = state.dock_state.iter_all_tabs_mut().find(|(_, t)| t.id == pane_id) {
+                if let Some(param_index) = pane.selected_ship.clone() {
+                    let display_name = pane.loaded_armor.as_ref().map(|a| a.display_name.clone()).unwrap_or_default();
+                    load_ship_for_pane_with_lod(pane, &param_index, &display_name, &ship_assets, pane.hull_lod);
                 }
             }
         }
@@ -1298,6 +1314,7 @@ fn render_armor_pane(
     translate_part: &dyn Fn(&str) -> String,
     comparison_ships_version: u64,
     hull_lod_signal: &std::cell::Cell<Option<(u64, usize)>>,
+    hull_change_signal: &std::cell::Cell<Option<u64>>,
 ) {
     let pane_id = pane.id;
 
@@ -1371,7 +1388,7 @@ fn render_armor_pane(
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey, lod) = draw_hull_visibility_popover(ui, pane, &armor);
+                                let (changed, hkey, lod, hull_changed) = draw_hull_visibility_popover(ui, pane, &armor);
                                 if changed {
                                     zone_changed = true;
                                 }
@@ -1380,6 +1397,9 @@ fn render_armor_pane(
                                 }
                                 if let Some(new_lod) = lod {
                                     hull_lod_signal.set(Some((pane_id, new_lod)));
+                                }
+                                if hull_changed {
+                                    hull_change_signal.set(Some(pane_id));
                                 }
                             });
                     }
@@ -2245,10 +2265,38 @@ fn load_ship_for_pane_with_lod(
     use wowsunpack::game_params::types::GameParamProvider;
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
+    let selected_hull = pane.selected_hull.clone();
+
+    // Build sorted hull upgrade list for the UI
+    let hull_upgrade_names: Vec<(String, String)> = vehicle
+        .as_ref()
+        .and_then(|v| v.hull_upgrades())
+        .map(|upgrades| {
+            let mut keys: Vec<&String> = upgrades.keys().collect();
+            keys.sort();
+            keys.iter()
+                .enumerate()
+                .map(|(i, k)| {
+                    let label = format!("Hull {}", (b'A' + i as u8) as char);
+                    ((*k).clone(), label)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Look up dock_y_offset for the selected hull (or first hull if none selected)
     let dock_y_offset = param.as_ref().and_then(|p| {
         p.vehicle()
             .and_then(|v| v.hull_upgrades())
-            .and_then(|upgrades| upgrades.values().next())
+            .and_then(|upgrades| {
+                if let Some(sel) = &selected_hull {
+                    upgrades.get(sel)
+                } else {
+                    let mut keys: Vec<&String> = upgrades.keys().collect();
+                    keys.sort();
+                    keys.first().and_then(|k| upgrades.get(*k))
+                }
+            })
             .and_then(|c| c.dock_y_offset())
     });
 
@@ -2257,7 +2305,7 @@ fn load_ship_for_pane_with_lod(
             let vehicle = vehicle.ok_or_else(|| format!("No vehicle found for param index"))?;
             let options = wowsunpack::export::ship::ShipExportOptions {
                 lod: requested_lod,
-                hull: None,
+                hull: selected_hull.clone(),
                 textures: false,
                 damaged: false,
             };
@@ -2420,6 +2468,8 @@ fn load_ship_for_pane_with_lod(
                 hull_textures,
                 hull_lod_count,
                 hull_lod: requested_lod,
+                hull_upgrade_names,
+                loaded_hull: selected_hull,
             };
             armor.apply_waterline_offset();
             Ok(armor)
@@ -2449,13 +2499,14 @@ pub(crate) fn start_hull_lod_reload(
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
     let waterline_dy = pane.loaded_armor.as_ref().map(|a| a.waterline_dy).unwrap_or(0.0);
+    let selected_hull = pane.selected_hull.clone();
 
     std::thread::spawn(move || {
         let result = (|| {
             let vehicle = vehicle.ok_or_else(|| "No vehicle found for param index".to_string())?;
             let options = wowsunpack::export::ship::ShipExportOptions {
                 lod: requested_lod,
-                hull: None,
+                hull: selected_hull,
                 textures: false,
                 damaged: false,
             };
@@ -2901,15 +2952,16 @@ pub fn upload_hull_highlight(
 }
 
 /// Draw the hull visibility popover content (groups + individual meshes with hover detection).
-/// Returns `(zone_changed, hovered_key, new_lod)` where `new_lod` is `Some(lod)` if the user
-/// selected a different LOD level.
+/// Returns `(zone_changed, hovered_key, new_lod, hull_changed)` where `new_lod` is `Some(lod)` if the user
+/// selected a different LOD level, and `hull_changed` is true if the user selected a different hull upgrade.
 pub(crate) fn draw_hull_visibility_popover(
     ui: &mut egui::Ui,
     pane: &mut ArmorPane,
     armor: &LoadedShipArmor,
-) -> (bool, Option<SidebarHighlightKey>, Option<usize>) {
+) -> (bool, Option<SidebarHighlightKey>, Option<usize>, bool) {
     let mut zone_changed = false;
     let mut new_lod: Option<usize> = None;
+    let mut hull_changed = false;
     let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
 
     let all_hull_names: Vec<&String> = armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
@@ -2928,6 +2980,21 @@ pub(crate) fn draw_hull_visibility_popover(
             zone_changed = true;
         }
     });
+
+    // Hull upgrade selector
+    if armor.hull_upgrade_names.len() > 1 {
+        ui.horizontal(|ui| {
+            ui.label("Hull:");
+            for (key, label) in &armor.hull_upgrade_names {
+                let is_selected = pane.selected_hull.as_ref() == Some(key)
+                    || (pane.selected_hull.is_none() && *key == armor.hull_upgrade_names[0].0);
+                if ui.selectable_label(is_selected, label).clicked() && !is_selected {
+                    pane.selected_hull = Some(key.clone());
+                    hull_changed = true;
+                }
+            }
+        });
+    }
 
     // LOD selector
     if armor.hull_lod_count > 1 {
@@ -2991,7 +3058,7 @@ pub(crate) fn draw_hull_visibility_popover(
         }
     });
 
-    (zone_changed, hovered.into_inner(), new_lod)
+    (zone_changed, hovered.into_inner(), new_lod, hull_changed)
 }
 
 /// Add a line segment as two cross-shaped quads into the vertex/index buffers.

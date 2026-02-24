@@ -193,10 +193,20 @@ impl RealtimeArmorViewer {
         let title =
             Arc::new(format!("Armor Viewer — {} ({})", target_player.username, target_player.ship_display_name));
 
+        // Resolve the replay's equipped hull to a hull upgrade key name
+        let selected_hull = target_player.hull_param_id.and_then(|hull_id| {
+            use wowsunpack::game_params::types::GameParamProvider;
+            let hull_param = ship_assets.metadata().game_param_by_id(hull_id)?;
+            let hull_index = hull_param.index().to_string();
+            let vehicle = target_player.vehicle.vehicle()?;
+            vehicle.hull_upgrades()?.keys().find(|k| k.contains(&hull_index)).cloned()
+        });
+
         let mut pane = ArmorPane::empty(0);
         pane.show_plate_edges = true;
         pane.armor_opacity = 1.0;
         pane.trajectory_mode = true;
+        pane.selected_hull = selected_hull;
 
         Self {
             title,
@@ -253,6 +263,7 @@ impl RealtimeArmorViewer {
 
         self.pane.selected_ship = Some(vehicle.index().to_string());
         self.pane.loading = true;
+        let selected_hull = self.pane.selected_hull.clone();
 
         let (tx, rx) = mpsc::channel();
         let requested_lod = lod;
@@ -266,13 +277,39 @@ impl RealtimeArmorViewer {
                 let dock_y_offset = param.as_ref().and_then(|p| {
                     p.vehicle()
                         .and_then(|v| v.hull_upgrades())
-                        .and_then(|upgrades| upgrades.values().next())
+                        .and_then(|upgrades| {
+                            if let Some(sel) = &selected_hull {
+                                upgrades.get(sel)
+                            } else {
+                                let mut keys: Vec<&String> = upgrades.keys().collect();
+                                keys.sort();
+                                keys.first().and_then(|k| upgrades.get(*k))
+                            }
+                        })
                         .and_then(|c| c.dock_y_offset())
                 });
 
+                // Build sorted hull upgrade list for the UI
+                let hull_upgrade_names: Vec<(String, String)> = param
+                    .as_ref()
+                    .and_then(|p| p.vehicle())
+                    .and_then(|v| v.hull_upgrades())
+                    .map(|upgrades| {
+                        let mut keys: Vec<&String> = upgrades.keys().collect();
+                        keys.sort();
+                        keys.iter()
+                            .enumerate()
+                            .map(|(i, k)| {
+                                let label = format!("Hull {}", (b'A' + i as u8) as char);
+                                ((*k).clone(), label)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 let options = wowsunpack::export::ship::ShipExportOptions {
                     lod: requested_lod,
-                    hull: None,
+                    hull: selected_hull.clone(),
                     textures: false,
                     damaged: false,
                 };
@@ -399,6 +436,8 @@ impl RealtimeArmorViewer {
                     hull_textures,
                     hull_lod_count,
                     hull_lod: requested_lod,
+                    hull_upgrade_names,
+                    loaded_hull: selected_hull,
                 };
                 armor.apply_waterline_offset();
                 Ok(armor)
@@ -493,11 +532,13 @@ impl RealtimeArmorViewer {
     ) -> [f32; 3] {
         let offset = [world_pos.x - ship_pos.x, world_pos.y - ship_pos.y, world_pos.z - ship_pos.z];
         let unrotated = Self::rotate_vec(rot, offset);
-        // model_x = world_z, model_z = world_x
+        // Map world-space (BigWorld) to model-space (right-handed, Z-negated):
+        //   model_x = -world_z (lateral — negated for RH mesh coords)
+        //   model_z = world_x  (longitudinal)
         // ship_pos.y is at the waterline (sea surface), so the Y offset
         // already gives height above waterline. apply_waterline_offset()
         // shifted the mesh so Y=0 = waterline.
-        let model_x = model_center[0] + unrotated[2];
+        let model_x = model_center[0] - unrotated[2];
         let model_y = unrotated[1];
         let model_z = model_center[2] + unrotated[0];
         if let Some((min, max)) = bounds {
@@ -704,8 +745,8 @@ impl RealtimeArmorViewer {
                 }
                 let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
                 let local = Self::rotate_vec(&rot, world_dir);
-                // model_x = world_z, model_z = world_x
-                normalize([local[2], local[1], local[0]])
+                // model_x = -world_z, model_z = -world_x (RH mesh coords)
+                normalize([-local[2], local[1], -local[0]])
             } else if let Some(shot) = matched_shot {
                 let dx = impact_pos.x - shot.origin.x;
                 let dz = impact_pos.z - shot.origin.z;
@@ -727,7 +768,7 @@ impl RealtimeArmorViewer {
                     world_dir
                 };
                 let local = Self::rotate_vec(&rot, world_dir_3d);
-                normalize([local[2], local[1], local[0]])
+                normalize([-local[2], local[1], -local[0]])
             } else {
                 continue;
             };
@@ -1396,7 +1437,8 @@ impl RealtimeArmorViewer {
                 }
                 let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
                 let local = Self::rotate_vec(&rot, world_dir);
-                normalize([local[2], local[1], local[0]])
+                // model_x = -world_z, model_z = -world_x (RH mesh coords)
+                normalize([-local[2], local[1], -local[0]])
             } else if let Some(shot) = matched_shot {
                 let dx = impact_pos.x - shot.origin.x;
                 let dz = impact_pos.z - shot.origin.z;
@@ -1417,7 +1459,7 @@ impl RealtimeArmorViewer {
                     world_dir
                 };
                 let local = Self::rotate_vec(&rot, world_dir_3d);
-                normalize([local[2], local[1], local[0]])
+                normalize([-local[2], local[1], -local[0]])
             } else {
                 continue;
             };
@@ -1749,6 +1791,7 @@ impl RealtimeArmorViewer {
         let prev_marker_opacity = self.pane.marker_opacity;
         let sidebar_hovered_key: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
         let lod_change_signal: std::cell::Cell<Option<usize>> = std::cell::Cell::new(None);
+        let hull_change_signal: std::cell::Cell<bool> = std::cell::Cell::new(false);
         if let Some(armor) = self.pane.loaded_armor.take() {
             if !armor.zone_parts.is_empty() {
                 ui.horizontal(|ui| {
@@ -1780,7 +1823,7 @@ impl RealtimeArmorViewer {
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey, new_lod) =
+                                let (changed, hkey, new_lod, hull_changed) =
                                     crate::ui::armor_viewer::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
                                 if changed {
                                     zone_changed = true;
@@ -1790,6 +1833,9 @@ impl RealtimeArmorViewer {
                                 }
                                 if new_lod.is_some() {
                                     lod_change_signal.set(new_lod);
+                                }
+                                if hull_changed {
+                                    hull_change_signal.set(true);
                                 }
                             });
                     }
@@ -1845,6 +1891,11 @@ impl RealtimeArmorViewer {
                 ui.separator();
             }
             self.pane.loaded_armor = Some(armor);
+        }
+
+        // Handle hull upgrade change — full ship reload
+        if hull_change_signal.get() {
+            self.start_ship_load();
         }
 
         // Handle LOD change from hull popover — hull-only reload

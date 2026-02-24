@@ -268,6 +268,11 @@ pub struct LoadedShipArmor {
     pub hull_lod_count: usize,
     /// The LOD level used to load the current hull meshes.
     pub hull_lod: usize,
+    /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
+    /// Display labels are "Hull A", "Hull B", etc. based on alphabetical order.
+    pub hull_upgrade_names: Vec<(String, String)>,
+    /// The hull upgrade key that was used to load this armor data.
+    pub loaded_hull: Option<String>,
 }
 
 impl LoadedShipArmor {
@@ -401,6 +406,8 @@ pub struct ArmorPane {
     pub hull_mesh_ids: Vec<MeshId>,
     /// Receiver for background hull-only reload (LOD change).
     pub hull_load_receiver: Option<Receiver<Result<HullReloadData, String>>>,
+    /// Selected hull upgrade name (GameParam key). `None` = stock (first alphabetically).
+    pub selected_hull: Option<String>,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -461,6 +468,7 @@ impl ArmorPane {
             hull_lod: 0,
             hull_mesh_ids: Vec::new(),
             hull_load_receiver: None,
+            selected_hull: None,
         }
     }
 }

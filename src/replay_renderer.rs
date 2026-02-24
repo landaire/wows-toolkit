@@ -757,6 +757,8 @@ pub struct ReplayPlayerInfo {
     pub vehicle: Arc<wowsunpack::game_params::types::Param>,
     pub ship_display_name: String,
     pub is_friendly: bool,
+    /// Equipped hull GameParamId from the replay's ShipConfig.
+    pub hull_param_id: Option<wowsunpack::game_types::GameParamId>,
 }
 
 /// Shared bridge between replay thread and realtime armor viewer windows.
@@ -1559,6 +1561,7 @@ fn playback_thread(
                     .unwrap_or_default();
                 let team_id = player.initial_state().team_id();
                 let is_friendly = self_team.map(|st| st == team_id).unwrap_or(false);
+                let hull_param_id = player.vehicle_entity().map(|ve| ve.props().ship_config().hull());
                 ReplayPlayerInfo {
                     entity_id: *eid,
                     username: player.initial_state().username().to_string(),
@@ -1566,6 +1569,7 @@ fn playback_thread(
                     vehicle: Arc::new(player.vehicle().clone()),
                     ship_display_name: display_name,
                     is_friendly,
+                    hull_param_id,
                 }
             })
             .collect();
