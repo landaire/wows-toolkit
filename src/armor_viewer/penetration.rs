@@ -3,7 +3,13 @@ use std::sync::Arc;
 
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Km, Millimeters, Param, ShellInfo, Species};
+use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::game_params::types::Species;
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
@@ -172,7 +178,8 @@ pub fn impact_angle_deg(ray_dir: &[f32; 3], normal: &[f32; 3]) -> f32 {
 // Per-plate ballistic simulation
 // ---------------------------------------------------------------------------
 
-use crate::armor_viewer::ballistics::{ImpactResult, ShellParams};
+use crate::armor_viewer::ballistics::ImpactResult;
+use crate::armor_viewer::ballistics::ShellParams;
 
 /// Outcome of a shell hitting a single plate.
 #[derive(Clone, Debug, PartialEq)]

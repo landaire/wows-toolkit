@@ -37,11 +37,13 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
-use wows_replays::analyzer::battle_controller::state::{ControlPointType, ResolvedShotHit};
+use wows_replays::analyzer::battle_controller::state::ControlPointType;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
+use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
-use wows_replays::types::{ElapsedClock, GameClock};
+use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -2083,7 +2085,9 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{self};
+    use wows_minimap_renderer::advantage::{
+        self,
+    };
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock = GameClock(0.0);
 

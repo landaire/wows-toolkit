@@ -1,5 +1,14 @@
-use crate::viewport_3d::camera::{ArcballCamera, add, cross, dot, mat4_inverse, mat4_mul, normalize, scale, sub};
-use crate::viewport_3d::types::{HitResult, MeshId};
+use crate::viewport_3d::camera::ArcballCamera;
+use crate::viewport_3d::camera::add;
+use crate::viewport_3d::camera::cross;
+use crate::viewport_3d::camera::dot;
+use crate::viewport_3d::camera::mat4_inverse;
+use crate::viewport_3d::camera::mat4_mul;
+use crate::viewport_3d::camera::normalize;
+use crate::viewport_3d::camera::scale;
+use crate::viewport_3d::camera::sub;
+use crate::viewport_3d::types::HitResult;
+use crate::viewport_3d::types::MeshId;
 
 /// CPU-side mesh data retained for picking.
 pub(crate) struct PickableMesh {

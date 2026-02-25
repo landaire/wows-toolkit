@@ -3,14 +3,22 @@
 //! Uses `egui_dock` so the user can split, rearrange, and dock sub-panels
 //! freely within the Analysis floating window.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 
-use egui_dock::{DockArea, DockState, TabViewer};
-use wowsunpack::game_params::types::{AmmoType, Km, ShellInfo};
+use egui_dock::DockArea;
+use egui_dock::DockState;
+use egui_dock::TabViewer;
+use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::ShellInfo;
 
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonShip;
-use crate::armor_viewer::state::{AnalysisTab, ArmorPane, ArmorViewerState, StoredTrajectory};
+use crate::armor_viewer::state::AnalysisTab;
+use crate::armor_viewer::state::ArmorPane;
+use crate::armor_viewer::state::ArmorViewerState;
+use crate::armor_viewer::state::StoredTrajectory;
 use crate::icons;
 use crate::wows_data::SharedWoWsData;
 

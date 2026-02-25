@@ -1,21 +1,41 @@
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use egui_dock::{DockArea, DockState, TabViewer};
+use egui_dock::DockArea;
+use egui_dock::DockState;
+use egui_dock::TabViewer;
 
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::legend::show_armor_legend;
-use crate::armor_viewer::ship_selector::{ShipCatalog, species_name, tier_roman};
-use crate::armor_viewer::state::{
-    AnalysisTab, ArmorPane, ArmorTriangleTooltip, ArmorViewerDefaults, ArmorZone, CompareSettings, ExportRequest,
-    HullPopoverResult, HullReloadData, LoadedShipArmor, PlateKey, ShipAssetsState, SidebarHighlightKey,
-    UpgradeReloadData, VisibilitySnapshot, ZonePart,
-};
+use crate::armor_viewer::ship_selector::ShipCatalog;
+use crate::armor_viewer::ship_selector::species_name;
+use crate::armor_viewer::ship_selector::tier_roman;
+use crate::armor_viewer::state::AnalysisTab;
+use crate::armor_viewer::state::ArmorPane;
+use crate::armor_viewer::state::ArmorTriangleTooltip;
+use crate::armor_viewer::state::ArmorViewerDefaults;
+use crate::armor_viewer::state::ArmorZone;
+use crate::armor_viewer::state::CompareSettings;
+use crate::armor_viewer::state::ExportRequest;
+use crate::armor_viewer::state::HullPopoverResult;
+use crate::armor_viewer::state::HullReloadData;
+use crate::armor_viewer::state::LoadedShipArmor;
+use crate::armor_viewer::state::PlateKey;
+use crate::armor_viewer::state::ShipAssetsState;
+use crate::armor_viewer::state::SidebarHighlightKey;
+use crate::armor_viewer::state::UpgradeReloadData;
+use crate::armor_viewer::state::VisibilitySnapshot;
+use crate::armor_viewer::state::ZonePart;
 use crate::icon_str;
 use crate::icons;
 use crate::ui::analysis_panel::focus_analysis_tab;
-use crate::viewport_3d::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, LAYER_OVERLAY, MeshId, Vertex};
+use crate::viewport_3d::GpuPipeline;
+use crate::viewport_3d::LAYER_DEFAULT;
+use crate::viewport_3d::LAYER_HULL;
+use crate::viewport_3d::LAYER_OVERLAY;
+use crate::viewport_3d::MeshId;
+use crate::viewport_3d::Vertex;
 use wowsunpack::game_params::types::AmmoType;
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
@@ -1585,7 +1605,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 if pane.trajectory_mode && response.clicked() {
                     let shift_held = vp_ui.input(|i| i.modifiers.shift);
                     if let Some(click_pos) = response.interact_pointer_pos() {
-                        use crate::viewport_3d::camera::{normalize, scale, sub};
+                        use crate::viewport_3d::camera::normalize;
+                        use crate::viewport_3d::camera::scale;
+                        use crate::viewport_3d::camera::sub;
 
                         // Step 1: Use camera ray to find the click point on the hull surface
                         let camera_hit = pane.viewport.pick(click_pos, response.rect);
@@ -2430,7 +2452,8 @@ pub(crate) fn show_armor_tooltip(
     ifhe_enabled: bool,
     translate: &dyn Fn(&str) -> String,
 ) {
-    use crate::armor_viewer::penetration::{PenResult, check_penetration};
+    use crate::armor_viewer::penetration::PenResult;
+    use crate::armor_viewer::penetration::check_penetration;
     use wowsunpack::export::gltf_export::thickness_to_color;
 
     // Main header: this plate's thickness with color swatch
@@ -2917,7 +2940,9 @@ fn traj_line_segment(
     perp2: [f32; 3],
     line_width: f32,
 ) {
-    use crate::viewport_3d::camera::{add, scale, sub};
+    use crate::viewport_3d::camera::add;
+    use crate::viewport_3d::camera::scale;
+    use crate::viewport_3d::camera::sub;
     let offset1 = scale(perp1, line_width * 0.5);
     let offset2 = scale(perp2, line_width * 0.5);
 
@@ -2943,7 +2968,9 @@ fn traj_marker(
     perp1: [f32; 3],
     perp2: [f32; 3],
 ) {
-    use crate::viewport_3d::camera::{add, scale, sub};
+    use crate::viewport_3d::camera::add;
+    use crate::viewport_3d::camera::scale;
+    use crate::viewport_3d::camera::sub;
     let base = vertices.len() as u32;
     let o1 = scale(perp1, size);
     let o2 = scale(perp2, size);
@@ -3138,7 +3165,9 @@ fn recompute_trajectory_for_roll(
     marker_opacity: f32,
     comparison_ships_version: u64,
 ) {
-    use crate::viewport_3d::camera::{normalize, scale, sub};
+    use crate::viewport_3d::camera::normalize;
+    use crate::viewport_3d::camera::scale;
+    use crate::viewport_3d::camera::sub;
 
     let old_roll = traj.created_at_roll;
     let delta = old_roll - new_roll;
@@ -3282,7 +3311,8 @@ fn update_shell_sim_cache(
 
 /// Compute perpendicular vectors for a line segment direction, for cross-shaped quad rendering.
 fn segment_perps(seg_dir: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    use crate::viewport_3d::camera::{cross, normalize};
+    use crate::viewport_3d::camera::cross;
+    use crate::viewport_3d::camera::normalize;
     let arbitrary = if seg_dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
     let p1 = normalize(cross(seg_dir, arbitrary));
     let p2 = normalize(cross(seg_dir, p1));
@@ -3303,7 +3333,11 @@ pub(crate) fn upload_trajectory_visualization(
     marker_opacity: f32,
     line_width_mult: f32,
 ) -> MeshId {
-    use crate::viewport_3d::camera::{add, cross, normalize, scale, sub};
+    use crate::viewport_3d::camera::add;
+    use crate::viewport_3d::camera::cross;
+    use crate::viewport_3d::camera::normalize;
+    use crate::viewport_3d::camera::scale;
+    use crate::viewport_3d::camera::sub;
 
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -3527,7 +3561,8 @@ fn hull_group_order(group: &str) -> u32 {
 pub(crate) fn build_hull_part_groups(
     hull_meshes: &[wowsunpack::export::gltf_export::InteractiveHullMesh],
 ) -> Vec<(String, Vec<String>)> {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
+    use std::collections::HashMap;
 
     let mut group_map: HashMap<&str, BTreeSet<String>> = HashMap::new();
     for mesh in hull_meshes {

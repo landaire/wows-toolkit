@@ -7,7 +7,11 @@ use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Vehicle;
 
-use super::state::{ArmorPane, ArmorZone, LoadedShipArmor, VisibilitySnapshot, ZonePart};
+use super::state::ArmorPane;
+use super::state::ArmorZone;
+use super::state::LoadedShipArmor;
+use super::state::VisibilitySnapshot;
+use super::state::ZonePart;
 
 /// Process undo/redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z / Ctrl+R).
 /// Returns `true` if visibility was changed (caller should re-upload armor).

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::{GameParamProvider, Species};
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Species;
 
 /// Pre-built catalog of all ships, organized for the tree selector.
 pub struct ShipCatalog {

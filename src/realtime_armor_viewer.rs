@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
 use egui::mutex::Mutex;
@@ -14,16 +15,30 @@ use egui::mutex::Mutex;
 use tracing::warn;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wowsunpack::export::ship::ShipAssets;
-use wowsunpack::game_params::types::{AmmoType, Meters, Millimeters, ShellInfo};
-use wowsunpack::game_types::{EntityId, GameClock, GameParamId, ShellHitType, ShotId, WorldPos};
+use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Meters;
+use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::ShellInfo;
+use wowsunpack::game_types::EntityId;
+use wowsunpack::game_types::GameClock;
+use wowsunpack::game_types::GameParamId;
+use wowsunpack::game_types::ShellHitType;
+use wowsunpack::game_types::ShotId;
+use wowsunpack::game_types::WorldPos;
 use wowsunpack::recognized::Recognized;
 
 use crate::armor_viewer::constants::*;
-use crate::armor_viewer::penetration::{ComparisonVerdict, ExitDivergence, ServerOutcome, ServerVsSimComparison};
-use crate::armor_viewer::state::{ArmorPane, SidebarHighlightKey, StoredTrajectory};
+use crate::armor_viewer::penetration::ComparisonVerdict;
+use crate::armor_viewer::penetration::ExitDivergence;
+use crate::armor_viewer::penetration::ServerOutcome;
+use crate::armor_viewer::penetration::ServerVsSimComparison;
+use crate::armor_viewer::state::ArmorPane;
+use crate::armor_viewer::state::SidebarHighlightKey;
+use crate::armor_viewer::state::StoredTrajectory;
 use crate::icon_str;
 use crate::icons;
-use crate::replay_renderer::{RealtimeArmorBridge, ReplayPlayerInfo};
+use crate::replay_renderer::RealtimeArmorBridge;
+use crate::replay_renderer::ReplayPlayerInfo;
 use crate::viewport_3d::GpuPipeline;
 
 /// A realtime armor viewer window spawned from the replay renderer.
@@ -559,7 +574,9 @@ impl RealtimeArmorViewer {
         shell: &ShellInfo,
         server_outcome: &ServerOutcome,
     ) -> Option<TrajectorySimResult> {
-        use crate::viewport_3d::camera::{normalize, scale, sub};
+        use crate::viewport_3d::camera::normalize;
+        use crate::viewport_3d::camera::scale;
+        use crate::viewport_3d::camera::sub;
 
         let ship_yaw = hit.victim_yaw;
         let ship_world_pos = hit.victim_position;
@@ -1860,7 +1877,8 @@ impl RealtimeArmorViewer {
 
     /// Draw the plate-by-plate detail panel for a selected salvo.
     fn draw_salvo_detail(&self, ui: &mut egui::Ui, trajectory_id: u64) {
-        use crate::armor_viewer::penetration::{PlateOutcome, enclosing_zone};
+        use crate::armor_viewer::penetration::PlateOutcome;
+        use crate::armor_viewer::penetration::enclosing_zone;
 
         // Find the matching shell entry (from salvo groups) and trajectory
         let shell_and_group = self

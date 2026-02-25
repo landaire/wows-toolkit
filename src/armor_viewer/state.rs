@@ -6,7 +6,10 @@ use egui_dock::DockState;
 
 use wowsunpack::game_params::types::Km;
 
-use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
+use crate::viewport_3d::ArcballCamera;
+use crate::viewport_3d::GpuPipeline;
+use crate::viewport_3d::MeshId;
+use crate::viewport_3d::Viewport3D;
 
 /// Key identifying a specific plate: (zone, material_name, thickness in tenths of mm).
 /// The thickness discriminator ensures highlights stop at plate boundaries.

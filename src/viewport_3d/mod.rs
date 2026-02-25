@@ -34,5 +34,11 @@ pub mod renderer;
 pub mod types;
 
 pub use camera::ArcballCamera;
-pub use renderer::{GpuPipeline, LAYER_DEFAULT, LAYER_HULL, LAYER_OVERLAY, Viewport3D};
-pub use types::{HitResult, MeshId, Vertex};
+pub use renderer::GpuPipeline;
+pub use renderer::LAYER_DEFAULT;
+pub use renderer::LAYER_HULL;
+pub use renderer::LAYER_OVERLAY;
+pub use renderer::Viewport3D;
+pub use types::HitResult;
+pub use types::MeshId;
+pub use types::Vertex;

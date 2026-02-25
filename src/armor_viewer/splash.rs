@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
-use wowsunpack::game_params::types::{AmmoType, HitLocation, Millimeters, ShellInfo};
+use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::HitLocation;
+use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::models::geometry::SplashBox;
 
 use crate::viewport_3d::types::Vertex;
