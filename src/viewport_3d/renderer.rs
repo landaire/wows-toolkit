@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking::PickableMesh;
-use crate::viewport_3d::picking::{
-    self,
-};
+use crate::viewport_3d::picking::{self};
 
 const MAT4_IDENTITY: [[f32; 4]; 4] =
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -942,18 +940,55 @@ impl Viewport3D {
         offscreen.egui_texture_id
     }
 
-    /// Perform CPU picking at a screen position within the given viewport rect.
-    pub fn pick(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Option<HitResult> {
-        let mesh_refs: Vec<(MeshId, &PickableMesh, bool)> = self
-            .pick_data
+    /// Rotate a 3D point around the Z axis by `angle` radians.
+    fn rotate_z(p: [f32; 3], angle: f32) -> [f32; 3] {
+        let (s, c) = angle.sin_cos();
+        [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]
+    }
+
+    /// Transform a world-space ray into model space (inverse of model_roll).
+    /// Returns the ray unchanged when model_roll is zero.
+    fn ray_to_model_space(&self, origin: [f32; 3], dir: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+        if self.model_roll.abs() < 1e-6 {
+            return (origin, dir);
+        }
+        // The model matrix rotates model-space -> world-space by -model_roll around Z.
+        // The inverse (world -> model) is rotation by +model_roll.
+        (Self::rotate_z(origin, self.model_roll), Self::rotate_z(dir, self.model_roll))
+    }
+
+    /// Transform a model-space position back to world space (apply model_roll).
+    fn pos_to_world_space(&self, p: [f32; 3]) -> [f32; 3] {
+        if self.model_roll.abs() < 1e-6 {
+            return p;
+        }
+        Self::rotate_z(p, -self.model_roll)
+    }
+
+    /// Transform a model-space normal back to world space (apply model_roll).
+    fn normal_to_world_space(&self, n: [f32; 3]) -> [f32; 3] {
+        self.pos_to_world_space(n)
+    }
+
+    /// Collect pickable mesh references with visibility info.
+    fn pick_mesh_refs(&self) -> Vec<(MeshId, &PickableMesh, bool)> {
+        self.pick_data
             .iter()
             .map(|(id, mesh)| {
                 let visible = self.meshes.get(id).is_some_and(|m| m.visible);
                 (*id, mesh, visible)
             })
-            .collect();
+            .collect()
+    }
 
-        picking::pick_meshes(screen_pos, viewport_rect, &self.camera, &mesh_refs)
+    /// Perform CPU picking at a screen position within the given viewport rect.
+    pub fn pick(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Option<HitResult> {
+        let (origin, dir) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)?;
+        let (origin, dir) = self.ray_to_model_space(origin, dir);
+        let mesh_refs = self.pick_mesh_refs();
+        let mut hit = picking::pick_all_ray(origin, dir, &mesh_refs).into_iter().next()?.0;
+        hit.world_position = self.pos_to_world_space(hit.world_position);
+        Some(hit)
     }
 
     /// Unproject a screen position to a world-space ray (origin, direction).
@@ -964,31 +999,32 @@ impl Viewport3D {
     /// Perform CPU picking that returns ALL hits along the ray, sorted by distance.
     /// Each hit includes the triangle normal for impact angle calculations.
     pub fn pick_all(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Vec<(HitResult, [f32; 3])> {
-        let mesh_refs: Vec<(MeshId, &PickableMesh, bool)> = self
-            .pick_data
-            .iter()
-            .map(|(id, mesh)| {
-                let visible = self.meshes.get(id).is_some_and(|m| m.visible);
-                (*id, mesh, visible)
+        let Some((origin, dir)) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera) else {
+            return Vec::new();
+        };
+        let (origin, dir) = self.ray_to_model_space(origin, dir);
+        let mesh_refs = self.pick_mesh_refs();
+        picking::pick_all_ray(origin, dir, &mesh_refs)
+            .into_iter()
+            .map(|(mut hit, normal)| {
+                hit.world_position = self.pos_to_world_space(hit.world_position);
+                (hit, self.normal_to_world_space(normal))
             })
-            .collect();
-
-        picking::pick_all_meshes(screen_pos, viewport_rect, &self.camera, &mesh_refs)
+            .collect()
     }
 
     /// Pick ALL triangles hit by an arbitrary world-space ray, sorted by distance.
     /// Each hit includes the triangle normal for angle calculations.
     pub fn pick_all_ray(&self, origin: [f32; 3], direction: [f32; 3]) -> Vec<(HitResult, [f32; 3])> {
-        let mesh_refs: Vec<(MeshId, &PickableMesh, bool)> = self
-            .pick_data
-            .iter()
-            .map(|(id, mesh)| {
-                let visible = self.meshes.get(id).is_some_and(|m| m.visible);
-                (*id, mesh, visible)
+        let (origin, dir) = self.ray_to_model_space(origin, direction);
+        let mesh_refs = self.pick_mesh_refs();
+        picking::pick_all_ray(origin, dir, &mesh_refs)
+            .into_iter()
+            .map(|(mut hit, normal)| {
+                hit.world_position = self.pos_to_world_space(hit.world_position);
+                (hit, self.normal_to_world_space(normal))
             })
-            .collect();
-
-        picking::pick_all_ray(origin, direction, &mesh_refs)
+            .collect()
     }
 
     /// Handle standard 3D navigation input on a UI response.
