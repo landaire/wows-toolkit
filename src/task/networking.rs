@@ -1,9 +1,8 @@
 use std::io::Cursor;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -427,6 +426,8 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
 
     let cursor = Cursor::new(zip_data.as_slice());
 
+    let exe_dir = new_exe_path.parent().unwrap_or_else(|| Path::new("."));
+
     let mut zip = ZipArchive::new(cursor).context("failed to create ZipArchive reader")?;
     for i in 0..zip.len() {
         let mut file = zip.by_index(i).context("failed to get zip inner file by index")?;
@@ -435,7 +436,11 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
                 .context("failed to create update tmp file")
                 .attach_with(|| format!("{new_exe_path:?}"))?;
             std::io::copy(&mut file, &mut out_file).context("failed to decompress update file to disk")?;
-            break;
+        } else if file.name().ends_with(".pdb") {
+            let pdb_path = exe_dir.join("wows_toolkit.pdb");
+            if let Ok(mut out_file) = std::fs::File::create(&pdb_path) {
+                let _ = std::io::copy(&mut file, &mut out_file);
+            }
         }
     }
 
@@ -489,9 +494,7 @@ pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{
-    self,
-};
+use crate::twitch::{self};
 use jiff::Timestamp;
 use parking_lot::RwLock;
 use twitch_api::twitch_oauth2::AccessToken;
