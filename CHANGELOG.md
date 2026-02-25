@@ -2,6 +2,67 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.53] - 2026-02-25
+
+### 🚀 Features
+
+- Rudimentary realtime armor viewer
+- Add hull upgrades to armor viewer
+
+### 🐛 Bug Fixes
+
+- Refactor child window repainting for perf / accuracy
+- Come very close to real turret positions -- TODO rework
+
+### App
+
+- Make sure errors about replays failing to parse and invalid WoWs dirs are more visible
+
+### Armor_viewer
+
+- Implement shader, MSAA, and double-sided panel edge for better quality
+- Basic implementation of penetration checks
+- Begin to implement ballistics checking/arcs/etc
+- Show simulated shells and where they explode
+- Ensure trajectory viewer uses correct camera path when clicking model
+- QoL updates to trajectory UI
+- Improve trajectory analysis for multiple simultaneous ships
+- Fix label for where shell exploded; ensure that we use multiple arcs for different ships
+- Implement splash box mechanics and refactor armor analysis window
+- Make checkboxes highlight bits of ship model they belong to + fix lighting
+- Refactor lighting / hull viewing and add intersection lines to all plates
+- Improvements to hull/splash box rendering + show salvo timeline in live renderer
+- Support extracting/viewing with turret/hull upgrades
+- Increase brightness of mesh
+- Lighting improvements + fix perf when trajectories are enabled
+- Splash boxes will carry override to new windows
+
+### Data_export
+
+- Exported data now has damage relationships, player relationships, ribbons, etc.
+
+### Live_armor_viewer
+
+- Add replay server ballistics comparison + fix waterline
+- Refactor to pre-populate salvos and show a timeline
+
+### Renderer
+
+- Use strongly typed clock types + parse ahead to collect salvos
+- Add option to prefer CPU decoder
+- Fix capture point icons for standard battle
+
+### Session_stats
+
+- Add division filters, game count limit appy per-ship (instead of globally), and persist sessions
+- Revamp per-ship display and add options to copy/delete ship info
+
+## [0.1.52] - 2026-02-19
+
+### Armor_viewer
+
+- Fix hidden panel display state
+
 ## [0.1.51] - 2026-02-19
 
 ### Armor_renderer

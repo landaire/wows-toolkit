@@ -2497,7 +2497,13 @@ impl ToolkitTabViewer<'_> {
             };
 
             let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
-            let message: Cow<'_, String> = translated_text.unwrap_or(message);
+            let message: Cow<'_, str> = match translated_text {
+                Some(t) => t,
+                None => match message {
+                    Cow::Owned(s) => Cow::Owned(s),
+                    Cow::Borrowed(s) => Cow::Borrowed(s.as_str()),
+                },
+            };
 
             let text = match player {
                 Some(player) if !player.initial_state().clan().is_empty() => {
@@ -2533,7 +2539,7 @@ impl ToolkitTabViewer<'_> {
                 _ => Color32::ORANGE,
             };
 
-            job.append(message.as_str(), 0.0, TextFormat { color: text_color, ..Default::default() });
+            job.append(&message, 0.0, TextFormat { color: text_color, ..Default::default() });
 
             if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
                 ui.ctx().copy_text(text);
@@ -4038,7 +4044,7 @@ impl ToolkitTabViewer<'_> {
 
                     // Build table rows for copy-to-clipboard (label, min, max, total, avg)
                     let mut table_rows: Vec<[String; 5]> = Vec::new();
-                    if let Some(ref pr) = pr_stats {
+                    if let Some(pr) = pr_stats {
                         table_rows.push([
                             "Personal Rating".into(),
                             format!("{:.0}", pr.min),
@@ -4099,7 +4105,7 @@ impl ToolkitTabViewer<'_> {
                                         ));
                                     }
                                     ui.ctx().copy_text(md);
-                                    ui.close_menu();
+                                    ui.close();
                                 }
                                 if ui.button("Copy as CSV").clicked() {
                                     let mut csv = String::from(",Min,Max,Total,Average\n");
@@ -4110,7 +4116,7 @@ impl ToolkitTabViewer<'_> {
                                         ));
                                     }
                                     ui.ctx().copy_text(csv);
-                                    ui.close_menu();
+                                    ui.close();
                                 }
                             });
                             if ui
@@ -4144,7 +4150,7 @@ impl ToolkitTabViewer<'_> {
                                     ui.strong("Average");
                                     ui.end_row();
 
-                                    if let Some(ref pr) = pr_stats {
+                                    if let Some(pr) = pr_stats {
                                         ui.label("Personal Rating");
                                         let min_cat = PersonalRatingCategory::from_pr(pr.min);
                                         ui.label(RichText::new(format!("{:.0}", pr.min)).color(min_cat.color()))
@@ -4540,27 +4546,27 @@ impl ToolkitTabViewer<'_> {
     /// Called from the main button (non-closure) path.
     fn open_replay_controls_window(&mut self) {
         // Parse from VFS on first use, then cache
-        if self.tab_state.replay_controls_cache.is_none() {
-            if let Some(map) = &self.tab_state.wows_data_map {
-                let result = map.with_builds(|builds| {
-                    for data in builds.values() {
-                        let data = data.read();
-                        let path = "system/data/commands.scheme.xml";
-                        let mut buf = Vec::new();
-                        if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
-                            use std::io::Read;
-                            if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
-                                let groups = crate::replay_renderer::parse_commands_scheme(&buf);
-                                if !groups.is_empty() {
-                                    return Some(groups);
-                                }
+        if self.tab_state.replay_controls_cache.is_none()
+            && let Some(map) = &self.tab_state.wows_data_map
+        {
+            let result = map.with_builds(|builds| {
+                for data in builds.values() {
+                    let data = data.read();
+                    let path = "system/data/commands.scheme.xml";
+                    let mut buf = Vec::new();
+                    if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
+                        use std::io::Read;
+                        if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                            let groups = crate::replay_renderer::parse_commands_scheme(&buf);
+                            if !groups.is_empty() {
+                                return Some(groups);
                             }
                         }
                     }
-                    None
-                });
-                self.tab_state.replay_controls_cache = result;
-            }
+                }
+                None
+            });
+            self.tab_state.replay_controls_cache = result;
         }
         self.tab_state.show_replay_controls = true;
     }

@@ -64,7 +64,8 @@ use crate::wows_data::SharedWoWsData;
 
 /// A single key-binding entry parsed from `commands.scheme.xml`.
 #[derive(Clone, Debug)]
-pub(crate) struct ReplayCommand {
+#[allow(dead_code)]
+pub struct ReplayCommand {
     /// Human-readable name derived from the XML tag (e.g. "Free Camera").
     pub label: String,
     /// Context the command belongs to (e.g. "replay", "dead", "freeCam").
@@ -77,7 +78,7 @@ pub(crate) struct ReplayCommand {
 
 /// A group of related commands for display.
 #[derive(Clone, Debug)]
-pub(crate) struct CommandGroup {
+pub struct CommandGroup {
     pub title: &'static str,
     pub commands: Vec<ReplayCommand>,
 }
@@ -181,7 +182,7 @@ pub(crate) fn parse_commands_scheme(data: &[u8]) -> Vec<CommandGroup> {
 }
 
 /// Extract formatted keybindings from VALUE1/VALUE2 child elements.
-fn parse_value_children(node: &roxmltree::Node) -> (String, String) {
+fn parse_value_children(node: &roxmltree::Node<'_, '_>) -> (String, String) {
     let mut key1 = String::new();
     let mut key2 = String::new();
 
@@ -1212,7 +1213,7 @@ fn playback_thread(
     let shot_timelines = extract_all_shots(
         &raw_meta,
         &packet_data,
-        &*game_metadata,
+        &game_metadata,
         Some(&game_constants),
         &shot_counts,
         health_histories,
@@ -2445,10 +2446,10 @@ fn extract_timeline_events(
                 for hit in controller.shot_hits() {
                     let counts = shot_counts.entry(hit.victim_entity_id).or_default();
                     counts.shell_count += 1;
-                    if let Some(ref salvo) = hit.salvo {
-                        if seen_salvos.insert((salvo.owner_id, salvo.salvo_id)) {
-                            counts.salvo_count += 1;
-                        }
+                    if let Some(ref salvo) = hit.salvo
+                        && seen_salvos.insert((salvo.owner_id, salvo.salvo_id))
+                    {
+                        counts.salvo_count += 1;
                     }
                 }
 

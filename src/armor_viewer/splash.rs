@@ -92,6 +92,7 @@ const CUBE_EDGE_HALF_WIDTH: f32 = 0.003;
 // ─── Data Structures ─────────────────────────────────────────────────────────
 
 /// Parsed splash box data for a loaded ship.
+#[allow(dead_code)]
 pub struct ShipSplashData {
     /// Named AABBs from the `.splash` file.
     pub boxes: Vec<SplashBox>,
@@ -105,6 +106,7 @@ pub struct ShipSplashData {
 ///
 /// This is shell-independent: it records which zones the splash volume
 /// overlaps. Penetration checks are done per-shell in the UI layer.
+#[allow(dead_code)]
 pub struct SplashResult {
     pub impact_point: [f32; 3],
     /// Splash cube half-extent in model-space units (uniform on all axes).
@@ -121,6 +123,7 @@ pub struct SplashResult {
 
 /// A zone/component hit by the splash cube.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct SplashZoneHit {
     /// Human-readable zone name (from HitLocation, or prettified box name).
     pub zone_name: String,
@@ -151,7 +154,7 @@ pub fn parse_ship_splash_data(
 
     if let Some(hit_locs) = hit_locations {
         for (zone_name, hl) in hit_locs {
-            let box_names: Vec<String> = hl.splash_boxes().iter().cloned().collect();
+            let box_names: Vec<String> = hl.splash_boxes().to_vec();
             for bname in &box_names {
                 box_to_zone.insert(bname.clone(), zone_name.clone());
             }

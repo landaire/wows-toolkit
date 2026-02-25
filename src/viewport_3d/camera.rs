@@ -242,10 +242,10 @@ impl ArcballCamera {
         }
 
         // Double-click: reset camera
-        if response.double_clicked() {
-            if let Some((min, max)) = bounds {
-                self.reset(min, max);
-            }
+        if response.double_clicked()
+            && let Some((min, max)) = bounds
+        {
+            self.reset(min, max);
         }
     }
 }

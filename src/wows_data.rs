@@ -405,7 +405,7 @@ impl ReplayLoader {
                                 .post("http://shipbuilds.com/api/ship_builds")
                                 .json(&crate::build_tracker::BuildTrackerPayload::build_from(
                                     player,
-                                    player.initial_state().realm().to_owned(),
+                                    player.initial_state().realm().unwrap_or_default().to_owned(),
                                     report.version(),
                                     report.game_type().to_string(),
                                     metadata_provider,

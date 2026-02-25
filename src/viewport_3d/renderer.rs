@@ -672,11 +672,11 @@ impl Viewport3D {
 
     /// Set mesh visibility.
     pub fn set_visible(&mut self, id: MeshId, visible: bool) {
-        if let Some(mesh) = self.meshes.get_mut(&id) {
-            if mesh.visible != visible {
-                mesh.visible = visible;
-                self.needs_redraw = true;
-            }
+        if let Some(mesh) = self.meshes.get_mut(&id)
+            && mesh.visible != visible
+        {
+            mesh.visible = visible;
+            self.needs_redraw = true;
         }
     }
 
@@ -825,7 +825,10 @@ impl Viewport3D {
         let world_mvp = mat4_mul(proj_mat, view_mat);
         let world_uniforms = Uniforms { mvp: world_mvp, model_view: view_mat, light_dir };
 
-        if self.uniform_buffer.is_none() {
+        if let (Some(ub), Some(wub)) = (self.uniform_buffer.as_ref(), self.world_uniform_buffer.as_ref()) {
+            queue.write_buffer(ub, 0, bytemuck::bytes_of(&uniforms));
+            queue.write_buffer(wub, 0, bytemuck::bytes_of(&world_uniforms));
+        } else {
             use wgpu::util::DeviceExt;
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("viewport_3d_uniforms"),
@@ -852,9 +855,6 @@ impl Viewport3D {
             });
             self.world_uniform_buffer = Some(world_buffer);
             self.world_uniform_bind_group = Some(world_bind_group);
-        } else {
-            queue.write_buffer(self.uniform_buffer.as_ref().unwrap(), 0, bytemuck::bytes_of(&uniforms));
-            queue.write_buffer(self.world_uniform_buffer.as_ref().unwrap(), 0, bytemuck::bytes_of(&world_uniforms));
         }
 
         // Render
@@ -1009,11 +1009,11 @@ impl Viewport3D {
 
     /// Free the offscreen textures and unregister from egui.
     pub fn destroy(&mut self, render_state: &eframe::egui_wgpu::RenderState) {
-        if let Some(offscreen) = self.offscreen.take() {
-            if let Some(id) = offscreen.egui_texture_id {
-                let mut renderer = render_state.renderer.write();
-                renderer.free_texture(&id);
-            }
+        if let Some(offscreen) = self.offscreen.take()
+            && let Some(id) = offscreen.egui_texture_id
+        {
+            let mut renderer = render_state.renderer.write();
+            renderer.free_texture(&id);
         }
         self.meshes.clear();
         self.pick_data.clear();

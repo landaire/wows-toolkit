@@ -7,7 +7,7 @@ use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::Vehicle;
 
-use super::state::{ArmorPane, LoadedShipArmor, VisibilitySnapshot};
+use super::state::{ArmorPane, ArmorZone, LoadedShipArmor, VisibilitySnapshot, ZonePart};
 
 /// Process undo/redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z / Ctrl+R).
 /// Returns `true` if visibility was changed (caller should re-upload armor).
@@ -98,6 +98,7 @@ pub(crate) fn resolve_dock_y_offset(vehicle: &Vehicle, selected_hull: &Option<St
 
 /// Options for [`load_ship_armor`]. Callers populate the fields they care about;
 /// others use sensible defaults via `..Default::default()`.
+#[derive(Default)]
 pub(crate) struct ShipLoadOptions {
     pub display_name: String,
     pub lod: usize,
@@ -115,22 +116,6 @@ pub(crate) struct ShipLoadOptions {
     pub hull_upgrade_names: Vec<(String, String)>,
     /// Pre-computed dock Y offset (from [`resolve_dock_y_offset`]).
     pub dock_y_offset: Option<f32>,
-}
-
-impl Default for ShipLoadOptions {
-    fn default() -> Self {
-        Self {
-            display_name: String::new(),
-            lod: 0,
-            selected_hull: None,
-            module_overrides: HashMap::new(),
-            include_splash_data: false,
-            include_hit_locations: false,
-            module_alternatives: Vec::new(),
-            hull_upgrade_names: Vec::new(),
-            dock_y_offset: None,
-        }
-    }
 }
 
 /// Full re-upload sequence after a zone/visibility change.
@@ -226,10 +211,10 @@ pub(crate) fn load_ship_armor(
         .collect();
     zone_parts.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)> = zone_parts
+    let zone_part_plates: Vec<ArmorZone> = zone_parts
         .iter()
         .map(|(zone, parts)| {
-            let parts_with_plates: Vec<(String, Vec<i32>)> = parts
+            let parts_with_plates = parts
                 .iter()
                 .map(|part| {
                     let plates = zone_part_plates_map
@@ -237,10 +222,10 @@ pub(crate) fn load_ship_armor(
                         .and_then(|m| m.get(part))
                         .map(|s| s.iter().copied().collect())
                         .unwrap_or_default();
-                    (part.clone(), plates)
+                    ZonePart { name: part.clone(), plates }
                 })
                 .collect();
-            (zone.clone(), parts_with_plates)
+            ArmorZone { name: zone.clone(), parts: parts_with_plates }
         })
         .collect();
 
@@ -285,14 +270,13 @@ pub(crate) fn load_ship_armor(
             if hull_textures.contains_key(mfm) {
                 continue;
             }
-            if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ship_assets.vfs(), mfm) {
-                if let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes)) {
-                    if let Ok(img) = image_dds::image_from_dds(&dds, 0) {
-                        let w = img.width();
-                        let h = img.height();
-                        hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
-                    }
-                }
+            if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(ship_assets.vfs(), mfm)
+                && let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes))
+                && let Ok(img) = image_dds::image_from_dds(&dds, 0)
+            {
+                let w = img.width();
+                let h = img.height();
+                hull_textures.insert(mfm.clone(), (w, h, img.into_raw()));
             }
         }
     }
@@ -391,35 +375,35 @@ pub(crate) fn poll_pane_load_receivers(
 ) -> bool {
     let mut ship_loaded = false;
 
-    if let Some(rx) = &pane.load_receiver {
-        if let Ok(result) = rx.try_recv() {
-            match result {
-                Ok(armor) => {
-                    crate::ui::armor_viewer::init_armor_viewport(pane, &armor, device, queue, pipeline);
-                    pane.loaded_armor = Some(armor);
-                    ship_loaded = true;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to load ship armor: {e}");
-                }
+    if let Some(rx) = &pane.load_receiver
+        && let Ok(result) = rx.try_recv()
+    {
+        match result {
+            Ok(armor) => {
+                crate::ui::armor_viewer::init_armor_viewport(pane, &armor, device, queue, pipeline);
+                pane.loaded_armor = Some(armor);
+                ship_loaded = true;
             }
-            pane.loading = false;
-            pane.load_receiver = None;
+            Err(e) => {
+                tracing::error!("Failed to load ship armor: {e}");
+            }
         }
+        pane.loading = false;
+        pane.load_receiver = None;
     }
 
-    if let Some(rx) = &pane.hull_load_receiver {
-        if let Ok(result) = rx.try_recv() {
-            match result {
-                Ok(data) => {
-                    crate::ui::armor_viewer::apply_hull_reload(pane, data, device, queue, pipeline);
-                }
-                Err(e) => {
-                    tracing::error!("Failed to reload hull LOD: {e}");
-                }
+    if let Some(rx) = &pane.hull_load_receiver
+        && let Ok(result) = rx.try_recv()
+    {
+        match result {
+            Ok(data) => {
+                crate::ui::armor_viewer::apply_hull_reload(pane, data, device, queue, pipeline);
             }
-            pane.hull_load_receiver = None;
+            Err(e) => {
+                tracing::error!("Failed to reload hull LOD: {e}");
+            }
         }
+        pane.hull_load_receiver = None;
     }
 
     ship_loaded
@@ -563,10 +547,8 @@ pub(crate) fn reupload_trajectory_meshes(
     let cam_dist = pane.viewport.camera.distance;
     let marker_opacity = pane.marker_opacity;
     for (i, traj) in pane.trajectories.iter_mut().enumerate() {
-        if remove_old {
-            if let Some(old_mid) = traj.mesh_id.take() {
-                pane.viewport.remove_mesh(old_mid);
-            }
+        if remove_old && let Some(old_mid) = traj.mesh_id.take() {
+            pane.viewport.remove_mesh(old_mid);
         }
         let dp = &display_params[i];
         traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(

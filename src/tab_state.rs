@@ -541,10 +541,10 @@ impl TabState {
                 let needs_parsing = replay_guard.ui_report.is_none();
 
                 // If already parsed, extract stats and add immediately
-                if !needs_parsing {
-                    if let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader) {
-                        self.settings.session_stats.add_game(stat);
-                    }
+                if !needs_parsing
+                    && let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
+                {
+                    self.settings.session_stats.add_game(stat);
                 }
 
                 drop(replay_guard);

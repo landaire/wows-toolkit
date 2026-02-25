@@ -12,6 +12,21 @@ use crate::viewport_3d::{ArcballCamera, GpuPipeline, MeshId, Viewport3D};
 /// The thickness discriminator ensures highlights stop at plate boundaries.
 pub type PlateKey = (String, String, i32);
 
+/// A material/part within an armor zone, with its sorted unique plate thicknesses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZonePart {
+    pub name: String,
+    /// Sorted unique plate thicknesses in tenths of mm.
+    pub plates: Vec<i32>,
+}
+
+/// An armor zone containing multiple material parts, each with plate thicknesses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArmorZone {
+    pub name: String,
+    pub parts: Vec<ZonePart>,
+}
+
 /// Identifies what the user is hovering over in a sidebar/popover for highlight purposes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarHighlightKey {
@@ -90,15 +105,10 @@ pub struct VisibilitySnapshot {
 }
 
 /// Simple undo/redo stack for visibility changes.
+#[derive(Default)]
 pub struct VisibilityUndoStack {
     undo: Vec<VisibilitySnapshot>,
     redo: Vec<VisibilitySnapshot>,
-}
-
-impl Default for VisibilityUndoStack {
-    fn default() -> Self {
-        Self { undo: Vec::new(), redo: Vec::new() }
-    }
 }
 
 impl VisibilityUndoStack {
@@ -134,17 +144,13 @@ impl VisibilityUndoStack {
 }
 
 /// Loading state for ShipAssets.
+#[derive(Default)]
 pub enum ShipAssetsState {
+    #[default]
     NotLoaded,
     Loading(Receiver<Result<Arc<wowsunpack::export::ship::ShipAssets>, String>>),
     Loaded(Arc<wowsunpack::export::ship::ShipAssets>),
     Failed(String),
-}
-
-impl Default for ShipAssetsState {
-    fn default() -> Self {
-        Self::NotLoaded
-    }
 }
 
 /// Settings to clone into a new pane for comparison.
@@ -271,7 +277,7 @@ pub struct LoadedShipArmor {
     /// Ordered mapping: zone name -> sorted list of unique material names in that zone.
     pub zone_parts: Vec<(String, Vec<String>)>,
     /// Three-level hierarchy: zone -> materials -> sorted unique plate thicknesses (i32, tenths of mm).
-    pub zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)>,
+    pub zone_part_plates: Vec<ArmorZone>,
     /// Hull visual meshes (render sets) for optional overlay display.
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     /// Hull parts grouped by category (e.g. "Hull", "Main Battery"), each with sorted part names.
@@ -359,6 +365,7 @@ pub struct CachedShellSim {
 }
 
 /// Cached shell simulation data for a trajectory, invalidated when range or comparison ships change.
+#[allow(dead_code)]
 pub struct ShellSimCache {
     pub sims: Vec<CachedShellSim>,
     /// Last visible hit index derived from the cached sims.
@@ -505,7 +512,7 @@ pub struct UpgradeReloadData {
     /// Updated zone/part/plate metadata derived from the new armor meshes.
     pub zones: Vec<String>,
     pub zone_parts: Vec<(String, Vec<String>)>,
-    pub zone_part_plates: Vec<(String, Vec<(String, Vec<i32>)>)>,
+    pub zone_part_plates: Vec<ArmorZone>,
     /// New hull visual meshes (hull parts + mounted turrets with new mount transforms).
     pub hull_meshes: Vec<wowsunpack::export::gltf_export::InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,

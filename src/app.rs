@@ -42,7 +42,6 @@ use tokio::runtime::Runtime;
 use wows_replays::analyzer::battle_controller::GameMessage;
 
 use crate::error::ToolkitError;
-use crate::game_params::old_game_params_bin_path;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task::BackgroundTaskCompletion;
@@ -549,7 +548,7 @@ impl WowsToolkitApp {
                                     self.tab_state.selected_browser_build = build_number;
 
                                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
-                                    let no_replays = replays.as_ref().map_or(true, |r| r.is_empty());
+                                    let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
                                     self.tab_state.replay_files = replays;
                                     self.tab_state.filtered_file_list = None;
                                     self.tab_state.used_filter = None;
@@ -1068,45 +1067,42 @@ impl WowsToolkitApp {
             // Poll ship assets loading (so it works without the Armor Viewer tab open)
             if let crate::armor_viewer::state::ShipAssetsState::Loading(ref rx) =
                 self.tab_state.armor_viewer.ship_assets
+                && let Ok(result) = rx.try_recv()
             {
-                if let Ok(result) = rx.try_recv() {
-                    match result {
-                        Ok(assets) => {
-                            // Build ship catalog if not already built (same logic as build_armor_viewer_tab)
-                            if self.tab_state.armor_viewer.ship_catalog.is_none() {
-                                if let Some(ref wows_data) = self.tab_state.world_of_warships_data {
-                                    let wd = wows_data.read();
-                                    if let Some(metadata) = wd.game_metadata.as_ref() {
-                                        let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
-                                        for nation_group in &catalog.nations {
-                                            if !self
-                                                .tab_state
-                                                .armor_viewer
-                                                .nation_flag_textures
-                                                .contains_key(&nation_group.nation)
-                                            {
-                                                if let Some(asset) =
-                                                    crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
-                                                {
-                                                    self.tab_state
-                                                        .armor_viewer
-                                                        .nation_flag_textures
-                                                        .insert(nation_group.nation.clone(), asset);
-                                                }
-                                            }
-                                        }
-                                        self.tab_state.armor_viewer.ship_catalog = Some(std::sync::Arc::new(catalog));
+                match result {
+                    Ok(assets) => {
+                        // Build ship catalog if not already built (same logic as build_armor_viewer_tab)
+                        if self.tab_state.armor_viewer.ship_catalog.is_none()
+                            && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                        {
+                            let wd = wows_data.read();
+                            if let Some(metadata) = wd.game_metadata.as_ref() {
+                                let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
+                                for nation_group in &catalog.nations {
+                                    if !self
+                                        .tab_state
+                                        .armor_viewer
+                                        .nation_flag_textures
+                                        .contains_key(&nation_group.nation)
+                                        && let Some(asset) =
+                                            crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
+                                    {
+                                        self.tab_state
+                                            .armor_viewer
+                                            .nation_flag_textures
+                                            .insert(nation_group.nation.clone(), asset);
                                     }
                                 }
+                                self.tab_state.armor_viewer.ship_catalog = Some(std::sync::Arc::new(catalog));
                             }
-                            self.tab_state.armor_viewer.ship_assets =
-                                crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
                         }
-                        Err(e) => {
-                            tracing::error!("Failed to load ship assets: {e}");
-                            self.tab_state.armor_viewer.ship_assets =
-                                crate::armor_viewer::state::ShipAssetsState::Failed(e);
-                        }
+                        self.tab_state.armor_viewer.ship_assets =
+                            crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load ship assets: {e}");
+                        self.tab_state.armor_viewer.ship_assets =
+                            crate::armor_viewer::state::ShipAssetsState::Failed(e);
                     }
                 }
             }
@@ -1155,34 +1151,32 @@ impl WowsToolkitApp {
                         if matches!(
                             &self.tab_state.armor_viewer.ship_assets,
                             crate::armor_viewer::state::ShipAssetsState::NotLoaded
-                        ) {
-                            if let Some(ref wows_data) = self.tab_state.world_of_warships_data {
-                                let wd = wows_data.read();
-                                let vfs = wd.vfs.clone();
-                                let game_metadata = wd.game_metadata.clone();
-                                drop(wd);
-                                let (tx, rx) = std::sync::mpsc::channel();
-                                std::thread::spawn(move || {
-                                    let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
-                                        let metadata = game_metadata
-                                            .ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
-                                        let assets = wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(
-                                            &vfs, metadata,
-                                        )
-                                        .map_err(|e| format!("{e:?}"))?;
-                                        Ok(Arc::new(assets))
-                                    })();
-                                    let _ = tx.send(result);
-                                });
-                                self.tab_state.armor_viewer.ship_assets =
-                                    crate::armor_viewer::state::ShipAssetsState::Loading(rx);
-                            }
+                        ) && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                        {
+                            let wd = wows_data.read();
+                            let vfs = wd.vfs.clone();
+                            let game_metadata = wd.game_metadata.clone();
+                            drop(wd);
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            std::thread::spawn(move || {
+                                let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
+                                    let metadata =
+                                        game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
+                                    let assets =
+                                        wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, metadata)
+                                            .map_err(|e| format!("{e:?}"))?;
+                                    Ok(Arc::new(assets))
+                                })();
+                                let _ = tx.send(result);
+                            });
+                            self.tab_state.armor_viewer.ship_assets =
+                                crate::armor_viewer::state::ShipAssetsState::Loading(rx);
                         }
-                        if self.tab_state.armor_viewer.gpu_pipeline.is_none() {
-                            if let Some(ref rs) = self.tab_state.wgpu_render_state {
-                                self.tab_state.armor_viewer.gpu_pipeline =
-                                    Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device, &rs.queue)));
-                            }
+                        if self.tab_state.armor_viewer.gpu_pipeline.is_none()
+                            && let Some(ref rs) = self.tab_state.wgpu_render_state
+                        {
+                            self.tab_state.armor_viewer.gpu_pipeline =
+                                Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device, &rs.queue)));
                         }
                         // Re-queue the request for next frame
                         let mut state = renderer.shared_state().lock();

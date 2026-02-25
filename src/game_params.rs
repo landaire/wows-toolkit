@@ -13,6 +13,7 @@ use wowsunpack::vfs::VfsPath;
 use crate::error::ToolkitError;
 
 /// Path to the old unversioned game_params.bin cache (for migration cleanup).
+#[allow(dead_code)]
 pub fn old_game_params_bin_path() -> PathBuf {
     let old_cache_path = std::path::Path::new("game_params.bin");
     if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {

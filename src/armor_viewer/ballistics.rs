@@ -31,6 +31,7 @@ const BISECT_MAX_ITER: u32 = 60; // max bisection iterations
 
 /// Preprocessed shell parameters for ballistic simulation.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ShellParams {
     pub caliber: f64,
     pub mass: f64,
@@ -84,6 +85,7 @@ impl ShellParams {
 
 /// Result of a trajectory simulation at impact.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ImpactResult {
     /// Horizontal range (m)
     pub distance: f64,
@@ -282,10 +284,10 @@ fn max_range(params: &ShellParams) -> Option<f64> {
     // Scan from 5° to 60° in 1° steps — high drag shells peak below 30°
     for deg in 5..=60 {
         let angle = (deg as f64).to_radians();
-        if let Some((dist, _, _, _)) = simulate_trajectory(params, angle) {
-            if dist > best_range {
-                best_range = dist;
-            }
+        if let Some((dist, _, _, _)) = simulate_trajectory(params, angle)
+            && dist > best_range
+        {
+            best_range = dist;
         }
     }
     if best_range > 0.0 { Some(best_range) } else { None }
@@ -339,6 +341,7 @@ pub fn solve_for_range(params: &ShellParams, range: Meters) -> Option<ImpactResu
 }
 
 /// Compute impact data at regular range intervals.
+#[allow(dead_code)]
 pub fn compute_range_table(params: &ShellParams, max_range: Meters, step: Meters) -> Vec<ImpactResult> {
     let mut results = Vec::new();
     let mut range = step;

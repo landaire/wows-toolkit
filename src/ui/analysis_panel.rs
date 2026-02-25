@@ -43,6 +43,7 @@ pub fn focus_analysis_tab(dock_state: &mut DockState<AnalysisTab>, tab: Analysis
 // ─── TabViewer ───────────────────────────────────────────────────────────────
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for analysis tabs.
+#[allow(dead_code)]
 struct AnalysisPaneViewer<'a> {
     // Read-only shared data
     comparison_ships: &'a [ComparisonShip],
@@ -169,11 +170,11 @@ pub fn show_analysis_window(
     state.comparison_search = search_cell.into_inner();
     for param_idx in ships_to_add.into_inner() {
         let wd = wows_data.read();
-        if let Some(metadata) = wd.game_metadata.as_ref() {
-            if let Some(ship) = crate::armor_viewer::penetration::resolve_ship_shells(metadata, &param_idx) {
-                state.comparison_ships.push(ship);
-                state.comparison_ships_version += 1;
-            }
+        if let Some(metadata) = wd.game_metadata.as_ref()
+            && let Some(ship) = crate::armor_viewer::penetration::resolve_ship_shells(metadata, &param_idx)
+        {
+            state.comparison_ships.push(ship);
+            state.comparison_ships_version += 1;
         }
     }
     if let Some(idx) = remove_ship_idx.get() {
@@ -207,41 +208,41 @@ impl AnalysisPaneViewer<'_> {
         });
 
         // Search results
-        if !search.is_empty() {
-            if let Some(catalog) = self.ship_catalog {
-                let search_lower = unidecode::unidecode(&search).to_lowercase();
-                let already_added: std::collections::HashSet<&str> =
-                    self.comparison_ships.iter().map(|s| s.param_index.as_str()).collect();
+        if !search.is_empty()
+            && let Some(catalog) = self.ship_catalog
+        {
+            let search_lower = unidecode::unidecode(&search).to_lowercase();
+            let already_added: std::collections::HashSet<&str> =
+                self.comparison_ships.iter().map(|s| s.param_index.as_str()).collect();
 
-                let mut results = Vec::new();
-                for nation in &catalog.nations {
-                    for class in &nation.classes {
-                        for ship in &class.ships {
-                            if ship.search_name.contains(&search_lower)
-                                && !already_added.contains(ship.param_index.as_str())
-                            {
-                                results.push(ship.clone());
-                            }
+            let mut results = Vec::new();
+            for nation in &catalog.nations {
+                for class in &nation.classes {
+                    for ship in &class.ships {
+                        if ship.search_name.contains(&search_lower)
+                            && !already_added.contains(ship.param_index.as_str())
+                        {
+                            results.push(ship.clone());
                         }
                     }
                 }
-                results.truncate(10);
+            }
+            results.truncate(10);
 
-                if !results.is_empty() {
-                    egui::ScrollArea::vertical().id_salt("pen_check_search_results").max_height(150.0).show(ui, |ui| {
-                        for ship in &results {
-                            let label = format!(
-                                "{} {}",
-                                crate::armor_viewer::ship_selector::tier_roman(ship.tier),
-                                &ship.display_name
-                            );
-                            if ui.button(label).clicked() {
-                                self.ships_to_add.borrow_mut().push(ship.param_index.clone());
-                                search.clear();
-                            }
+            if !results.is_empty() {
+                egui::ScrollArea::vertical().id_salt("pen_check_search_results").max_height(150.0).show(ui, |ui| {
+                    for ship in &results {
+                        let label = format!(
+                            "{} {}",
+                            crate::armor_viewer::ship_selector::tier_roman(ship.tier),
+                            &ship.display_name
+                        );
+                        if ui.button(label).clicked() {
+                            self.ships_to_add.borrow_mut().push(ship.param_index.clone());
+                            search.clear();
                         }
-                    });
-                }
+                    }
+                });
             }
         }
         // Drop the search borrow before the rest of the UI
@@ -390,241 +391,306 @@ impl AnalysisPaneViewer<'_> {
         let translate_part = self.translate_part;
 
         // Helper: render one trajectory column
-        let render_traj_column = |ui: &mut egui::Ui,
-                                  ti: usize,
-                                  traj: &StoredTrajectory,
-                                  actions: &mut TrajectoryActions| {
-            let result = &traj.result;
-            let palette_color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
-            let header_color = egui::Color32::from_rgba_unmultiplied(
-                (palette_color[0] * 255.0) as u8,
-                (palette_color[1] * 255.0) as u8,
-                (palette_color[2] * 255.0) as u8,
-                255,
-            );
-
-            // Header line with color swatch
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("Arc {}", ti + 1)).strong().color(header_color));
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} hits, {:.0}mm @ {:.1}km",
-                        result.hits.len(),
-                        result.total_armor_mm,
-                        traj.meta.range.value(),
-                    ))
-                    .small()
-                    .color(egui::Color32::GRAY),
+        let render_traj_column =
+            |ui: &mut egui::Ui, ti: usize, traj: &StoredTrajectory, actions: &mut TrajectoryActions| {
+                let result = &traj.result;
+                let palette_color = TRAJECTORY_PALETTE[traj.meta.color_index % TRAJECTORY_PALETTE.len()];
+                let header_color = egui::Color32::from_rgba_unmultiplied(
+                    (palette_color[0] * 255.0) as u8,
+                    (palette_color[1] * 255.0) as u8,
+                    (palette_color[2] * 255.0) as u8,
+                    255,
                 );
-            });
 
-            // Toolbar: delete + isolation toggles
-            ui.horizontal(|ui| {
-                if ui.button(icons::TRASH).on_hover_text("Delete this arc").clicked() {
-                    actions.delete_id = Some(traj.meta.id);
-                }
-                if ui
-                    .selectable_label(traj.show_plates_active, "Isolate Plates")
-                    .on_hover_text("Show only plates hit by this arc")
-                    .clicked()
+                // Header line with color swatch
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Arc {}", ti + 1)).strong().color(header_color));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} hits, {:.0}mm @ {:.1}km",
+                            result.hits.len(),
+                            result.total_armor_mm,
+                            traj.meta.range.value(),
+                        ))
+                        .small()
+                        .color(egui::Color32::GRAY),
+                    );
+                });
+
+                // Toolbar: delete + isolation toggles
+                ui.horizontal(|ui| {
+                    if ui.button(icons::TRASH).on_hover_text("Delete this arc").clicked() {
+                        actions.delete_id = Some(traj.meta.id);
+                    }
+                    if ui
+                        .selectable_label(traj.show_plates_active, "Isolate Plates")
+                        .on_hover_text("Show only plates hit by this arc")
+                        .clicked()
+                    {
+                        actions.arc_plate_toggles.push((ti, !traj.show_plates_active));
+                    }
+                    if ui
+                        .selectable_label(traj.show_zones_active, "Isolate Zones")
+                        .on_hover_text("Show entire zones hit by this arc")
+                        .clicked()
+                    {
+                        actions.arc_zone_toggles.push((ti, !traj.show_zones_active));
+                    }
+                });
+
+                // Per-trajectory range slider
                 {
-                    actions.arc_plate_toggles.push((ti, !traj.show_plates_active));
-                }
-                if ui
-                    .selectable_label(traj.show_zones_active, "Isolate Zones")
-                    .on_hover_text("Show entire zones hit by this arc")
-                    .clicked()
-                {
-                    actions.arc_zone_toggles.push((ti, !traj.show_zones_active));
-                }
-            });
-
-            // Per-trajectory range slider
-            {
-                let mut rng = traj.meta.range.value();
-                let resp =
-                    ui.add(egui::Slider::new(&mut rng, 0.0..=30.0).suffix(" km").step_by(0.5).max_decimals(1).text(""));
-                if resp.changed() {
-                    actions.per_arc_range_changes.push((ti, Km::new(rng)));
-                }
-            }
-
-            // Ballistic impact info (per-ship)
-            for arc_data in &result.ship_arcs {
-                if let Some(ref impact) = arc_data.ballistic_impact {
-                    let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
-                    ui.horizontal(|ui| {
-                        if result.ship_arcs.len() > 1 {
-                            ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(
-                                (sc[0] * 255.0) as u8,
-                                (sc[1] * 255.0) as u8,
-                                (sc[2] * 255.0) as u8,
-                            )));
-                        }
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "v={:.0} m/s  t={:.1}s  fall={:.1}\u{00B0}",
-                                impact.impact_velocity,
-                                impact.time_to_target,
-                                impact.impact_angle_horizontal.to_degrees(),
-                            ))
-                            .small()
-                            .color(egui::Color32::from_rgb(180, 180, 220)),
-                        );
-                    });
-                }
-            }
-
-            // Use cached shell simulation results (populated by update_shell_sim_cache
-            // when trajectory is created, range changes, or comparison ships change).
-            let empty_sims: Vec<crate::armor_viewer::state::CachedShellSim> = Vec::new();
-            let (shell_sims, last_visible_hit) = match &traj.shell_sim_cache {
-                Some(cache) => (&cache.sims, cache.last_visible_hit),
-                None => (&empty_sims, None),
-            };
-
-            // Outcome badges per shell
-            for ss in shell_sims {
-                let ammo = ss.shell.ammo_type.display_name();
-                let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber.value());
-                if let Some(ref sim) = ss.sim {
-                    use crate::armor_viewer::penetration::PlateOutcome;
-                    let (icon, badge_color, outcome_text) = if let Some(det_idx) = sim.detonated_at {
-                        let volume_desc = crate::armor_viewer::penetration::enclosing_zone(&result.hits, det_idx);
-                        (
-                            icons::BOMB,
-                            egui::Color32::from_rgb(255, 140, 40),
-                            format!("detonation inside {}", volume_desc),
-                        )
-                    } else if let Some(stop_idx) = sim.stopped_at {
-                        let plate_desc = result
-                            .hits
-                            .get(stop_idx)
-                            .map(|h| {
-                                format!("#{} {:.0}mm {}", stop_idx + 1, h.thickness_mm, translate_part(&h.material))
-                            })
-                            .unwrap_or_default();
-                        let last_outcome = sim.plates.last().map(|p| &p.outcome);
-                        match last_outcome {
-                            Some(PlateOutcome::Ricochet) => (
-                                icons::PROHIBIT,
-                                egui::Color32::from_rgb(220, 100, 100),
-                                format!("ricochet @ {}", plate_desc),
-                            ),
-                            Some(PlateOutcome::Shatter) => (
-                                icons::X_CIRCLE,
-                                egui::Color32::from_rgb(220, 100, 100),
-                                format!("shatter @ {}", plate_desc),
-                            ),
-                            _ => (
-                                icons::X_CIRCLE,
-                                egui::Color32::from_rgb(220, 100, 100),
-                                format!("stopped @ {}", plate_desc),
-                            ),
-                        }
-                    } else if sim.detonation.is_some() {
-                        (icons::ARROWS_OUT_SIMPLE, egui::Color32::from_rgb(220, 180, 80), "overpen".to_string())
-                    } else {
-                        (
-                            icons::ARROWS_OUT_SIMPLE,
-                            egui::Color32::from_rgb(220, 180, 80),
-                            "overpen (fuse never armed)".to_string(),
-                        )
-                    };
-
-                    ui.horizontal(|ui| {
-                        let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
-                        let ship_dot_color = egui::Color32::from_rgb(
-                            (sc[0] * 255.0) as u8,
-                            (sc[1] * 255.0) as u8,
-                            (sc[2] * 255.0) as u8,
-                        );
-                        ui.label(egui::RichText::new("\u{25CF}").color(ship_dot_color));
-                        ui.label(egui::RichText::new(icon).color(badge_color));
-                        ui.label(
-                            egui::RichText::new(format!("{} — {}", shell_label, outcome_text))
-                                .small()
-                                .strong()
-                                .color(badge_color),
-                        );
-                    });
-                }
-            }
-
-            ui.separator();
-
-            for (i, hit) in result.hits.iter().enumerate() {
-                let is_post_detonation = last_visible_hit.map_or(false, |lv| i > lv);
-
-                // Skip ghost plates that have no detonation event on them
-                if is_post_detonation {
-                    let has_detonation_here =
-                        shell_sims.iter().any(|ss| ss.sim.as_ref().map_or(false, |sim| sim.detonated_at == Some(i)));
-                    if !has_detonation_here {
-                        continue;
+                    let mut rng = traj.meta.range.value();
+                    let resp = ui.add(
+                        egui::Slider::new(&mut rng, 0.0..=30.0).suffix(" km").step_by(0.5).max_decimals(1).text(""),
+                    );
+                    if resp.changed() {
+                        actions.per_arc_range_changes.push((ti, Km::new(rng)));
                     }
                 }
 
-                let color = if is_post_detonation {
-                    egui::Color32::from_rgb(100, 100, 100)
-                } else if hit.angle_deg < 30.0 {
-                    egui::Color32::from_rgb(100, 220, 100)
-                } else if hit.angle_deg < 45.0 {
-                    egui::Color32::from_rgb(220, 180, 80)
-                } else {
-                    egui::Color32::from_rgb(220, 100, 100)
+                // Ballistic impact info (per-ship)
+                for arc_data in &result.ship_arcs {
+                    if let Some(ref impact) = arc_data.ballistic_impact {
+                        let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
+                        ui.horizontal(|ui| {
+                            if result.ship_arcs.len() > 1 {
+                                ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(
+                                    (sc[0] * 255.0) as u8,
+                                    (sc[1] * 255.0) as u8,
+                                    (sc[2] * 255.0) as u8,
+                                )));
+                            }
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "v={:.0} m/s  t={:.1}s  fall={:.1}\u{00B0}",
+                                    impact.impact_velocity,
+                                    impact.time_to_target,
+                                    impact.impact_angle_horizontal.to_degrees(),
+                                ))
+                                .small()
+                                .color(egui::Color32::from_rgb(180, 180, 220)),
+                            );
+                        });
+                    }
+                }
+
+                // Use cached shell simulation results (populated by update_shell_sim_cache
+                // when trajectory is created, range changes, or comparison ships change).
+                let empty_sims: Vec<crate::armor_viewer::state::CachedShellSim> = Vec::new();
+                let (shell_sims, last_visible_hit) = match &traj.shell_sim_cache {
+                    Some(cache) => (&cache.sims, cache.last_visible_hit),
+                    None => (&empty_sims, None),
                 };
 
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("#{}", i + 1)).small().color(egui::Color32::GRAY));
-                    ui.label(egui::RichText::new(format!("{:.0} mm", hit.thickness_mm)).strong().color(color));
-                    ui.label(egui::RichText::new(format!("{:.1}\u{00B0}", hit.angle_deg)).small().color(color));
-                });
-                ui.label(
-                    egui::RichText::new(format!("  {} / {}", &hit.zone, translate_part(&hit.material)))
-                        .small()
-                        .color(egui::Color32::GRAY),
-                );
+                // Outcome badges per shell
+                for ss in shell_sims {
+                    let ammo = ss.shell.ammo_type.display_name();
+                    let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber.value());
+                    if let Some(ref sim) = ss.sim {
+                        use crate::armor_viewer::penetration::PlateOutcome;
+                        let (icon, badge_color, outcome_text) = if let Some(det_idx) = sim.detonated_at {
+                            let volume_desc = crate::armor_viewer::penetration::enclosing_zone(&result.hits, det_idx);
+                            (
+                                icons::BOMB,
+                                egui::Color32::from_rgb(255, 140, 40),
+                                format!("detonation inside {}", volume_desc),
+                            )
+                        } else if let Some(stop_idx) = sim.stopped_at {
+                            let plate_desc = result
+                                .hits
+                                .get(stop_idx)
+                                .map(|h| {
+                                    format!("#{} {:.0}mm {}", stop_idx + 1, h.thickness_mm, translate_part(&h.material))
+                                })
+                                .unwrap_or_default();
+                            let last_outcome = sim.plates.last().map(|p| &p.outcome);
+                            match last_outcome {
+                                Some(PlateOutcome::Ricochet) => (
+                                    icons::PROHIBIT,
+                                    egui::Color32::from_rgb(220, 100, 100),
+                                    format!("ricochet @ {}", plate_desc),
+                                ),
+                                Some(PlateOutcome::Shatter) => (
+                                    icons::X_CIRCLE,
+                                    egui::Color32::from_rgb(220, 100, 100),
+                                    format!("shatter @ {}", plate_desc),
+                                ),
+                                _ => (
+                                    icons::X_CIRCLE,
+                                    egui::Color32::from_rgb(220, 100, 100),
+                                    format!("stopped @ {}", plate_desc),
+                                ),
+                            }
+                        } else if sim.detonation.is_some() {
+                            (icons::ARROWS_OUT_SIMPLE, egui::Color32::from_rgb(220, 180, 80), "overpen".to_string())
+                        } else {
+                            (
+                                icons::ARROWS_OUT_SIMPLE,
+                                egui::Color32::from_rgb(220, 180, 80),
+                                "overpen (fuse never armed)".to_string(),
+                            )
+                        };
 
-                if !is_post_detonation {
-                    for ss in shell_sims {
-                        if let Some(ref sim) = ss.sim {
-                            if let Some(plate) = sim.plates.get(i) {
-                                use crate::armor_viewer::penetration::PlateOutcome;
-                                let (icon, detail_color, detail) = match plate.outcome {
-                                    PlateOutcome::Overmatch => (
-                                        "\u{2705}",
-                                        egui::Color32::from_rgb(100, 220, 100),
-                                        format!(
-                                            "overmatch \u{2014} {:.0}mm pen, v={:.0} m/s",
-                                            plate.raw_pen_before_mm, plate.velocity_before
+                        ui.horizontal(|ui| {
+                            let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                            let ship_dot_color = egui::Color32::from_rgb(
+                                (sc[0] * 255.0) as u8,
+                                (sc[1] * 255.0) as u8,
+                                (sc[2] * 255.0) as u8,
+                            );
+                            ui.label(egui::RichText::new("\u{25CF}").color(ship_dot_color));
+                            ui.label(egui::RichText::new(icon).color(badge_color));
+                            ui.label(
+                                egui::RichText::new(format!("{} — {}", shell_label, outcome_text))
+                                    .small()
+                                    .strong()
+                                    .color(badge_color),
+                            );
+                        });
+                    }
+                }
+
+                ui.separator();
+
+                for (i, hit) in result.hits.iter().enumerate() {
+                    let is_post_detonation = last_visible_hit.is_some_and(|lv| i > lv);
+
+                    // Skip ghost plates that have no detonation event on them
+                    if is_post_detonation {
+                        let has_detonation_here =
+                            shell_sims.iter().any(|ss| ss.sim.as_ref().is_some_and(|sim| sim.detonated_at == Some(i)));
+                        if !has_detonation_here {
+                            continue;
+                        }
+                    }
+
+                    let color = if is_post_detonation {
+                        egui::Color32::from_rgb(100, 100, 100)
+                    } else if hit.angle_deg < 30.0 {
+                        egui::Color32::from_rgb(100, 220, 100)
+                    } else if hit.angle_deg < 45.0 {
+                        egui::Color32::from_rgb(220, 180, 80)
+                    } else {
+                        egui::Color32::from_rgb(220, 100, 100)
+                    };
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("#{}", i + 1)).small().color(egui::Color32::GRAY));
+                        ui.label(egui::RichText::new(format!("{:.0} mm", hit.thickness_mm)).strong().color(color));
+                        ui.label(egui::RichText::new(format!("{:.1}\u{00B0}", hit.angle_deg)).small().color(color));
+                    });
+                    ui.label(
+                        egui::RichText::new(format!("  {} / {}", &hit.zone, translate_part(&hit.material)))
+                            .small()
+                            .color(egui::Color32::GRAY),
+                    );
+
+                    if !is_post_detonation {
+                        for ss in shell_sims {
+                            if let Some(ref sim) = ss.sim {
+                                if let Some(plate) = sim.plates.get(i) {
+                                    use crate::armor_viewer::penetration::PlateOutcome;
+                                    let (icon, detail_color, detail) = match plate.outcome {
+                                        PlateOutcome::Overmatch => (
+                                            "\u{2705}",
+                                            egui::Color32::from_rgb(100, 220, 100),
+                                            format!(
+                                                "overmatch \u{2014} {:.0}mm pen, v={:.0} m/s",
+                                                plate.raw_pen_before_mm, plate.velocity_before
+                                            ),
                                         ),
-                                    ),
-                                    PlateOutcome::Penetrate => (
-                                        "\u{2705}",
-                                        egui::Color32::from_rgb(100, 220, 100),
-                                        format!(
-                                            "{:.0}/{:.0}mm eff \u{2014} v={:.0} m/s",
-                                            plate.raw_pen_before_mm,
-                                            plate.effective_thickness_mm,
-                                            plate.velocity_before
+                                        PlateOutcome::Penetrate => (
+                                            "\u{2705}",
+                                            egui::Color32::from_rgb(100, 220, 100),
+                                            format!(
+                                                "{:.0}/{:.0}mm eff \u{2014} v={:.0} m/s",
+                                                plate.raw_pen_before_mm,
+                                                plate.effective_thickness_mm,
+                                                plate.velocity_before
+                                            ),
                                         ),
-                                    ),
-                                    PlateOutcome::Ricochet => (
-                                        "\u{274C}",
-                                        egui::Color32::from_rgb(220, 100, 100),
-                                        format!("ricochet @ {:.1}\u{00B0}", hit.angle_deg),
-                                    ),
-                                    PlateOutcome::Shatter => (
-                                        "\u{274C}",
-                                        egui::Color32::from_rgb(220, 100, 100),
-                                        format!(
-                                            "shatter \u{2014} {:.0} < {:.0}mm eff",
-                                            plate.raw_pen_before_mm, plate.effective_thickness_mm
+                                        PlateOutcome::Ricochet => (
+                                            "\u{274C}",
+                                            egui::Color32::from_rgb(220, 100, 100),
+                                            format!("ricochet @ {:.1}\u{00B0}", hit.angle_deg),
                                         ),
-                                    ),
+                                        PlateOutcome::Shatter => (
+                                            "\u{274C}",
+                                            egui::Color32::from_rgb(220, 100, 100),
+                                            format!(
+                                                "shatter \u{2014} {:.0} < {:.0}mm eff",
+                                                plate.raw_pen_before_mm, plate.effective_thickness_mm
+                                            ),
+                                        ),
+                                    };
+
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(12.0);
+                                        let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
+                                        ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(
+                                            (sc[0] * 255.0) as u8,
+                                            (sc[1] * 255.0) as u8,
+                                            (sc[2] * 255.0) as u8,
+                                        )));
+                                        ui.label(egui::RichText::new(icon));
+                                        let mut label_text = format!(
+                                            "{} {} {:.0}mm",
+                                            &ss.ship_name,
+                                            ss.shell.ammo_type.display_name(),
+                                            ss.shell.caliber.value(),
+                                        );
+                                        if plate.fuse_armed_here {
+                                            label_text.push_str(" \u{23F1}");
+                                        }
+                                        ui.label(egui::RichText::new(label_text).small().color(detail_color));
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(28.0);
+                                        ui.label(egui::RichText::new(detail).small().color(egui::Color32::GRAY));
+                                    });
+                                }
+                            } else if i == 0 {
+                                // HE/SAP on first hit
+                                let (icon, detail_color, detail) = match &ss.shell.ammo_type {
+                                    AmmoType::HE => {
+                                        let pen = if ifhe_enabled {
+                                            ss.shell.he_pen_mm.unwrap_or(0.0) * 1.25
+                                        } else {
+                                            ss.shell.he_pen_mm.unwrap_or(0.0)
+                                        };
+                                        if pen >= hit.thickness_mm {
+                                            (
+                                                icons::FIRE,
+                                                egui::Color32::from_rgb(255, 140, 40),
+                                                format!("{:.0}mm pen \u{2014} detonates", pen),
+                                            )
+                                        } else {
+                                            (
+                                                "\u{274C}",
+                                                egui::Color32::from_rgb(220, 100, 100),
+                                                format!("{:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                                            )
+                                        }
+                                    }
+                                    AmmoType::SAP => {
+                                        let pen = ss.shell.sap_pen_mm.unwrap_or(0.0);
+                                        if pen >= hit.thickness_mm {
+                                            (
+                                                icons::SHIELD_STAR,
+                                                egui::Color32::from_rgb(255, 140, 40),
+                                                format!("{:.0}mm pen \u{2014} detonates", pen),
+                                            )
+                                        } else {
+                                            (
+                                                "\u{274C}",
+                                                egui::Color32::from_rgb(220, 100, 100),
+                                                format!("{:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
+                                            )
+                                        }
+                                    }
+                                    _ => ("\u{2796}", egui::Color32::GRAY, "unknown".to_string()),
                                 };
-
                                 ui.horizontal(|ui| {
                                     ui.add_space(12.0);
                                     let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
@@ -633,133 +699,64 @@ impl AnalysisPaneViewer<'_> {
                                         (sc[1] * 255.0) as u8,
                                         (sc[2] * 255.0) as u8,
                                     )));
-                                    ui.label(egui::RichText::new(icon));
-                                    let mut label_text = format!(
-                                        "{} {} {:.0}mm",
-                                        &ss.ship_name,
-                                        ss.shell.ammo_type.display_name(),
-                                        ss.shell.caliber.value(),
+                                    ui.label(egui::RichText::new(icon).color(detail_color));
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} {} {:.0}mm",
+                                            &ss.ship_name,
+                                            ss.shell.ammo_type.display_name(),
+                                            ss.shell.caliber.value(),
+                                        ))
+                                        .small()
+                                        .color(detail_color),
                                     );
-                                    if plate.fuse_armed_here {
-                                        label_text.push_str(" \u{23F1}");
-                                    }
-                                    ui.label(egui::RichText::new(label_text).small().color(detail_color));
                                 });
                                 ui.horizontal(|ui| {
                                     ui.add_space(28.0);
                                     ui.label(egui::RichText::new(detail).small().color(egui::Color32::GRAY));
                                 });
                             }
-                        } else if i == 0 {
-                            // HE/SAP on first hit
-                            let (icon, detail_color, detail) = match &ss.shell.ammo_type {
-                                AmmoType::HE => {
-                                    let pen = if ifhe_enabled {
-                                        ss.shell.he_pen_mm.unwrap_or(0.0) * 1.25
-                                    } else {
-                                        ss.shell.he_pen_mm.unwrap_or(0.0)
-                                    };
-                                    if pen >= hit.thickness_mm {
-                                        (
-                                            icons::FIRE,
-                                            egui::Color32::from_rgb(255, 140, 40),
-                                            format!("{:.0}mm pen \u{2014} detonates", pen),
-                                        )
-                                    } else {
-                                        (
-                                            "\u{274C}",
-                                            egui::Color32::from_rgb(220, 100, 100),
-                                            format!("{:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
-                                        )
-                                    }
-                                }
-                                AmmoType::SAP => {
-                                    let pen = ss.shell.sap_pen_mm.unwrap_or(0.0);
-                                    if pen >= hit.thickness_mm {
-                                        (
-                                            icons::SHIELD_STAR,
-                                            egui::Color32::from_rgb(255, 140, 40),
-                                            format!("{:.0}mm pen \u{2014} detonates", pen),
-                                        )
-                                    } else {
-                                        (
-                                            "\u{274C}",
-                                            egui::Color32::from_rgb(220, 100, 100),
-                                            format!("{:.0}mm pen < {:.0}mm", pen, hit.thickness_mm),
-                                        )
-                                    }
-                                }
-                                _ => ("\u{2796}", egui::Color32::GRAY, "unknown".to_string()),
-                            };
+                        }
+                    }
+
+                    // Inline detonation markers
+                    for ss in shell_sims {
+                        if let Some(ref sim) = ss.sim
+                            && sim.detonated_at == Some(i)
+                            && let Some(ref det) = sim.detonation
+                        {
                             ui.horizontal(|ui| {
-                                ui.add_space(12.0);
+                                ui.add_space(8.0);
                                 let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
                                 ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(
                                     (sc[0] * 255.0) as u8,
                                     (sc[1] * 255.0) as u8,
                                     (sc[2] * 255.0) as u8,
                                 )));
-                                ui.label(egui::RichText::new(icon).color(detail_color));
+                                ui.label(egui::RichText::new(icons::BOMB).color(egui::Color32::from_rgb(255, 140, 40)));
+                                let volume_desc = crate::armor_viewer::penetration::enclosing_zone(&result.hits, i);
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "{} {} {:.0}mm",
+                                        "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",
                                         &ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
-                                        ss.shell.caliber.value(),
+                                        volume_desc,
+                                        det.travel_distance,
+                                        det.armed_at_hit + 1,
                                     ))
                                     .small()
-                                    .color(detail_color),
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(255, 140, 40)),
                                 );
                             });
-                            ui.horizontal(|ui| {
-                                ui.add_space(28.0);
-                                ui.label(egui::RichText::new(detail).small().color(egui::Color32::GRAY));
-                            });
                         }
                     }
-                }
 
-                // Inline detonation markers
-                for ss in shell_sims {
-                    if let Some(ref sim) = ss.sim {
-                        if sim.detonated_at == Some(i) {
-                            if let Some(ref det) = sim.detonation {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(8.0);
-                                    let sc = SHIP_COLORS[ss.ship_index % SHIP_COLORS.len()];
-                                    ui.label(egui::RichText::new("\u{25CF}").color(egui::Color32::from_rgb(
-                                        (sc[0] * 255.0) as u8,
-                                        (sc[1] * 255.0) as u8,
-                                        (sc[2] * 255.0) as u8,
-                                    )));
-                                    ui.label(
-                                        egui::RichText::new(icons::BOMB).color(egui::Color32::from_rgb(255, 140, 40)),
-                                    );
-                                    let volume_desc = crate::armor_viewer::penetration::enclosing_zone(&result.hits, i);
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",
-                                            &ss.ship_name,
-                                            ss.shell.ammo_type.display_name(),
-                                            volume_desc,
-                                            det.travel_distance,
-                                            det.armed_at_hit + 1,
-                                        ))
-                                        .small()
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(255, 140, 40)),
-                                    );
-                                });
-                            }
-                        }
+                    if i + 1 < result.hits.len() {
+                        ui.separator();
                     }
                 }
-
-                if i + 1 < result.hits.len() {
-                    ui.separator();
-                }
-            }
-        };
+            };
 
         egui::ScrollArea::vertical().id_salt(("traj_scroll", pane_id)).show(ui, |ui| {
             ui.horizontal_top(|ui| {

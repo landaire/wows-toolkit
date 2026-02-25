@@ -7,6 +7,7 @@ use wowsunpack::game_params::types::{AmmoType, GameParamProvider, Km, Millimeter
 
 /// A ship added to the comparison list.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ComparisonShip {
     pub param_index: String,
     pub display_name: String,
@@ -98,6 +99,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
 
 /// A single hit along a trajectory ray through the armor model.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct TrajectoryHit {
     pub position: [f32; 3],
     pub thickness_mm: f32,
@@ -140,10 +142,10 @@ pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate_idx: usize) -> String {
         }
     }
     // Return the innermost zone (last one entered with odd count), or fall back
-    if let Some(zone) = last_entered {
-        if *zone_crossings.get(zone).unwrap_or(&0) % 2 == 1 {
-            return zone.to_string();
-        }
+    if let Some(zone) = last_entered
+        && *zone_crossings.get(zone).unwrap_or(&0) % 2 == 1
+    {
+        return zone.to_string();
     }
     // Fallback: any zone with odd crossing count (last one in iteration order)
     for (i, hit) in hits.iter().enumerate().rev() {
@@ -187,6 +189,7 @@ pub enum PlateOutcome {
 
 /// Per-plate simulation result.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct PlateResult {
     pub outcome: PlateOutcome,
     /// Effective thickness after normalization (mm).
@@ -480,6 +483,7 @@ pub enum ComparisonVerdict {
 
 /// Overpen exit point comparison.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ExitDivergence {
     /// Server exit position (model space).
     pub server_exit_pos: [f32; 3],
