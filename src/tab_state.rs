@@ -135,6 +135,8 @@ pub enum ConfirmableAction {
     OpenInGame { replay_path: PathBuf },
     /// Clear all session stats.
     ClearSessionStats,
+    /// Clear session stats for a specific ship.
+    ClearShipSessionStats { ship_name: String },
     /// Replace session stats with the given replays.
     SetAsSessionStats { replays: Vec<std::sync::Weak<RwLock<Replay>>> },
 }
@@ -144,6 +146,9 @@ impl ConfirmableAction {
         match self {
             ConfirmableAction::OpenInGame { .. } => "This will launch World of Warships. Continue?",
             ConfirmableAction::ClearSessionStats => "This will clear all session stats. Continue?",
+            ConfirmableAction::ClearShipSessionStats { .. } => {
+                "This will remove all games for this ship from session stats. Continue?"
+            }
             ConfirmableAction::SetAsSessionStats { .. } => "This will replace your current session stats. Continue?",
         }
     }

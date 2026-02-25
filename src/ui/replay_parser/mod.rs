@@ -3994,6 +3994,23 @@ impl ToolkitTabViewer<'_> {
             ui.heading("Ship Stats");
 
             ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                // Collect per-ship PR stats (min/max/avg) before entering the mutable loop
+                let pr_stats_by_ship: std::collections::HashMap<String, crate::session_stats::PrStats> = {
+                    let per_ship_games = self.tab_state.settings.session_stats.per_ship_limited_games();
+                    let mut games_by_ship: std::collections::HashMap<&str, Vec<&crate::session_stats::PerGameStat>> =
+                        std::collections::HashMap::new();
+                    for game in &per_ship_games {
+                        games_by_ship.entry(game.ship_name.as_str()).or_default().push(game);
+                    }
+                    let pr_data = self.tab_state.personal_rating_data.read();
+                    games_by_ship
+                        .into_iter()
+                        .filter_map(|(name, games)| {
+                            crate::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (name.to_string(), pr))
+                        })
+                        .collect()
+                };
+
                 let mut battle_results: Vec<(String, PerformanceInfo)> =
                     self.tab_state.settings.session_stats.ship_stats_per_ship_limited().drain().collect();
                 battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()));
@@ -4006,6 +4023,7 @@ impl ToolkitTabViewer<'_> {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     let ship_pr = perf_info.calculate_pr(&pr_data);
                     drop(pr_data);
+                    let pr_stats = pr_stats_by_ship.get(&ship_name);
 
                     let wld = if perf_info.draws() > 0 {
                         format!("{}W/{}L/{}D", perf_info.wins(), perf_info.losses(), perf_info.draws())
@@ -4018,93 +4036,177 @@ impl ToolkitTabViewer<'_> {
                         format!("{ship_name} {wld} ({:.0}%)", perf_info.win_rate().unwrap())
                     };
 
-                    ui.collapsing(header, |ui| {
-                        // Show PR at the top of the expanded section
-                        if let Some(ref pr) = ship_pr {
-                            ui.horizontal(|ui| {
-                                ui.label("Personal Rating:");
-                                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(format!("{:.0} ({})", pr.pr, pr.category.name()))
-                                            .color(pr.category.color()),
-                                    );
-                                });
-                            });
-                        }
+                    // Build table rows for copy-to-clipboard (label, min, max, total, avg)
+                    let mut table_rows: Vec<[String; 5]> = Vec::new();
+                    if let Some(ref pr) = pr_stats {
+                        table_rows.push([
+                            "Personal Rating".into(),
+                            format!("{:.0}", pr.min),
+                            format!("{:.0}", pr.max),
+                            String::new(),
+                            format!("{:.0}", pr.avg),
+                        ]);
+                    }
+                    table_rows.push([
+                        "Damage".into(),
+                        separate_number(perf_info.min_damage(), locale),
+                        separate_number(perf_info.max_damage(), locale),
+                        separate_number(perf_info.total_damage(), locale),
+                        separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale),
+                    ]);
+                    table_rows.push([
+                        "Spotting Damage".into(),
+                        separate_number(perf_info.min_spotting_damage(), locale),
+                        separate_number(perf_info.max_spotting_damage(), locale),
+                        separate_number(perf_info.total_spotting_damage(), locale),
+                        separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale),
+                    ]);
+                    table_rows.push([
+                        "Frags".into(),
+                        separate_number(perf_info.min_frags(), locale),
+                        separate_number(perf_info.max_frags(), locale),
+                        separate_number(perf_info.total_frags(), locale),
+                        format!("{:.2}", perf_info.avg_frags().unwrap_or_default()),
+                    ]);
+                    table_rows.push([
+                        "Raw XP".into(),
+                        separate_number(perf_info.min_xp(), locale),
+                        separate_number(perf_info.max_xp(), locale),
+                        separate_number(perf_info.total_xp(), locale),
+                        separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale),
+                    ]);
+                    table_rows.push([
+                        "Base XP".into(),
+                        separate_number(perf_info.min_win_adjusted_xp(), locale),
+                        separate_number(perf_info.max_win_adjusted_xp(), locale),
+                        separate_number(perf_info.total_win_adjusted_xp(), locale),
+                        separate_number(perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64, locale),
+                    ]);
 
-                        ui.horizontal(|ui| {
-                            ui.label("Avg Damage:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale));
+                    let collapsing_id = ui.make_persistent_id(format!("ship_stats_collapse_{ship_name}"));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
+                        .show_header(ui, |ui| {
+                            ui.label(&header);
+                            ui.menu_button(icons::COPY, |ui| {
+                                if ui.button("Copy as Markdown").clicked() {
+                                    let mut md = format!("**{header}**\n\n");
+                                    md.push_str("| | Min | Max | Total | Average |\n");
+                                    md.push_str("|---|---|---|---|---|\n");
+                                    for row in &table_rows {
+                                        md.push_str(&format!(
+                                            "| {} | {} | {} | {} | **{}** |\n",
+                                            row[0], row[1], row[2], row[3], row[4]
+                                        ));
+                                    }
+                                    ui.ctx().copy_text(md);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Copy as CSV").clicked() {
+                                    let mut csv = String::from(",Min,Max,Total,Average\n");
+                                    for row in &table_rows {
+                                        csv.push_str(&format!(
+                                            "{},{},{},{},{}\n",
+                                            row[0], row[1], row[2], row[3], row[4]
+                                        ));
+                                    }
+                                    ui.ctx().copy_text(csv);
+                                    ui.close_menu();
+                                }
                             });
+                            if ui
+                                .small_button(icons::TRASH)
+                                .on_hover_text(format!(
+                                    "Remove all {} games (Ctrl+Click to skip confirmation)",
+                                    ship_name
+                                ))
+                                .clicked()
+                            {
+                                if ui.input(|i| i.modifiers.ctrl) {
+                                    self.tab_state.settings.session_stats.clear_ship(&ship_name);
+                                } else {
+                                    self.tab_state.pending_confirmation =
+                                        Some(crate::tab_state::ConfirmableAction::ClearShipSessionStats {
+                                            ship_name: ship_name.clone(),
+                                        });
+                                }
+                            }
+                        })
+                        .body(|ui| {
+                            egui::Grid::new(format!("ship_stats_{ship_name}")).num_columns(5).striped(true).show(
+                                ui,
+                                |ui| {
+                                    use crate::personal_rating::PersonalRatingCategory;
+
+                                    ui.strong("");
+                                    ui.strong("Min");
+                                    ui.strong("Max");
+                                    ui.strong("Total");
+                                    ui.strong("Average");
+                                    ui.end_row();
+
+                                    if let Some(ref pr) = pr_stats {
+                                        ui.label("Personal Rating");
+                                        let min_cat = PersonalRatingCategory::from_pr(pr.min);
+                                        ui.label(RichText::new(format!("{:.0}", pr.min)).color(min_cat.color()))
+                                            .on_hover_text(min_cat.name());
+                                        let max_cat = PersonalRatingCategory::from_pr(pr.max);
+                                        ui.label(RichText::new(format!("{:.0}", pr.max)).color(max_cat.color()))
+                                            .on_hover_text(max_cat.name());
+                                        ui.label("");
+                                        let avg_cat = PersonalRatingCategory::from_pr(pr.avg);
+                                        ui.label(
+                                            RichText::new(format!("{:.0}", pr.avg)).color(avg_cat.color()).strong(),
+                                        )
+                                        .on_hover_text(avg_cat.name());
+                                        ui.end_row();
+                                    }
+
+                                    ui.label("Damage");
+                                    ui.label(separate_number(perf_info.min_damage(), locale));
+                                    ui.label(separate_number(perf_info.max_damage(), locale));
+                                    ui.label(separate_number(perf_info.total_damage(), locale));
+                                    ui.strong(separate_number(
+                                        perf_info.avg_damage().unwrap_or_default() as u64,
+                                        locale,
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Spotting Damage");
+                                    ui.label(separate_number(perf_info.min_spotting_damage(), locale));
+                                    ui.label(separate_number(perf_info.max_spotting_damage(), locale));
+                                    ui.label(separate_number(perf_info.total_spotting_damage(), locale));
+                                    ui.strong(separate_number(
+                                        perf_info.avg_spotting_damage().unwrap_or_default() as u64,
+                                        locale,
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Frags");
+                                    ui.label(separate_number(perf_info.min_frags(), locale));
+                                    ui.label(separate_number(perf_info.max_frags(), locale));
+                                    ui.label(separate_number(perf_info.total_frags(), locale));
+                                    ui.strong(format!("{:.2}", perf_info.avg_frags().unwrap_or_default()));
+                                    ui.end_row();
+
+                                    ui.label("Raw XP");
+                                    ui.label(separate_number(perf_info.min_xp(), locale));
+                                    ui.label(separate_number(perf_info.max_xp(), locale));
+                                    ui.label(separate_number(perf_info.total_xp(), locale));
+                                    ui.strong(separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale));
+                                    ui.end_row();
+
+                                    ui.label("Base XP");
+                                    ui.label(separate_number(perf_info.min_win_adjusted_xp(), locale));
+                                    ui.label(separate_number(perf_info.max_win_adjusted_xp(), locale));
+                                    ui.label(separate_number(perf_info.total_win_adjusted_xp(), locale));
+                                    ui.strong(separate_number(
+                                        perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64,
+                                        locale,
+                                    ));
+                                    ui.end_row();
+                                },
+                            );
                         });
-                        ui.horizontal(|ui| {
-                            ui.label("Max Damage:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.max_damage(), locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Avg Spotting Damage:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(
-                                    perf_info.avg_spotting_damage().unwrap_or_default() as u64,
-                                    locale,
-                                ));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Max Spotting Damage:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.max_spotting_damage(), locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Avg Frags:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(format!("{:.2}", perf_info.avg_frags().unwrap_or_default()));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Total Frags:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.total_frags(), locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Max Frags:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.max_frags(), locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Avg Raw XP:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Max Raw XP:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.max_xp(), locale));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Avg Base XP:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(
-                                    perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64,
-                                    locale,
-                                ));
-                            });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Max Base XP:");
-                            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(separate_number(perf_info.max_win_adjusted_xp(), locale));
-                            });
-                        });
-                    });
                 }
             });
         });
@@ -4377,6 +4479,9 @@ impl ToolkitTabViewer<'_> {
             }
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
                 self.tab_state.settings.session_stats.clear();
+            }
+            crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_name } => {
+                self.tab_state.settings.session_stats.clear_ship(&ship_name);
             }
             crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
                 self.tab_state.replays_for_session_reset = Some(replays);

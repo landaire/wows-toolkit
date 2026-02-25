@@ -181,8 +181,13 @@ pub struct PerformanceInfo {
     max_win_adjusted_xp: i64,
     total_xp: i64,
     total_win_adjusted_xp: i64,
+    min_frags: i64,
     max_spotting_damage: u64,
+    min_spotting_damage: u64,
     total_spotting_damage: u64,
+    min_xp: i64,
+    min_win_adjusted_xp: i64,
+    min_damage: u64,
     /// The `game_time` of the most recent game for this ship.
     last_played: String,
 }
@@ -190,7 +195,14 @@ pub struct PerformanceInfo {
 impl PerformanceInfo {
     /// Create a PerformanceInfo by aggregating multiple PerGameStat instances
     pub fn from_games(games: &[&PerGameStat]) -> Self {
-        let mut info = PerformanceInfo::default();
+        let mut info = PerformanceInfo {
+            min_frags: i64::MAX,
+            min_damage: u64::MAX,
+            min_spotting_damage: u64::MAX,
+            min_xp: i64::MAX,
+            min_win_adjusted_xp: i64::MAX,
+            ..Default::default()
+        };
 
         for game in games {
             if info.ship_id.is_none() {
@@ -207,24 +219,38 @@ impl PerformanceInfo {
 
             info.total_frags += game.frags;
             info.max_frags = info.max_frags.max(game.frags);
+            info.min_frags = info.min_frags.min(game.frags);
 
             info.total_damage += game.damage;
             info.max_damage = info.max_damage.max(game.damage);
+            info.min_damage = info.min_damage.min(game.damage);
 
             info.total_spotting_damage += game.spotting_damage;
             info.max_spotting_damage = info.max_spotting_damage.max(game.spotting_damage);
+            info.min_spotting_damage = info.min_spotting_damage.min(game.spotting_damage);
 
             info.total_xp += game.raw_xp;
             info.max_xp = info.max_xp.max(game.raw_xp);
+            info.min_xp = info.min_xp.min(game.raw_xp);
 
             info.total_win_adjusted_xp += game.base_xp;
             info.max_win_adjusted_xp = info.max_win_adjusted_xp.max(game.base_xp);
+            info.min_win_adjusted_xp = info.min_win_adjusted_xp.min(game.base_xp);
 
             info.total_games += 1;
 
             if game.sort_key > info.last_played {
                 info.last_played = game.sort_key.clone();
             }
+        }
+
+        // Reset mins to 0 if no games were processed
+        if info.total_games == 0 {
+            info.min_frags = 0;
+            info.min_damage = 0;
+            info.min_spotting_damage = 0;
+            info.min_xp = 0;
+            info.min_win_adjusted_xp = 0;
         }
 
         info
@@ -313,6 +339,42 @@ impl PerformanceInfo {
         Some(self.total_win_adjusted_xp as f64 / self.total_games as f64)
     }
 
+    pub fn min_damage(&self) -> u64 {
+        self.min_damage
+    }
+
+    pub fn total_damage(&self) -> u64 {
+        self.total_damage
+    }
+
+    pub fn min_spotting_damage(&self) -> u64 {
+        self.min_spotting_damage
+    }
+
+    pub fn total_spotting_damage(&self) -> u64 {
+        self.total_spotting_damage
+    }
+
+    pub fn min_frags(&self) -> i64 {
+        self.min_frags
+    }
+
+    pub fn min_xp(&self) -> i64 {
+        self.min_xp
+    }
+
+    pub fn total_xp(&self) -> i64 {
+        self.total_xp
+    }
+
+    pub fn min_win_adjusted_xp(&self) -> i64 {
+        self.min_win_adjusted_xp
+    }
+
+    pub fn total_win_adjusted_xp(&self) -> i64 {
+        self.total_win_adjusted_xp
+    }
+
     /// Calculate Personal Rating for this ship's performance
     pub fn calculate_pr(&self, pr_data: &PersonalRatingData) -> Option<PersonalRatingResult> {
         let ship_id = self.ship_id?;
@@ -324,6 +386,27 @@ impl PerformanceInfo {
             frags: self.total_frags,
         };
         pr_data.calculate_pr(&[stats])
+    }
+}
+
+/// Min/max/average Personal Rating computed from individual games.
+pub struct PrStats {
+    pub min: f64,
+    pub max: f64,
+    pub avg: f64,
+}
+
+impl PrStats {
+    /// Compute PR stats from a set of per-game stats.
+    pub fn from_games(games: &[&PerGameStat], pr_data: &PersonalRatingData) -> Option<Self> {
+        let prs: Vec<f64> = games.iter().filter_map(|g| g.calculate_pr(Some(pr_data))).collect();
+        if prs.is_empty() {
+            return None;
+        }
+        let min = prs.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = prs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let avg = prs.iter().sum::<f64>() / prs.len() as f64;
+        Some(PrStats { min, max, avg })
     }
 }
 
@@ -346,6 +429,11 @@ pub struct SessionStats {
 impl SessionStats {
     pub fn clear(&mut self) {
         self.games.clear();
+    }
+
+    /// Remove all games for a specific ship by name.
+    pub fn clear_ship(&mut self, ship_name: &str) {
+        self.games.retain(|g| g.ship_name != ship_name);
     }
 
     /// Get all unique match group strings from the session's games.
