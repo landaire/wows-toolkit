@@ -37,7 +37,7 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
-use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+use wows_replays::analyzer::battle_controller::state::{ControlPointType, ResolvedShotHit};
 use wows_replays::analyzer::decoder::Consumable;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
@@ -2188,11 +2188,21 @@ fn extract_timeline_events(
                     for cap in controller.capture_points() {
                         let cap_idx = cap.index;
 
-                        let cap_label = if cap.control_point_type == 5 {
-                            "Flag".to_string()
-                        } else {
-                            ((b'A' + cap_idx as u8) as char).to_string()
-                        };
+                        let is_base = cap
+                            .control_point_type
+                            .as_ref()
+                            .and_then(|r| r.known().copied())
+                            .map(|t| {
+                                matches!(
+                                    t,
+                                    ControlPointType::Base
+                                        | ControlPointType::BaseWithPoints
+                                        | ControlPointType::MegaBase
+                                )
+                            })
+                            .unwrap_or(false);
+                        let cap_label =
+                            if is_base { "\u{2691}".to_string() } else { ((b'A' + cap_idx as u8) as char).to_string() };
 
                         // Cap contested: both_inside transitions false → true
                         let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
@@ -4092,7 +4102,7 @@ fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color } => {
+        DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, .. } => {
             let center = transform.minimap_to_screen(pos);
             let r = transform.scale_distance(*radius as f32);
 
