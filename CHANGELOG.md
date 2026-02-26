@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.54] - 2026-02-26
+
+### 🐛 Bug Fixes
+
+- Refactoring from wows-replays
+- Ribbon icons were not properly loading
+
+### Models
+
+- Fix hover target when ship has roll applied
+
+### Updater
+
+- Ensure PDB is updated with app updates
+
 ## [0.1.53] - 2026-02-25
 
 ### 🚀 Features
