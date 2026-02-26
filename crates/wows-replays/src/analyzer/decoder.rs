@@ -753,7 +753,9 @@ impl HitType {
 pub struct TerminalBallisticsInfo {
     /// Shell position at impact in world coordinates.
     pub position: WorldPos,
-    /// Shell velocity vector at impact (direction and magnitude in m/s).
+    /// Shell velocity vector after server-side impact processing (post-impact, not incoming).
+    /// Used by the game client to spawn a visual FakeShot showing the shell exiting/bouncing.
+    /// For ricochets this is the bounce direction; for overpens the exit direction.
     pub velocity: WorldPos,
     /// Whether the AP detonator has been activated (fuse armed).
     pub detonator_activated: bool,

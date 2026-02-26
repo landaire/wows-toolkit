@@ -1,14 +1,9 @@
-use crate::viewport_3d::camera::ArcballCamera;
-use crate::viewport_3d::camera::add;
-use crate::viewport_3d::camera::cross;
-use crate::viewport_3d::camera::dot;
-use crate::viewport_3d::camera::mat4_inverse;
+extern crate nalgebra as na;
+use na::Vector4;
+
 use crate::viewport_3d::camera::mat4_mul;
-use crate::viewport_3d::camera::normalize;
-use crate::viewport_3d::camera::scale;
-use crate::viewport_3d::camera::sub;
-use crate::viewport_3d::types::HitResult;
-use crate::viewport_3d::types::MeshId;
+use crate::viewport_3d::camera::{ArcballCamera, mat4_to_na};
+use crate::viewport_3d::types::{HitResult, MeshId, Vec3};
 
 /// CPU-side mesh data retained for picking.
 pub(crate) struct PickableMesh {
@@ -21,50 +16,44 @@ pub fn screen_to_ray(
     screen_pos: egui::Pos2,
     viewport_rect: egui::Rect,
     camera: &ArcballCamera,
-) -> Option<([f32; 3], [f32; 3])> {
+) -> Option<(Vec3, Vec3)> {
     let aspect = viewport_rect.width() / viewport_rect.height().max(1.0);
     let proj = camera.projection_matrix(aspect);
     let view = camera.view_matrix();
     let vp = mat4_mul(proj, view);
-    let inv_vp = mat4_inverse(vp)?;
+    let inv_vp_na = mat4_to_na(vp).try_inverse()?;
 
     // Normalize screen position to [-1, 1] (NDC)
     let ndc_x = ((screen_pos.x - viewport_rect.left()) / viewport_rect.width()) * 2.0 - 1.0;
     let ndc_y = 1.0 - ((screen_pos.y - viewport_rect.top()) / viewport_rect.height()) * 2.0;
 
     // Unproject near and far points
-    let near_ndc = [ndc_x, ndc_y, 0.0, 1.0];
-    let far_ndc = [ndc_x, ndc_y, 1.0, 1.0];
+    let near_clip = Vector4::new(ndc_x, ndc_y, 0.0, 1.0);
+    let far_clip = Vector4::new(ndc_x, ndc_y, 1.0, 1.0);
 
-    let near_world = mat4_mul_vec4(inv_vp, near_ndc);
-    let far_world = mat4_mul_vec4(inv_vp, far_ndc);
+    let near_world = inv_vp_na * near_clip;
+    let far_world = inv_vp_na * far_clip;
 
-    if near_world[3].abs() < 1e-10 || far_world[3].abs() < 1e-10 {
+    if near_world.w.abs() < 1e-10 || far_world.w.abs() < 1e-10 {
         return None;
     }
 
-    let near_pos = [near_world[0] / near_world[3], near_world[1] / near_world[3], near_world[2] / near_world[3]];
-    let far_pos = [far_world[0] / far_world[3], far_world[1] / far_world[3], far_world[2] / far_world[3]];
+    let near_pos = Vec3::new(near_world.x / near_world.w, near_world.y / near_world.w, near_world.z / near_world.w);
+    let far_pos = Vec3::new(far_world.x / far_world.w, far_world.y / far_world.w, far_world.z / far_world.w);
 
-    let dir = normalize(sub(far_pos, near_pos));
+    let dir = (far_pos - near_pos).normalize();
     Some((near_pos, dir))
 }
 
 /// Moller-Trumbore ray-triangle intersection.
 /// Returns `Some(t)` where `t` is the distance along the ray to the hit point.
-pub fn ray_triangle_intersect(
-    origin: &[f32; 3],
-    dir: &[f32; 3],
-    v0: &[f32; 3],
-    v1: &[f32; 3],
-    v2: &[f32; 3],
-) -> Option<f32> {
+pub fn ray_triangle_intersect(origin: &Vec3, dir: &Vec3, v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Option<f32> {
     const EPSILON: f32 = 1e-7;
 
-    let edge1 = sub(*v1, *v0);
-    let edge2 = sub(*v2, *v0);
-    let h = cross(*dir, edge2);
-    let a = dot(edge1, h);
+    let edge1 = v1 - v0;
+    let edge2 = v2 - v0;
+    let h = dir.cross(&edge2);
+    let a = edge1.dot(&h);
 
     // Check both sides (double-sided)
     if a.abs() < EPSILON {
@@ -72,30 +61,30 @@ pub fn ray_triangle_intersect(
     }
 
     let f = 1.0 / a;
-    let s = sub(*origin, *v0);
-    let u = f * dot(s, h);
+    let s = origin - v0;
+    let u = f * s.dot(&h);
     if !(0.0..=1.0).contains(&u) {
         return None;
     }
 
-    let q = cross(s, edge1);
-    let v = f * dot(*dir, q);
+    let q = s.cross(&edge1);
+    let v = f * dir.dot(&q);
     if v < 0.0 || u + v > 1.0 {
         return None;
     }
 
-    let t = f * dot(edge2, q);
+    let t = f * edge2.dot(&q);
     if t > EPSILON { Some(t) } else { None }
 }
 
 /// Pick ALL triangles hit by a ray from an arbitrary origin and direction, sorted by distance.
 /// Each result includes the triangle normal.
 pub(crate) fn pick_all_ray(
-    origin: [f32; 3],
-    dir: [f32; 3],
+    origin: Vec3,
+    dir: Vec3,
     meshes: &[(MeshId, &PickableMesh, bool)],
-) -> Vec<(HitResult, [f32; 3])> {
-    let mut hits: Vec<(HitResult, [f32; 3])> = Vec::new();
+) -> Vec<(HitResult, Vec3)> {
+    let mut hits: Vec<(HitResult, Vec3)> = Vec::new();
 
     for (mesh_id, mesh, visible) in meshes {
         if !visible {
@@ -112,15 +101,16 @@ pub(crate) fn pick_all_ray(
                 continue;
             }
 
-            let v0 = &mesh.positions[i0];
-            let v1 = &mesh.positions[i1];
-            let v2 = &mesh.positions[i2];
+            // Convert from GPU [f32; 3] at the boundary
+            let v0 = Vec3::from(mesh.positions[i0]);
+            let v1 = Vec3::from(mesh.positions[i1]);
+            let v2 = Vec3::from(mesh.positions[i2]);
 
-            if let Some(t) = ray_triangle_intersect(&origin, &dir, v0, v1, v2) {
-                let world_pos = add(origin, scale(dir, t));
-                let edge1 = sub(*v1, *v0);
-                let edge2 = sub(*v2, *v0);
-                let normal = normalize(cross(edge1, edge2));
+            if let Some(t) = ray_triangle_intersect(&origin, &dir, &v0, &v1, &v2) {
+                let world_pos = origin + dir * t;
+                let edge1 = v1 - v0;
+                let edge2 = v2 - v0;
+                let normal = edge1.cross(&edge2).normalize();
 
                 hits.push((
                     HitResult { mesh_id: *mesh_id, triangle_index: tri_idx, distance: t, world_position: world_pos },
@@ -132,14 +122,4 @@ pub(crate) fn pick_all_ray(
 
     hits.sort_by(|a, b| a.0.distance.partial_cmp(&b.0.distance).unwrap_or(std::cmp::Ordering::Equal));
     hits
-}
-
-/// Multiply a 4x4 matrix by a 4-component vector.
-fn mat4_mul_vec4(m: [[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
-    [
-        m[0][0] * v[0] + m[1][0] * v[1] + m[2][0] * v[2] + m[3][0] * v[3],
-        m[0][1] * v[0] + m[1][1] * v[1] + m[2][1] * v[2] + m[3][1] * v[3],
-        m[0][2] * v[0] + m[1][2] * v[1] + m[2][2] * v[2] + m[3][2] * v[3],
-        m[0][3] * v[0] + m[1][3] * v[1] + m[2][3] * v[2] + m[3][3] * v[3],
-    ]
 }

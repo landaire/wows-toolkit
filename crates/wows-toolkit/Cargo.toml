@@ -89,6 +89,7 @@ const_format = "0.2.35"
 tempfile = "3.25.0"
 unidecode = "0.3.0"
 roxmltree = { workspace = true }
+nalgebra = "0.34.1"
 
 [build-dependencies]
 winresource = "0.1.20"

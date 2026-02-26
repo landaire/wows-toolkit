@@ -27,6 +27,9 @@ use wowsunpack::game_types::ShotId;
 use wowsunpack::game_types::WorldPos;
 use wowsunpack::recognized::Recognized;
 
+extern crate nalgebra as na;
+use na::Rotation3;
+
 use crate::armor_viewer::constants::*;
 use crate::armor_viewer::penetration::ComparisonVerdict;
 use crate::armor_viewer::penetration::ExitDivergence;
@@ -40,6 +43,7 @@ use crate::icons;
 use crate::replay_renderer::RealtimeArmorBridge;
 use crate::replay_renderer::ReplayPlayerInfo;
 use crate::viewport_3d::GpuPipeline;
+use crate::viewport_3d::Vec3;
 
 /// A realtime armor viewer window spawned from the replay renderer.
 pub struct RealtimeArmorViewer {
@@ -158,6 +162,10 @@ struct ShellEntry {
     server_outcome: ServerOutcome,
     /// Victim ship roll at impact time (radians). Used to set viewport model roll on selection.
     victim_roll: f32,
+    /// Victim ship yaw at impact time (radians). Used to set viewport model yaw on selection.
+    victim_yaw: f32,
+    /// Server-reported impact angle against armor (radians), from terminal ballistics.
+    server_material_angle: Option<f32>,
 }
 
 /// All shells from one salvo firing event, grouped together.
@@ -232,6 +240,9 @@ impl RealtimeArmorViewer {
         pane.armor_opacity = 1.0;
         pane.trajectory_mode = true;
         pane.selected_hull = selected_hull;
+        // Trajectories are in body-frame mesh-space and must rotate with the
+        // model matrix (world_space=false).
+        pane.trajectory_world_space = false;
 
         Self {
             title,
@@ -368,27 +379,22 @@ impl RealtimeArmorViewer {
         }
     }
 
-    /// Build the inverse ship rotation matrix: Rz(-roll) * Rx(-pitch) * Ry(-yaw).
-    /// Transforms world-space vectors into ship model-space.
-    fn inverse_ship_rotation(yaw: f32, pitch: f32, roll: f32) -> [[f32; 3]; 3] {
-        let (sy, cy) = (-yaw).sin_cos();
-        let (sp, cp) = (-pitch).sin_cos();
-        let (sr, cr) = (-roll).sin_cos();
-        // Rz(-roll) * Rx(-pitch) * Ry(-yaw)
-        [
-            [cr * cy + sr * sp * sy, sr * cp, -cr * sy + sr * sp * cy],
-            [-sr * cy + cr * sp * sy, cr * cp, sr * sy + cr * sp * cy],
-            [cp * sy, -sp, cp * cy],
-        ]
+    /// Build the inverse ship rotation: undoes yaw, pitch, roll to get body-frame.
+    /// Returns R_z(-roll) * R_x(-pitch) * R_y(-yaw) (applied right-to-left to vectors).
+    fn inverse_ship_rotation(yaw: f32, pitch: f32, roll: f32) -> Rotation3<f32> {
+        let ry = Rotation3::from_axis_angle(&Vec3::y_axis(), -yaw);
+        let rx = Rotation3::from_axis_angle(&Vec3::x_axis(), -pitch);
+        let rz = Rotation3::from_axis_angle(&Vec3::z_axis(), -roll);
+        rz * rx * ry
     }
 
-    /// Multiply a 3x3 rotation matrix by a 3-element vector.
-    fn rotate_vec(m: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
-        [
-            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-        ]
+    /// The axis remap from BigWorld body-frame to mesh-space.
+    /// BigWorld: +X = East, +Z = North, +Y = up.
+    /// Mesh: bow along +Z, starboard along +X, +Y = up.
+    /// Remap: mesh_x = -body_z, mesh_y = body_y, mesh_z = +body_x.
+    /// This is Ry(-90°): (1,0,0)→(0,0,1), (0,0,1)→(-1,0,0).
+    fn axis_remap() -> Rotation3<f32> {
+        Rotation3::from_axis_angle(&Vec3::y_axis(), -std::f32::consts::FRAC_PI_2)
     }
 
     /// Transform a world-space position to model-space given ship position and
@@ -396,25 +402,18 @@ impl RealtimeArmorViewer {
     fn world_to_model(
         world_pos: &WorldPos,
         ship_pos: &WorldPos,
-        rot: &[[f32; 3]; 3],
-        model_center: &[f32; 3],
-        bounds: Option<&([f32; 3], [f32; 3])>,
-    ) -> [f32; 3] {
-        let offset = [world_pos.x - ship_pos.x, world_pos.y - ship_pos.y, world_pos.z - ship_pos.z];
-        let unrotated = Self::rotate_vec(rot, offset);
-        // Map world-space (BigWorld) to model-space (right-handed, Z-negated):
-        //   model_x = -world_z (lateral — negated for RH mesh coords)
-        //   model_z = world_x  (longitudinal)
-        // ship_pos.y is at the waterline (sea surface), so the Y offset
-        // already gives height above waterline. apply_waterline_offset()
-        // shifted the mesh so Y=0 = waterline.
-        let model_x = model_center[0] - unrotated[2];
-        let model_y = unrotated[1];
-        let model_z = model_center[2] + unrotated[0];
+        rot: &Rotation3<f32>,
+        model_center: &Vec3,
+        bounds: Option<&(Vec3, Vec3)>,
+    ) -> Vec3 {
+        let offset = Vec3::new(world_pos.x - ship_pos.x, world_pos.y - ship_pos.y, world_pos.z - ship_pos.z);
+        let body = rot * offset;
+        let remapped = Self::axis_remap() * body;
+        let model = model_center + remapped;
         if let Some((min, max)) = bounds {
-            [model_x.clamp(min[0], max[0]), model_y, model_z.clamp(min[2], max[2])]
+            Vec3::new(model.x.clamp(min.x, max.x), model.y, model.z.clamp(min.z, max.z))
         } else {
-            [model_x, model_y, model_z]
+            model
         }
     }
 
@@ -482,6 +481,8 @@ impl RealtimeArmorViewer {
             comparison,
             server_outcome,
             victim_roll: hit.victim_roll,
+            victim_yaw: hit.victim_yaw,
+            server_material_angle: hit.hit.terminal_ballistics.as_ref().map(|tb| tb.material_angle),
         };
 
         if let Some(&idx) = self.salvo_group_index.get(&key) {
@@ -574,10 +575,6 @@ impl RealtimeArmorViewer {
         shell: &ShellInfo,
         server_outcome: &ServerOutcome,
     ) -> Option<TrajectorySimResult> {
-        use crate::viewport_3d::camera::normalize;
-        use crate::viewport_3d::camera::scale;
-        use crate::viewport_3d::camera::sub;
-
         let ship_yaw = hit.victim_yaw;
         let ship_world_pos = hit.victim_position;
         let salvo_shots: Vec<_> = hit.salvo.as_ref().map(|s| s.shots.clone()).unwrap_or_default();
@@ -587,48 +584,43 @@ impl RealtimeArmorViewer {
 
         let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
 
-        // Determine shell direction: prefer terminal ballistics if available,
-        // otherwise compute from salvo origin → actual impact position.
-        let shell_dir = if let Some(ref tb) = hit.hit.terminal_ballistics {
-            let vel = tb.velocity;
-            let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
-            if speed < 1.0 {
-                return None;
-            }
-            let world_dir = [vel.x / speed, vel.y / speed, vel.z / speed];
-            let local = Self::rotate_vec(&rot, world_dir);
-            normalize([-local[2], local[1], -local[0]])
-        } else if let Some(shot) = matched_shot {
-            let dx = impact_pos.x - shot.origin.x;
-            let dz = impact_pos.z - shot.origin.z;
-            let horiz_len = (dx * dx + dz * dz).sqrt();
-            let world_dir = if horiz_len > 0.001 {
-                [dx / horiz_len, 0.0, dz / horiz_len]
-            } else {
-                return None;
-            };
-            let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-            let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
-            let world_dir_3d = if let Some(ref imp) = impact_result {
-                let horiz_angle = imp.impact_angle_horizontal as f32;
-                let cos_h = horiz_angle.cos();
-                let sin_h = horiz_angle.sin();
-                [world_dir[0] * cos_h, -sin_h, world_dir[2] * cos_h]
-            } else {
-                world_dir
-            };
-            let local = Self::rotate_vec(&rot, world_dir_3d);
-            normalize([-local[2], local[1], -local[0]])
-        } else {
+        let Some(shot) = matched_shot else {
             return None;
         };
 
-        let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or([0.0; 3]);
+        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
+        let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
+
+        let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or(Vec3::zeros());
         let bounds = self.pane.loaded_armor.as_ref().map(|a| a.bounds);
+
+        // Transform both origin and impact to mesh-space via world_to_model.
         let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
-        let ray_through = [model_impact[0], 0.0, model_impact[2]];
-        let ray_origin = sub(ray_through, scale(shell_dir, 100.0));
-        let all_hits = self.pane.viewport.pick_all_ray(ray_origin, shell_dir);
+
+        // Shell direction: transform the world-space direction through the same
+        // inverse_ship_rotation + axis_remap pipeline used for positions.
+        // For a direction vector we skip the translation (ship_pos, model_center).
+        let world_dir =
+            Vec3::new(impact_pos.x - shot.origin.x, impact_pos.y - shot.origin.y, impact_pos.z - shot.origin.z);
+        let body_dir = rot * world_dir;
+        let mesh_dir = Self::axis_remap() * body_dir;
+        let horiz_len = (mesh_dir.x * mesh_dir.x + mesh_dir.z * mesh_dir.z).sqrt();
+        if horiz_len < 0.001 {
+            return None;
+        }
+        let horiz_dir = Vec3::new(mesh_dir.x / horiz_len, 0.0, mesh_dir.z / horiz_len);
+        let shell_dir: Vec3 = if let Some(ref imp) = impact_result {
+            let horiz_angle = imp.impact_angle_horizontal as f32;
+            let cos_h = horiz_angle.cos();
+            let sin_h = horiz_angle.sin();
+            Vec3::new(horiz_dir.x * cos_h, -sin_h, horiz_dir.z * cos_h).normalize()
+        } else {
+            horiz_dir
+        };
+
+        let ray_through = Vec3::new(model_impact.x, 0.0, model_impact.z);
+        let ray_origin: Vec3 = ray_through - shell_dir * 100.0;
+        let all_hits = self.pane.viewport.pick_all_ray_model_space(ray_origin, shell_dir);
 
         if all_hits.is_empty() {
             return None;
@@ -638,22 +630,10 @@ impl RealtimeArmorViewer {
         let traj_hits =
             crate::armor_viewer::common::build_traj_hits(&all_hits, &self.pane.mesh_triangle_info, &shell_dir);
 
-        // Build ImpactResult: use terminal ballistics if available, otherwise simulate.
-        let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
-        let impact = if let Some(ref tb) = hit.hit.terminal_ballistics {
-            let mut imp = crate::armor_viewer::ballistics::ImpactResult::from_terminal_velocity(
-                &params,
-                tb.velocity.x as f64,
-                tb.velocity.y as f64,
-                tb.velocity.z as f64,
-            );
-            imp.distance = firing_range.value() as f64;
-            Some(imp)
-        } else if matched_shot.is_some() {
-            crate::armor_viewer::ballistics::solve_for_range(&params, firing_range)
-        } else {
-            None
-        };
+        // Build ImpactResult from ballistic simulation.
+        // Note: terminalBallisticsInfo.velocity is post-impact (not incoming), so we
+        // cannot use from_terminal_velocity() here — always simulate from range.
+        let impact = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);
 
         // AP simulation + comparison
         let mut detonation_points = Vec::new();
@@ -741,6 +721,7 @@ impl RealtimeArmorViewer {
             cam_dist,
             self.pane.marker_opacity,
             upload_lw,
+            self.pane.trajectory_world_space,
         );
 
         self.pane.trajectories.push(StoredTrajectory {
@@ -757,6 +738,7 @@ impl RealtimeArmorViewer {
             show_zones_active: false,
             shell_sim_cache: None,
             created_at_roll: self.pane.viewport.model_roll,
+            created_at_yaw: self.pane.viewport.model_yaw,
         });
 
         Some(TrajectorySimResult { traj_id, comparison, traj_hits, firing_range })
@@ -797,14 +779,14 @@ impl RealtimeArmorViewer {
                 && let Some(ref cmp) = sim_result.comparison
             {
                 let rot = Self::inverse_ship_rotation(hit.victim_yaw, hit.victim_pitch, hit.victim_roll);
-                let model_center = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or([0.0; 3]);
+                let mc = self.pane.loaded_armor.as_ref().map(|a| a.center()).unwrap_or(Vec3::zeros());
                 let exit_div = self.compute_exit_divergence(
                     group,
                     &cmp.sim,
                     &sim_result.traj_hits,
                     &hit.victim_position,
                     &rot,
-                    &model_center,
+                    &mc,
                 );
                 // Patch exit divergence into the comparison
                 if let Some(ref mut s) = sim
@@ -844,8 +826,8 @@ impl RealtimeArmorViewer {
         sim: &crate::armor_viewer::penetration::ShellSimResult,
         traj_hits: &[crate::armor_viewer::penetration::TrajectoryHit],
         ship_world_pos: &WorldPos,
-        rot: &[[f32; 3]; 3],
-        model_center: &[f32; 3],
+        rot: &Rotation3<f32>,
+        model_center: &Vec3,
     ) -> Option<ExitDivergence> {
         // Server exit position from the ExitOverpenetration hit's terminal ballistics
         let exit_tb = group.exit.as_ref().and_then(|e| e.hit.terminal_ballistics.as_ref());
@@ -917,12 +899,12 @@ impl RealtimeArmorViewer {
             if let Some(ref armor) = self.pane.loaded_armor {
                 tracing::debug!(
                     "RealtimeArmorViewer: ship loaded — bounds min=[{:.1},{:.1},{:.1}] max=[{:.1},{:.1},{:.1}]",
-                    armor.bounds.0[0],
-                    armor.bounds.0[1],
-                    armor.bounds.0[2],
-                    armor.bounds.1[0],
-                    armor.bounds.1[1],
-                    armor.bounds.1[2],
+                    armor.bounds.0.x,
+                    armor.bounds.0.y,
+                    armor.bounds.0.z,
+                    armor.bounds.1.x,
+                    armor.bounds.1.y,
+                    armor.bounds.1.z,
                 );
             }
         }
@@ -979,6 +961,26 @@ impl RealtimeArmorViewer {
                 .flat_map(|g| &g.shells)
                 .find(|s| s.trajectory_id == Some(tid))
                 .map(|s| s.victim_roll)
+        })
+        .unwrap_or(0.0)
+    }
+
+    /// Get the victim_yaw from the currently selected shell, or 0.0 if nothing is selected.
+    fn selected_shell_yaw(&self) -> f32 {
+        let tid = match &self.selection {
+            Some(SalvoSelection::Shell { trajectory_id, .. }) => Some(*trajectory_id),
+            Some(SalvoSelection::Group(key)) => self.salvo_group_index.get(key).and_then(|&idx| {
+                let g = &self.salvo_groups[idx];
+                if g.shells.len() == 1 { g.shells[0].trajectory_id } else { None }
+            }),
+            None => None,
+        };
+        tid.and_then(|tid| {
+            self.salvo_groups
+                .iter()
+                .flat_map(|g| &g.shells)
+                .find(|s| s.trajectory_id == Some(tid))
+                .map(|s| s.victim_yaw)
         })
         .unwrap_or(0.0)
     }
@@ -1214,6 +1216,88 @@ impl RealtimeArmorViewer {
         });
     }
 
+    /// Draw a compass rose overlay in the top-left corner of the viewport.
+    /// Shows absolute world cardinal directions based on camera azimuth only
+    /// (independent of ship yaw/roll and camera elevation).
+    fn draw_compass(&self, painter: &egui::Painter, viewport_rect: egui::Rect) {
+        let vp = &self.pane.viewport;
+
+        // The camera azimuth rotates the view around the Y axis. At azimuth=0,
+        // the camera looks along mesh -Z. We need to map BigWorld cardinal
+        // directions to screen (right, up) using only the horizontal camera angle.
+        //
+        // BigWorld: +X = East, +Z = North (from heading conversion: yaw = PI/2 - heading).
+        // Mesh coordinate system (from world_to_model axis remap):
+        //   mesh +Z = BigWorld +X (East) direction at yaw=0
+        //   mesh -X = BigWorld +Z (North) direction
+        //
+        // Camera at azimuth=a looks from direction (sin(a), 0, cos(a)).
+        // Screen-right = camera's right vector projected on XZ = (cos(a), 0, -sin(a))
+        // Screen-up projected on XZ = camera's up, but for a top-down compass we use
+        // the forward direction on the ground plane = (-sin(a), 0, -cos(a))
+        //
+        // For a mesh-space direction (mx, 0, mz):
+        //   screen_x = mx * cos(a) + mz * (-sin(a))
+        //   screen_y = mx * (-sin(a)) + mz * (-cos(a))    (up on screen = into the screen on ground)
+        let az = vp.camera.azimuth;
+        let (sa, ca) = az.sin_cos();
+
+        let project_world_dir = |world_x: f32, world_z: f32| -> (f32, f32) {
+            // BigWorld → mesh: mesh_x = -world_z, mesh_z = +world_x
+            let mx = -world_z;
+            let mz = world_x;
+            // Project onto screen using camera azimuth
+            let screen_x = mx * ca - mz * sa;
+            let screen_y = -(mx * sa + mz * ca);
+            (screen_x, screen_y)
+        };
+
+        let (nx, ny) = project_world_dir(0.0, 1.0);
+        let (ex, ey) = project_world_dir(1.0, 0.0);
+        let (sx, sy) = (-nx, -ny);
+        let (wx, wy) = (-ex, -ey);
+
+        // Compass center: top-left corner with padding
+        let radius = 30.0_f32;
+        let center = egui::pos2(viewport_rect.left() + radius + 12.0, viewport_rect.top() + radius + 12.0);
+
+        // Background circle
+        painter.circle_filled(center, radius + 4.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140));
+        painter.circle_stroke(
+            center,
+            radius + 4.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(180, 180, 180, 100)),
+        );
+
+        let directions: [(&str, (f32, f32), egui::Color32); 4] = [
+            ("N", (nx, ny), egui::Color32::from_rgb(255, 80, 80)),
+            ("W", (ex, ey), egui::Color32::from_rgb(180, 180, 180)),
+            ("S", (sx, sy), egui::Color32::from_rgb(180, 180, 180)),
+            ("E", (wx, wy), egui::Color32::from_rgb(180, 180, 180)),
+        ];
+
+        for &(label, (dx, dy), color) in &directions {
+            // Normalize the projected direction to unit length
+            let len = (dx * dx + dy * dy).sqrt();
+            if len < 1e-6 {
+                continue;
+            }
+            let (ux, uy) = (dx / len, dy / len);
+
+            // Arm endpoint (screen Y is flipped: up = negative in screen coords)
+            let arm_end = egui::pos2(center.x + ux * radius, center.y - uy * radius);
+
+            // Draw arm line
+            let stroke_width = if label == "N" { 2.0 } else { 1.0 };
+            painter.line_segment([center, arm_end], egui::Stroke::new(stroke_width, color));
+
+            // Draw label at the tip
+            let label_pos = egui::pos2(center.x + ux * (radius + 10.0), center.y - uy * (radius + 10.0));
+            let font = egui::FontId::proportional(if label == "N" { 12.0 } else { 10.0 });
+            painter.text(label_pos, egui::Align2::CENTER_CENTER, label, font, color);
+        }
+    }
+
     /// Draw the 3D armor viewport with toolbar and plate interaction.
     fn draw_viewport(&mut self, ui: &mut egui::Ui) {
         if self.pane.loading {
@@ -1405,6 +1489,9 @@ impl RealtimeArmorViewer {
 
             // Draw disclaimer watermark
             crate::ui::armor_viewer::draw_viewport_watermark(ui.painter(), response.rect);
+
+            // Draw compass rose overlay
+            self.draw_compass(ui.painter(), response.rect);
         }
 
         // Re-upload armor and trajectories if visibility changed
@@ -1849,10 +1936,15 @@ impl RealtimeArmorViewer {
                 }
             }
 
-            // Update viewport model roll from the selected shell's victim_roll
+            // Update viewport model roll/yaw from the selected shell's victim orientation
             let roll = self.selected_shell_roll();
             if (self.pane.viewport.model_roll - roll).abs() > 1e-6 {
                 self.pane.viewport.model_roll = roll;
+                self.pane.viewport.mark_dirty();
+            }
+            let yaw = self.selected_shell_yaw();
+            if (self.pane.viewport.model_yaw - yaw).abs() > 1e-6 {
+                self.pane.viewport.model_yaw = yaw;
                 self.pane.viewport.mark_dirty();
             }
         }
@@ -2045,6 +2137,15 @@ impl RealtimeArmorViewer {
                         egui::RichText::new(format!("{:.0}mm", hit.thickness_mm)).strong().small().color(plate_color),
                     );
                     ui.label(egui::RichText::new(format!("{:.1}°", hit.angle_deg)).small().color(plate_color));
+                    if i == 0 {
+                        if let Some(server_angle) = shell_entry.server_material_angle {
+                            ui.label(
+                                egui::RichText::new(format!("(Server: {:.1}°)", server_angle.to_degrees()))
+                                    .small()
+                                    .color(egui::Color32::GRAY),
+                            );
+                        }
+                    }
                 });
                 ui.label(
                     egui::RichText::new(format!("  {} / {}", hit.zone, hit.material))

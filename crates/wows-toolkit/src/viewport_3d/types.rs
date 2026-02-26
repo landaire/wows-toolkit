@@ -1,3 +1,7 @@
+extern crate nalgebra as na;
+/// 3D vector type used throughout the crate. Alias for `nalgebra::Vector3<f32>`.
+pub type Vec3 = na::Vector3<f32>;
+
 /// A single vertex sent to the GPU.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -35,7 +39,7 @@ pub struct HitResult {
     pub mesh_id: MeshId,
     pub triangle_index: usize,
     pub distance: f32,
-    pub world_position: [f32; 3],
+    pub world_position: Vec3,
 }
 
 /// Uniform data sent to the vertex/fragment shader.

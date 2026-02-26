@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
+extern crate nalgebra as na;
+use na::{Rotation3, Vector3};
+
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking::PickableMesh;
 use crate::viewport_3d::picking::{self};
+use crate::viewport_3d::types::{HitResult, MeshId, Uniforms, Vec3, Vertex};
 
 const MAT4_IDENTITY: [[f32; 4]; 4] =
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-use crate::viewport_3d::types::HitResult;
-use crate::viewport_3d::types::MeshId;
-use crate::viewport_3d::types::Uniforms;
-use crate::viewport_3d::types::Vertex;
 
 const SHADER_SOURCE: &str = r#"
 struct Uniforms {
@@ -387,6 +387,8 @@ pub struct Viewport3D {
     needs_redraw: bool,
     /// Model roll angle in radians (rotation around the longitudinal/Z axis).
     pub model_roll: f32,
+    /// Model yaw angle in radians (rotation around the vertical/Y axis).
+    pub model_yaw: f32,
     /// Cursor position in NDC ([-1,1] range), updated each frame for flashlight lighting.
     pub cursor_ndc: Option<[f32; 2]>,
 }
@@ -412,6 +414,7 @@ impl Viewport3D {
             clear_color: wgpu::Color { r: 0.12, g: 0.12, b: 0.18, a: 1.0 },
             needs_redraw: true,
             model_roll: 0.0,
+            model_yaw: 0.0,
             cursor_ndc: None,
         }
     }
@@ -807,13 +810,26 @@ impl Viewport3D {
 
         // Create/update uniform buffer
         let aspect = size.0 as f32 / size.1 as f32;
-        let model_mat = if self.model_roll.abs() > 1e-6 {
-            // Rotation around Z axis (ship's longitudinal axis).
-            // Negated because mesh Z is reversed (RH coords: +Z = stern).
-            let (s, c) = (-self.model_roll).sin_cos();
-            [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
-        } else {
-            MAT4_IDENTITY
+        let model_mat = {
+            let has_roll = self.model_roll.abs() > 1e-6;
+            let has_yaw = self.model_yaw.abs() > 1e-6;
+            if !has_roll && !has_yaw {
+                MAT4_IDENTITY
+            } else {
+                // model_mat = Ry(+yaw) * Rz(-roll): roll first (in model space), then yaw.
+                let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -self.model_roll);
+                let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), self.model_yaw);
+                let rot = ry * rz;
+                let m = rot.to_homogeneous();
+                // nalgebra Matrix4 is column-major; extract as [[f32;4];4] where arr[col][row].
+                let s = m.as_slice();
+                [
+                    [s[0], s[1], s[2], s[3]],
+                    [s[4], s[5], s[6], s[7]],
+                    [s[8], s[9], s[10], s[11]],
+                    [s[12], s[13], s[14], s[15]],
+                ]
+            }
         };
         let view_mat = self.camera.view_matrix();
         let proj_mat = self.camera.projection_matrix(aspect);
@@ -940,33 +956,42 @@ impl Viewport3D {
         offscreen.egui_texture_id
     }
 
-    /// Rotate a 3D point around the Z axis by `angle` radians.
-    fn rotate_z(p: [f32; 3], angle: f32) -> [f32; 3] {
-        let (s, c) = angle.sin_cos();
-        [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]]
-    }
-
-    /// Transform a world-space ray into model space (inverse of model_roll).
-    /// Returns the ray unchanged when model_roll is zero.
-    fn ray_to_model_space(&self, origin: [f32; 3], dir: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-        if self.model_roll.abs() < 1e-6 {
+    /// Transform a world-space ray into model space (inverse of model matrix).
+    /// The model matrix is Ry(yaw) * Rz(-roll), so the inverse is Rz(+roll) * Ry(-yaw).
+    fn ray_to_model_space(&self, origin: Vec3, dir: Vec3) -> (Vec3, Vec3) {
+        let has_roll = self.model_roll.abs() > 1e-6;
+        let has_yaw = self.model_yaw.abs() > 1e-6;
+        if !has_roll && !has_yaw {
             return (origin, dir);
         }
-        // The model matrix rotates model-space -> world-space by -model_roll around Z.
-        // The inverse (world -> model) is rotation by +model_roll.
-        (Self::rotate_z(origin, self.model_roll), Self::rotate_z(dir, self.model_roll))
+        // Inverse: Rz(+roll) * Ry(-yaw) — composed as a single rotation.
+        let inv_rot = {
+            let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), self.model_roll);
+            let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), -self.model_yaw);
+            rz * ry
+        };
+        (inv_rot * origin, inv_rot * dir)
     }
 
-    /// Transform a model-space position back to world space (apply model_roll).
-    fn pos_to_world_space(&self, p: [f32; 3]) -> [f32; 3] {
-        if self.model_roll.abs() < 1e-6 {
+    /// Transform a model-space position back to world space (apply model matrix).
+    /// The model matrix is Ry(+yaw) * Rz(-roll): apply Rz(-roll) first, then Ry(+yaw).
+    fn pos_to_world_space(&self, p: Vec3) -> Vec3 {
+        let has_roll = self.model_roll.abs() > 1e-6;
+        let has_yaw = self.model_yaw.abs() > 1e-6;
+        if !has_roll && !has_yaw {
             return p;
         }
-        Self::rotate_z(p, -self.model_roll)
+        // Model matrix: Ry(+yaw) * Rz(-roll)
+        let model_rot = {
+            let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), self.model_yaw);
+            let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), -self.model_roll);
+            ry * rz
+        };
+        model_rot * p
     }
 
-    /// Transform a model-space normal back to world space (apply model_roll).
-    fn normal_to_world_space(&self, n: [f32; 3]) -> [f32; 3] {
+    /// Transform a model-space normal back to world space (apply model rotation).
+    fn normal_to_world_space(&self, n: Vec3) -> Vec3 {
         self.pos_to_world_space(n)
     }
 
@@ -992,13 +1017,13 @@ impl Viewport3D {
     }
 
     /// Unproject a screen position to a world-space ray (origin, direction).
-    pub fn screen_to_ray(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Option<([f32; 3], [f32; 3])> {
+    pub fn screen_to_ray(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Option<(Vec3, Vec3)> {
         picking::screen_to_ray(screen_pos, viewport_rect, &self.camera)
     }
 
     /// Perform CPU picking that returns ALL hits along the ray, sorted by distance.
     /// Each hit includes the triangle normal for impact angle calculations.
-    pub fn pick_all(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Vec<(HitResult, [f32; 3])> {
+    pub fn pick_all(&self, screen_pos: egui::Pos2, viewport_rect: egui::Rect) -> Vec<(HitResult, Vec3)> {
         let Some((origin, dir)) = picking::screen_to_ray(screen_pos, viewport_rect, &self.camera) else {
             return Vec::new();
         };
@@ -1015,7 +1040,7 @@ impl Viewport3D {
 
     /// Pick ALL triangles hit by an arbitrary world-space ray, sorted by distance.
     /// Each hit includes the triangle normal for angle calculations.
-    pub fn pick_all_ray(&self, origin: [f32; 3], direction: [f32; 3]) -> Vec<(HitResult, [f32; 3])> {
+    pub fn pick_all_ray(&self, origin: Vec3, direction: Vec3) -> Vec<(HitResult, Vec3)> {
         let (origin, dir) = self.ray_to_model_space(origin, direction);
         let mesh_refs = self.pick_mesh_refs();
         picking::pick_all_ray(origin, dir, &mesh_refs)
@@ -1027,10 +1052,17 @@ impl Viewport3D {
             .collect()
     }
 
+    /// Like `pick_all_ray`, but the ray is already in raw model/mesh space.
+    /// Skips model rotation transforms on both input and output.
+    pub fn pick_all_ray_model_space(&self, origin: Vec3, direction: Vec3) -> Vec<(HitResult, Vec3)> {
+        let mesh_refs = self.pick_mesh_refs();
+        picking::pick_all_ray(origin, direction, &mesh_refs)
+    }
+
     /// Handle standard 3D navigation input on a UI response.
     /// Left-drag = orbit, scroll = zoom, middle-drag = pan, double-click = reset.
     /// Returns true if the camera changed.
-    pub fn handle_input(&mut self, response: &egui::Response, bounds: Option<([f32; 3], [f32; 3])>) -> bool {
+    pub fn handle_input(&mut self, response: &egui::Response, bounds: Option<(Vec3, Vec3)>) -> bool {
         let old_az = self.camera.azimuth;
         let old_el = self.camera.elevation;
         let old_dist = self.camera.distance;

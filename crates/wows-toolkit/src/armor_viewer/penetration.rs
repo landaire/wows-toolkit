@@ -1,3 +1,5 @@
+use crate::viewport_3d::Vec3;
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -107,7 +109,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct TrajectoryHit {
-    pub position: [f32; 3],
+    pub position: Vec3,
     pub thickness_mm: f32,
     pub zone: String,
     pub material: String,
@@ -118,8 +120,8 @@ pub struct TrajectoryHit {
 /// Result of casting a trajectory ray through the armor model.
 #[derive(Clone, Debug)]
 pub struct TrajectoryResult {
-    pub origin: [f32; 3],
-    pub direction: [f32; 3],
+    pub origin: Vec3,
+    pub direction: Vec3,
     pub hits: Vec<TrajectoryHit>,
     pub total_armor_mm: f32,
     /// Per-ship ballistic arcs (each ship gets its own arc shape + impact data).
@@ -168,9 +170,8 @@ pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate_idx: usize) -> String {
 /// Compute the impact angle between a ray direction and a triangle normal (in degrees).
 /// Returns angle from normal: 0° = head-on (perpendicular to plate), 90° = glancing (parallel).
 /// This matches the WoWs convention where ricochet angles (45°/60°) are from normal.
-pub fn impact_angle_deg(ray_dir: &[f32; 3], normal: &[f32; 3]) -> f32 {
-    let dot = ray_dir[0] * normal[0] + ray_dir[1] * normal[1] + ray_dir[2] * normal[2];
-    let cos_angle = dot.abs().min(1.0);
+pub fn impact_angle_deg(ray_dir: &Vec3, normal: &Vec3) -> f32 {
+    let cos_angle = ray_dir.dot(normal).abs().min(1.0);
     cos_angle.acos().to_degrees()
 }
 
@@ -214,7 +215,7 @@ pub struct PlateResult {
 /// A detonation point in 3D space, tagged with which comparison ship produced it.
 #[derive(Clone, Debug)]
 pub struct DetonationMarker {
-    pub position: [f32; 3],
+    pub position: Vec3,
     pub ship_index: usize,
 }
 
@@ -222,7 +223,7 @@ pub struct DetonationMarker {
 #[derive(Clone, Debug)]
 pub struct ShipArc {
     pub ship_index: usize,
-    pub arc_points_3d: Vec<[f32; 3]>,
+    pub arc_points_3d: Vec<Vec3>,
     pub ballistic_impact: Option<crate::armor_viewer::ballistics::ImpactResult>,
 }
 
@@ -230,7 +231,7 @@ pub struct ShipArc {
 #[derive(Clone, Debug)]
 pub struct FuseDetonation {
     /// 3D world position of detonation.
-    pub position: [f32; 3],
+    pub position: Vec3,
     /// Which hit index armed the fuse.
     pub armed_at_hit: usize,
     /// Distance traveled after arming (in real meters).
@@ -265,7 +266,7 @@ pub fn simulate_shell_through_hits(
     params: &ShellParams,
     impact: &ImpactResult,
     hits: &[TrajectoryHit],
-    shell_dir: &[f32; 3],
+    shell_dir: &Vec3,
 ) -> ShellSimResult {
     use wowsunpack::game_params::types::Meters;
 
@@ -286,28 +287,22 @@ pub fn simulate_shell_through_hits(
     let mut fuse_arm_velocity: f32 = 0.0;
     let mut fuse_distance_model: f32 = 0.0;
     let mut fuse_accumulated: f32 = 0.0; // distance traveled since arming (model units)
-    let mut prev_position: [f32; 3] = [0.0; 3]; // last hit position (for distance accumulation)
+    let mut prev_position = Vec3::zeros(); // last hit position (for distance accumulation)
 
     // Precompute shell direction unit vector for detonation fallback
-    let dir_len =
-        (shell_dir[0] * shell_dir[0] + shell_dir[1] * shell_dir[1] + shell_dir[2] * shell_dir[2]).sqrt().max(1e-9);
-    let dir_norm = [shell_dir[0] / dir_len, shell_dir[1] / dir_len, shell_dir[2] / dir_len];
+    let dir_norm_v = shell_dir / shell_dir.norm().max(1e-9);
 
     let mut detonation: Option<FuseDetonation> = None;
 
     for (i, hit) in hits.iter().enumerate() {
         // If fuse is armed, check if detonation occurs before reaching this plate
         if fuse_armed && detonation.is_none() {
-            let seg_dist = distance_3d(&prev_position, &hit.position);
+            let seg_dist = (hit.position - prev_position).norm();
             let remaining = fuse_distance_model - fuse_accumulated;
             if seg_dist >= remaining && remaining > 0.0 {
                 // Shell detonates before reaching this plate
                 let t = remaining / seg_dist.max(1e-9);
-                let det_pos = [
-                    prev_position[0] + (hit.position[0] - prev_position[0]) * t,
-                    prev_position[1] + (hit.position[1] - prev_position[1]) * t,
-                    prev_position[2] + (hit.position[2] - prev_position[2]) * t,
-                ];
+                let det_pos = prev_position.lerp(&hit.position, t);
                 let arm_idx = plates.iter().position(|p: &PlateResult| p.fuse_armed_here).unwrap_or(0);
                 let fuse_real_m = fuse_arm_velocity * fuse_time;
                 detonation =
@@ -391,11 +386,7 @@ pub fn simulate_shell_through_hits(
     // If fuse armed but detonation didn't happen between hits, compute where it detonates.
     if fuse_armed && detonation.is_none() {
         let remaining = fuse_distance_model - fuse_accumulated;
-        let det_pos = [
-            prev_position[0] + dir_norm[0] * remaining.max(0.0),
-            prev_position[1] + dir_norm[1] * remaining.max(0.0),
-            prev_position[2] + dir_norm[2] * remaining.max(0.0),
-        ];
+        let det_pos = prev_position + dir_norm_v * remaining.max(0.0);
         let arm_idx = plates.iter().position(|p| p.fuse_armed_here).unwrap_or(0);
         let fuse_real_m = fuse_arm_velocity * fuse_time;
         detonation = Some(FuseDetonation { position: det_pos, armed_at_hit: arm_idx, travel_distance: fuse_real_m });
@@ -423,11 +414,8 @@ pub struct TrajectoryMeta {
 }
 
 /// Euclidean distance between two 3D points.
-pub fn distance_3d(a: &[f32; 3], b: &[f32; 3]) -> f32 {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    let dz = b[2] - a[2];
-    (dx * dx + dy * dy + dz * dz).sqrt()
+pub fn distance_3d(a: &Vec3, b: &Vec3) -> f32 {
+    (b - a).norm()
 }
 
 // ---------------------------------------------------------------------------
@@ -493,9 +481,9 @@ pub enum ComparisonVerdict {
 #[allow(dead_code)]
 pub struct ExitDivergence {
     /// Server exit position (model space).
-    pub server_exit_pos: [f32; 3],
+    pub server_exit_pos: Vec3,
     /// Simulated exit position (model space). None if sim didn't produce an exit.
-    pub sim_exit_pos: Option<[f32; 3]>,
+    pub sim_exit_pos: Option<Vec3>,
     /// Distance between them in model units. None if sim exit unavailable.
     pub distance: Option<f32>,
 }

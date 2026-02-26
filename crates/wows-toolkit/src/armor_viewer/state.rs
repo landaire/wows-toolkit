@@ -9,6 +9,7 @@ use wowsunpack::game_params::types::Km;
 use crate::viewport_3d::ArcballCamera;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::MeshId;
+use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Viewport3D;
 
 /// Key identifying a specific plate: (zone, material_name, thickness in tenths of mm).
@@ -275,7 +276,7 @@ pub struct ArmorTriangleTooltip {
 pub struct LoadedShipArmor {
     pub display_name: String,
     pub meshes: Vec<wowsunpack::export::gltf_export::InteractiveArmorMesh>,
-    pub bounds: ([f32; 3], [f32; 3]),
+    pub bounds: (Vec3, Vec3),
     pub zones: Vec<String>,
     /// Ordered mapping: zone name -> sorted list of unique material names in that zone.
     pub zone_parts: Vec<(String, Vec<String>)>,
@@ -336,24 +337,20 @@ impl LoadedShipArmor {
                 pos[1] += dy;
             }
         }
-        self.bounds.0[1] += dy;
-        self.bounds.1[1] += dy;
+        self.bounds.0.y += dy;
+        self.bounds.1.y += dy;
         self.waterline_dy = dy;
     }
 
     /// Bounding-box center in model space.
-    pub fn center(&self) -> [f32; 3] {
-        [
-            (self.bounds.0[0] + self.bounds.1[0]) * 0.5,
-            (self.bounds.0[1] + self.bounds.1[1]) * 0.5,
-            (self.bounds.0[2] + self.bounds.1[2]) * 0.5,
-        ]
+    pub fn center(&self) -> Vec3 {
+        (self.bounds.0 + self.bounds.1) * 0.5
     }
 
     /// Maximum extent in the XZ plane (max of width, depth).
     pub fn max_extent_xz(&self) -> f32 {
-        let dx = self.bounds.1[0] - self.bounds.0[0];
-        let dz = self.bounds.1[2] - self.bounds.0[2];
+        let dx = self.bounds.1.x - self.bounds.0.x;
+        let dz = self.bounds.1.z - self.bounds.0.z;
         dx.max(dz)
     }
 }
@@ -398,6 +395,9 @@ pub struct StoredTrajectory {
     /// The `model_roll` (radians) at which this trajectory was ray-cast.
     /// Used to rotate the ray into model space when roll changes.
     pub created_at_roll: f32,
+    /// The `model_yaw` (radians) at which this trajectory was ray-cast.
+    #[allow(dead_code)]
+    pub created_at_yaw: f32,
 }
 
 /// State for a single armor viewer pane within the split tree.
@@ -497,6 +497,11 @@ pub struct ArmorPane {
     /// Selected module overrides: component type -> component name.
     /// When a module type has alternatives, this stores the user's selection.
     pub selected_modules: HashMap<wowsunpack::game_params::keys::ComponentType, String>,
+    /// When true, trajectory meshes use world-space uniforms (no model rotation).
+    /// The standalone viewer sets this to true because it manually recomputes
+    /// trajectories when roll changes. The realtime viewer sets this to false so
+    /// trajectories rotate with the model matrix (yaw/roll baked via inverse_ship_rotation).
+    pub trajectory_world_space: bool,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -579,6 +584,7 @@ impl ArmorPane {
             upgrade_load_receiver: None,
             selected_hull: None,
             selected_modules: HashMap::new(),
+            trajectory_world_space: true,
         }
     }
 }

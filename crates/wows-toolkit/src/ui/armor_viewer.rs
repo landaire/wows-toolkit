@@ -1,3 +1,6 @@
+extern crate nalgebra as na;
+use na::{Rotation3, Vector3};
+
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -35,6 +38,7 @@ use crate::viewport_3d::LAYER_DEFAULT;
 use crate::viewport_3d::LAYER_HULL;
 use crate::viewport_3d::LAYER_OVERLAY;
 use crate::viewport_3d::MeshId;
+use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Vertex;
 use wowsunpack::game_params::types::AmmoType;
 
@@ -1605,10 +1609,6 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 if pane.trajectory_mode && response.clicked() {
                     let shift_held = vp_ui.input(|i| i.modifiers.shift);
                     if let Some(click_pos) = response.interact_pointer_pos() {
-                        use crate::viewport_3d::camera::normalize;
-                        use crate::viewport_3d::camera::scale;
-                        use crate::viewport_3d::camera::sub;
-
                         // Step 1: Use camera ray to find the click point on the hull surface
                         let camera_hit = pane.viewport.pick(click_pos, response.rect);
 
@@ -1619,17 +1619,16 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             // Compute shell approach direction from the camera ray at the click point.
                             // Project onto XZ plane so the shell approaches horizontally from
                             // the camera's direction toward the clicked surface.
-                            let approach_xz: [f32; 3] =
+                            let approach_xz: Vec3 =
                                 if let Some((_, cam_dir)) = pane.viewport.screen_to_ray(click_pos, response.rect) {
-                                    let xz_len = (cam_dir[0] * cam_dir[0] + cam_dir[2] * cam_dir[2]).sqrt().max(1e-6);
-                                    [cam_dir[0] / xz_len, 0.0, cam_dir[2] / xz_len]
+                                    let xz = Vec3::new(cam_dir[0], 0.0, cam_dir[2]);
+                                    xz / xz.norm().max(1e-6)
                                 } else {
                                     let cam_eye = pane.viewport.camera.eye_position();
                                     let cam_tgt = pane.viewport.camera.target;
-                                    let dx = cam_tgt[0] - cam_eye[0];
-                                    let dz = cam_tgt[2] - cam_eye[2];
-                                    let len = (dx * dx + dz * dz).sqrt().max(1e-6);
-                                    [dx / len, 0.0, dz / len]
+                                    let diff = cam_tgt - cam_eye;
+                                    let xz = Vec3::new(diff.x, 0.0, diff.z);
+                                    xz / xz.norm().max(1e-6)
                                 };
 
                             // Try to get ballistic impact for the first AP shell (or any shell)
@@ -1645,26 +1644,27 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             });
 
                             // Step 2: Compute shell direction from ballistic impact angle
-                            let shell_dir = if let Some(ref impact) = ballistic_impact {
+                            let shell_dir: Vec3 = if let Some(ref impact) = ballistic_impact {
                                 let horiz_angle = impact.impact_angle_horizontal as f32;
                                 let cos_h = horiz_angle.cos();
                                 let sin_h = horiz_angle.sin();
-                                normalize([
+                                Vec3::new(
                                     approach_xz[0] * cos_h,
                                     -sin_h, // shell falls downward
                                     approach_xz[2] * cos_h,
-                                ])
+                                )
+                                .normalize()
                             } else {
                                 // Point-blank: use camera ray direction
                                 pane.viewport
                                     .screen_to_ray(click_pos, response.rect)
                                     .map(|(_, d)| d)
-                                    .unwrap_or([0.0, 0.0, -1.0])
+                                    .unwrap_or(Vec3::new(0.0, 0.0, -1.0))
                             };
 
                             // Step 3: Cast a ray from far behind the click point along shell_dir
                             // Origin = click_point - shell_dir * large_distance (so ray starts well behind)
-                            let ray_origin = sub(click_point, scale(shell_dir, 50.0));
+                            let ray_origin = click_point - shell_dir * 50.0;
                             let all_hits = pane.viewport.pick_all_ray(ray_origin, shell_dir);
 
                             // Find the hit closest to the user's click_point and start from there.
@@ -1795,6 +1795,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 cam_dist,
                                 pane.marker_opacity,
                                 1.0,
+                                pane.trajectory_world_space,
                             );
                             pane.trajectories.push(crate::armor_viewer::state::StoredTrajectory {
                                 meta: crate::armor_viewer::penetration::TrajectoryMeta {
@@ -1810,6 +1811,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 show_zones_active: false,
                                 shell_sim_cache: None,
                                 created_at_roll: pane.viewport.model_roll,
+                                created_at_yaw: pane.viewport.model_yaw,
                             });
                             update_shell_sim_cache(
                                 pane.trajectories.last_mut().unwrap(),
@@ -1853,10 +1855,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             let half_ext = crate::armor_viewer::splash::splash_half_extent(max_caliber);
 
                             // Compute zone-level splash result (shell-independent)
+                            let click_point_arr: [f32; 3] = click_point.into();
                             let splash_result = if let Some(armor) = &pane.loaded_armor {
                                 armor.splash_data.as_ref().map(|sd| {
                                     crate::armor_viewer::splash::compute_splash(
-                                        click_point,
+                                        click_point_arr,
                                         half_ext,
                                         sd,
                                         armor.hit_locations.as_ref(),
@@ -1869,7 +1872,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             // Always draw the wireframe cube so the user can
                             // see the splash volume even when no boxes are hit.
                             let (cube_verts, cube_indices) = crate::armor_viewer::splash::build_splash_cube_mesh(
-                                click_point,
+                                click_point_arr,
                                 half_ext,
                                 crate::armor_viewer::splash::SPLASH_CUBE_COLOR,
                             );
@@ -1894,7 +1897,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                     let (hl_verts, hl_indices, tri_total, tri_pen) =
                                         crate::armor_viewer::splash::build_splash_highlight_mesh(
                                             &armor.meshes,
-                                            click_point,
+                                            click_point_arr,
                                             half_ext,
                                             shell,
                                             ifhe_enabled,
@@ -2933,25 +2936,23 @@ pub(crate) fn draw_hull_visibility_popover(
 fn traj_line_segment(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
-    p0: [f32; 3],
-    p1: [f32; 3],
+    p0: Vec3,
+    p1: Vec3,
     color: [f32; 4],
-    perp1: [f32; 3],
-    perp2: [f32; 3],
+    perp1: Vec3,
+    perp2: Vec3,
     line_width: f32,
 ) {
-    use crate::viewport_3d::camera::add;
-    use crate::viewport_3d::camera::scale;
-    use crate::viewport_3d::camera::sub;
-    let offset1 = scale(perp1, line_width * 0.5);
-    let offset2 = scale(perp2, line_width * 0.5);
+    let offset1 = perp1 * (line_width * 0.5);
+    let offset2 = perp2 * (line_width * 0.5);
+    let normal: [f32; 3] = perp1.into();
 
     for offset in [offset1, offset2] {
         let b = vertices.len() as u32;
-        vertices.push(Vertex { position: sub(p0, offset), normal: perp1, color, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: add(p0, offset), normal: perp1, color, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: add(p1, offset), normal: perp1, color, uv: [0.0, 0.0] });
-        vertices.push(Vertex { position: sub(p1, offset), normal: perp1, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: (p0 - offset).into(), normal, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: (p0 + offset).into(), normal, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: (p1 + offset).into(), normal, color, uv: [0.0, 0.0] });
+        vertices.push(Vertex { position: (p1 - offset).into(), normal, color, uv: [0.0, 0.0] });
         indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
     }
 }
@@ -2961,27 +2962,24 @@ fn traj_line_segment(
 fn traj_marker(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
-    pos: [f32; 3],
+    pos: Vec3,
     color: [f32; 4],
     size: f32,
-    dir: [f32; 3],
-    perp1: [f32; 3],
-    perp2: [f32; 3],
+    dir: Vec3,
+    perp1: Vec3,
+    perp2: Vec3,
 ) {
-    use crate::viewport_3d::camera::add;
-    use crate::viewport_3d::camera::scale;
-    use crate::viewport_3d::camera::sub;
     let base = vertices.len() as u32;
-    let o1 = scale(perp1, size);
-    let o2 = scale(perp2, size);
-    let od = scale(dir, size);
+    let o1 = perp1 * size;
+    let o2 = perp2 * size;
+    let od = dir * size;
 
-    let top = add(pos, od);
-    let bottom = sub(pos, od);
-    let left = sub(pos, o1);
-    let right = add(pos, o1);
-    let front = add(pos, o2);
-    let back = sub(pos, o2);
+    let top: [f32; 3] = (pos + od).into();
+    let bottom: [f32; 3] = (pos - od).into();
+    let left: [f32; 3] = (pos - o1).into();
+    let right: [f32; 3] = (pos + o1).into();
+    let front: [f32; 3] = (pos + o2).into();
+    let back: [f32; 3] = (pos - o2).into();
 
     let n = [0.0, 1.0, 0.0];
     for &[a, b, c] in &[
@@ -3016,15 +3014,14 @@ fn recompute_trajectory_for_range(
     marker_opacity: f32,
     comparison_ships_version: u64,
 ) {
-    use crate::viewport_3d::camera::normalize;
-
     let range_meters = traj.meta.range.to_meters();
     let result = &mut traj.result;
 
     // Derive horizontal approach direction from the existing shell direction
     let dir = result.direction;
-    let horiz_len = (dir[0] * dir[0] + dir[2] * dir[2]).sqrt();
-    let approach_xz = if horiz_len > 1e-6 { [dir[0] / horiz_len, 0.0, dir[2] / horiz_len] } else { [0.0, 0.0, -1.0] };
+    let xz = Vec3::new(dir[0], 0.0, dir[2]);
+    let horiz_len = xz.norm();
+    let approach_xz: Vec3 = if horiz_len > 1e-6 { xz / horiz_len } else { Vec3::new(0.0, 0.0, -1.0) };
 
     // Get first AP shell for shell direction (shared ray direction)
     let first_shell = comparison_ships
@@ -3042,7 +3039,7 @@ fn recompute_trajectory_for_range(
             let horiz_angle = impact.impact_angle_horizontal as f32;
             let cos_h = horiz_angle.cos();
             let sin_h = horiz_angle.sin();
-            result.direction = normalize([approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h]);
+            result.direction = Vec3::new(approach_xz[0] * cos_h, -sin_h, approach_xz[2] * cos_h).normalize();
         }
     }
 
@@ -3061,17 +3058,13 @@ fn recompute_trajectory_for_range(
                     let (arc_2d, height_ratio) =
                         crate::armor_viewer::ballistics::simulate_arc_points(&params, impact.launch_angle, 60);
                     let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
-                    let arc_points_3d: Vec<[f32; 3]> = arc_2d
+                    let arc_points_3d: Vec<Vec3> = arc_2d
                         .iter()
                         .map(|(xf, yf)| {
                             let xf = *xf as f32;
                             let yf = *yf as f32;
                             let along = (1.0 - xf) * arc_horiz_extent;
-                            [
-                                first_hit_pos[0] - approach_xz[0] * along,
-                                first_hit_pos[1] + yf * arc_height_extent,
-                                first_hit_pos[2] - approach_xz[2] * along,
-                            ]
+                            first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
                         })
                         .collect();
                     new_ship_arcs.push(crate::armor_viewer::penetration::ShipArc {
@@ -3140,6 +3133,7 @@ fn recompute_trajectory_for_range(
         cam_distance,
         marker_opacity,
         1.0,
+        true, // standalone viewer: world_space (trajectories manually recomputed for roll)
     ));
     traj.marker_cam_dist = cam_distance;
 
@@ -3165,24 +3159,17 @@ fn recompute_trajectory_for_roll(
     marker_opacity: f32,
     comparison_ships_version: u64,
 ) {
-    use crate::viewport_3d::camera::normalize;
-    use crate::viewport_3d::camera::scale;
-    use crate::viewport_3d::camera::sub;
-
     let old_roll = traj.created_at_roll;
     let delta = old_roll - new_roll;
 
     // Rotate origin and direction around Z by delta to transform from old model space to new.
-    let rotate_z = |v: [f32; 3], angle: f32| -> [f32; 3] {
-        let (s, c) = angle.sin_cos();
-        [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]]
-    };
+    let rz = Rotation3::from_axis_angle(&Vector3::z_axis(), delta);
 
-    let rotated_origin = rotate_z(traj.result.origin, delta);
-    let rotated_dir = normalize(rotate_z(traj.result.direction, delta));
+    let rotated_origin = rz * traj.result.origin;
+    let rotated_dir = (rz * traj.result.direction).normalize();
 
     // Re-ray-cast against armor meshes
-    let ray_origin = sub(rotated_origin, scale(rotated_dir, 50.0));
+    let ray_origin = rotated_origin - rotated_dir * 50.0;
     let all_hits = viewport.pick_all_ray(ray_origin, rotated_dir);
 
     // Find the hit closest to the rotated origin (same logic as initial trajectory creation)
@@ -3190,12 +3177,8 @@ fn recompute_trajectory_for_roll(
         .iter()
         .enumerate()
         .min_by(|(_, (a, _)), (_, (b, _))| {
-            let da = (a.world_position[0] - rotated_origin[0]).powi(2)
-                + (a.world_position[1] - rotated_origin[1]).powi(2)
-                + (a.world_position[2] - rotated_origin[2]).powi(2);
-            let db = (b.world_position[0] - rotated_origin[0]).powi(2)
-                + (b.world_position[1] - rotated_origin[1]).powi(2)
-                + (b.world_position[2] - rotated_origin[2]).powi(2);
+            let da = (a.world_position - rotated_origin).norm_squared();
+            let db = (b.world_position - rotated_origin).norm_squared();
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(i, _)| i)
@@ -3310,12 +3293,10 @@ fn update_shell_sim_cache(
 }
 
 /// Compute perpendicular vectors for a line segment direction, for cross-shaped quad rendering.
-fn segment_perps(seg_dir: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    use crate::viewport_3d::camera::cross;
-    use crate::viewport_3d::camera::normalize;
-    let arbitrary = if seg_dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
-    let p1 = normalize(cross(seg_dir, arbitrary));
-    let p2 = normalize(cross(seg_dir, p1));
+fn segment_perps(seg_dir: Vec3) -> (Vec3, Vec3) {
+    let arbitrary = if seg_dir[1].abs() < 0.9 { Vec3::y() } else { Vec3::x() };
+    let p1 = seg_dir.cross(&arbitrary).normalize();
+    let p2 = seg_dir.cross(&p1).normalize();
     (p1, p2)
 }
 
@@ -3332,13 +3313,8 @@ pub(crate) fn upload_trajectory_visualization(
     cam_distance: f32,
     marker_opacity: f32,
     line_width_mult: f32,
+    world_space: bool,
 ) -> MeshId {
-    use crate::viewport_3d::camera::add;
-    use crate::viewport_3d::camera::cross;
-    use crate::viewport_3d::camera::normalize;
-    use crate::viewport_3d::camera::scale;
-    use crate::viewport_3d::camera::sub;
-
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
@@ -3347,9 +3323,9 @@ pub(crate) fn upload_trajectory_visualization(
     let scale_factor = (cam_distance / 200.0).clamp(0.15, 3.0);
     let line_width = TRAJECTORY_LINE_WIDTH_FACTOR * scale_factor * line_width_mult;
 
-    let arbitrary = if dir[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
-    let perp1 = normalize(cross(dir, arbitrary));
-    let perp2 = normalize(cross(dir, perp1));
+    let arbitrary = if dir[1].abs() < 0.9 { Vec3::y() } else { Vec3::x() };
+    let perp1 = dir.cross(&arbitrary).normalize();
+    let perp2 = dir.cross(&perp1).normalize();
 
     if !result.hits.is_empty() {
         let first_pos = result.hits[0].position;
@@ -3364,15 +3340,12 @@ pub(crate) fn upload_trajectory_visualization(
                 let sc = SHIP_COLORS[arc_data.ship_index % SHIP_COLORS.len()];
                 let arc = &arc_data.arc_points_3d;
                 for i in 0..arc.len() - 1 {
-                    let seg_dir_raw = sub(arc[i + 1], arc[i]);
-                    let len = (seg_dir_raw[0] * seg_dir_raw[0]
-                        + seg_dir_raw[1] * seg_dir_raw[1]
-                        + seg_dir_raw[2] * seg_dir_raw[2])
-                        .sqrt();
+                    let seg_raw = arc[i + 1] - arc[i];
+                    let len = seg_raw.norm();
                     if len < 1e-6 {
                         continue;
                     }
-                    let seg_dir = [seg_dir_raw[0] / len, seg_dir_raw[1] / len, seg_dir_raw[2] / len];
+                    let seg_dir = seg_raw / len;
                     let (sp1, sp2) = segment_perps(seg_dir);
                     let frac = i as f32 / (arc.len() - 1) as f32;
                     let alpha = 0.7 + 0.3 * frac;
@@ -3390,7 +3363,7 @@ pub(crate) fn upload_trajectory_visualization(
             }
         } else {
             // No arc: draw flat leading segment (point-blank mode)
-            let lead_start = sub(first_pos, scale(dir, 2.0));
+            let lead_start = first_pos - dir * 2.0;
             traj_line_segment(
                 &mut vertices,
                 &mut indices,
@@ -3452,7 +3425,7 @@ pub(crate) fn upload_trajectory_visualization(
         {
             let last_rendered_idx = last_visible_hit.unwrap_or(result.hits.len().saturating_sub(1));
             let last_pos = result.hits[last_rendered_idx].position;
-            let trail_end = add(last_pos, scale(dir, 2.0));
+            let trail_end = last_pos + dir * 2.0;
             traj_line_segment(
                 &mut vertices,
                 &mut indices,
@@ -3472,32 +3445,37 @@ pub(crate) fn upload_trajectory_visualization(
             let lateral_offset = if num_dets > 1 {
                 let spread = 0.4 * scale_factor;
                 let t = if num_dets == 1 { 0.0 } else { (di as f32 / (num_dets - 1) as f32) - 0.5 };
-                scale(perp1, t * spread)
+                perp1 * (t * spread)
             } else {
-                [0.0, 0.0, 0.0]
+                Vec3::zeros()
             };
-            let det_pos = add(det.position, lateral_offset);
+            let det_pos = det.position + lateral_offset;
             let burst_size = DETONATION_BURST_SIZE_FACTOR * scale_factor;
             let sc = SHIP_COLORS[det.ship_index % SHIP_COLORS.len()];
             let burst_color = [sc[0], sc[1], sc[2], marker_opacity];
 
             // Octahedron diamond: 6 tip points along each axis
             let base_idx = vertices.len() as u32;
-            let offsets = [
-                scale(perp1, burst_size),
-                scale(perp1, -burst_size),
-                scale(perp2, burst_size),
-                scale(perp2, -burst_size),
-                scale(dir, burst_size),
-                scale(dir, -burst_size),
+            let offsets: [Vec3; 6] = [
+                perp1 * burst_size,
+                perp1 * -burst_size,
+                perp2 * burst_size,
+                perp2 * -burst_size,
+                dir * burst_size,
+                dir * -burst_size,
             ];
 
             // Center vertex
-            vertices.push(Vertex { position: det_pos, normal: [0.0, 1.0, 0.0], color: burst_color, uv: [0.0, 0.0] });
+            vertices.push(Vertex {
+                position: det_pos.into(),
+                normal: [0.0, 1.0, 0.0],
+                color: burst_color,
+                uv: [0.0, 0.0],
+            });
 
             for offset in &offsets {
                 vertices.push(Vertex {
-                    position: add(det_pos, *offset),
+                    position: (det_pos + offset).into(),
                     normal: [0.0, 1.0, 0.0],
                     color: burst_color,
                     uv: [0.0, 0.0],
@@ -3515,8 +3493,11 @@ pub(crate) fn upload_trajectory_visualization(
     }
 
     let id = viewport.add_overlay_mesh(device, &vertices, &indices);
-    // Trajectories are analysis overlays — they should not rotate with model_roll.
-    viewport.set_world_space(id, true);
+    // world_space=true: trajectory stays fixed while model rotates (standalone viewer
+    // manually recomputes trajectories when roll changes).
+    // world_space=false: trajectory rotates with the model matrix (realtime viewer
+    // bakes yaw/roll into mesh-space via inverse_ship_rotation).
+    viewport.set_world_space(id, world_space);
     id
 }
 
@@ -3578,7 +3559,7 @@ pub(crate) fn build_hull_part_groups(
 
 /// Create a water plane quad at the given Y height, extending beyond the hull bounding box.
 /// Returns (vertices, indices) for a semi-transparent blue quad.
-pub(crate) fn create_water_plane(y: f32, bounds: ([f32; 3], [f32; 3]), opacity: f32) -> (Vec<Vertex>, Vec<u32>) {
+pub(crate) fn create_water_plane(y: f32, bounds: (Vec3, Vec3), opacity: f32) -> (Vec<Vertex>, Vec<u32>) {
     let cx = (bounds.0[0] + bounds.1[0]) * 0.5;
     let cz = (bounds.0[2] + bounds.1[2]) * 0.5;
     let ex = (bounds.1[0] - bounds.0[0]) * 2.25;
@@ -4438,7 +4419,7 @@ pub(crate) fn draw_splash_box_labels(pane: &ArmorPane, painter: &egui::Painter, 
     let bg_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140);
 
     for label in &pane.splash_box_labels {
-        if let Some(screen_pos) = pane.viewport.camera.project_to_screen(label.position, viewport_rect) {
+        if let Some(screen_pos) = pane.viewport.camera.project_to_screen(Vec3::from(label.position), viewport_rect) {
             // Only draw if within the viewport
             if viewport_rect.contains(screen_pos) {
                 let galley = painter.layout_no_wrap(label.name.clone(), font.clone(), text_color);

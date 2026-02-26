@@ -1,8 +1,13 @@
+extern crate nalgebra as na;
+use na::{Matrix4, Vector4};
+
+use super::types::Vec3;
+
 /// Arcball orbital camera for 3D model inspection.
 #[derive(Clone, Debug)]
 pub struct ArcballCamera {
     /// Center of rotation (typically model center from bounding box).
-    pub target: [f32; 3],
+    pub target: Vec3,
     /// Distance from the target.
     pub distance: f32,
     /// Horizontal angle in radians.
@@ -20,7 +25,7 @@ pub struct ArcballCamera {
 impl Default for ArcballCamera {
     fn default() -> Self {
         Self {
-            target: [0.0, 0.0, 0.0],
+            target: Vec3::zeros(),
             distance: 5.0,
             azimuth: std::f32::consts::FRAC_PI_4,
             elevation: 0.3,
@@ -33,10 +38,10 @@ impl Default for ArcballCamera {
 
 impl ArcballCamera {
     /// Create a camera that frames the given bounding box.
-    pub fn from_bounds(min: [f32; 3], max: [f32; 3]) -> Self {
-        let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5, (min[2] + max[2]) * 0.5];
-        let extent = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-        let max_extent = extent[0].max(extent[1]).max(extent[2]);
+    pub fn from_bounds(min: Vec3, max: Vec3) -> Self {
+        let center = (min + max) * 0.5;
+        let extent = max - min;
+        let max_extent = extent.x.max(extent.y).max(extent.z);
         let fov = std::f32::consts::FRAC_PI_4;
         let distance = (max_extent * 0.5) / (fov * 0.5).tan();
 
@@ -52,28 +57,27 @@ impl ArcballCamera {
     }
 
     /// Reset camera to frame the given bounding box.
-    pub fn reset(&mut self, min: [f32; 3], max: [f32; 3]) {
+    pub fn reset(&mut self, min: Vec3, max: Vec3) {
         *self = Self::from_bounds(min, max);
     }
 
     /// Camera position in world space.
-    pub fn eye_position(&self) -> [f32; 3] {
+    pub fn eye_position(&self) -> Vec3 {
         let cos_el = self.elevation.cos();
         let sin_el = self.elevation.sin();
         let cos_az = self.azimuth.cos();
         let sin_az = self.azimuth.sin();
 
-        [
-            self.target[0] + self.distance * cos_el * sin_az,
-            self.target[1] + self.distance * sin_el,
-            self.target[2] + self.distance * cos_el * cos_az,
-        ]
+        let offset =
+            Vec3::new(self.distance * cos_el * sin_az, self.distance * sin_el, self.distance * cos_el * cos_az);
+
+        self.target + offset
     }
 
     /// Compute the view matrix (world -> camera).
     pub fn view_matrix(&self) -> [[f32; 4]; 4] {
         let eye = self.eye_position();
-        look_at(eye, self.target, [0.0, 1.0, 0.0])
+        look_at(eye, self.target, Vec3::new(0.0, 1.0, 0.0))
     }
 
     /// Compute the projection matrix for a given aspect ratio.
@@ -101,16 +105,15 @@ impl ArcballCamera {
     /// Handle middle-mouse drag for panning.
     pub fn pan(&mut self, delta: egui::Vec2, viewport_size: egui::Vec2) {
         let view = self.view_matrix();
+        let view_na = mat4_to_na(view);
 
-        // Extract right and up vectors from view matrix
-        let right = [view[0][0], view[1][0], view[2][0]];
-        let up = [view[0][1], view[1][1], view[2][1]];
+        // Extract right and up vectors from view matrix columns
+        let right = Vec3::new(view_na[(0, 0)], view_na[(1, 0)], view_na[(2, 0)]);
+        let up = Vec3::new(view_na[(0, 1)], view_na[(1, 1)], view_na[(2, 1)]);
 
         let scale = self.distance * (self.fov * 0.5).tan() * 2.0 / viewport_size.y.max(1.0);
 
-        self.target[0] -= (right[0] * delta.x + up[0] * delta.y) * scale;
-        self.target[1] -= (right[1] * delta.x + up[1] * delta.y) * scale;
-        self.target[2] -= (right[2] * delta.x + up[2] * delta.y) * scale;
+        self.target -= (right * delta.x + up * delta.y) * scale;
     }
 
     /// Move the camera target using WASD-style keys.
@@ -118,22 +121,20 @@ impl ArcballCamera {
     /// A/D strafe left/right. Speed scales with distance but has a floor.
     pub fn wasd(&mut self, forward: f32, right: f32) {
         // Forward direction projected onto horizontal plane (Y-up)
-        let fwd = normalize([-(self.azimuth.sin()), 0.0, -(self.azimuth.cos())]);
+        let fwd = Vec3::new(-(self.azimuth.sin()), 0.0, -(self.azimuth.cos())).normalize();
         // Right direction (perpendicular to forward, horizontal)
-        let rt = normalize([-fwd[2], 0.0, fwd[0]]);
+        let rt = Vec3::new(-fwd.z, 0.0, fwd.x).normalize();
 
         let min_speed = self.far * 0.00005;
         let speed = (self.distance * 0.0025).max(min_speed);
-        self.target[0] += (fwd[0] * forward + rt[0] * right) * speed;
-        self.target[1] += (fwd[1] * forward + rt[1] * right) * speed;
-        self.target[2] += (fwd[2] * forward + rt[2] * right) * speed;
+        self.target += (fwd * forward + rt * right) * speed;
     }
 
     /// Move the camera target up/down (world Y axis).
     pub fn move_vertical(&mut self, amount: f32) {
         let min_speed = self.far * 0.00005;
         let speed = (self.distance * 0.0025).max(min_speed);
-        self.target[1] += amount * speed;
+        self.target.y += amount * speed;
     }
 
     /// Rotate the camera around the target (azimuth).
@@ -143,25 +144,23 @@ impl ArcballCamera {
 
     /// Project a world-space point to screen coordinates within the given viewport rect.
     /// Returns `None` if the point is behind the camera.
-    pub fn project_to_screen(&self, world_pos: [f32; 3], viewport_rect: egui::Rect) -> Option<egui::Pos2> {
+    pub fn project_to_screen(&self, world_pos: Vec3, viewport_rect: egui::Rect) -> Option<egui::Pos2> {
         let aspect = viewport_rect.width() / viewport_rect.height().max(1.0);
-        let view = self.view_matrix();
-        let proj = self.projection_matrix(aspect);
-        let vp = mat4_mul(proj, view);
+        let view = mat4_to_na(self.view_matrix());
+        let proj = mat4_to_na(self.projection_matrix(aspect));
+        let vp = proj * view;
 
-        // Multiply: clip = vp * [x, y, z, 1]
-        let x = vp[0][0] * world_pos[0] + vp[1][0] * world_pos[1] + vp[2][0] * world_pos[2] + vp[3][0];
-        let y = vp[0][1] * world_pos[0] + vp[1][1] * world_pos[1] + vp[2][1] * world_pos[2] + vp[3][1];
-        let w = vp[0][3] * world_pos[0] + vp[1][3] * world_pos[1] + vp[2][3] * world_pos[2] + vp[3][3];
+        let pos = world_pos.to_homogeneous();
+        let clip = vp * pos;
 
-        if w <= 0.0 {
+        if clip.w <= 0.0 {
             return None; // behind camera
         }
 
-        let ndc_x = x / w;
-        let ndc_y = y / w;
+        let ndc_x = clip.x / clip.w;
+        let ndc_y = clip.y / clip.w;
 
-        // NDC [-1,1] → screen coords
+        // NDC [-1,1] -> screen coords
         let sx = viewport_rect.left() + (ndc_x + 1.0) * 0.5 * viewport_rect.width();
         let sy = viewport_rect.top() + (1.0 - ndc_y) * 0.5 * viewport_rect.height();
 
@@ -171,7 +170,7 @@ impl ArcballCamera {
     /// Handle standard 3D navigation input on a UI response.
     /// Left-drag = orbit, scroll = zoom, middle-drag = pan, double-click = reset.
     /// WASD = move camera target forward/left/backward/right.
-    pub fn handle_input(&mut self, response: &egui::Response, bounds: Option<([f32; 3], [f32; 3])>) {
+    pub fn handle_input(&mut self, response: &egui::Response, bounds: Option<(Vec3, Vec3)>) {
         let viewport_size = response.rect.size();
 
         // Left-drag: orbit
@@ -250,18 +249,66 @@ impl ArcballCamera {
     }
 }
 
-/// Look-at matrix (right-handed, Y-up).
-fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
-    let f = normalize(sub(target, eye));
-    let s = normalize(cross(f, up));
-    let u = cross(s, f);
+// --- Conversion helpers between [[f32; 4]; 4] (col-major) and nalgebra Matrix4 ---
 
+/// Convert our column-major `[[f32; 4]; 4]` into a `Matrix4<f32>`.
+/// Our layout: `m[col][row]`, nalgebra stores column-major internally
+/// but its `new()` constructor takes arguments in **row-major** order,
+/// and `from_columns` takes column slices.
+pub(crate) fn mat4_to_na(m: [[f32; 4]; 4]) -> Matrix4<f32> {
+    Matrix4::from_columns(&[
+        Vector4::new(m[0][0], m[0][1], m[0][2], m[0][3]),
+        Vector4::new(m[1][0], m[1][1], m[1][2], m[1][3]),
+        Vector4::new(m[2][0], m[2][1], m[2][2], m[2][3]),
+        Vector4::new(m[3][0], m[3][1], m[3][2], m[3][3]),
+    ])
+}
+
+/// Convert a `Matrix4<f32>` back to our column-major `[[f32; 4]; 4]`.
+pub(crate) fn na_to_mat4(m: Matrix4<f32>) -> [[f32; 4]; 4] {
+    let c0 = m.column(0);
+    let c1 = m.column(1);
+    let c2 = m.column(2);
+    let c3 = m.column(3);
     [
-        [s[0], u[0], -f[0], 0.0],
-        [s[1], u[1], -f[1], 0.0],
-        [s[2], u[2], -f[2], 0.0],
-        [-dot(s, eye), -dot(u, eye), dot(f, eye), 1.0],
+        [c0[0], c0[1], c0[2], c0[3]],
+        [c1[0], c1[1], c1[2], c1[3]],
+        [c2[0], c2[1], c2[2], c2[3]],
+        [c3[0], c3[1], c3[2], c3[3]],
     ]
+}
+
+/// Look-at matrix (right-handed, Y-up).
+fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> [[f32; 4]; 4] {
+    let f = (target - eye).normalize();
+    let s = f.cross(&up).normalize();
+    let u = s.cross(&f);
+
+    // Build the same column-major matrix as the original code:
+    //   col0 = [s.x,  u.x, -f.x, 0]
+    //   col1 = [s.y,  u.y, -f.y, 0]
+    //   col2 = [s.z,  u.z, -f.z, 0]
+    //   col3 = [-s.dot(eye), -u.dot(eye), f.dot(eye), 1]
+    let m = Matrix4::new(
+        s.x,
+        s.y,
+        s.z,
+        -s.dot(&eye),
+        u.x,
+        u.y,
+        u.z,
+        -u.dot(&eye),
+        -f.x,
+        -f.y,
+        -f.z,
+        f.dot(&eye),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    );
+
+    na_to_mat4(m)
 }
 
 /// Perspective projection matrix (right-handed, depth [0, 1]).
@@ -269,123 +316,31 @@ fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
     let f = 1.0 / (fov_y * 0.5).tan();
     let range = near - far;
 
-    [
-        [f / aspect, 0.0, 0.0, 0.0],
-        [0.0, f, 0.0, 0.0],
-        [0.0, 0.0, far / range, -1.0],
-        [0.0, 0.0, (near * far) / range, 0.0],
-    ]
-}
+    // Build the same column-major matrix as the original code.
+    // Matrix4::new takes row-major arguments.
+    let m = Matrix4::new(
+        f / aspect,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        f,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        far / range,
+        (near * far) / range,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+    );
 
-// --- Vec3 math helpers ---
-
-pub(crate) fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-pub(crate) fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-pub(crate) fn scale(a: [f32; 3], s: f32) -> [f32; 3] {
-    [a[0] * s, a[1] * s, a[2] * s]
-}
-
-pub(crate) fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-pub(crate) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
-
-pub(crate) fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let len = dot(v, v).sqrt();
-    if len < 1e-10 {
-        return [0.0, 0.0, 0.0];
-    }
-    [v[0] / len, v[1] / len, v[2] / len]
+    na_to_mat4(m)
 }
 
 /// Multiply two 4x4 matrices (column-major layout: m[col][row]).
 pub(crate) fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
-    let mut out = [[0.0f32; 4]; 4];
-    for col in 0..4 {
-        for row in 0..4 {
-            out[col][row] =
-                a[0][row] * b[col][0] + a[1][row] * b[col][1] + a[2][row] * b[col][2] + a[3][row] * b[col][3];
-        }
-    }
-    out
-}
-
-/// Invert a 4x4 matrix. Returns None if singular.
-pub(crate) fn mat4_inverse(m: [[f32; 4]; 4]) -> Option<[[f32; 4]; 4]> {
-    // Flatten to compute cofactors
-    let m = [
-        m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3],
-        m[3][0], m[3][1], m[3][2], m[3][3],
-    ];
-
-    let mut inv = [0.0f32; 16];
-
-    inv[0] =
-        m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11]
-            - m[13] * m[7] * m[10];
-    inv[4] =
-        -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11]
-            + m[12] * m[7] * m[10];
-    inv[8] =
-        m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11]
-            - m[12] * m[7] * m[9];
-    inv[12] =
-        -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10]
-            + m[12] * m[6] * m[9];
-    inv[1] =
-        -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11]
-            + m[13] * m[3] * m[10];
-    inv[5] =
-        m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11]
-            - m[12] * m[3] * m[10];
-    inv[9] =
-        -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11]
-            + m[12] * m[3] * m[9];
-    inv[13] =
-        m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10]
-            - m[12] * m[2] * m[9];
-    inv[2] =
-        m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7]
-            - m[13] * m[3] * m[6];
-    inv[6] =
-        -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7]
-            + m[12] * m[3] * m[6];
-    inv[10] =
-        m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7]
-            - m[12] * m[3] * m[5];
-    inv[14] =
-        -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6]
-            + m[12] * m[2] * m[5];
-    inv[3] =
-        -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7]
-            + m[9] * m[3] * m[6];
-    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7]
-        - m[8] * m[3] * m[6];
-    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7]
-        + m[8] * m[3] * m[5];
-    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6]
-        - m[8] * m[2] * m[5];
-
-    let det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
-    if det.abs() < 1e-10 {
-        return None;
-    }
-
-    let inv_det = 1.0 / det;
-    let mut result = [[0.0f32; 4]; 4];
-    for col in 0..4 {
-        for row in 0..4 {
-            result[col][row] = inv[col * 4 + row] * inv_det;
-        }
-    }
-    Some(result)
+    na_to_mat4(mat4_to_na(a) * mat4_to_na(b))
 }

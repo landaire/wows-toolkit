@@ -1,6 +1,8 @@
 //! Shared orchestration functions used by both the armor viewer tab
 //! (`ui/armor_viewer.rs`) and the realtime armor viewer (`realtime_armor_viewer.rs`).
 
+use crate::viewport_3d::Vec3;
+
 use std::collections::HashMap;
 
 use wowsunpack::export::ship::ShipAssets;
@@ -290,7 +292,7 @@ pub(crate) fn load_ship_armor(
     let mut armor = LoadedShipArmor {
         display_name: options.display_name,
         meshes,
-        bounds: (min, max),
+        bounds: (Vec3::from(min), Vec3::from(max)),
         zones,
         zone_parts,
         zone_part_plates,
@@ -422,9 +424,9 @@ pub(crate) fn poll_pane_load_receivers(
 /// `all_hits` is the output of `viewport.pick_all_ray()`: pairs of (HitResult, surface_normal).
 /// `mesh_triangle_info` is the per-mesh, per-triangle metadata from the pane.
 pub(crate) fn build_traj_hits(
-    all_hits: &[(crate::viewport_3d::types::HitResult, [f32; 3])],
+    all_hits: &[(crate::viewport_3d::types::HitResult, Vec3)],
     mesh_triangle_info: &[(crate::viewport_3d::MeshId, Vec<super::state::ArmorTriangleTooltip>)],
-    shell_dir: &[f32; 3],
+    shell_dir: &Vec3,
 ) -> Vec<super::penetration::TrajectoryHit> {
     let first_dist = all_hits.first().map(|h| h.0.distance).unwrap_or(0.0);
     let mut traj_hits = Vec::new();
@@ -450,7 +452,7 @@ pub(crate) fn build_traj_hits(
 
 /// Result of AP shell simulation through armor hits.
 pub(crate) struct ApSimResult {
-    pub detonation_point: Option<[f32; 3]>,
+    pub detonation_point: Option<Vec3>,
     pub last_visible_hit: Option<usize>,
     pub sim: super::penetration::ShellSimResult,
 }
@@ -461,7 +463,7 @@ pub(crate) fn simulate_ap_shell(
     params: &super::ballistics::ShellParams,
     impact: &super::ballistics::ImpactResult,
     traj_hits: &[super::penetration::TrajectoryHit],
-    shell_dir: &[f32; 3],
+    shell_dir: &Vec3,
 ) -> ApSimResult {
     let sim = super::penetration::simulate_shell_through_hits(params, impact, traj_hits, shell_dir);
     let detonation_point = sim.detonation.as_ref().map(|det| det.position);
@@ -482,10 +484,10 @@ pub(crate) fn simulate_ap_shell(
 pub(crate) fn build_ballistic_arc_3d(
     params: &super::ballistics::ShellParams,
     impact: &super::ballistics::ImpactResult,
-    approach_xz: [f32; 3],
-    first_hit_pos: [f32; 3],
+    approach_xz: Vec3,
+    first_hit_pos: Vec3,
     model_extent: f32,
-) -> Vec<[f32; 3]> {
+) -> Vec<Vec3> {
     let arc_horiz_extent = model_extent * 2.0;
     let (arc_2d, height_ratio) = super::ballistics::simulate_arc_points(params, impact.launch_angle, 60);
     let arc_height_extent = arc_horiz_extent * (height_ratio as f32).max(0.02);
@@ -495,21 +497,17 @@ pub(crate) fn build_ballistic_arc_3d(
             let xf = *xf as f32;
             let yf = *yf as f32;
             let along = (1.0 - xf) * arc_horiz_extent;
-            [
-                first_hit_pos[0] - approach_xz[0] * along,
-                first_hit_pos[1] + yf * arc_height_extent,
-                first_hit_pos[2] - approach_xz[2] * along,
-            ]
+            first_hit_pos - approach_xz * along + Vec3::new(0.0, yf * arc_height_extent, 0.0)
         })
         .collect()
 }
 
 /// Normalize the XZ approach direction from a shell direction vector.
-/// Returns `[1.0, 0.0, 0.0]` if the XZ component is too small.
-pub(crate) fn approach_xz_from_shell_dir(shell_dir: &[f32; 3]) -> [f32; 3] {
-    let approach_xz = [shell_dir[0], 0.0_f32, shell_dir[2]];
-    let len = (approach_xz[0] * approach_xz[0] + approach_xz[2] * approach_xz[2]).sqrt();
-    if len > 0.001 { [approach_xz[0] / len, 0.0, approach_xz[2] / len] } else { [1.0, 0.0, 0.0] }
+/// Returns `Vec3::x()` if the XZ component is too small.
+pub(crate) fn approach_xz_from_shell_dir(shell_dir: &Vec3) -> Vec3 {
+    let xz = Vec3::new(shell_dir.x, 0.0, shell_dir.z);
+    let len = xz.norm();
+    if len > 0.001 { xz / len } else { Vec3::x() }
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +562,7 @@ pub(crate) fn reupload_trajectory_meshes(
             cam_dist,
             marker_opacity,
             dp.line_width_mult,
+            pane.trajectory_world_space,
         ));
         traj.marker_cam_dist = cam_dist;
     }
