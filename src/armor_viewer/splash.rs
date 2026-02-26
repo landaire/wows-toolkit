@@ -150,7 +150,19 @@ pub fn parse_ship_splash_data(
     hit_locations: Option<&HashMap<String, HitLocation>>,
 ) -> Option<ShipSplashData> {
     let bytes = splash_bytes?;
-    let boxes = wowsunpack::models::geometry::parse_splash_file(bytes).ok()?;
+    // Negate Z to convert from left-handed (BigWorld) to right-handed coordinates,
+    // matching the armor mesh positions which also have Z negated.
+    let boxes: Vec<SplashBox> = wowsunpack::models::geometry::parse_splash_file(bytes)
+        .ok()?
+        .into_iter()
+        .map(|mut b| {
+            let z0 = -b.min[2];
+            let z1 = -b.max[2];
+            b.min[2] = z0.min(z1);
+            b.max[2] = z0.max(z1);
+            b
+        })
+        .collect();
 
     let mut zone_box_mapping: HashMap<String, Vec<String>> = HashMap::new();
     let mut box_to_zone: HashMap<String, String> = HashMap::new();

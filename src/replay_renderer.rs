@@ -2484,7 +2484,7 @@ fn extract_timeline_events(
     {
         use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
         for (entity_id, player) in controller.player_entities() {
-            for info in player.connection_change_info() {
+            for info in player.connection_change_info().iter() {
                 if info.event_kind() == ConnectionChangeKind::Disconnected && !info.had_death_event() {
                     let sname = ship_names.get(entity_id).cloned().unwrap_or_default();
                     let pname = player_names.get(entity_id).cloned().unwrap_or_default();
