@@ -398,6 +398,7 @@ pub struct PrStats {
 
 impl PrStats {
     /// Compute PR stats from a set of per-game stats.
+    /// `avg` is the aggregate PR (from totals), matching the header PR formula.
     pub fn from_games(games: &[&PerGameStat], pr_data: &PersonalRatingData) -> Option<Self> {
         let prs: Vec<f64> = games.iter().filter_map(|g| g.calculate_pr(Some(pr_data))).collect();
         if prs.is_empty() {
@@ -405,7 +406,18 @@ impl PrStats {
         }
         let min = prs.iter().copied().fold(f64::INFINITY, f64::min);
         let max = prs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let avg = prs.iter().sum::<f64>() / prs.len() as f64;
+
+        // Aggregate PR from totals (same formula as PerformanceInfo::calculate_pr)
+        let first = games.first()?;
+        let stats = ShipBattleStats {
+            ship_id: first.ship_id,
+            battles: games.len() as u32,
+            damage: games.iter().map(|g| g.damage).sum(),
+            wins: games.iter().filter(|g| g.is_win).count() as u32,
+            frags: games.iter().map(|g| g.frags).sum(),
+        };
+        let avg = pr_data.calculate_pr(&[stats])?.pr;
+
         Some(PrStats { min, max, avg })
     }
 }
