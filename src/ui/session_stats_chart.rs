@@ -60,6 +60,7 @@ pub fn render_line_chart(
     pr_data: &PersonalRatingData,
     rolling_average: bool,
     show_labels: bool,
+    reset: bool,
 ) -> Option<egui::Rect> {
     // Win rate doesn't make sense per-game (but rolling average win rate does)
     if stat == ChartableStat::WinRate && !rolling_average {
@@ -151,6 +152,9 @@ pub fn render_line_chart(
         stat.name()
     };
 
+    // Compute the minimum Y value across all data points so the axis starts at 0.min(min_value)
+    let min_y = ship_data.iter().flat_map(|(_, points, _)| points.iter().map(|p| p[1])).fold(0.0f64, f64::min);
+
     // Wrap in a group to get the full rect including axis labels
     let group_response = ui.group(|ui| {
         // Chart title (centered)
@@ -158,43 +162,47 @@ pub fn render_line_chart(
             if rolling_average { format!("{} (Rolling Average)", stat.name()) } else { stat.name().to_string() };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        Plot::new("line_chart")
+        let mut plot = Plot::new("line_chart")
             .legend(Legend::default())
             .x_axis_label("Game #")
             .y_axis_label(y_label)
             .auto_bounds([true, true])
-            .view_aspect(2.0)
-            .show(ui, |plot_ui| {
-                for (name, points, color) in &ship_data {
-                    // Draw the line
-                    plot_ui.line(Line::new(name.clone(), PlotPoints::from(points.clone())).color(*color));
-                    // Draw points/markers so single data points are visible
-                    plot_ui.points(
-                        Points::new(name.clone(), PlotPoints::from(points.clone()))
-                            .color(*color)
-                            .radius(4.0)
-                            .shape(MarkerShape::Circle)
-                            .filled(true),
-                    );
-                    // Add value labels at each point (if enabled)
-                    if show_labels {
-                        for point in points {
-                            let label = if point[1] >= 1000.0 {
-                                format!("{:.0}", point[1])
-                            } else if point[1] >= 10.0 {
-                                format!("{:.1}", point[1])
-                            } else {
-                                format!("{:.2}", point[1])
-                            };
-                            plot_ui.text(
-                                Text::new("", PlotPoint::new(point[0], point[1]), RichText::new(label).size(14.0))
-                                    .color(*color)
-                                    .anchor(egui::Align2::CENTER_BOTTOM),
-                            );
-                        }
+            .include_y(0.0_f64.min(min_y))
+            .view_aspect(2.0);
+        if reset {
+            plot = plot.reset();
+        }
+        plot.show(ui, |plot_ui| {
+            for (name, points, color) in &ship_data {
+                // Draw the line
+                plot_ui.line(Line::new(name.clone(), PlotPoints::from(points.clone())).color(*color));
+                // Draw points/markers so single data points are visible
+                plot_ui.points(
+                    Points::new(name.clone(), PlotPoints::from(points.clone()))
+                        .color(*color)
+                        .radius(4.0)
+                        .shape(MarkerShape::Circle)
+                        .filled(true),
+                );
+                // Add value labels at each point (if enabled)
+                if show_labels {
+                    for point in points {
+                        let label = if point[1] >= 1000.0 {
+                            format!("{:.0}", point[1])
+                        } else if point[1] >= 10.0 {
+                            format!("{:.1}", point[1])
+                        } else {
+                            format!("{:.2}", point[1])
+                        };
+                        plot_ui.text(
+                            Text::new("", PlotPoint::new(point[0], point[1]), RichText::new(label).size(14.0))
+                                .color(*color)
+                                .anchor(egui::Align2::CENTER_BOTTOM),
+                        );
                     }
                 }
-            });
+            }
+        });
     });
 
     Some(group_response.response.rect)
@@ -208,6 +216,7 @@ pub fn render_bar_chart(
     stat: ChartableStat,
     pr_data: &PersonalRatingData,
     show_labels: bool,
+    reset: bool,
 ) -> egui::Rect {
     // Collect bar data with values for later text labels
     let mut bar_data: Vec<(usize, String, f64, Color32)> = Vec::new();
@@ -236,6 +245,9 @@ pub fn render_bar_chart(
         ChartableStat::PersonalRating => "Avg PR",
     };
 
+    // Compute the minimum Y value across all bars so the axis starts at 0.min(min_value)
+    let min_y = bar_data.iter().map(|(_, _, v, _)| *v).fold(0.0f64, f64::min);
+
     // Wrap in a group to get the full rect including axis labels
     let group_response = ui.group(|ui| {
         // Chart title (centered) - show "Avg" prefix for everything except Win Rate
@@ -245,37 +257,41 @@ pub fn render_bar_chart(
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        Plot::new("bar_chart")
+        let mut plot = Plot::new("bar_chart")
             .legend(Legend::default())
             .y_axis_label(y_label)
             .show_axes([false, true])
             .allow_zoom(false)
             .allow_drag(false)
             .allow_scroll(false)
-            .view_aspect(2.0)
-            .show(ui, |plot_ui| {
-                for (i, ship_name, value, color) in &bar_data {
-                    let bar = Bar::new(*i as f64, *value).width(0.7);
-                    let chart = BarChart::new(ship_name.as_str(), vec![bar]).color(*color);
-                    plot_ui.bar_chart(chart);
+            .include_y(0.0_f64.min(min_y))
+            .view_aspect(2.0);
+        if reset {
+            plot = plot.reset();
+        }
+        plot.show(ui, |plot_ui| {
+            for (i, ship_name, value, color) in &bar_data {
+                let bar = Bar::new(*i as f64, *value).width(0.7);
+                let chart = BarChart::new(ship_name.as_str(), vec![bar]).color(*color);
+                plot_ui.bar_chart(chart);
 
-                    // Add value label above the bar (if enabled)
-                    if show_labels {
-                        let label = if *value >= 1000.0 {
-                            format!("{:.0}", value)
-                        } else if *value >= 10.0 {
-                            format!("{:.1}", value)
-                        } else {
-                            format!("{:.2}", value)
-                        };
-                        plot_ui.text(
-                            Text::new("", PlotPoint::new(*i as f64, *value), RichText::new(label).size(14.0))
-                                .color(*color)
-                                .anchor(egui::Align2::CENTER_BOTTOM),
-                        );
-                    }
+                // Add value label above the bar (if enabled)
+                if show_labels {
+                    let label = if *value >= 1000.0 {
+                        format!("{:.0}", value)
+                    } else if *value >= 10.0 {
+                        format!("{:.1}", value)
+                    } else {
+                        format!("{:.2}", value)
+                    };
+                    plot_ui.text(
+                        Text::new("", PlotPoint::new(*i as f64, *value), RichText::new(label).size(14.0))
+                            .color(*color)
+                            .anchor(egui::Align2::CENTER_BOTTOM),
+                    );
                 }
-            });
+            }
+        });
     });
 
     group_response.response.rect

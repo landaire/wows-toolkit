@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -116,6 +114,8 @@ pub struct SessionStatsChartConfig {
     pub screenshot_requested: bool,
     /// The plot rectangle from the last frame (used to crop the screenshot)
     pub plot_rect: Option<egui::Rect>,
+    /// Whether the plot should be reset (e.g. after stat/mode change)
+    pub reset_plot: bool,
 }
 
 /// File system events for replay monitoring

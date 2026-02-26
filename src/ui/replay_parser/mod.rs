@@ -4313,6 +4313,7 @@ impl ToolkitTabViewer<'_> {
                                 let is_selected = self.tab_state.session_stats_chart_config.selected_stat == *stat;
                                 if ui.selectable_label(is_selected, stat.name()).clicked() {
                                     self.tab_state.session_stats_chart_config.selected_stat = *stat;
+                                    self.tab_state.session_stats_chart_config.reset_plot = true;
                                 }
                             }
                         });
@@ -4321,16 +4322,26 @@ impl ToolkitTabViewer<'_> {
                 // Chart type selection
                 ui.horizontal(|ui| {
                     ui.label("Chart Type:");
-                    ui.selectable_value(
-                        &mut self.tab_state.session_stats_chart_config.mode,
-                        ChartMode::Line,
-                        "Line (per game)",
-                    );
-                    ui.selectable_value(
-                        &mut self.tab_state.session_stats_chart_config.mode,
-                        ChartMode::Bar,
-                        "Bar (average)",
-                    );
+                    if ui
+                        .selectable_value(
+                            &mut self.tab_state.session_stats_chart_config.mode,
+                            ChartMode::Line,
+                            "Line (per game)",
+                        )
+                        .clicked()
+                    {
+                        self.tab_state.session_stats_chart_config.reset_plot = true;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut self.tab_state.session_stats_chart_config.mode,
+                            ChartMode::Bar,
+                            "Bar (average)",
+                        )
+                        .clicked()
+                    {
+                        self.tab_state.session_stats_chart_config.reset_plot = true;
+                    }
                     // Rolling average checkbox (only for line charts)
                     if self.tab_state.session_stats_chart_config.mode == ChartMode::Line {
                         ui.checkbox(&mut self.tab_state.session_stats_chart_config.rolling_average, "Rolling Average");
@@ -4383,6 +4394,7 @@ impl ToolkitTabViewer<'_> {
                 let mut plot_rect: Option<egui::Rect> = None;
 
                 let show_labels = self.tab_state.session_stats_chart_config.show_labels;
+                let reset_plot = std::mem::take(&mut self.tab_state.session_stats_chart_config.reset_plot);
 
                 match self.tab_state.session_stats_chart_config.mode {
                     ChartMode::Line => {
@@ -4400,6 +4412,7 @@ impl ToolkitTabViewer<'_> {
                                 &pr_data,
                                 rolling_average,
                                 show_labels,
+                                reset_plot,
                             );
                         }
                     }
@@ -4414,8 +4427,14 @@ impl ToolkitTabViewer<'_> {
                         selected_stats.sort_by_key(|a| a.0);
 
                         if !selected_stats.is_empty() {
-                            plot_rect =
-                                Some(render_bar_chart(ui, &selected_stats, selected_stat, &pr_data, show_labels));
+                            plot_rect = Some(render_bar_chart(
+                                ui,
+                                &selected_stats,
+                                selected_stat,
+                                &pr_data,
+                                show_labels,
+                                reset_plot,
+                            ));
                         }
                     }
                 }
