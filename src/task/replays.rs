@@ -6,9 +6,7 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{
-    self,
-};
+use std::sync::mpsc::{self};
 use std::thread;
 use std::time::Duration;
 
@@ -29,9 +27,7 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::data::idx::VfsEntry;
-use wowsunpack::data::idx::{
-    self,
-};
+use wowsunpack::data::idx::{self};
 use wowsunpack::data::idx_vfs::IdxVfs;
 use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::game_data;
@@ -89,8 +85,19 @@ fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 pub fn load_ribbon_icons(vfs: &VfsPath, dir_path: &str) -> HashMap<String, Arc<GameAsset>> {
     let mut icons = HashMap::new();
 
-    let Ok(dir) = vfs.join(dir_path) else { return icons };
-    let Ok(entries) = dir.read_dir() else { return icons };
+    let dir = match vfs.join(dir_path) {
+        Ok(dir) => dir,
+        Err(e) => {
+            error!("failed to join input paths: {e:?}");
+            return icons;
+        }
+    };
+
+    let Ok(entries) = dir.read_dir() else {
+        error!("failed to get directory entries");
+        return icons;
+    };
+
     for entry in entries {
         let filename = entry.filename();
         let file_stem = Path::new(&filename).file_stem().and_then(|s| s.to_str());

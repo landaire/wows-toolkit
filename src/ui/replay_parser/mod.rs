@@ -729,7 +729,7 @@ impl UiReport {
                             continue;
                         }
 
-                        // Look up the display name and description via shared translation helper
+                        // Look up the display name and description via shared translation helper.
                         let Some(ribbon_translation) =
                             wowsunpack::game_params::translations::translate_ribbon(key, metadata_provider.as_ref())
                         else {
@@ -1712,6 +1712,12 @@ impl UiReport {
                                             })
                                             .fit_to_exact_size(size.into());
                                             ui.add(image).on_hover_text(&ribbon.description);
+                                        } else {
+                                            tracing::warn!(
+                                                "Failed to resolve ribbon icon: {} (is_subribbon: {})",
+                                                ribbon.icon_key,
+                                                ribbon.is_subribbon,
+                                            );
                                         }
 
                                         ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
