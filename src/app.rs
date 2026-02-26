@@ -49,9 +49,7 @@ use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
+use crate::task::{self};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -276,6 +274,7 @@ impl WowsToolkitApp {
                     }
                 }
             } else {
+                warn!("Creating new default app settings");
                 Default::default()
             };
 
