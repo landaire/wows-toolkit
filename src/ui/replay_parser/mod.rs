@@ -2338,10 +2338,9 @@ impl Replay {
 
         let mut remaining = &packet_data[..];
         while !remaining.is_empty() {
-            match p.parse_packet(remaining) {
-                Ok((rest, packet)) => {
+            match p.parse_packet(&mut remaining) {
+                Ok(packet) => {
                     controller.process(&packet);
-                    remaining = rest;
                 }
                 Err(e) => {
                     debug!("Packet parse error: {:?}", e);

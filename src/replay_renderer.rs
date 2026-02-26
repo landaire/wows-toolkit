@@ -1142,8 +1142,8 @@ fn playback_thread(
 
     while !remaining.is_empty() {
         let offset_before = full_packet_data.len() - remaining.len();
-        match parser.parse_packet(remaining) {
-            Ok((rest, packet)) => {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => {
                 if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                     renderer.populate_players(&controller);
                     renderer.update_squadron_info(&controller);
@@ -1173,7 +1173,6 @@ fn playback_thread(
                 }
 
                 controller.process(&packet);
-                remaining = rest;
             }
             Err(_) => break,
         }
@@ -1612,8 +1611,8 @@ fn playback_thread(
         let mut remaining = &packet_data[start_offset..];
 
         while !remaining.is_empty() {
-            match parser.parse_packet(remaining) {
-                Ok((rest, packet)) => {
+            match parser.parse_packet(&mut remaining) {
+                Ok(packet) => {
                     if packet.clock > target_clock + frame_duration {
                         break;
                     }
@@ -1642,7 +1641,6 @@ fn playback_thread(
                     controller.process(&packet);
                     push_salvos_to_staging(controller, staging, packet.clock, salvo_cursor);
                     push_shot_hits_to_staging(controller, staging, hit_cursor);
-                    remaining = rest;
                 }
                 Err(_) => break,
             }
@@ -2085,9 +2083,7 @@ fn extract_timeline_events(
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{
-        self,
-    };
+    use wows_minimap_renderer::advantage::{self};
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock = GameClock(0.0);
 
@@ -2095,8 +2091,8 @@ fn extract_timeline_events(
     let mut prev_clock = GameClock(0.0);
 
     while !remaining.is_empty() {
-        match parser.parse_packet(remaining) {
-            Ok((rest, packet)) => {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => {
                 if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                     // Populate player info on first tick where players are available
                     if !players_populated {
@@ -2477,8 +2473,6 @@ fn extract_timeline_events(
                         }
                     }
                 }
-
-                remaining = rest;
             }
             Err(_) => break,
         }
@@ -2576,8 +2570,8 @@ fn extract_all_shots(
 
     let mut remaining = &replay_file.packet_data[..];
     while !remaining.is_empty() {
-        match parser.parse_packet(remaining) {
-            Ok((rest, packet)) => {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => {
                 controller.process(&packet);
 
                 // Accumulate all shot_hits (cleared each packet by the controller)
@@ -2596,8 +2590,6 @@ fn extract_all_shots(
                         timelines.insert(hit.victim_entity_id, tl);
                     }
                 }
-
-                remaining = rest;
             }
             Err(_) => break,
         }
@@ -2886,8 +2878,8 @@ fn render_video_blocking(
     let mut prev_clock = GameClock(0.0);
 
     while !remaining.is_empty() {
-        match parser.parse_packet(remaining) {
-            Ok((rest, packet)) => {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => {
                 if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
                     renderer.populate_players(&controller);
                     renderer.update_squadron_info(&controller);
@@ -2896,7 +2888,6 @@ fn render_video_blocking(
                 }
                 prev_clock = packet.clock;
                 controller.process(&packet);
-                remaining = rest;
             }
             Err(_) => break,
         }
