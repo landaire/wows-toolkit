@@ -1,0 +1,18 @@
+[package]
+name = "replayshark"
+version = "0.1.0"
+authors = ["Lane Kolbly <lane@rscheme.org>"]
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wows_replays = { workspace = true }
+rootcause = { workspace = true }
+clap = "2.33.1"
+walkdir = "2.3.2"
+chrono = "0.4.19"
+serde_json = { workspace = true }
+parse_int = "0.6.0"
+wowsunpack = { workspace = true, features = ["json", "vfs"] }
+anyhow = "1.0"

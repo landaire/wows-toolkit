@@ -1,10 +1,11 @@
 {
-  description = "WoWs Toolkit devShell";
+  description = "WoWs Toolkit - World of Warships tools monorepo";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs = {
@@ -12,6 +13,7 @@
     nixpkgs,
     rust-overlay,
     flake-utils,
+    crane,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
@@ -25,12 +27,51 @@
         extensions = components;
         inherit targets;
       };
+
+      craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+      commonArgs = {
+        src = craneLib.cleanCargoSource ./.;
+        strictDeps = true;
+
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+        ];
+
+        buildInputs = with pkgs; [
+          openssl
+        ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          pkgs.vulkan-loader
+        ];
+      };
+
+      # Build workspace deps once, share across packages
+      cargoArtifacts = craneLib.buildDepsOnly commonArgs;
     in
       with pkgs; {
+        packages = {
+          wowsunpack = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            cargoExtraArgs = "-p wowsunpack";
+          });
+
+          minimap-renderer = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            cargoExtraArgs = "-p wows_minimap_renderer --features bin,gpu";
+            buildInputs = commonArgs.buildInputs ++ lib.optionals stdenv.hostPlatform.isLinux [
+              vulkan-loader
+            ];
+          });
+
+          replayshark = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            cargoExtraArgs = "-p replayshark";
+          });
+        };
+
         devShells.default = mkShell rec {
           buildInputs = [
             # Rust
-            rust-bin.stable.latest.default
             rustToolchain
 
             # misc. libraries

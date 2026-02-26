@@ -31,7 +31,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Build release binary
-        run: cargo build --release --target x86_64-pc-windows-msvc
+        run: cargo build --release --target x86_64-pc-windows-msvc -p wows_toolkit
 
       - name: Azure login
         uses: azure/login@v2

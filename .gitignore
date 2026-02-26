@@ -3,3 +3,5 @@ dist/
 .cargo/config.toml
 wows_toolkit.log.*
 .claude/
+*.glb
+dump_out/

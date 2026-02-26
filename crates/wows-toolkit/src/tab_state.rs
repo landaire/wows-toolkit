@@ -1,0 +1,678 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self};
+use std::time::Duration;
+
+use egui::mutex::Mutex;
+use notify::EventKind;
+use notify::RecommendedWatcher;
+use notify::RecursiveMode;
+use notify::Watcher;
+use notify::event::ModifyKind;
+use notify::event::RenameMode;
+use parking_lot::RwLock;
+use serde::Deserialize;
+use serde::Serialize;
+use tracing::debug;
+use wows_replays::ReplayFile;
+use wowsunpack::vfs::VfsPath;
+
+use crate::personal_rating::PersonalRatingData;
+use crate::plaintext_viewer::PlaintextFileViewer;
+use crate::session_stats::PerGameStat;
+use crate::settings::Settings;
+use crate::settings::default_bool;
+use crate::task::BackgroundParserThread;
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskKind;
+use crate::task::DataExportSettings;
+use crate::task::NetworkJob;
+use crate::task::ReplayBackgroundParserThreadMessage;
+use crate::twitch::TwitchState;
+use crate::ui::file_unpacker::UnpackerProgress;
+use crate::ui::mod_manager::ModInfo;
+use crate::ui::mod_manager::ModManagerInfo;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SharedReplayParserTabState;
+use crate::ui::replay_parser::SortOrder;
+use crate::update_background_task;
+use crate::wows_data::ReplayDependencies;
+use crate::wows_data::ReplayLoader;
+use crate::wows_data::SharedWoWsData;
+use crate::wows_data::WoWsDataMap;
+
+pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
+
+/// Available statistics for charting
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartableStat {
+    #[default]
+    Damage,
+    SpottingDamage,
+    Frags,
+    RawXp,
+    BaseXp,
+    WinRate,
+    PersonalRating,
+}
+
+impl ChartableStat {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ChartableStat::Damage => "Damage",
+            ChartableStat::SpottingDamage => "Spotting Damage",
+            ChartableStat::Frags => "Frags",
+            ChartableStat::RawXp => "Raw XP",
+            ChartableStat::BaseXp => "Base XP",
+            ChartableStat::WinRate => "Win Rate",
+            ChartableStat::PersonalRating => "Personal Rating",
+        }
+    }
+
+    pub fn all() -> &'static [ChartableStat] {
+        &[
+            ChartableStat::BaseXp,
+            ChartableStat::Damage,
+            ChartableStat::Frags,
+            ChartableStat::PersonalRating,
+            ChartableStat::RawXp,
+            ChartableStat::SpottingDamage,
+            ChartableStat::WinRate,
+        ]
+    }
+}
+
+/// Chart display mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartMode {
+    /// Line chart showing stat over each game played
+    #[default]
+    Line,
+    /// Bar chart showing average stat comparison between ships
+    Bar,
+}
+
+/// Configuration for the session stats chart
+#[derive(Default)]
+pub struct SessionStatsChartConfig {
+    /// Selected stat to display
+    pub selected_stat: ChartableStat,
+    /// Chart display mode (line or bar)
+    pub mode: ChartMode,
+    /// Selected ships to show (empty = all ships)
+    pub selected_ships: Vec<String>,
+    pub selected_ships_manually_changed: bool,
+    /// Whether to show rolling average instead of per-game values (line chart only)
+    pub rolling_average: bool,
+    /// Whether to show value labels on data points
+    pub show_labels: bool,
+    /// Whether a screenshot has been requested (waiting for the event)
+    pub screenshot_requested: bool,
+    /// The plot rectangle from the last frame (used to crop the screenshot)
+    pub plot_rect: Option<egui::Rect>,
+    /// Whether the plot should be reset (e.g. after stat/mode change)
+    pub reset_plot: bool,
+}
+
+/// File system events for replay monitoring
+#[derive(Debug)]
+pub enum NotifyFileEvent {
+    Added(PathBuf),
+    Modified(PathBuf),
+    Removed(PathBuf),
+    PreferencesChanged,
+    TempArenaInfoCreated(PathBuf),
+}
+
+pub type PathFileNodePair = (Arc<PathBuf>, VfsPath);
+
+/// An action that requires user confirmation before executing.
+#[derive(Clone)]
+pub enum ConfirmableAction {
+    /// Launch WorldOfWarships.exe with the given replay path.
+    OpenInGame { replay_path: PathBuf },
+    /// Clear all session stats.
+    ClearSessionStats,
+    /// Clear session stats for a specific ship.
+    ClearShipSessionStats { ship_name: String },
+    /// Replace session stats with the given replays.
+    SetAsSessionStats { replays: Vec<std::sync::Weak<RwLock<Replay>>> },
+}
+
+impl ConfirmableAction {
+    pub fn confirmation_message(&self) -> &str {
+        match self {
+            ConfirmableAction::OpenInGame { .. } => "This will launch World of Warships. Continue?",
+            ConfirmableAction::ClearSessionStats => "This will clear all session stats. Continue?",
+            ConfirmableAction::ClearShipSessionStats { .. } => {
+                "This will remove all games for this ship from session stats. Continue?"
+            }
+            ConfirmableAction::SetAsSessionStats { .. } => "This will replace your current session stats. Continue?",
+        }
+    }
+}
+
+/// Main application state container
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct TabState {
+    #[serde(skip)]
+    pub world_of_warships_data: Option<SharedWoWsData>,
+
+    pub filter: String,
+
+    #[serde(skip)]
+    pub used_filter: Option<String>,
+    #[serde(skip)]
+    pub filtered_file_list: Option<Arc<Vec<PathFileNodePair>>>,
+
+    #[serde(skip)]
+    pub items_to_extract: Mutex<Vec<VfsPath>>,
+
+    pub settings: Settings,
+
+    #[serde(skip)]
+    pub translations: Option<gettext::Catalog>,
+
+    pub output_dir: String,
+
+    #[serde(skip)]
+    pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
+
+    #[serde(skip)]
+    pub last_progress: Option<UnpackerProgress>,
+
+    #[serde(skip)]
+    pub replay_parser_tab: SharedReplayParserTabState,
+
+    #[serde(skip)]
+    pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
+
+    #[serde(skip)]
+    pub replay_renderers: Mutex<Vec<crate::replay_renderer::ReplayRendererViewer>>,
+
+    #[serde(skip)]
+    pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay_renderer::RendererAssetCache>>,
+
+    #[serde(skip)]
+    pub file_watcher: Option<RecommendedWatcher>,
+
+    #[serde(skip)]
+    pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
+
+    #[serde(skip)]
+    pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
+
+    #[serde(skip)]
+    pub background_tasks: Vec<BackgroundTask>,
+
+    #[serde(skip)]
+    pub toasts: SharedToasts,
+
+    #[serde(skip)]
+    pub can_change_wows_dir: bool,
+
+    #[serde(skip)]
+    pub current_replay: Option<Arc<RwLock<Replay>>>,
+
+    #[serde(default = "default_bool::<true>")]
+    pub auto_load_latest_replay: bool,
+
+    #[serde(skip)]
+    pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
+
+    #[serde(skip)]
+    pub twitch_state: Arc<RwLock<TwitchState>>,
+
+    #[serde(skip)]
+    pub markdown_cache: egui_commonmark::CommonMarkCache,
+
+    #[serde(default)]
+    pub replay_sort: Arc<parking_lot::Mutex<SortOrder>>,
+
+    #[serde(skip)]
+    pub game_constants: Arc<RwLock<serde_json::Value>>,
+
+    #[serde(default)]
+    pub mod_manager_info: ModManagerInfo,
+
+    #[serde(skip)]
+    pub mod_action_sender: Sender<ModInfo>,
+
+    #[serde(skip)]
+    /// Used temporarily to store the mod action receiver until the mod manager thread is started
+    pub mod_action_receiver: Option<Receiver<ModInfo>>,
+
+    #[serde(skip)]
+    pub background_task_receiver: Receiver<BackgroundTask>,
+    #[serde(skip)]
+    pub background_task_sender: Sender<BackgroundTask>,
+    #[serde(skip)]
+    pub background_parser_tx: Option<Sender<ReplayBackgroundParserThreadMessage>>,
+    #[serde(skip)]
+    pub parser_lock: Arc<parking_lot::Mutex<()>>,
+
+    #[serde(skip)]
+    pub show_session_stats: bool,
+    #[serde(skip)]
+    pub show_session_stats_chart: bool,
+    #[serde(skip)]
+    pub session_stats_chart_config: SessionStatsChartConfig,
+    #[serde(skip)]
+    pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
+
+    /// Replays selected for resetting session stats. When Some, they will be
+    /// processed and added to session stats, clearing the old ones first.
+    /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
+    #[serde(skip)]
+    pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
+
+    /// Pending action awaiting user confirmation.
+    #[serde(skip)]
+    pub pending_confirmation: Option<ConfirmableAction>,
+
+    /// All loaded version data, keyed by build number.
+    #[serde(skip)]
+    pub wows_data_map: Option<WoWsDataMap>,
+
+    /// All build numbers available in the game's bin/ directory.
+    #[serde(skip)]
+    pub available_builds: Vec<u32>,
+
+    /// Currently selected build in the Resource Browser.
+    #[serde(skip)]
+    pub selected_browser_build: u32,
+
+    /// Shared flag for "suppress GPU encoder warning" — synced from Settings on startup.
+    #[serde(skip)]
+    pub suppress_gpu_encoder_warning: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Sender for submitting jobs to the background networking thread.
+    #[serde(skip)]
+    pub network_job_tx: Option<Sender<NetworkJob>>,
+
+    /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
+    #[serde(skip)]
+    pub settings_needs_attention: bool,
+
+    /// wgpu render state for 3D viewport rendering (captured at app init).
+    #[serde(skip)]
+    pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
+
+    /// State for the Armor Viewer tab.
+    #[serde(skip)]
+    pub armor_viewer: crate::armor_viewer::ArmorViewerState,
+
+    /// Persisted display defaults for the Armor Viewer (plate edges, waterline, etc.).
+    pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
+
+    /// Whether the standalone replay controls reference window is open.
+    #[serde(skip)]
+    pub show_replay_controls: bool,
+
+    /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
+    #[serde(skip)]
+    pub replay_controls_cache: Option<Vec<crate::replay_renderer::CommandGroup>>,
+}
+
+impl Default for TabState {
+    fn default() -> Self {
+        let default_constants = serde_json::from_str(include_str!("../../../embedded_resources/constants.json"))
+            .expect("failed to parse constants JSON");
+        let (mod_action_sender, mod_action_receiver) = mpsc::channel();
+        let (background_task_sender, background_task_receiver) = mpsc::channel();
+        Self {
+            world_of_warships_data: None,
+            filter: Default::default(),
+            items_to_extract: Default::default(),
+            settings: Default::default(),
+            translations: Default::default(),
+            output_dir: Default::default(),
+            unpacker_progress: Default::default(),
+            last_progress: Default::default(),
+            replay_parser_tab: Default::default(),
+            file_viewer: Default::default(),
+            replay_renderers: Default::default(),
+            renderer_asset_cache: Default::default(),
+            file_watcher: None,
+            replay_files: None,
+            file_receiver: None,
+            background_tasks: Vec::new(),
+            can_change_wows_dir: true,
+            toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
+            current_replay: None,
+            used_filter: None,
+            filtered_file_list: None,
+            auto_load_latest_replay: true,
+            twitch_update_sender: Default::default(),
+            twitch_state: Default::default(),
+            markdown_cache: Default::default(),
+            replay_sort: Default::default(),
+            game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
+            mod_manager_info: Default::default(),
+            mod_action_sender,
+            mod_action_receiver: Some(mod_action_receiver),
+            background_task_receiver,
+            background_task_sender,
+            background_parser_tx: None,
+            parser_lock: Arc::new(parking_lot::Mutex::new(())),
+            show_session_stats: false,
+            show_session_stats_chart: false,
+            session_stats_chart_config: Default::default(),
+            personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
+            replays_for_session_reset: None,
+            pending_confirmation: None,
+            wows_data_map: None,
+            available_builds: Vec::new(),
+            selected_browser_build: 0,
+            suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            network_job_tx: None,
+            settings_needs_attention: false,
+            wgpu_render_state: None,
+            armor_viewer: Default::default(),
+            armor_viewer_defaults: Default::default(),
+            show_replay_controls: false,
+            replay_controls_cache: None,
+        }
+    }
+}
+
+impl TabState {
+    /// Returns the shared dependencies needed for loading replays, if wows_data is available.
+    pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
+        let wows_data_map = self.wows_data_map.as_ref()?;
+        Some(ReplayDependencies {
+            wows_data_map: wows_data_map.clone(),
+            twitch_state: Arc::clone(&self.twitch_state),
+            replay_sort: Arc::clone(&self.replay_sort),
+            background_task_sender: self.background_task_sender.clone(),
+            is_debug_mode: self.settings.debug_mode,
+        })
+    }
+
+    /// Send a job to the background networking thread.
+    pub fn send_network_job(&self, job: NetworkJob) {
+        if let Some(tx) = &self.network_job_tx {
+            let _ = tx.send(job);
+        }
+    }
+
+    pub(crate) fn send_replay_consent_changed(&self) {
+        let _ = self.background_parser_tx.as_ref().map(|tx| {
+            tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data))
+        });
+    }
+
+    pub(crate) fn try_update_replays(&mut self) {
+        // Sometimes we parse the replay too early. Let's try to parse it a couple times
+        let parser_lock = self.parser_lock.try_lock();
+        if parser_lock.is_none() {
+            // don't make the UI hang
+            return;
+        }
+
+        if let Some(file) = self.file_receiver.as_ref() {
+            while let Ok(file_event) = file.try_recv() {
+                match file_event {
+                    NotifyFileEvent::Added(new_file) => {
+                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
+                            let wows_data = wows_data.read();
+                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
+                                for _ in 0..3 {
+                                    if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
+                                        let mut replay = Replay::new(replay_file, game_metadata.clone());
+                                        replay.game_constants = Some(Arc::clone(&wows_data.game_constants));
+                                        replay.source_path = Some(new_file.clone());
+                                        let replay = Arc::new(RwLock::new(replay));
+
+                                        if let Some(replay_files) = &mut self.replay_files {
+                                            replay_files.insert(new_file.clone(), Arc::clone(&replay));
+                                        }
+
+                                        if let Some(deps) = self.replay_dependencies() {
+                                            update_background_task!(
+                                                self.background_tasks,
+                                                deps.load_replay(replay, self.auto_load_latest_replay)
+                                            );
+                                        }
+
+                                        break;
+                                    } else {
+                                        // oops our framerate
+                                        std::thread::sleep(Duration::from_secs(1));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    NotifyFileEvent::Modified(modified_file) => {
+                        // Invalidate cached data when file is modified
+                        if let Some(replay_files) = &self.replay_files
+                            && let Some(replay) = replay_files.get(&modified_file)
+                        {
+                            let mut replay_inner = replay.write();
+                            replay_inner.battle_report = None;
+                            replay_inner.ui_report = None;
+                            drop(replay_inner);
+
+                            if let Some(deps) = self.replay_dependencies() {
+                                update_background_task!(
+                                    self.background_tasks,
+                                    deps.load_replay(Arc::clone(replay), self.auto_load_latest_replay)
+                                );
+                            }
+                        }
+                    }
+                    NotifyFileEvent::Removed(old_file) => {
+                        if let Some(replay_files) = &mut self.replay_files {
+                            replay_files.remove(&old_file);
+                        }
+                    }
+                    NotifyFileEvent::PreferencesChanged => {
+                        // debug!("Preferences file changed -- reloading game data");
+                        // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
+                    }
+                    NotifyFileEvent::TempArenaInfoCreated(path) => {
+                        // Parse the metadata
+                        let meta_data = std::fs::read(path);
+
+                        if meta_data.is_err() {
+                            return;
+                        }
+
+                        if let Ok(replay_file) =
+                            ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0))
+                        {
+                            self.settings.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn prevent_changing_wows_dir(&mut self) {
+        self.can_change_wows_dir = false;
+    }
+
+    pub(crate) fn allow_changing_wows_dir(&mut self) {
+        self.can_change_wows_dir = true;
+    }
+
+    /// Clears all game-related state. Called when the WoWs directory changes
+    /// to ensure no stale data from the previous directory persists.
+    pub(crate) fn reset_game_state(&mut self) {
+        self.current_replay = None;
+        self.replay_files = None;
+        self.filtered_file_list = None;
+        self.used_filter = None;
+        self.settings.session_stats.clear();
+        self.show_session_stats = false;
+        self.show_session_stats_chart = false;
+        self.session_stats_chart_config = Default::default();
+        self.replays_for_session_reset = None;
+        self.replay_parser_tab.lock().game_chat.clear();
+        self.file_viewer.lock().clear();
+        self.replay_renderers.lock().clear();
+        self.available_builds.clear();
+        self.selected_browser_build = 0;
+        self.wows_data_map = None;
+    }
+
+    /// Process replays selected for session stats reset.
+    /// Clears the current session stats and populates with the selected replays.
+    /// If any replays haven't been parsed yet, they will be queued for parsing.
+    pub(crate) fn process_session_stats_reset(&mut self) {
+        let Some(weak_replays) = self.replays_for_session_reset.take() else {
+            return;
+        };
+
+        // Clear current session stats
+        self.settings.session_stats.clear();
+
+        // Upgrade weak references and add to session stats
+        for weak_replay in weak_replays {
+            if let Some(replay) = weak_replay.upgrade() {
+                let replay_guard = replay.read();
+
+                // Check if the replay needs parsing (no ui_report means not parsed)
+                let needs_parsing = replay_guard.ui_report.is_none();
+
+                // If already parsed, extract stats and add immediately
+                if !needs_parsing
+                    && let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
+                {
+                    self.settings.session_stats.add_game(stat);
+                }
+
+                drop(replay_guard);
+
+                if needs_parsing {
+                    // Queue the replay for parsing (skip UI update since this is batch loading)
+                    if let Some(deps) = self.replay_dependencies() {
+                        update_background_task!(
+                            self.background_tasks,
+                            ReplayLoader::new(deps, replay.clone()).skip_ui_update().load()
+                        );
+                    }
+                }
+            }
+        }
+
+        // Show session stats window automatically
+        self.show_session_stats = true;
+    }
+
+    pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
+        // Drop old watcher and background parser thread (if any).
+        // Dropping background_parser_tx closes the channel, causing the old
+        // parser thread to exit when its recv() returns Err.
+        self.file_watcher = None;
+        self.file_receiver = None;
+        self.background_parser_tx = None;
+
+        debug!("creating filesystem watcher");
+        let (tx, rx) = mpsc::channel();
+        let (background_tx, background_rx) = mpsc::channel();
+
+        self.background_parser_tx = Some(background_tx.clone());
+
+        if let Some(wows_data_map) = self.wows_data_map.clone() {
+            let background_thread_data = BackgroundParserThread {
+                rx: background_rx,
+                sent_replays: Arc::clone(&self.settings.sent_replays),
+                wows_data_map,
+                twitch_state: Arc::clone(&self.twitch_state),
+                should_send_replays: self.settings.send_replay_data,
+                data_export_settings: DataExportSettings {
+                    should_auto_export: self.settings.replay_settings.auto_export_data,
+                    export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
+                    export_format: self.settings.replay_settings.auto_export_format,
+                },
+
+                player_tracker: Arc::clone(&self.settings.player_tracker),
+                is_debug: self.settings.debug_mode,
+                parser_lock: Arc::clone(&self.parser_lock),
+            };
+            crate::task::start_background_parsing_thread(background_thread_data);
+        }
+
+        let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(event) => {
+                // TODO: maybe properly handle moves?
+                debug!("filesytem event: {:?}", event);
+                match event.kind {
+                    EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                        for path in event.paths {
+                            if path.is_file() {
+                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                    && path.file_name().expect("path has no filename") != "temp.wowsreplay"
+                                {
+                                    tx.send(NotifyFileEvent::Added(path.clone()))
+                                        .expect("failed to send file creation event");
+                                    // Send this path to the thread watching for replays in background
+                                    let _ = background_tx
+                                        .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
+                                } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
+                                    tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
+                                        .expect("failed to send file creation event");
+                                }
+                            }
+                        }
+                    }
+                    EventKind::Modify(ModifyKind::Data(_)) => {
+                        for path in event.paths {
+                            if let Some(filename) = path.file_name()
+                                && filename == "preferences.xml"
+                            {
+                                debug!("Sending preferences changed event");
+                                tx.send(NotifyFileEvent::PreferencesChanged)
+                                    .expect("failed to send file creation event");
+                            }
+                            if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                tx.send(NotifyFileEvent::Modified(path.clone()))
+                                    .expect("failed to send file modification event");
+                                let _ = background_tx
+                                    .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
+                            }
+                        }
+                    }
+                    EventKind::Remove(_) => {
+                        for path in event.paths {
+                            tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                        }
+                    }
+                    _ => {
+                        // TODO: handle RenameMode::From for proper file moves
+                    }
+                }
+            }
+            Err(e) => debug!("watch error: {:?}", e),
+        })
+        .expect("failed to create fs watcher for replays dir");
+
+        watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
+
+        self.file_watcher = Some(watcher);
+        self.file_receiver = Some(rx);
+
+        self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
+        self.settings.replays_dir = Some(replay_dir.to_owned());
+    }
+
+    #[must_use]
+    pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
+        let (tx, rx) = mpsc::channel();
+        let locale = self.settings.locale.clone().unwrap();
+        let fallback_constants = self.game_constants.read().clone();
+        let _join_handle = std::thread::spawn(move || {
+            let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));
+        });
+
+        BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
+    }
+}

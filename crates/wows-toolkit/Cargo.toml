@@ -1,0 +1,110 @@
+[package]
+name = "wows_toolkit"
+version = "0.1.54"
+authors = ["landaire"]
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[package.metadata.winresource]
+
+[dependencies]
+# All of these need to be bumped with egui releases
+egui = "0.33.3"
+eframe = { version = "0.33.3", default-features = false, features = [
+    "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
+    "default_fonts", # Embed the default egui fonts.
+    # "glow",
+    "wgpu",
+    "persistence",   # Enable restoring app state when restarting the app.
+    "wayland",       # To support Linux (and CI)
+] }
+egui_extras = { version = "0.33.3", features = ["syntect", "image", "svg"] }
+egui_dock = "0.18.0"
+egui-phosphor = "0.11"
+egui_table = "0.6.0"
+egui_commonmark = "0.22"
+# Pin to match eframe's wgpu version so backend features unify correctly
+# This dependency with `default-features = true` is also needed to ensure
+# that targets are properly initialized.
+wgpu = { version = "27", default-features = true }
+
+tracing = { workspace = true }
+wows_replays = { workspace = true, features = ["arc"] }
+serde = { workspace = true }
+wowsunpack = { workspace = true, features = [
+    "arc",
+    "cbor",
+    "json",
+    "models",
+    "rkyv",
+    "vfs",
+] }
+bytemuck = { workspace = true }
+wows_minimap_renderer = { workspace = true, features = ["gpu", "cpu", "arc"] }
+rfd = "0.15"
+humansize = "2.1.3"
+thiserror = { workspace = true }
+glob = "0.3.1"
+itertools = { workspace = true }
+gettext = { workspace = true }
+language-tags = "0.3"
+pickled = { workspace = true, features = ["variantly"] }
+flate2 = { workspace = true }
+thousands = "0.2.0"
+notify = "8.0.0"
+serde_json = { workspace = true, features = ["preserve_order"] }
+data-encoding = "2.5.0"
+image = { workspace = true, features = ["jpeg", "png"] }
+image_dds = { workspace = true, features = ["ddsfile", "image"] }
+octocrab = "0.43"
+semver = "1.0"
+tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "macros"] }
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde_cbor = { workspace = true }
+parking_lot = { version = "0.12.3", features = ["serde"] }
+twitch_api = { version = "0.7.0-rc.8", features = [
+    "helix",
+    "client",
+    "reqwest",
+] }
+levenshtein = "1.0.5"
+escaper = "0.1.1"
+http-body = "1.0.1"
+http-body-util = "0.1.2"
+toml = { version = "0.8.19", optional = true }
+tar = { version = "0.4.43", optional = true }
+scopeguard = { version = "1.2.0", optional = true }
+csv = "1.3.1"
+jiff = { version = "0.2.4", features = ["serde"] }
+rootcause = { workspace = true }
+egui_ltreeview = { version = "0.6.1", features = ["persistence"] }
+egui_plot = "0.34.0"
+arboard = "3.6.1"
+egui_taffy = "0.10.0"
+egui-notify = "0.21.0"
+rkyv = { workspace = true }
+const_format = "0.2.35"
+tempfile = "3.25.0"
+unidecode = "0.3.0"
+roxmltree = { workspace = true }
+
+[build-dependencies]
+winresource = "0.1.20"
+
+# native:
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-appender = { version = "0.2", optional = true }
+tracing-subscriber = { version = "0.3", features = [
+    "local-time",
+    "time",
+    "env-filter",
+], optional = true }
+
+[features]
+default = ["logging"]
+shipbuilds_debugging = []
+mod_manager = ["dep:toml", "dep:tar", "dep:scopeguard"]
+logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
+panic_handler = []

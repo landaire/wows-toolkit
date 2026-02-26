@@ -1,0 +1,29 @@
+[package]
+name = "wows_replays"
+version = "0.24.0"
+authors = ["landaire, Lane Kolbly <lane@rscheme.org>"]
+description = "A parser for World of Warships replay files"
+repository = "https://github.com/landaire/wows-toolkit"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+winnow = { workspace = true }
+flate2 = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rust-crypto = "0.2.36"
+roxmltree = { workspace = true }
+pickled = { workspace = true }
+kinded = "0.3"
+tracing = { workspace = true }
+wowsunpack = { workspace = true, features = ["json", "vfs"] }
+bon = { workspace = true }
+rootcause = { workspace = true }
+modular-bitfield = "0.13"
+
+[features]
+default = ["arc"]
+arc = ["wowsunpack/arc"]

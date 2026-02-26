@@ -29,7 +29,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --all-features
+          args: --workspace --all-features
 
   fmt:
     name: Rustfmt
@@ -70,4 +70,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --workspace --all-features -- -D warnings

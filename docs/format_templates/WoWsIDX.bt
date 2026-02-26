@@ -1,0 +1,87 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: WoWs Index
+//   Authors: 
+//   Version: 
+//   Purpose: 
+//  Category: 
+// File Mask: *.idx
+//  ID Bytes: 
+//   History: 
+//------------------------------------------------
+LittleEndian();
+
+typedef struct {
+    uint32 magic;
+    uint32 endianness;
+    uint32 murmur_hash;
+    uint32 endianness2;
+} Header;
+
+typedef struct {
+    uint32 resources_count;
+    uint32 file_infos_count;
+    uint32 volumes_count;
+    uint32 unk_unused;
+    uint32 blocks_table_pointer;
+    uint32 unk5;
+    uint32 file_infos_table_ptr;
+    uint32 unk7;
+    uint32 volumes_table_ptr;
+    uint32 unk9;
+} Resource;
+
+typedef struct {
+    local int64 base_off = FTell();
+
+    uint32 resource_ptr;
+    uint32 unk11;
+    uint32 filename_ptr;
+
+    local int64 off = FTell();
+    FSeek(base_off + (int64)filename_ptr);
+    string filename;
+    FSeek(off);
+
+    uint32 id_end_questionmark;
+    uint64 id;
+    uint64 parent_id;
+} Block;
+
+typedef struct {
+    uint64 resource_id;
+    uint64 volume_id;
+    uint64 offset;
+    uint64 compressionInfo;
+    uint32 size;
+    uint32 crc32;
+    uint32 unpackedSize;
+    uint32 padding;
+} FileInfo;
+
+typedef struct {
+    local int64 base_off = FTell();
+    uint64 len;
+    uint64 name_ptr;
+    uint64 volume_id;
+
+    local int64 off = FTell();
+    FSeek(base_off + (int64)name_ptr);
+    string filename;
+    FSeek(off);
+   
+} VolumeInfo;
+
+Header header;
+
+local int64 resource_off = FTell();
+Resource resource;
+Block blocks[resource.resources_count] <optimize=false>;
+
+FSeek(resource_off + (int64)resource.file_infos_table_ptr);
+FileInfo file_infos[resource.file_infos_count] <optimize=false>;
+
+
+FSeek(resource_off + (int64)resource.volumes_table_ptr);
+VolumeInfo volumes[resource.volumes_count] <optimize=false>;

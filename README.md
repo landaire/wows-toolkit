@@ -1,12 +1,31 @@
 # WoWs Toolkit
 
-This is a toolkit for interacting with World of Warships files
+A monorepo of tools for interacting with World of Warships game data, replays, and assets.
 
 ![WoWs Toolkit Replay Tab](assets/wows_toolkit_replay_screenshot.png)
 
 ![WoWs Toolkit Unpacker Tab](assets/wows_toolkit_unpacker_screenshot.png)
 
 ![WoWs Toolkit Unpacker Tab With Filtering](assets/wows_toolkit_unpacker_filtering.png)
+
+## Crates
+
+| Crate | Description | CLI Binary |
+|-------|-------------|------------|
+| [`wows-toolkit`](crates/wows-toolkit) | GUI application for browsing replays, extracting game files, and viewing armor models | `wows_toolkit` |
+| [`wowsunpack`](crates/wowsunpack) | Library and CLI for unpacking World of Warships game assets (IDX/PKG files, GameParams) | `wowsunpack` |
+| [`wows-replays`](crates/wows-replays) | Core replay file parser library (`wows_replays`) | - |
+| [`minimap-renderer`](crates/minimap-renderer) | Library and CLI for rendering replay minimaps as images or video (`wows_minimap_renderer`) | `minimap_renderer` |
+| [`replayshark`](crates/replayshark) | CLI tool for dumping and analyzing replay files | `replayshark` |
+
+## Documentation
+
+Reverse engineering notes and format specifications live in [`docs/`](docs/):
+
+- [BALLISTICS.md](docs/BALLISTICS.md) - Trajectory simulation, penetration, and splash mechanics
+- [MODELS.md](docs/MODELS.md) - `.geometry` file format specification
+- [TEAM_ADVANTAGE_SCORING.md](docs/TEAM_ADVANTAGE_SCORING.md) - Team advantage calculation algorithm
+- [format_templates/](docs/format_templates/) - Binary format templates for 010 Editor
 
 ## Community Discussion
 
@@ -39,7 +58,15 @@ This is not considered a World of Warships mod and does not modify your World of
 
 If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
 
-To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release` from the source code directory.
+To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
+
+To build the CLI tools:
+
+```
+cargo build --release -p wowsunpack
+cargo build --release -p wows_minimap_renderer --features bin
+cargo build --release -p replayshark
+```
 
 On Linux you need to first run:
 
@@ -48,3 +75,14 @@ On Linux you need to first run:
 On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
+
+### Nix
+
+A Nix flake is provided with a devShell and packages for the CLI tools:
+
+```
+nix develop          # Enter dev shell
+nix build .#wowsunpack
+nix build .#minimap-renderer
+nix build .#replayshark
+```
