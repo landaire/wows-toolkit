@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
-use wowsunpack::error::ErrorKind;
+use wowsunpack::error::GameDataError;
 
 #[derive(Error, Debug)]
 pub enum ToolkitError {
@@ -11,7 +11,7 @@ pub enum ToolkitError {
     InvalidWowsDirectory(PathBuf),
 
     #[error("Data unpacker error")]
-    UnpackerError(#[from] ErrorKind),
+    UnpackerError(#[from] GameDataError),
 
     #[error("An I/O error occurred: {0}")]
     Io(#[from] io::Error),
