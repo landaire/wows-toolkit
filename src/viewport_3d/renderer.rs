@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking::PickableMesh;
-use crate::viewport_3d::picking::{self};
+use crate::viewport_3d::picking::{
+    self,
+};
 
 const MAT4_IDENTITY: [[f32; 4]; 4] =
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];

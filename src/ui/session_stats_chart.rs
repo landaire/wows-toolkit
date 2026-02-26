@@ -52,6 +52,7 @@ pub fn color_from_name(name: &str) -> Color32 {
 
 /// Render a line chart showing per-game statistics over time.
 /// Returns the plot rectangle if rendered, for screenshot cropping.
+#[allow(clippy::too_many_arguments)]
 pub fn render_line_chart(
     ui: &mut egui::Ui,
     per_game_data: &[&PerGameStat],
