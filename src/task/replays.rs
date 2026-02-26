@@ -455,7 +455,7 @@ fn parse_replay_data_in_background(
                             if !replay_parsed_before {
                                 if data.should_send_replays && is_valid_game_type_for_shipbuilds {
                                     // Send the replay builds to the remote server
-                                    for player in report.players() {
+                                    for player in report.players().iter().filter(|player| !player.is_bot()) {
                                         let Some(realm) = player.initial_state().realm() else {
                                             continue;
                                         };
