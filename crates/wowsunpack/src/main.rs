@@ -319,6 +319,10 @@ enum Commands {
         #[clap(long)]
         parse_visual: Option<String>,
 
+        /// Parse and display a MaterialPrototype by path suffix
+        #[clap(long)]
+        parse_material: Option<String>,
+
         /// Read file from disk instead of VFS
         #[clap(long)]
         no_vfs: bool,
@@ -1030,7 +1034,7 @@ fn run() -> Result<(), Report> {
             };
             run_dump_uvs(vfs, &name, &game_dir, game_version, hull.as_deref())?;
         }
-        Commands::AssetsBin { file, filter, max_paths, resolve, parse_visual, no_vfs } => {
+        Commands::AssetsBin { file, filter, max_paths, resolve, parse_visual, parse_material, no_vfs } => {
             let file_data = read_file_data(&file, no_vfs, vfs.as_ref())?;
             run_assets_bin(
                 &file_data,
@@ -1039,6 +1043,7 @@ fn run() -> Result<(), Report> {
                 max_paths,
                 resolve.as_deref(),
                 parse_visual.as_deref(),
+                parse_material.as_deref(),
             )?;
         }
     }
@@ -1189,8 +1194,10 @@ fn run_assets_bin(
     max_paths: usize,
     resolve: Option<&str>,
     parse_visual: Option<&str>,
+    parse_material: Option<&str>,
 ) -> Result<(), Report> {
     use wowsunpack::models::assets_bin;
+    use wowsunpack::models::material;
     use wowsunpack::models::visual;
 
     let db = assets_bin::parse_assets_bin(file_data)?;
@@ -1249,6 +1256,34 @@ fn run_assets_bin(
         println!("=== VisualPrototype: {full_path} ===");
         println!("  blob_index={}, record_index={}", location.blob_index, location.record_index);
         vp.print_summary(&db);
+
+        return Ok(());
+    }
+
+    // --parse-material: resolve path, extract record, parse and print MaterialPrototype
+    if let Some(path_suffix) = parse_material {
+        let self_id_index = db.build_self_id_index();
+        let (location, full_path) = db.resolve_path(path_suffix, &self_id_index)?;
+
+        if location.blob_index != material::MATERIAL_BLOB_INDEX {
+            bail!(
+                "Path '{}' resolved to blob {} (not MaterialPrototype blob {})",
+                path_suffix,
+                location.blob_index,
+                material::MATERIAL_BLOB_INDEX
+            );
+        }
+
+        let record_data = db
+            .get_prototype_data(location, material::MATERIAL_ITEM_SIZE)
+            .context("Failed to get material prototype data")?;
+
+        let mat = material::parse_material(record_data).context("Failed to parse MaterialPrototype")?;
+
+        let prop_names = material::build_property_name_table();
+        println!("=== MaterialPrototype: {full_path} ===");
+        println!("  blob_index={}, record_index={}", location.blob_index, location.record_index);
+        mat.print_summary(&prop_names);
 
         return Ok(());
     }

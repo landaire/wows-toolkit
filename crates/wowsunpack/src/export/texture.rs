@@ -335,3 +335,271 @@ pub fn discover_texture_schemes(vfs: &vfs::VfsPath, mfm_stems: &[String]) -> Vec
 
     schemes.into_iter().collect()
 }
+
+// ---------------------------------------------------------------------------
+// TILEDLAND terrain texture baking
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+
+use image_dds::SurfaceRgba8;
+use image_dds::image::RgbaImage;
+
+use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::material::{self, MaterialPrototype};
+
+/// Resolve a texture selfId hash from an MFM property to a VFS path,
+/// load the DDS bytes, and return them.
+fn load_texture_by_hash(
+    vfs: &vfs::VfsPath,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    texture_hash: u64,
+) -> Option<Vec<u8>> {
+    let &path_idx = self_id_index.get(&texture_hash)?;
+    let full_path = db.reconstruct_path(path_idx, self_id_index);
+
+    // Try .dd0 (high-res) first, then the path as-is (.dds).
+    let dd0_path = if full_path.ends_with(".dds") { Some(full_path.replace(".dds", ".dd0")) } else { None };
+
+    for path in dd0_path.iter().chain(std::iter::once(&full_path)) {
+        if let Some(data) = load_dds_from_vfs(vfs, path) {
+            return Some(data);
+        }
+    }
+    None
+}
+
+/// Parse an MFM material from assets.bin given its selfId (material_mfm_path_id).
+///
+/// Returns the parsed material if the MFM is found and parses successfully.
+pub fn parse_mfm_from_db(db: &PrototypeDatabase<'_>, mfm_path_id: u64) -> Option<MaterialPrototype> {
+    let r2p_value = db.lookup_r2p(mfm_path_id)?;
+    let location = db.decode_r2p_value(r2p_value).ok()?;
+    if location.blob_index != material::MATERIAL_BLOB_INDEX {
+        return None;
+    }
+    let record_data = db.get_prototype_data(location, material::MATERIAL_ITEM_SIZE).ok()?;
+    material::parse_material(record_data).ok()
+}
+
+/// Check if a material is a TILEDLAND terrain material.
+///
+/// TILEDLAND materials have `AHArray` (tile atlas), `blendMap`, and `g_tilesIndex`.
+pub fn is_tiledland_material(mat: &MaterialPrototype) -> bool {
+    mat.get_texture_hash("AHArray").is_some()
+        && mat.get_texture_hash("blendMap").is_some()
+        && mat.get_vec4("g_tilesIndex").is_some()
+}
+
+/// Bake a TILEDLAND terrain albedo texture from MFM material properties.
+///
+/// The TILEDLAND shader composites 4 tile layers from a shared atlas texture,
+/// weighted by the RGBA channels of a blend map. Parameters:
+/// - `AHArray`: texture array atlas (Albedo/Height), each layer is a tile material
+/// - `blendMap`: per-pixel RGBA blend weights selecting which atlas layers to use
+/// - `g_tilesIndex`: vec4 of 4 atlas layer indices (one per blend channel)
+/// - `g_tilesScale`: float UV tiling scale for atlas sampling
+/// - `ODMap` (optional): overlay diffuse/occlusion multiplied on top
+///
+/// Returns PNG bytes of the baked albedo texture at the blend map's resolution.
+pub fn bake_tiledland_albedo(
+    mat: &MaterialPrototype,
+    vfs: &vfs::VfsPath,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    max_size: Option<u32>,
+) -> Option<Vec<u8>> {
+    // Extract material properties.
+    let ah_hash = mat.get_texture_hash("AHArray")?;
+    let blend_hash = mat.get_texture_hash("blendMap")?;
+    let tiles_index = mat.get_vec4("g_tilesIndex")?;
+    let tiles_scale = mat.get_float("g_tilesScale").unwrap_or(16.0);
+    let od_hash = mat.get_texture_hash("ODMap");
+
+    // Load and decode the tile atlas (array texture).
+    let ah_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, ah_hash)?;
+    let ah_dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&ah_dds_bytes)).ok()?;
+    // Decode only mip 0 of all layers.
+    let ah_surface =
+        SurfaceRgba8::decode_layers_mipmaps_dds(&ah_dds, 0..ah_dds.get_num_array_layers().max(1), 0..1).ok()?;
+
+    // Extract the 4 tile layers we need.
+    let layer_indices: [u32; 4] =
+        [tiles_index[0] as u32, tiles_index[1] as u32, tiles_index[2] as u32, tiles_index[3] as u32];
+    let tile_w = ah_surface.width;
+    let tile_h = ah_surface.height;
+
+    let tile_layers: Vec<Option<RgbaImage>> =
+        layer_indices.iter().map(|&idx| ah_surface.get_image(idx, 0, 0)).collect();
+
+    // Load and decode the blend map.
+    let blend_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, blend_hash)?;
+    let blend_img = {
+        let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&blend_dds_bytes)).ok()?;
+        image_dds::image_from_dds(&dds, 0).ok()?
+    };
+    let blend_w = blend_img.width();
+    let blend_h = blend_img.height();
+
+    // Optionally load the OD (overlay diffuse) map.
+    let od_img = od_hash.and_then(|h| {
+        let dds_bytes = load_texture_by_hash(vfs, db, self_id_index, h)?;
+        let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&dds_bytes)).ok()?;
+        image_dds::image_from_dds(&dds, 0).ok()
+    });
+
+    // Determine output size: use blend map resolution (typically 512-1024).
+    let out_w = blend_w;
+    let out_h = blend_h;
+
+    // Bake: for each output pixel, sample blend weights and composite tile layers.
+    let mut output = RgbaImage::new(out_w, out_h);
+
+    for py in 0..out_h {
+        for px in 0..out_w {
+            let blend_pixel = blend_img.get_pixel(px, py);
+            let weights = [
+                blend_pixel[0] as f32 / 255.0, // R → layer 0
+                blend_pixel[1] as f32 / 255.0, // G → layer 1
+                blend_pixel[2] as f32 / 255.0, // B → layer 2
+                blend_pixel[3] as f32 / 255.0, // A → layer 3
+            ];
+
+            // Normalize weights so they sum to 1. If all zero, use equal weights.
+            let sum: f32 = weights.iter().sum();
+            let norm = if sum > 0.001 {
+                [weights[0] / sum, weights[1] / sum, weights[2] / sum, weights[3] / sum]
+            } else {
+                [0.25, 0.25, 0.25, 0.25]
+            };
+
+            // UV in blend map space [0..1], then tile with g_tilesScale.
+            let u = px as f32 / out_w as f32;
+            let v = py as f32 / out_h as f32;
+            let tile_u = (u * tiles_scale).fract();
+            let tile_v = (v * tiles_scale).fract();
+
+            // Sample each tile layer and blend.
+            let mut r = 0.0f32;
+            let mut g = 0.0f32;
+            let mut b = 0.0f32;
+
+            for (i, layer_img) in tile_layers.iter().enumerate() {
+                if norm[i] < 0.001 {
+                    continue;
+                }
+                if let Some(img) = layer_img {
+                    let tx = ((tile_u * tile_w as f32) as u32).min(tile_w - 1);
+                    let ty = ((tile_v * tile_h as f32) as u32).min(tile_h - 1);
+                    let p = img.get_pixel(tx, ty);
+                    r += p[0] as f32 * norm[i];
+                    g += p[1] as f32 * norm[i];
+                    b += p[2] as f32 * norm[i];
+                }
+            }
+
+            // Apply OD overlay as multiplicative factor (if available).
+            if let Some(ref od) = od_img {
+                let ox = (px * od.width() / out_w).min(od.width() - 1);
+                let oy = (py * od.height() / out_h).min(od.height() - 1);
+                let od_pixel = od.get_pixel(ox, oy);
+                // OD is typically grayscale stored in RGB; use R channel.
+                let od_factor = od_pixel[0] as f32 / 255.0;
+                r *= od_factor;
+                g *= od_factor;
+                b *= od_factor;
+            }
+
+            output.put_pixel(
+                px,
+                py,
+                image_dds::image::Rgba([
+                    r.clamp(0.0, 255.0) as u8,
+                    g.clamp(0.0, 255.0) as u8,
+                    b.clamp(0.0, 255.0) as u8,
+                    255,
+                ]),
+            );
+        }
+    }
+
+    // Downsample if needed.
+    let (final_w, final_h, pixels) = if let Some(max) = max_size
+        && (out_w > max || out_h > max)
+    {
+        let scale = (max as f32 / out_w as f32).min(max as f32 / out_h as f32);
+        let nw = ((out_w as f32 * scale) as u32).max(1);
+        let nh = ((out_h as f32 * scale) as u32).max(1);
+        let src = output.as_raw();
+        let mut dst = vec![0u8; (nw * nh * 4) as usize];
+        for dy in 0..nh {
+            let sy0 = (dy as f64 * out_h as f64 / nh as f64) as u32;
+            let sy1 = (((dy + 1) as f64 * out_h as f64 / nh as f64) as u32).min(out_h);
+            for dx in 0..nw {
+                let sx0 = (dx as f64 * out_w as f64 / nw as f64) as u32;
+                let sx1 = (((dx + 1) as f64 * out_w as f64 / nw as f64) as u32).min(out_w);
+                let mut ra = 0u32;
+                let mut ga = 0u32;
+                let mut ba = 0u32;
+                let mut count = 0u32;
+                for sy in sy0..sy1 {
+                    for sx in sx0..sx1 {
+                        let i = (sy * out_w + sx) as usize * 4;
+                        ra += src[i] as u32;
+                        ga += src[i + 1] as u32;
+                        ba += src[i + 2] as u32;
+                        count += 1;
+                    }
+                }
+                if count > 0 {
+                    let di = (dy * nw + dx) as usize * 4;
+                    dst[di] = (ra / count) as u8;
+                    dst[di + 1] = (ga / count) as u8;
+                    dst[di + 2] = (ba / count) as u8;
+                    dst[di + 3] = 255;
+                }
+            }
+        }
+        (nw, nh, dst)
+    } else {
+        (out_w, out_h, output.into_raw())
+    };
+
+    // Encode to PNG.
+    let mut png_buf = Vec::new();
+    PngEncoder::new(&mut png_buf).write_image(&pixels, final_w, final_h, ExtendedColorType::Rgba8).ok()?;
+
+    Some(png_buf)
+}
+
+/// Try to load a texture for a model mesh, with TILEDLAND baking as fallback.
+///
+/// First tries the simple filename-based `load_base_albedo_bytes`. If that fails
+/// and assets.bin is available, parses the MFM material and checks if it's a
+/// TILEDLAND terrain material. If so, bakes a composite albedo texture.
+///
+/// Returns PNG bytes if successful.
+pub fn load_or_bake_albedo(
+    vfs: &vfs::VfsPath,
+    mfm_full_path: &str,
+    mfm_path_id: u64,
+    db: Option<&PrototypeDatabase<'_>>,
+    self_id_index: Option<&HashMap<u64, usize>>,
+    max_size: Option<u32>,
+) -> Option<Vec<u8>> {
+    // Try simple filename-based lookup first (works for standard PBS materials).
+    if let Some(dds_bytes) = load_base_albedo_bytes(vfs, mfm_full_path) {
+        return dds_to_png_resized(&dds_bytes, max_size).ok();
+    }
+
+    // Fall back to MFM-based TILEDLAND baking.
+    let db = db?;
+    let idx = self_id_index?;
+    let mat = parse_mfm_from_db(db, mfm_path_id)?;
+    if !is_tiledland_material(&mat) {
+        return None;
+    }
+    eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
+    bake_tiledland_albedo(&mat, vfs, db, idx, max_size)
+}

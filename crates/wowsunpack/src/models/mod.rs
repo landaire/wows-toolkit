@@ -4,6 +4,8 @@ pub mod forest;
 #[cfg(feature = "models")]
 pub mod geometry;
 #[cfg(feature = "models")]
+pub mod material;
+#[cfg(feature = "models")]
 pub mod merged_models;
 #[cfg(feature = "models")]
 pub mod model;

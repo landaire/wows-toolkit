@@ -58,6 +58,8 @@ struct DecodedPrimitive {
     mfm_stem: Option<String>,
     /// Full VFS path to the .mfm file (e.g. "content/location/.../textures/LBC001.mfm").
     mfm_full_path: Option<String>,
+    /// Raw selfId for the .mfm file in assets.bin (used for TILEDLAND MFM parsing).
+    mfm_path_id: u64,
 }
 
 /// Export a visual + geometry pair to a GLB binary and write it.
@@ -367,17 +369,24 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
 
         for prim in primitives {
             // Load texture on demand via full MFM path (deduplicated).
+            // Falls back to TILEDLAND baking for terrain materials.
             let albedo_texture = if let Some(vfs) = vfs
                 && let Some(mfm_path) = &prim.mfm_full_path
             {
                 *texture_cache.entry(mfm_path.clone()).or_insert_with(|| {
-                    texture::load_base_albedo_bytes(vfs, mfm_path)
-                        .and_then(|dds_bytes| texture::dds_to_png_resized(&dds_bytes, max_texture_size).ok())
-                        .map(|png_bytes| {
-                            let idx = textures.len();
-                            textures.push(png_bytes);
-                            idx
-                        })
+                    texture::load_or_bake_albedo(
+                        vfs,
+                        mfm_path,
+                        prim.mfm_path_id,
+                        db,
+                        self_id_index.as_ref(),
+                        max_texture_size,
+                    )
+                    .map(|png_bytes| {
+                        let idx = textures.len();
+                        textures.push(png_bytes);
+                        idx
+                    })
                 })
             } else {
                 None
@@ -1514,6 +1523,7 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
             material_name: format!("Primitive_{i}"),
             mfm_stem: None,
             mfm_full_path: None,
+            mfm_path_id: 0,
         };
 
         let empty_textures = TextureSet::empty();
@@ -1761,6 +1771,7 @@ fn collect_primitives(
             material_name,
             mfm_stem,
             mfm_full_path,
+            mfm_path_id: rs.material_mfm_path_id,
         });
     }
 
