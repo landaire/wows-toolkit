@@ -18,6 +18,28 @@ pub enum TextureError {
     PngEncode(String),
 }
 
+/// Force all alpha values to 255 in an RGBA8 PNG buffer.
+/// Re-decodes and re-encodes the PNG. Used for model textures where the DDS alpha
+/// channel stores non-opacity data (height, roughness).
+pub fn force_png_opaque(png_bytes: &mut Vec<u8>) {
+    use image_dds::image::ImageReader;
+    let Ok(reader) = ImageReader::new(Cursor::new(&*png_bytes)).with_guessed_format() else {
+        return;
+    };
+    let Ok(img) = reader.decode() else { return };
+    let mut rgba = img.into_rgba8();
+    for pixel in rgba.pixels_mut() {
+        pixel[3] = 255;
+    }
+    let mut buf = Vec::new();
+    if PngEncoder::new(&mut buf)
+        .write_image(rgba.as_raw(), rgba.width(), rgba.height(), ExtendedColorType::Rgba8)
+        .is_ok()
+    {
+        *png_bytes = buf;
+    }
+}
+
 /// Decode DDS bytes to PNG bytes (RGBA8), optionally downsampling to a max size.
 ///
 /// If `max_size` is `Some(n)`, the image is downsampled using box filtering so
@@ -400,7 +422,9 @@ pub fn is_tiledland_material(mat: &MaterialPrototype) -> bool {
 /// - `blendMap`: per-pixel RGBA blend weights selecting which atlas layers to use
 /// - `g_tilesIndex`: vec4 of 4 atlas layer indices (one per blend channel)
 /// - `g_tilesScale`: float UV tiling scale for atlas sampling
-/// - `ODMap` (optional): overlay diffuse/occlusion multiplied on top
+///
+/// Note: ODMap is intentionally NOT applied — it requires g_overlayOpacity/g_overlayDepth
+/// shader parameters for correct blending, and naive multiplication darkens the result.
 ///
 /// Returns PNG bytes of the baked albedo texture at the blend map's resolution.
 pub fn bake_tiledland_albedo(
@@ -415,14 +439,18 @@ pub fn bake_tiledland_albedo(
     let blend_hash = mat.get_texture_hash("blendMap")?;
     let tiles_index = mat.get_vec4("g_tilesIndex")?;
     let tiles_scale = mat.get_float("g_tilesScale").unwrap_or(16.0);
-    let od_hash = mat.get_texture_hash("ODMap");
+
+    // Optional sheen tint color — the TILEDLAND shader uses this to add vegetation
+    // coloring (e.g. green tint) on top of the otherwise earth-tone atlas tiles.
+    let sheen_tint = mat.get_vec4("addSheenTintColor");
+    let sheen_amount = mat.get_float("sheen").unwrap_or(0.0);
 
     // Load and decode the tile atlas (array texture).
     let ah_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, ah_hash)?;
     let ah_dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&ah_dds_bytes)).ok()?;
+    let num_layers = ah_dds.get_num_array_layers().max(1);
     // Decode only mip 0 of all layers.
-    let ah_surface =
-        SurfaceRgba8::decode_layers_mipmaps_dds(&ah_dds, 0..ah_dds.get_num_array_layers().max(1), 0..1).ok()?;
+    let ah_surface = SurfaceRgba8::decode_layers_mipmaps_dds(&ah_dds, 0..num_layers, 0..1).ok()?;
 
     // Extract the 4 tile layers we need.
     let layer_indices: [u32; 4] =
@@ -441,13 +469,6 @@ pub fn bake_tiledland_albedo(
     };
     let blend_w = blend_img.width();
     let blend_h = blend_img.height();
-
-    // Optionally load the OD (overlay diffuse) map.
-    let od_img = od_hash.and_then(|h| {
-        let dds_bytes = load_texture_by_hash(vfs, db, self_id_index, h)?;
-        let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&dds_bytes)).ok()?;
-        image_dds::image_from_dds(&dds, 0).ok()
-    });
 
     // Determine output size: use blend map resolution (typically 512-1024).
     let out_w = blend_w;
@@ -499,16 +520,16 @@ pub fn bake_tiledland_albedo(
                 }
             }
 
-            // Apply OD overlay as multiplicative factor (if available).
-            if let Some(ref od) = od_img {
-                let ox = (px * od.width() / out_w).min(od.width() - 1);
-                let oy = (py * od.height() / out_h).min(od.height() - 1);
-                let od_pixel = od.get_pixel(ox, oy);
-                // OD is typically grayscale stored in RGB; use R channel.
-                let od_factor = od_pixel[0] as f32 / 255.0;
-                r *= od_factor;
-                g *= od_factor;
-                b *= od_factor;
+            // Apply addSheenTintColor — the TILEDLAND shader uses this to add
+            // vegetation coloring (green tint) on top of the earth-tone atlas tiles.
+            // We lerp toward the tint color by the sheen amount.
+            if let Some(tint) = sheen_tint {
+                if sheen_amount > 0.0 {
+                    let t = sheen_amount;
+                    r = r * (1.0 - t) + (tint[0] * 255.0) * t;
+                    g = g * (1.0 - t) + (tint[1] * 255.0) * t;
+                    b = b * (1.0 - t) + (tint[2] * 255.0) * t;
+                }
             }
 
             output.put_pixel(
@@ -573,11 +594,12 @@ pub fn bake_tiledland_albedo(
     Some(png_buf)
 }
 
-/// Try to load a texture for a model mesh, with TILEDLAND baking as fallback.
+/// Try to load a texture for a model mesh, with TILEDLAND baking support.
 ///
-/// First tries the simple filename-based `load_base_albedo_bytes`. If that fails
-/// and assets.bin is available, parses the MFM material and checks if it's a
-/// TILEDLAND terrain material. If so, bakes a composite albedo texture.
+/// If assets.bin is available, first parses the MFM to check if it's a TILEDLAND
+/// terrain material. If so, bakes a composite albedo from the tile atlas + blend
+/// map (the correct rendering). Otherwise falls back to simple filename-based
+/// texture lookup via `load_base_albedo_bytes`.
 ///
 /// Returns PNG bytes if successful.
 pub fn load_or_bake_albedo(
@@ -588,18 +610,29 @@ pub fn load_or_bake_albedo(
     self_id_index: Option<&HashMap<u64, usize>>,
     max_size: Option<u32>,
 ) -> Option<Vec<u8>> {
-    // Try simple filename-based lookup first (works for standard PBS materials).
-    if let Some(dds_bytes) = load_base_albedo_bytes(vfs, mfm_full_path) {
-        return dds_to_png_resized(&dds_bytes, max_size).ok();
+    // Try MFM-based TILEDLAND baking first (terrain materials).
+    // This must come before filename-based lookup because _od files exist for
+    // TILEDLAND tiles but are overlay maps, not standalone albedo textures.
+    if let Some(db) = db
+        && let Some(idx) = self_id_index
+        && mfm_path_id != 0
+    {
+        if let Some(mat) = parse_mfm_from_db(db, mfm_path_id) {
+            if is_tiledland_material(&mat) {
+                eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
+                if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, max_size) {
+                    return Some(png);
+                }
+                eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
+            }
+        }
     }
 
-    // Fall back to MFM-based TILEDLAND baking.
-    let db = db?;
-    let idx = self_id_index?;
-    let mat = parse_mfm_from_db(db, mfm_path_id)?;
-    if !is_tiledland_material(&mat) {
-        return None;
-    }
-    eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
-    bake_tiledland_albedo(&mat, vfs, db, idx, max_size)
+    // Fall back to simple filename-based lookup (works for standard PBS materials).
+    // Force alpha=255 since model albedo textures often store non-opacity data
+    // (height, roughness) in the alpha channel which would cause unwanted transparency.
+    let dds_bytes = load_base_albedo_bytes(vfs, mfm_full_path)?;
+    let mut png = dds_to_png_resized(&dds_bytes, max_size).ok()?;
+    force_png_opaque(&mut png);
+    Some(png)
 }

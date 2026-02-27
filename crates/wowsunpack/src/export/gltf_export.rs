@@ -452,7 +452,10 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
             })();
             match dds_bytes {
                 Some(dds_bytes) => match texture::dds_to_png_resized(&dds_bytes, max_texture_size) {
-                    Ok(png_bytes) => {
+                    Ok(mut png_bytes) => {
+                        // Force alpha=255: the lightmap DDS stores shadow data in
+                        // the alpha channel which causes terrain transparency in viewers.
+                        texture::force_png_opaque(&mut png_bytes);
                         let idx = textures.len();
                         textures.push(png_bytes);
                         mesh.albedo_texture = Some(idx);
