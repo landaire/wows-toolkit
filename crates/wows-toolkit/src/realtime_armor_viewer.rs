@@ -380,19 +380,27 @@ impl RealtimeArmorViewer {
     }
 
     /// Build the inverse ship rotation: undoes yaw, pitch, roll to get body-frame.
-    /// Returns R_z(-roll) * R_x(-pitch) * R_y(-yaw) (applied right-to-left to vectors).
+    ///
+    /// In BigWorld, yaw=0 faces East (+X), yaw increases CCW. The nalgebra
+    /// `Ry(+θ)` rotates +X toward −Z (right-hand rule), so the BigWorld
+    /// forward rotation is `Ry(−yaw)` and its inverse is `Ry(+yaw)`.
     fn inverse_ship_rotation(yaw: f32, pitch: f32, roll: f32) -> Rotation3<f32> {
-        let ry = Rotation3::from_axis_angle(&Vec3::y_axis(), -yaw);
-        let rx = Rotation3::from_axis_angle(&Vec3::x_axis(), -pitch);
-        let rz = Rotation3::from_axis_angle(&Vec3::z_axis(), -roll);
+        let ry = Rotation3::from_axis_angle(&Vec3::y_axis(), yaw);
+        let rx = Rotation3::from_axis_angle(&Vec3::x_axis(), pitch);
+        let rz = Rotation3::from_axis_angle(&Vec3::z_axis(), roll);
         rz * rx * ry
     }
 
-    /// The axis remap from BigWorld body-frame to mesh-space.
-    /// BigWorld: +X = East, +Z = North, +Y = up.
-    /// Mesh: bow along +Z, starboard along +X, +Y = up.
-    /// Remap: mesh_x = -body_z, mesh_y = body_y, mesh_z = +body_x.
-    /// This is Ry(-90°): (1,0,0)→(0,0,1), (0,0,1)→(-1,0,0).
+    /// Remap from BigWorld body-frame to GLTF mesh-space (partial).
+    ///
+    /// Body-frame (after inverse rotation, yaw=0 faces East):
+    ///   bow = +X, up = +Y
+    /// GLTF mesh (model-local, bow along +Z):
+    ///   bow = +Z, starboard = +X, up = +Y
+    ///
+    /// This rotation maps body_x → mesh_z, body_z → −mesh_x.
+    /// For directions, a subsequent Z-negation is needed to account for the
+    /// GLTF exporter's left→right-handed conversion (`positions.push([x, y, -z])`).
     fn axis_remap() -> Rotation3<f32> {
         Rotation3::from_axis_angle(&Vec3::y_axis(), -std::f32::consts::FRAC_PI_2)
     }
@@ -597,13 +605,14 @@ impl RealtimeArmorViewer {
         // Transform both origin and impact to mesh-space via world_to_model.
         let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
 
-        // Shell direction: transform the world-space direction through the same
-        // inverse_ship_rotation + axis_remap pipeline used for positions.
-        // For a direction vector we skip the translation (ship_pos, model_center).
+        // Shell direction: transform the world-space travel vector (impact − origin)
+        // through inverse_ship_rotation + axis_remap, then negate Z to match the
+        // GLTF mesh's right-handed coordinate system (Z-negated during export).
         let world_dir =
             Vec3::new(impact_pos.x - shot.origin.x, impact_pos.y - shot.origin.y, impact_pos.z - shot.origin.z);
         let body_dir = rot * world_dir;
-        let mesh_dir = Self::axis_remap() * body_dir;
+        let remapped = Self::axis_remap() * body_dir;
+        let mesh_dir = Vec3::new(remapped.x, remapped.y, -remapped.z);
         let horiz_len = (mesh_dir.x * mesh_dir.x + mesh_dir.z * mesh_dir.z).sqrt();
         if horiz_len < 0.001 {
             return None;
@@ -1942,6 +1951,8 @@ impl RealtimeArmorViewer {
                 self.pane.viewport.model_roll = roll;
                 self.pane.viewport.mark_dirty();
             }
+            // model_yaw = +victim_yaw: the renderer applies Ry(model_yaw) to the
+            // hull mesh (bow=+Z), rotating the bow to the correct compass heading.
             let yaw = self.selected_shell_yaw();
             if (self.pane.viewport.model_yaw - yaw).abs() > 1e-6 {
                 self.pane.viewport.model_yaw = yaw;
