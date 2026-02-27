@@ -32,15 +32,15 @@ image = { workspace = true, features = ["png", "jpeg"] }
 ab_glyph = "0.2"
 mp4 = "0.14"
 bytes = "1"
-clap = { version = "2.33.1", optional = true }
-toml = { version = "0.8", optional = true }
+clap = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 serde = { workspace = true }
-convert_case = "0.6"
+convert_case = { workspace = true }
 gettext = { workspace = true, optional = true }
 roxmltree = { workspace = true }
-resvg = "0.44"
-tiny-skia = "0.11"
-indicatif = { version = "0.18.4", optional = true }
+resvg = "0.47"
+tiny-skia = "0.12"
+indicatif = { workspace = true, optional = true }
 
 # GPU encoder (default)
 vk-video = { version = "0.2", optional = true }
@@ -51,4 +51,4 @@ yuvutils-rs = { version = "0.8", optional = true }
 openh264 = { version = "0.9", features = ["source"], optional = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = "0.3.22"
+tracing-subscriber = { workspace = true }

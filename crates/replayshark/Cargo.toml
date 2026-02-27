@@ -1,7 +1,7 @@
 [package]
 name = "replayshark"
 version = "0.1.0"
-authors = ["Lane Kolbly <lane@rscheme.org>"]
+authors = ["Lane Kolbly <lane@rscheme.org>", "Lander Brandt <landaire>"]
 publish = false
 edition.workspace = true
 rust-version.workspace = true
@@ -9,10 +9,10 @@ rust-version.workspace = true
 [dependencies]
 wows_replays = { workspace = true }
 rootcause = { workspace = true }
-clap = "2.33.1"
-walkdir = "2.3.2"
-chrono = "0.4.19"
+clap = { workspace = true }
+walkdir = { workspace = true }
+jiff = { workspace = true }
 serde_json = { workspace = true }
-parse_int = "0.6.0"
+parse_int = "0.9.0"
 wowsunpack = { workspace = true, features = ["json", "vfs"] }
-anyhow = "1.0"
+anyhow = { workspace = true }

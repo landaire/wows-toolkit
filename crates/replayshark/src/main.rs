@@ -1,7 +1,8 @@
 use anyhow::{Context, anyhow};
-use clap::{App, Arg, SubCommand};
+use clap::{Parser, Subcommand};
 use std::borrow::Cow;
 use std::io::Write;
+use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
 use wowsunpack::data::DataFileWithCallback;
 use wowsunpack::data::Version;
@@ -10,6 +11,108 @@ use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
 
 use wows_replays::{ParseError, ReplayFile, analyzer::Analyzer, types::EntityId};
+
+/// Parses & processes World of Warships replay files
+#[derive(Parser)]
+#[command(author = "Lane Kolbly <lane@rscheme.org>, Lander Brandt <landaire>")]
+struct Args {
+    /// Path to your game directory (e.g. E:\WoWs\World_of_Warships\)
+    #[arg(short = 'g', long = "game")]
+    game_dir: Option<PathBuf>,
+
+    /// Path to extracted game files
+    #[arg(short = 'e', long = "extracted")]
+    extracted_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Runs the parser against a directory of replays to validate the parser
+    Survey {
+        /// Don't run the decoder
+        #[arg(long)]
+        skip_decode: bool,
+
+        /// The replay files to use
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
+    },
+    /// Print the chat log of the given game
+    Chat {
+        /// The replay file to use
+        replay: PathBuf,
+    },
+    /// Generate summary statistics of the game
+    Summary {
+        /// The replay file to use
+        replay: PathBuf,
+    },
+    /// Dump the packets to console
+    Dump {
+        /// Output filename to dump to
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Don't output the metadata as first line
+        #[arg(long)]
+        no_meta: bool,
+
+        /// The replay file to use
+        replay: PathBuf,
+    },
+    /// Dump the scripts specifications to console
+    Spec {
+        /// Version to dump. Must be comma-delimited: major,minor,patch,build
+        version: String,
+    },
+    /// Decrypt a replay file and dump the meta and packet data to disk
+    Decrypt {
+        /// Output path for the JSON metadata
+        #[arg(short = 'm', long)]
+        meta_output: PathBuf,
+
+        /// Output path for the decrypted packet data
+        #[arg(short = 'p', long)]
+        packets_output: PathBuf,
+
+        /// The replay file to use
+        replay: PathBuf,
+    },
+    /// Search a directory full of replays
+    Search {
+        /// The replay files to use
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
+    },
+    /// Tools designed for reverse-engineering packets
+    Investigate {
+        /// Output the metadata as first line
+        #[arg(long)]
+        meta: bool,
+
+        /// hh:mm:ss offset to render clock values with
+        #[arg(long)]
+        timestamp: Option<String>,
+
+        /// If specified, only return packets of the given packet_type
+        #[arg(long)]
+        filter_packet: Option<String>,
+
+        /// If specified, only return method calls for the given method
+        #[arg(long)]
+        filter_method: Option<String>,
+
+        /// Entity ID to apply to other filters if applicable
+        #[arg(long)]
+        entity_id: Option<String>,
+
+        /// The replay file to use
+        replay: PathBuf,
+    },
+}
 
 struct InvestigativePrinter {
     filter_packet: Option<u32>,
@@ -301,7 +404,7 @@ impl SurveyResults {
 
     fn print(&self) {
         let mut audits: Vec<_> = self.audits.iter().collect();
-        audits.sort_by_key(|(_, (tm, _))| chrono::NaiveDateTime::parse_from_str(tm, "%d.%m.%Y %H:%M:%S").unwrap());
+        audits.sort_by_key(|(_, (tm, _))| jiff::civil::DateTime::strptime("%d.%m.%Y %H:%M:%S", tm).unwrap());
         for (k, (tm, v)) in audits.iter() {
             println!();
             println!("{} ({}) has {} audits:", truncate_string(k, 20), tm, v.len());
@@ -387,233 +490,117 @@ fn survey_file(
 }
 
 fn main() {
-    let replay_arg = Arg::with_name("REPLAY").help("The replay file to use").required(true).index(1);
-    let matches = App::new("World of Warships Replay Parser Utility")
-        .author("Lane Kolbly <lane@rscheme.org>")
-        .about("Parses & processes World of Warships replay files")
-        .arg(
-            Arg::with_name("GAME_DIRECTORY")
-                .help(
-                    "Path to your game directory. Should be the base game directory like E:\\WoWs\\World_of_Warships\\",
-                )
-                .short("g")
-                .long("game")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("EXTRACTED_FILES_DIRECTORY")
-                .help("Path to extracted game files")
-                .short("e")
-                .long("extracted")
-                .takes_value(true),
-        )
-        .subcommand(
-            SubCommand::with_name("survey")
-                .about("Runs the parser against a directory of replays to validate the parser")
-                .arg(Arg::with_name("skip-decode").long("skip-decode").help("Don't run the decoder"))
-                .arg(Arg::with_name("REPLAYS").help("The replay files to use").required(true).multiple(true)),
-        )
-        .subcommand(SubCommand::with_name("chat").about("Print the chat log of the given game").arg(replay_arg.clone()))
-        .subcommand(
-            SubCommand::with_name("summary").about("Generate summary statistics of the game").arg(replay_arg.clone()),
-        )
-        .subcommand(
-            SubCommand::with_name("dump")
-                .about("Dump the packets to console")
-                .arg(
-                    Arg::with_name("output")
-                        .long("output")
-                        .short("o")
-                        .help("Output filename to dump to")
-                        .takes_value(true),
-                )
-                .arg(Arg::with_name("no-meta").long("no-meta").help("Don't output the metadata as first line"))
-                .arg(replay_arg.clone()),
-        )
-        .subcommand(
-            SubCommand::with_name("spec").about("Dump the scripts specifications to console").arg(
-                Arg::with_name("version")
-                    .help("Version to dump. Must be comma-delimited: major,minor,patch,build")
-                    .takes_value(true)
-                    .required(true),
-            ),
-        )
-        .subcommand(
-            SubCommand::with_name("decrypt")
-                .about("Decrypt a replay file and dump the meta and packet data to disk")
-                .arg(
-                    Arg::with_name("meta-output")
-                        .long("meta-output")
-                        .short("m")
-                        .help("Output path for the JSON metadata")
-                        .takes_value(true)
-                        .required(true),
-                )
-                .arg(
-                    Arg::with_name("packets-output")
-                        .long("packets-output")
-                        .short("p")
-                        .help("Output path for the decrypted packet data")
-                        .takes_value(true)
-                        .required(true),
-                )
-                .arg(replay_arg.clone()),
-        )
-        .subcommand(
-            SubCommand::with_name("search")
-                .about("Search a directory full of replays")
-                .arg(Arg::with_name("REPLAYS").help("The replay files to use").required(true).multiple(true)),
-        )
-        .subcommand(
-            SubCommand::with_name("investigate")
-                .about("Tools designed for reverse-engineering packets")
-                .arg(Arg::with_name("meta").long("meta").help("Don't output the metadata as first line"))
-                .arg(
-                    Arg::with_name("timestamp")
-                        .long("timestamp")
-                        .takes_value(true)
-                        .help("hh:mm:ss offset to render clock values with"),
-                )
-                .arg(
-                    Arg::with_name("filter-packet")
-                        .long("filter-packet")
-                        .takes_value(true)
-                        .help("If specified, only return packets of the given packet_type"),
-                )
-                .arg(
-                    Arg::with_name("filter-method")
-                        .long("filter-method")
-                        .takes_value(true)
-                        .help("If specified, only return method calls for the given method"),
-                )
-                .arg(
-                    Arg::with_name("entity-id")
-                        .long("entity-id")
-                        .takes_value(true)
-                        .help("Entity ID to apply to other filters if applicable"),
-                )
-                .arg(replay_arg.clone()),
-        );
+    let args = Args::parse();
 
-    let matches = matches.get_matches();
+    let game_dir = args.game_dir.as_deref().and_then(|p| p.to_str());
+    let extracted = args.extracted_dir.as_deref().and_then(|p| p.to_str());
 
-    let (game_dir, extracted) = (matches.value_of("GAME_DIRECTORY"), matches.value_of("EXTRACTED_FILES_DIRECTORY"));
-
-    if let Some(matches) = matches.subcommand_matches("dump") {
-        let input = matches.value_of("REPLAY").unwrap();
-        let no_meta = matches.is_present("no-meta");
-        let output = matches.value_of("output").map(|s| s.to_string());
-        parse_replay(&std::path::PathBuf::from(input), game_dir, extracted, |meta| {
-            wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref()).build(meta)
-        })
-        .unwrap();
-    }
-    if let Some(matches) = matches.subcommand_matches("investigate") {
-        let input = matches.value_of("REPLAY").unwrap();
-        let no_meta = !matches.is_present("meta");
-        let filter_packet = matches.value_of("filter-packet");
-        let filter_method = matches.value_of("filter-method");
-        let entity_id = matches.value_of("entity-id");
-        let timestamp = matches.value_of("timestamp");
-        parse_replay(&std::path::PathBuf::from(input), game_dir, extracted, |meta| {
-            build_investigative_printer(meta, no_meta, filter_packet, filter_method, timestamp, entity_id)
-        })
-        .unwrap();
-    }
-    if let Some(matches) = matches.subcommand_matches("spec") {
-        let target_version = Version::from_client_exe(matches.value_of("version").unwrap());
-        let specs = load_game_data(None, extracted, &target_version).expect("failed to load game data");
-        printspecs(&specs);
-    }
-    if let Some(matches) = matches.subcommand_matches("decrypt") {
-        let input = matches.value_of("REPLAY").unwrap();
-        let meta_output = matches.value_of("meta-output").unwrap();
-        let packets_output = matches.value_of("packets-output").unwrap();
-
-        let replay_file = ReplayFile::from_file(&std::path::PathBuf::from(input)).unwrap();
-        std::fs::write(meta_output, &replay_file.raw_meta).unwrap();
-        std::fs::write(packets_output, &replay_file.packet_data).unwrap();
-
-        println!("Wrote {} bytes of metadata to {}", replay_file.raw_meta.len(), meta_output);
-        println!("Wrote {} bytes of packet data to {}", replay_file.packet_data.len(), packets_output);
-    }
-    if let Some(matches) = matches.subcommand_matches("summary") {
-        let input = matches.value_of("REPLAY").unwrap();
-        parse_replay(&std::path::PathBuf::from(input), game_dir, extracted, |meta| {
-            wows_replays::analyzer::summary::SummaryBuilder::new().build(meta)
-        })
-        .unwrap();
-    }
-    if let Some(matches) = matches.subcommand_matches("chat") {
-        let input = matches.value_of("REPLAY").unwrap();
-        parse_replay(&std::path::PathBuf::from(input), game_dir, extracted, |meta| {
-            wows_replays::analyzer::chat::ChatLoggerBuilder::new().build(meta)
-        })
-        .unwrap();
-    }
-    if let Some(matches) = matches.subcommand_matches("survey") {
-        let mut survey_result = SurveyResults::empty();
-        for replay in matches.values_of("REPLAYS").unwrap() {
-            for entry in walkdir::WalkDir::new(replay) {
-                let entry = entry.expect("Error unwrapping entry");
-                if !entry.path().is_file() {
-                    continue;
-                }
-                let replay = entry.path().to_path_buf();
-                let result = survey_file(matches.is_present("skip-decode"), game_dir, extracted, replay);
-                survey_result.add(result);
-            }
+    match args.command {
+        Commands::Dump { output, no_meta, replay } => {
+            parse_replay(&replay, game_dir, extracted, |meta| {
+                wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref()).build(meta)
+            })
+            .unwrap();
         }
-        survey_result.print();
-    }
-    if let Some(matches) = matches.subcommand_matches("search") {
-        let mut replays = vec![];
-        for replay in matches.values_of("REPLAYS").unwrap() {
-            for entry in walkdir::WalkDir::new(replay) {
-                let entry = entry.expect("Error unwrapping entry");
-                if !entry.path().is_file() {
-                    continue;
-                }
-                let replay = entry.path().to_path_buf();
-                let replay_path = replay.clone();
+        Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
+            let no_meta = !meta;
+            parse_replay(&replay, game_dir, extracted, |meta| {
+                build_investigative_printer(
+                    meta,
+                    no_meta,
+                    filter_packet.as_deref(),
+                    filter_method.as_deref(),
+                    timestamp.as_deref(),
+                    entity_id.as_deref(),
+                )
+            })
+            .unwrap();
+        }
+        Commands::Spec { version } => {
+            let target_version = Version::from_client_exe(&version);
+            let specs = load_game_data(None, extracted, &target_version).expect("failed to load game data");
+            printspecs(&specs);
+        }
+        Commands::Decrypt { meta_output, packets_output, replay } => {
+            let replay_file = ReplayFile::from_file(&replay).unwrap();
+            std::fs::write(&meta_output, &replay_file.raw_meta).unwrap();
+            std::fs::write(&packets_output, &replay_file.packet_data).unwrap();
 
-                let replay = match ReplayFile::from_file(&replay) {
-                    Ok(replay) => replay,
-                    Err(_) => {
+            println!("Wrote {} bytes of metadata to {:?}", replay_file.raw_meta.len(), meta_output);
+            println!("Wrote {} bytes of packet data to {:?}", replay_file.packet_data.len(), packets_output);
+        }
+        Commands::Summary { replay } => {
+            parse_replay(&replay, game_dir, extracted, |meta| {
+                wows_replays::analyzer::summary::SummaryBuilder::new().build(meta)
+            })
+            .unwrap();
+        }
+        Commands::Chat { replay } => {
+            parse_replay(&replay, game_dir, extracted, |meta| {
+                wows_replays::analyzer::chat::ChatLoggerBuilder::new().build(meta)
+            })
+            .unwrap();
+        }
+        Commands::Survey { skip_decode, replays } => {
+            let mut survey_result = SurveyResults::empty();
+            for replay_path in &replays {
+                for entry in walkdir::WalkDir::new(replay_path) {
+                    let entry = entry.expect("Error unwrapping entry");
+                    if !entry.path().is_file() {
                         continue;
                     }
-                };
-                replays.push((replay_path, replay.meta));
-
-                if replays.len() % 100 == 0 {
-                    println!("Parsed {} games...", replays.len());
+                    let replay = entry.path().to_path_buf();
+                    let result = survey_file(skip_decode, game_dir, extracted, replay);
+                    survey_result.add(result);
                 }
-
-                //let result = survey_file(matches.is_present("skip-decode"), replay);
-                //survey_result.add(result);
             }
+            survey_result.print();
         }
-        replays.sort_by_key(|replay| {
-            match chrono::NaiveDateTime::parse_from_str(&replay.1.dateTime, "%d.%m.%Y %H:%M:%S") {
-                Ok(x) => x,
-                Err(e) => {
-                    println!("Couldn't parse '{}' because {:?}", replay.1.dateTime, e);
-                    chrono::NaiveDateTime::parse_from_str("05.05.1995 01:02:03", "%d.%m.%Y %H:%M:%S").unwrap()
+        Commands::Search { replays: replay_paths } => {
+            let mut replays = vec![];
+            for replay_path in &replay_paths {
+                for entry in walkdir::WalkDir::new(replay_path) {
+                    let entry = entry.expect("Error unwrapping entry");
+                    if !entry.path().is_file() {
+                        continue;
+                    }
+                    let replay = entry.path().to_path_buf();
+                    let replay_path = replay.clone();
+
+                    let replay = match ReplayFile::from_file(&replay) {
+                        Ok(replay) => replay,
+                        Err(_) => {
+                            continue;
+                        }
+                    };
+                    replays.push((replay_path, replay.meta));
+
+                    if replays.len() % 100 == 0 {
+                        println!("Parsed {} games...", replays.len());
+                    }
                 }
             }
-            //replay.1.dateTime.clone()
-        });
-        println!("Found {} games", replays.len());
-        for i in 0..10 {
-            let idx = replays.len() - i - 1;
-            println!(
-                "{:?} {} {} {} {}",
-                replays[idx].0,
-                replays[idx].1.playerName,
-                replays[idx].1.dateTime,
-                replays[idx].1.mapDisplayName,
-                replays[idx].1.playerVehicle
-            );
+            replays.sort_by_key(|replay| {
+                match jiff::civil::DateTime::strptime("%d.%m.%Y %H:%M:%S", &replay.1.dateTime) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        println!("Couldn't parse '{}' because {:?}", replay.1.dateTime, e);
+                        jiff::civil::DateTime::strptime("%d.%m.%Y %H:%M:%S", "05.05.1995 01:02:03").unwrap()
+                    }
+                }
+            });
+            println!("Found {} games", replays.len());
+            for i in 0..10 {
+                let idx = replays.len() - i - 1;
+                println!(
+                    "{:?} {} {} {} {}",
+                    replays[idx].0,
+                    replays[idx].1.playerName,
+                    replays[idx].1.dateTime,
+                    replays[idx].1.mapDisplayName,
+                    replays[idx].1.playerVehicle
+                );
+            }
         }
     }
 }

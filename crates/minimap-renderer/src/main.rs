@@ -1,9 +1,9 @@
-use clap::{App, Arg};
+use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use rootcause::prelude::*;
 use std::cell::Cell;
 use std::fs::File;
-use std::path::Path;
+use std::path::PathBuf;
 use tracing::{info, warn};
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
@@ -23,135 +23,110 @@ use wows_minimap_renderer::drawing::ImageTarget;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::video::{DumpMode, RenderStage, VideoEncoder};
 
+/// Generates a minimap timelapse video from a WoWS replay
+#[derive(Parser)]
+#[command(name = "Minimap Renderer")]
+struct Args {
+    /// Path to the World of Warships game directory
+    #[arg(short = 'g', long = "game", required_unless_present_any = ["generate_config", "check_encoder"])]
+    game_dir: Option<PathBuf>,
+
+    /// Output MP4 file path
+    #[arg(short, long, required_unless_present_any = ["generate_config", "check_encoder"])]
+    output: Option<PathBuf>,
+
+    /// Dump a single frame as PNG instead of rendering video (specify frame number or 'mid' for midpoint)
+    #[arg(long)]
+    dump_frame: Option<String>,
+
+    /// Hide player names above ship icons
+    #[arg(long)]
+    no_player_names: bool,
+
+    /// Hide ship names above ship icons
+    #[arg(long)]
+    no_ship_names: bool,
+
+    /// Hide capture point zones
+    #[arg(long)]
+    no_capture_points: bool,
+
+    /// Hide building markers
+    #[arg(long)]
+    no_buildings: bool,
+
+    /// Hide turret direction indicators
+    #[arg(long)]
+    no_turret_direction: bool,
+
+    /// Hide selected armament/ammo type below ship icons
+    #[arg(long)]
+    no_armament: bool,
+
+    /// Show position trail heatmap (rainbow coloring)
+    #[arg(long)]
+    show_trails: bool,
+
+    /// Hide trails for dead ships
+    #[arg(long)]
+    no_dead_trails: bool,
+
+    /// Show speed-based trails (blue=slow, red=fast)
+    #[arg(long)]
+    show_speed_trails: bool,
+
+    /// Show ship config range circles (detection, battery, etc.)
+    #[arg(long)]
+    show_ship_config: bool,
+
+    /// Path to TOML config file
+    #[arg(long)]
+    config: Option<PathBuf>,
+
+    /// Print default TOML config to stdout and exit
+    #[arg(long)]
+    generate_config: bool,
+
+    /// Check encoder availability (GPU/CPU) and exit
+    #[arg(long)]
+    check_encoder: bool,
+
+    /// Use CPU encoder (openh264) instead of GPU
+    #[arg(long)]
+    cpu: bool,
+
+    /// Disable progress bar and use log output instead
+    #[arg(long)]
+    no_progress: bool,
+
+    /// The replay file to process
+    #[arg(required_unless_present_any = ["generate_config", "check_encoder"])]
+    replay: Option<PathBuf>,
+}
+
 fn main() -> Result<(), Report> {
-    let matches = App::new("Minimap Renderer")
-        .about("Generates a minimap timelapse video from a WoWS replay")
-        .arg(
-            Arg::with_name("GAME_DIRECTORY")
-                .help("Path to the World of Warships game directory")
-                .short("g")
-                .long("game")
-                .takes_value(true)
-                .required_unless_one(&["GENERATE_CONFIG", "CHECK_ENCODER"]),
-        )
-        .arg(
-            Arg::with_name("OUTPUT")
-                .help("Output MP4 file path")
-                .short("o")
-                .long("output")
-                .takes_value(true)
-                .required_unless_one(&["GENERATE_CONFIG", "CHECK_ENCODER"]),
-        )
-        .arg(
-            Arg::with_name("DUMP_FRAME")
-                .help("Dump a single frame as PNG instead of rendering video (specify frame number or 'mid' for midpoint)")
-                .long("dump-frame")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("NO_PLAYER_NAMES")
-                .help("Hide player names above ship icons")
-                .long("no-player-names"),
-        )
-        .arg(
-            Arg::with_name("NO_SHIP_NAMES")
-                .help("Hide ship names above ship icons")
-                .long("no-ship-names"),
-        )
-        .arg(
-            Arg::with_name("NO_CAPTURE_POINTS")
-                .help("Hide capture point zones")
-                .long("no-capture-points"),
-        )
-        .arg(
-            Arg::with_name("NO_BUILDINGS")
-                .help("Hide building markers")
-                .long("no-buildings"),
-        )
-        .arg(
-            Arg::with_name("NO_TURRET_DIRECTION")
-                .help("Hide turret direction indicators")
-                .long("no-turret-direction"),
-        )
-        .arg(
-            Arg::with_name("NO_ARMAMENT")
-                .help("Hide selected armament/ammo type below ship icons")
-                .long("no-armament"),
-        )
-        .arg(
-            Arg::with_name("SHOW_TRAILS")
-                .help("Show position trail heatmap (rainbow coloring)")
-                .long("show-trails"),
-        )
-        .arg(
-            Arg::with_name("NO_DEAD_TRAILS")
-                .help("Hide trails for dead ships")
-                .long("no-dead-trails"),
-        )
-        .arg(
-            Arg::with_name("SHOW_SPEED_TRAILS")
-                .help("Show speed-based trails (blue=slow, red=fast)")
-                .long("show-speed-trails"),
-        )
-        .arg(
-            Arg::with_name("SHOW_SHIP_CONFIG")
-                .help("Show ship config range circles (detection, battery, etc.)")
-                .long("show-ship-config"),
-        )
-        .arg(
-            Arg::with_name("CONFIG")
-                .help("Path to TOML config file")
-                .long("config")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("GENERATE_CONFIG")
-                .help("Print default TOML config to stdout and exit")
-                .long("generate-config"),
-        )
-        .arg(
-            Arg::with_name("CHECK_ENCODER")
-                .help("Check encoder availability (GPU/CPU) and exit")
-                .long("check-encoder"),
-        )
-        .arg(
-            Arg::with_name("CPU")
-                .help("Use CPU encoder (openh264) instead of GPU")
-                .long("cpu"),
-        )
-        .arg(
-            Arg::with_name("NO_PROGRESS")
-                .help("Disable progress bar and use log output instead")
-                .long("no-progress"),
-        )
-        .arg(
-            Arg::with_name("REPLAY")
-                .help("The replay file to process")
-                .required_unless_one(&["GENERATE_CONFIG", "CHECK_ENCODER"])
-                .index(1),
-        )
-        .get_matches();
+    let args = Args::parse();
 
     tracing_subscriber::fmt().with_target(false).init();
 
     // Handle --generate-config before anything else
-    if matches.is_present("GENERATE_CONFIG") {
+    if args.generate_config {
         print!("{}", RendererConfig::generate_default_toml());
         return Ok(());
     }
 
     // Handle --check-encoder
-    if matches.is_present("CHECK_ENCODER") {
+    if args.check_encoder {
         let status = wows_minimap_renderer::check_encoder();
         print!("{status}");
         return Ok(());
     }
 
-    let game_dir = matches.value_of("GAME_DIRECTORY").unwrap();
-    let output = matches.value_of("OUTPUT").unwrap();
-    let replay_path = matches.value_of("REPLAY").unwrap();
+    let game_dir = args.game_dir.as_ref().expect("game directory is required");
+    let output = args.output.as_ref().expect("output is required");
+    let replay_path = args.replay.as_ref().expect("replay is required");
 
-    let dump_mode = match matches.value_of("DUMP_FRAME") {
+    let dump_mode = match args.dump_frame.as_deref() {
         Some("mid") => Some(DumpMode::Midpoint),
         Some("last") => Some(DumpMode::Last),
         Some(n) => Some(DumpMode::Frame(n.parse::<usize>().expect("invalid frame number"))),
@@ -159,11 +134,11 @@ fn main() -> Result<(), Report> {
     };
 
     info!("Parsing replay");
-    let replay_file = ReplayFile::from_file(&std::path::PathBuf::from(replay_path))?;
+    let replay_file = ReplayFile::from_file(replay_path)?;
     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
     info!(build = %replay_version.build, "Loading game data");
-    let wows_dir = Path::new(game_dir);
+    let wows_dir = game_dir.as_path();
     let resources = game_data::load_game_resources(wows_dir, &replay_version).map_err(|e| report!("{e}"))?;
     let vfs = &resources.vfs;
     let specs = &resources.specs;
@@ -222,8 +197,8 @@ fn main() -> Result<(), Report> {
     );
 
     // Load config: --config path > exe-adjacent minimap_renderer.toml > defaults
-    let mut config = if let Some(config_path) = matches.value_of("CONFIG") {
-        RendererConfig::load(Path::new(config_path))?
+    let mut config = if let Some(config_path) = &args.config {
+        RendererConfig::load(config_path)?
     } else {
         // Try exe-adjacent config file
         let exe_config = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("minimap_renderer.toml")));
@@ -235,7 +210,18 @@ fn main() -> Result<(), Report> {
             _ => RendererConfig::default(),
         }
     };
-    config.apply_cli_overrides(&matches);
+    config.apply_cli_overrides(&wows_minimap_renderer::config::CliOverrides {
+        no_player_names: args.no_player_names,
+        no_ship_names: args.no_ship_names,
+        no_capture_points: args.no_capture_points,
+        no_buildings: args.no_buildings,
+        no_turret_direction: args.no_turret_direction,
+        no_armament: args.no_armament,
+        show_trails: args.show_trails,
+        no_dead_trails: args.no_dead_trails,
+        show_speed_trails: args.show_speed_trails,
+        show_ship_config: args.show_ship_config,
+    });
     let mut options = config.into_render_options();
     options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
 
@@ -243,17 +229,17 @@ fn main() -> Result<(), Report> {
     renderer.set_fonts(game_fonts);
     renderer.set_flag_icons(flag_icons);
 
-    let mut encoder = VideoEncoder::new(output, dump_mode, game_duration);
-    if matches.is_present("CPU") {
+    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, game_duration);
+    if args.cpu {
         encoder.set_prefer_cpu(true);
     }
     // Initialize the encoder eagerly so startup logs appear before the
     // progress bar. Skip for dump modes which don't encode video.
-    if !matches.is_present("DUMP_FRAME") {
+    if args.dump_frame.is_none() {
         encoder.init()?;
     }
 
-    let use_progress_bar = !matches.is_present("NO_PROGRESS");
+    let use_progress_bar = !args.no_progress;
     let progress_bar = if use_progress_bar {
         let pb = ProgressBar::new(0);
         pb.set_style(

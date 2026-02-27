@@ -17,7 +17,7 @@ thiserror = { workspace = true }
 rust-crypto = "0.2.36"
 roxmltree = { workspace = true }
 pickled = { workspace = true }
-kinded = "0.3"
+kinded = "0.5"
 tracing = { workspace = true }
 wowsunpack = { workspace = true, features = ["json", "vfs"] }
 bon = { workspace = true }

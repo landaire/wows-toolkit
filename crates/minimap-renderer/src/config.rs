@@ -3,6 +3,25 @@ use serde::{Deserialize, Serialize};
 use crate::draw_command::ShipConfigVisibility;
 use crate::renderer::RenderOptions;
 
+/// CLI override flags for renderer configuration.
+///
+/// Fields mirror the `--no-*` / `--show-*` CLI flags. Pass this to
+/// [`RendererConfig::apply_cli_overrides`] to apply them on top of
+/// a config-file or default configuration.
+#[derive(Debug, Clone, Default)]
+pub struct CliOverrides {
+    pub no_player_names: bool,
+    pub no_ship_names: bool,
+    pub no_capture_points: bool,
+    pub no_buildings: bool,
+    pub no_turret_direction: bool,
+    pub no_armament: bool,
+    pub show_trails: bool,
+    pub no_dead_trails: bool,
+    pub show_speed_trails: bool,
+    pub show_ship_config: bool,
+}
+
 /// Renderer configuration, loadable from a TOML file.
 ///
 /// All fields default to their standard values. CLI flags override config file values.
@@ -179,37 +198,36 @@ show_ship_config = false
         .to_string()
     }
 
-    /// Apply CLI flag overrides. Flags use negative form (--no-X disables, --show-X enables).
-    #[cfg(feature = "bin")]
-    pub fn apply_cli_overrides(&mut self, matches: &clap::ArgMatches) {
-        if matches.is_present("NO_PLAYER_NAMES") {
+    /// Apply CLI flag overrides from parsed arguments.
+    pub fn apply_cli_overrides(&mut self, overrides: &CliOverrides) {
+        if overrides.no_player_names {
             self.show_player_names = false;
         }
-        if matches.is_present("NO_SHIP_NAMES") {
+        if overrides.no_ship_names {
             self.show_ship_names = false;
         }
-        if matches.is_present("NO_CAPTURE_POINTS") {
+        if overrides.no_capture_points {
             self.show_capture_points = false;
         }
-        if matches.is_present("NO_BUILDINGS") {
+        if overrides.no_buildings {
             self.show_buildings = false;
         }
-        if matches.is_present("NO_TURRET_DIRECTION") {
+        if overrides.no_turret_direction {
             self.show_turret_direction = false;
         }
-        if matches.is_present("NO_ARMAMENT") {
+        if overrides.no_armament {
             self.show_armament = false;
         }
-        if matches.is_present("SHOW_TRAILS") {
+        if overrides.show_trails {
             self.show_trails = true;
         }
-        if matches.is_present("NO_DEAD_TRAILS") {
+        if overrides.no_dead_trails {
             self.show_dead_trails = false;
         }
-        if matches.is_present("SHOW_SPEED_TRAILS") {
+        if overrides.show_speed_trails {
             self.show_speed_trails = true;
         }
-        if matches.is_present("SHOW_SHIP_CONFIG") {
+        if overrides.show_ship_config {
             self.show_ship_config = true;
         }
     }
