@@ -464,8 +464,10 @@ pub(crate) fn simulate_ap_shell(
     impact: &super::ballistics::ImpactResult,
     traj_hits: &[super::penetration::TrajectoryHit],
     shell_dir: &Vec3,
+    continue_on_ricochet: bool,
 ) -> ApSimResult {
-    let sim = super::penetration::simulate_shell_through_hits(params, impact, traj_hits, shell_dir);
+    let sim =
+        super::penetration::simulate_shell_through_hits(params, impact, traj_hits, shell_dir, continue_on_ricochet);
     let detonation_point = sim.detonation.as_ref().map(|det| det.position);
     let shell_stop = match (sim.detonated_at, sim.stopped_at) {
         (Some(d), Some(s)) => Some(d.min(s)),

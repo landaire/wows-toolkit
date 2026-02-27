@@ -780,6 +780,7 @@ impl ToolkitTabViewer<'_> {
                             cam_dist,
                             mo,
                             comparison_ships_version,
+                            pane.continue_on_ricochet,
                         );
                     }
                 }
@@ -1477,6 +1478,28 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         }
                     }
 
+                    if pane.trajectory_mode {
+                        if ui.checkbox(&mut pane.continue_on_ricochet, "Continue past ricochet").changed()
+                            && !pane.trajectories.is_empty()
+                        {
+                            let cam_dist = pane.viewport.camera.distance;
+                            let mo = pane.marker_opacity;
+                            for ti in 0..pane.trajectories.len() {
+                                recompute_trajectory_for_range(
+                                    &mut pane.trajectories[ti],
+                                    comparison_ships,
+                                    &mut pane.viewport,
+                                    pane.loaded_armor.as_ref(),
+                                    &render_state.device,
+                                    cam_dist,
+                                    mo,
+                                    comparison_ships_version,
+                                    pane.continue_on_ricochet,
+                                );
+                            }
+                        }
+                    }
+
                     // ── Splash mode toggle ──
                     {
                         let has_splash = armor.splash_data.is_some();
@@ -1523,6 +1546,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 cam_dist,
                                 mo,
                                 comparison_ships_version,
+                                pane.continue_on_ricochet,
                             );
                         }
                     }
@@ -1745,7 +1769,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                     };
                                     if let Some(ref impact) = shell_impact {
                                         let ap = crate::armor_viewer::common::simulate_ap_shell(
-                                            &params, impact, &traj_hits, &shell_dir,
+                                            &params,
+                                            impact,
+                                            &traj_hits,
+                                            &shell_dir,
+                                            pane.continue_on_ricochet,
                                         );
                                         if let Some(pos) = ap.detonation_point {
                                             detonation_points.push(
@@ -1817,6 +1845,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                 pane.trajectories.last_mut().unwrap(),
                                 comparison_ships,
                                 comparison_ships_version,
+                                pane.continue_on_ricochet,
                             );
                         } else if !shift_held {
                             // Clicked empty space without shift: clear all
@@ -1962,6 +1991,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             cam_dist,
                             mo,
                             comparison_ships_version,
+                            pane.continue_on_ricochet,
                         );
                     }
                 }
@@ -3013,6 +3043,7 @@ fn recompute_trajectory_for_range(
     cam_distance: f32,
     marker_opacity: f32,
     comparison_ships_version: u64,
+    continue_on_ricochet: bool,
 ) {
     let range_meters = traj.meta.range.to_meters();
     let result = &mut traj.result;
@@ -3096,6 +3127,7 @@ fn recompute_trajectory_for_range(
                     impact,
                     &result.hits,
                     &result.direction,
+                    continue_on_ricochet,
                 );
                 if let Some(det) = sim.detonation {
                     new_detonation_points.push(crate::armor_viewer::penetration::DetonationMarker {
@@ -3138,7 +3170,7 @@ fn recompute_trajectory_for_range(
     traj.marker_cam_dist = cam_distance;
 
     // Update the shell sim cache for the analysis panel.
-    update_shell_sim_cache(traj, comparison_ships, comparison_ships_version);
+    update_shell_sim_cache(traj, comparison_ships, comparison_ships_version, continue_on_ricochet);
 }
 
 /// Recompute a trajectory after the ship's roll changes.
@@ -3158,6 +3190,7 @@ fn recompute_trajectory_for_roll(
     cam_distance: f32,
     marker_opacity: f32,
     comparison_ships_version: u64,
+    continue_on_ricochet: bool,
 ) {
     let old_roll = traj.created_at_roll;
     let delta = old_roll - new_roll;
@@ -3227,6 +3260,7 @@ fn recompute_trajectory_for_roll(
         cam_distance,
         marker_opacity,
         comparison_ships_version,
+        continue_on_ricochet,
     );
 }
 
@@ -3238,6 +3272,7 @@ fn update_shell_sim_cache(
     traj: &mut crate::armor_viewer::state::StoredTrajectory,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     comparison_ships_version: u64,
+    continue_on_ricochet: bool,
 ) {
     use wowsunpack::game_params::types::AmmoType;
 
@@ -3257,7 +3292,13 @@ fn update_shell_sim_cache(
                 };
                 let sim = if shell.ammo_type == AmmoType::AP {
                     impact.as_ref().map(|imp| {
-                        crate::armor_viewer::penetration::simulate_shell_through_hits(&params, imp, hits, direction)
+                        crate::armor_viewer::penetration::simulate_shell_through_hits(
+                            &params,
+                            imp,
+                            hits,
+                            direction,
+                            continue_on_ricochet,
+                        )
                     })
                 } else {
                     None

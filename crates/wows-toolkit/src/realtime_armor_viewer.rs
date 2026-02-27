@@ -652,7 +652,13 @@ impl RealtimeArmorViewer {
         if shell.ammo_type == AmmoType::AP
             && let Some(ref imp) = impact
         {
-            let ap = crate::armor_viewer::common::simulate_ap_shell(&params, imp, &traj_hits, &shell_dir);
+            let ap = crate::armor_viewer::common::simulate_ap_shell(
+                &params,
+                imp,
+                &traj_hits,
+                &shell_dir,
+                self.pane.continue_on_ricochet,
+            );
             if let Some(pos) = ap.detonation_point {
                 detonation_points
                     .push(crate::armor_viewer::penetration::DetonationMarker { position: pos, ship_index: 0 });
@@ -1683,6 +1689,11 @@ impl RealtimeArmorViewer {
         }
 
         if ui.checkbox(&mut self.show_secondaries, "Show secondary armament").changed() {
+            self.clear_and_reprocess();
+            self.needs_repaint = true;
+        }
+
+        if ui.checkbox(&mut self.pane.continue_on_ricochet, "Continue past ricochet").changed() {
             self.clear_and_reprocess();
             self.needs_repaint = true;
         }

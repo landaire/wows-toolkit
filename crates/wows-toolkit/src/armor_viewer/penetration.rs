@@ -267,6 +267,7 @@ pub fn simulate_shell_through_hits(
     impact: &ImpactResult,
     hits: &[TrajectoryHit],
     shell_dir: &Vec3,
+    continue_on_ricochet: bool,
 ) -> ShellSimResult {
     use wowsunpack::game_params::types::Meters;
 
@@ -324,11 +325,16 @@ pub fn simulate_shell_through_hits(
                 effective_thickness_mm: hit.thickness_mm / angle_from_normal_rad.cos().max(0.001),
                 raw_pen_before_mm: raw_pen,
                 velocity_before: velocity,
-                velocity_after: 0.0,
+                velocity_after: if continue_on_ricochet { velocity } else { 0.0 },
                 fuse_armed_here: false,
             });
-            stopped_at = Some(i);
-            break;
+            if !continue_on_ricochet {
+                stopped_at = Some(i);
+                break;
+            }
+            // continue_on_ricochet: plate recorded as ricochet, shell continues with unchanged velocity
+            prev_position = hit.position;
+            continue;
         }
 
         // Apply normalization
@@ -579,8 +585,8 @@ pub fn compare_with_server(
     let sim_desc = describe_sim_outcome(sim, hits);
 
     let matches = match server_outcome {
-        ServerOutcome::Penetration => sim_desc == "Penetration" || sim_desc == "Citadel",
-        ServerOutcome::Citadel => sim_desc == "Citadel" || sim_desc == "Penetration",
+        ServerOutcome::Penetration => sim_desc == "Penetration",
+        ServerOutcome::Citadel => sim_desc == "Citadel",
         ServerOutcome::Shatter => sim_desc == "Shatter",
         ServerOutcome::Overpenetration => sim_desc == "Overpenetration",
         ServerOutcome::Underwater => true,

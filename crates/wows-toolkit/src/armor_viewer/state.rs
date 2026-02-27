@@ -502,6 +502,8 @@ pub struct ArmorPane {
     /// trajectories when roll changes. The realtime viewer sets this to false so
     /// trajectories rotate with the model matrix (yaw/roll baked via inverse_ship_rotation).
     pub trajectory_world_space: bool,
+    /// When true, the shell simulation continues past ricochet plates instead of stopping.
+    pub continue_on_ricochet: bool,
 }
 
 /// Data returned by a hull-only background reload (LOD change without full ship reload).
@@ -585,6 +587,7 @@ impl ArmorPane {
             selected_hull: None,
             selected_modules: HashMap::new(),
             trajectory_world_space: true,
+            continue_on_ricochet: false,
         }
     }
 }
