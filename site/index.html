@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WoWs Toolkit</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg: #111318;
+                --bg-raised: #181b22;
+                --border: #2a2d36;
+                --text: #c4c8d4;
+                --text-dim: #6b7084;
+                --accent: #d4a24e;
+            }
+
+            body {
+                font-family: "IBM Plex Mono", monospace;
+                background: var(--bg);
+                color: var(--text);
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+            }
+
+            a {
+                color: var(--accent);
+                text-decoration: none;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+
+            .container {
+                max-width: 1120px;
+                margin: 0 auto;
+                padding: 0 24px;
+            }
+
+            /* Header */
+            header {
+                border-bottom: 1px solid var(--border);
+                padding: 16px 0;
+            }
+            header .container {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .logo {
+                font-weight: 600;
+                font-size: 15px;
+                color: var(--text);
+                letter-spacing: 0.02em;
+            }
+            nav {
+                display: flex;
+                gap: 24px;
+                font-size: 13px;
+            }
+            nav a {
+                color: var(--text-dim);
+            }
+            nav a:hover {
+                color: var(--text);
+                text-decoration: none;
+            }
+
+            /* Hero */
+            .hero {
+                padding: 80px 0 60px;
+                text-align: center;
+            }
+            .hero h1 {
+                font-size: 36px;
+                font-weight: 600;
+                color: #e8ecf4;
+                margin-bottom: 12px;
+                letter-spacing: -0.01em;
+            }
+            .hero p {
+                font-size: 14px;
+                color: var(--text-dim);
+                max-width: 520px;
+                margin: 0 auto 32px;
+            }
+            .hero-buttons {
+                display: flex;
+                justify-content: center;
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 24px;
+                font-family: inherit;
+                font-size: 14px;
+                font-weight: 500;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.15s;
+            }
+            .btn-primary {
+                background: var(--accent);
+                color: #111;
+                border: 1px solid var(--accent);
+            }
+            .btn-primary:hover {
+                background: #e0ad5a;
+                text-decoration: none;
+            }
+            .btn-secondary {
+                background: transparent;
+                color: var(--text);
+                border: 1px solid var(--border);
+            }
+            .btn-secondary:hover {
+                border-color: var(--text-dim);
+                text-decoration: none;
+            }
+            .version-tag {
+                font-size: 12px;
+                opacity: 0.6;
+            }
+            .hero-meta {
+                font-size: 12px;
+                color: var(--text-dim);
+            }
+
+            /* Screenshots */
+            .screenshot {
+                border: 1px solid var(--border);
+                border-radius: 6px;
+                overflow: hidden;
+                background: #0a0b0e;
+                cursor: pointer;
+                transition: border-color 0.15s;
+            }
+            .screenshot:hover {
+                border-color: var(--text-dim);
+            }
+            .screenshot img {
+                display: block;
+                width: 100%;
+            }
+            .screenshot-caption {
+                font-size: 12px;
+                color: var(--text-dim);
+                text-align: center;
+                margin-top: 12px;
+            }
+
+            /* Hero screenshot */
+            .hero-screenshot {
+                padding: 0 0 60px;
+            }
+
+            /* Divider */
+            .divider {
+                border: none;
+                border-top: 1px solid var(--border);
+                margin: 0;
+            }
+
+            /* Features — stacked layout: text then full-width image */
+            .features {
+                padding: 60px 0;
+            }
+            .features h2 {
+                font-size: 20px;
+                font-weight: 600;
+                color: #e8ecf4;
+                margin-bottom: 40px;
+            }
+            .feature {
+                margin-bottom: 56px;
+            }
+            .feature:last-child {
+                margin-bottom: 0;
+            }
+            .feature h3 {
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--accent);
+                margin-bottom: 8px;
+            }
+            .feature p {
+                font-size: 13px;
+                color: var(--text-dim);
+                line-height: 1.7;
+                max-width: 640px;
+                margin-bottom: 20px;
+            }
+            .feature .screenshot {
+                margin: 0;
+            }
+
+            /* Specs */
+            .specs {
+                padding: 40px 0 60px;
+            }
+            .specs-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 1px;
+                background: var(--border);
+                border: 1px solid var(--border);
+                border-radius: 6px;
+                overflow: hidden;
+            }
+            .spec {
+                background: var(--bg-raised);
+                padding: 20px 24px;
+            }
+            .spec-label {
+                font-size: 11px;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 4px;
+            }
+            .spec-value {
+                font-size: 14px;
+                color: var(--text);
+                font-weight: 500;
+            }
+
+            /* Footer */
+            footer {
+                border-top: 1px solid var(--border);
+                padding: 32px 0;
+                text-align: center;
+            }
+            footer nav {
+                justify-content: center;
+                margin-bottom: 16px;
+            }
+            .legal {
+                font-size: 11px;
+                color: var(--text-dim);
+            }
+
+            /* Lightbox */
+            .lightbox {
+                display: none;
+                position: fixed;
+                inset: 0;
+                z-index: 1000;
+                background: rgba(0, 0, 0, 0.85);
+                cursor: zoom-out;
+                align-items: center;
+                justify-content: center;
+                padding: 32px;
+            }
+            .lightbox.open {
+                display: flex;
+            }
+            .lightbox img {
+                max-width: 100%;
+                max-height: 100%;
+                border-radius: 4px;
+                box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+            }
+
+            /* Responsive */
+            @media (max-width: 700px) {
+                .specs-grid {
+                    grid-template-columns: 1fr;
+                }
+                .hero h1 {
+                    font-size: 28px;
+                }
+                nav {
+                    gap: 16px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <div class="container">
+                <span class="logo">WoWs Toolkit</span>
+                <nav>
+                    <a href="#features">Features</a>
+                    <a href="https://github.com/landaire/wows-toolkit"
+                        >Source</a
+                    >
+                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                </nav>
+            </div>
+        </header>
+
+        <section class="hero">
+            <div class="container">
+                <h1>WoWs Toolkit</h1>
+                <p>
+                    Open-source desktop tool for World of Warships. Replay
+                    analysis, stat tracking, armor inspection, and game file
+                    browsing. Runs locally, doesn't modify game files.
+                </p>
+                <div class="hero-buttons">
+                    <a
+                        id="download-btn"
+                        href="https://github.com/landaire/wows-toolkit/releases/latest"
+                        class="btn btn-primary"
+                    >
+                        Download<span
+                            id="download-version"
+                            class="version-tag"
+                        ></span>
+                    </a>
+                    <a
+                        href="https://github.com/landaire/wows-toolkit"
+                        class="btn btn-secondary"
+                        >View Source</a
+                    >
+                </div>
+                <p class="hero-meta">
+                    Windows &middot; Portable &middot; MIT License
+                </p>
+            </div>
+        </section>
+
+        <section class="hero-screenshot">
+            <div class="container">
+                <div class="screenshot" onclick="openLightbox(this)">
+                    <img
+                        src="img/replay.png"
+                        alt="Replay analysis showing post-battle statistics"
+                    />
+                </div>
+                <p class="screenshot-caption">
+                    Post-battle breakdown showing damage, XP, fires, floods,
+                    citadels, and more for every player.
+                </p>
+            </div>
+        </section>
+
+        <hr class="divider container" />
+
+        <section id="features" class="features">
+            <div class="container">
+                <h2>Features</h2>
+
+                <div class="feature">
+                    <h3>Replay Analysis</h3>
+                    <p>
+                        Full post-battle breakdown beyond what the game shows.
+                        Every player's damage dealt and received with type
+                        breakdowns (AP, HE, SAP, fire, flooding, torpedoes).
+                        View other players' builds and captain skills. See
+                        damage numbers the game hides from you. Export match
+                        data.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/replay.png" alt="Replay analysis" />
+                    </div>
+                </div>
+
+                <div class="feature">
+                    <h3>Stat Tracking</h3>
+                    <p>
+                        Performance tracking computed locally from your replay
+                        files. Damage, win rate, XP, per-ship breakdowns. No API
+                        keys or account linking needed.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/stats.svg" alt="Stat tracking" />
+                    </div>
+                </div>
+
+                <div class="feature">
+                    <h3>Player Tracker</h3>
+                    <p>
+                        Logs every player you encounter in battle. See how often
+                        you face the same opponents, spot recurring division
+                        mates, build a local matchmaking history. All offline
+                        from replay files.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/tracker.svg" alt="Player tracker" />
+                    </div>
+                </div>
+
+                <div class="feature">
+                    <h3>Armor Viewer</h3>
+                    <p>
+                        3D armor model inspection for any ship. Color-coded
+                        thickness visualization. Simulate artillery impacts at
+                        any angle and range against layered
+                        protection&mdash;deck plating, belt armor, citadel
+                        bulkheads, torpedo protection.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/armor.svg" alt="Armor model viewer" />
+                    </div>
+                </div>
+
+                <div class="feature">
+                    <h3>Resource Browser</h3>
+                    <p>
+                        Browse and extract game assets from packed IDX/PKG
+                        archives. Filter by path, view metadata, pull out
+                        textures, models, scripts, and config files. For
+                        modders, data miners, and the curious.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/browser.png" alt="Resource browser" />
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <hr class="divider container" />
+
+        <section class="specs">
+            <div class="container">
+                <div class="specs-grid">
+                    <div class="spec">
+                        <div class="spec-label">Language</div>
+                        <div class="spec-value">Rust</div>
+                    </div>
+                    <div class="spec">
+                        <div class="spec-label">Platform</div>
+                        <div class="spec-value">Windows x64</div>
+                    </div>
+                    <div class="spec">
+                        <div class="spec-label">Install</div>
+                        <div class="spec-value">Portable</div>
+                    </div>
+                    <div class="spec">
+                        <div class="spec-label">License</div>
+                        <div class="spec-value">MIT</div>
+                    </div>
+                    <div class="spec">
+                        <div class="spec-label">Game Files</div>
+                        <div class="spec-value">Read-only</div>
+                    </div>
+                    <div class="spec">
+                        <div class="spec-label">Updates</div>
+                        <div class="spec-value">In-app</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="container">
+                <nav>
+                    <a href="https://github.com/landaire/wows-toolkit"
+                        >GitHub</a
+                    >
+                    <a
+                        href="https://github.com/landaire/wows-toolkit/releases/latest"
+                        >Releases</a
+                    >
+                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                </nav>
+                <p class="legal">
+                    Not affiliated with or endorsed by Wargaming.net. World of
+                    Warships is a trademark of Wargaming.net.
+                </p>
+            </div>
+        </footer>
+
+        <!-- Lightbox overlay -->
+        <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+            <img id="lightbox-img" src="" alt="" />
+        </div>
+
+        <script>
+            function openLightbox(el) {
+                const img = el.querySelector("img");
+                if (!img) return;
+                document.getElementById("lightbox-img").src = img.src;
+                document.getElementById("lightbox").classList.add("open");
+            }
+            function closeLightbox() {
+                document.getElementById("lightbox").classList.remove("open");
+            }
+            document.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") closeLightbox();
+            });
+
+            (async () => {
+                try {
+                    const resp = await fetch(
+                        "https://api.github.com/repos/landaire/wows-toolkit/releases/latest",
+                    );
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    const tag = data.tag_name;
+                    const el = document.getElementById("download-version");
+                    if (el && tag) el.textContent = tag;
+                    const asset = data.assets?.find((a) =>
+                        a.name.endsWith("_windows.zip"),
+                    );
+                    if (asset)
+                        document.getElementById("download-btn").href =
+                            asset.browser_download_url;
+                } catch (e) {}
+            })();
+        </script>
+    </body>
+</html>
