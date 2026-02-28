@@ -14,20 +14,72 @@ use vfs::{FileSystem, VfsMetadata};
 
 use crate::models::assets_bin::{self, AssetsBinError, PrototypeDatabase};
 
-/// Known item sizes for each blob type (from RE).
-/// Index corresponds to blob index in the databases array.
-const ITEM_SIZES: [usize; 10] = [
-    0x78, // 0: MaterialPrototype
-    0x70, // 1: VisualPrototype
-    0x20, // 2: SkeletonExtenderPrototype
-    0x28, // 3: ModelPrototype
-    0x70, // 4: PointLightPrototype
-    0x10, // 5: EffectPrototype
-    0x18, // 6: VelocityFieldPrototype
-    0x10, // 7: EffectPresetPrototype
-    0x10, // 8: EffectMetadataPrototype
-    0x10, // 9: AtlasContourProto
-];
+/// The type of prototype stored in a given assets.bin blob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrototypeType {
+    Material,         // blob 0
+    Visual,           // blob 1
+    SkeletonExtender, // blob 2
+    Model,            // blob 3
+    PointLight,       // blob 4
+    Effect,           // blob 5
+    VelocityField,    // blob 6
+    EffectPreset,     // blob 7
+    EffectMetadata,   // blob 8
+    AtlasContour,     // blob 9
+}
+
+impl PrototypeType {
+    /// Convert a blob index (0-9) to a `PrototypeType`.
+    pub fn from_blob_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Material),
+            1 => Some(Self::Visual),
+            2 => Some(Self::SkeletonExtender),
+            3 => Some(Self::Model),
+            4 => Some(Self::PointLight),
+            5 => Some(Self::Effect),
+            6 => Some(Self::VelocityField),
+            7 => Some(Self::EffectPreset),
+            8 => Some(Self::EffectMetadata),
+            9 => Some(Self::AtlasContour),
+            _ => None,
+        }
+    }
+
+    /// Infer prototype type from a file extension (e.g. `".visual"`, `".mfm"`).
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            ".mfm" => Some(Self::Material),
+            ".visual" => Some(Self::Visual),
+            ".skeleton_extender" => Some(Self::SkeletonExtender),
+            ".model" => Some(Self::Model),
+            ".point_light" => Some(Self::PointLight),
+            ".effect" => Some(Self::Effect),
+            ".velocity_field" => Some(Self::VelocityField),
+            ".effect_preset" => Some(Self::EffectPreset),
+            ".effect_metadata" => Some(Self::EffectMetadata),
+            ".atlas_contour" => Some(Self::AtlasContour),
+            _ => None,
+        }
+    }
+
+    /// The fixed record stride in bytes for this prototype type.
+    pub fn item_size(self) -> usize {
+        match self {
+            Self::Material => 0x78,
+            Self::Visual => 0x70,
+            Self::SkeletonExtender => 0x20,
+            Self::Model => 0x28,
+            Self::PointLight => 0x70,
+            Self::Effect => 0x10,
+            Self::VelocityField => 0x18,
+            Self::EffectPreset => 0x10,
+            Self::EffectMetadata => 0x10,
+            Self::AtlasContour => 0x10,
+        }
+    }
+}
 
 /// Pre-computed file location within the owned assets.bin data.
 #[derive(Debug, Clone)]
@@ -36,6 +88,8 @@ struct FileLocation {
     byte_offset: usize,
     /// Byte offset from start of `data` to end of the blob.
     byte_end: usize,
+    /// The prototype type this record belongs to.
+    prototype_type: PrototypeType,
 }
 
 /// A virtual filesystem backed by an assets.bin PrototypeDatabase.
@@ -112,16 +166,16 @@ impl AssetsBinVfs {
             let Ok(location) = db.decode_r2p_value(r2p_value) else {
                 continue;
             };
-            if location.blob_index >= ITEM_SIZES.len() {
+            let Some(proto_type) = PrototypeType::from_blob_index(location.blob_index) else {
                 continue;
-            }
+            };
 
             let raw_path = db.reconstruct_path(i, &self_id_index);
             if raw_path.is_empty() {
                 continue;
             }
 
-            let item_size = ITEM_SIZES[location.blob_index];
+            let item_size = proto_type.item_size();
             let blob = &db.databases[location.blob_index];
 
             let blob_start = subslice_offset(data, blob.data);
@@ -134,7 +188,10 @@ impl AssetsBinVfs {
             }
 
             let full_path = format!("/{raw_path}");
-            files.insert(full_path.clone(), FileLocation { byte_offset: record_offset, byte_end: blob_end });
+            files.insert(
+                full_path.clone(),
+                FileLocation { byte_offset: record_offset, byte_end: blob_end, prototype_type: proto_type },
+            );
 
             register_path_in_dirs(&full_path, &mut dir_children);
         }
@@ -177,6 +234,17 @@ impl AssetsBinVfs {
     /// Iterate over all directory paths.
     pub fn dirs(&self) -> impl Iterator<Item = &str> {
         self.dirs.keys().map(|k| k.as_str())
+    }
+
+    /// Get the prototype type for a file path, if it exists.
+    pub fn prototype_type(&self, path: &str) -> Option<PrototypeType> {
+        let key = lookup_key(path);
+        self.files.get(key).map(|loc| loc.prototype_type)
+    }
+
+    /// Iterate over all file paths with their sizes and prototype types.
+    pub fn files_with_type(&self) -> impl Iterator<Item = (&str, usize, PrototypeType)> {
+        self.files.iter().map(|(path, loc)| (path.as_str(), loc.byte_end - loc.byte_offset, loc.prototype_type))
     }
 }
 

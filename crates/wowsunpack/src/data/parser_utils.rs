@@ -72,10 +72,12 @@ pub fn read_null_terminated_string(file_data: &[u8], offset: usize) -> &str {
 
 /// 4×4 transformation matrix (column-major, 64 bytes).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Matrix4x4(pub [f32; 16]);
 
 /// Axis-aligned bounding box (32 bytes on disk: 3×f32 min, pad, 3×f32 max, pad).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BoundingBox {
     pub min: [f32; 3],
     pub max: [f32; 3],

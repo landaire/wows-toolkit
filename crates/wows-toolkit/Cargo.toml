@@ -90,6 +90,7 @@ tempfile = "3.26.0"
 unidecode = "0.3.0"
 roxmltree = { workspace = true }
 nalgebra = "0.34.1"
+regex = "1.12"
 
 [build-dependencies]
 winresource = "0.1.30"

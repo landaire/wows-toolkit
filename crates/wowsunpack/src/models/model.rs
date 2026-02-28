@@ -26,14 +26,32 @@ pub enum ModelError {
 /// Item size for ModelPrototype records in the database blob.
 pub const MODEL_ITEM_SIZE: usize = 0x28;
 
+#[cfg(feature = "serde")]
+fn serialize_hex_u64<S: serde::Serializer>(val: &u64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&format!("0x{val:016x}"))
+}
+
+#[cfg(feature = "serde")]
+fn serialize_hex_u64_vec<S: serde::Serializer>(val: &[u64], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = s.serialize_seq(Some(val.len()))?;
+    for v in val {
+        seq.serialize_element(&format!("0x{v:016x}"))?;
+    }
+    seq.end()
+}
+
 /// A parsed ModelPrototype record.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ModelPrototype {
     /// selfId (path hash) of the referenced `.visual` in pathsStorage.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64"))]
     pub visual_resource_id: u64,
     /// Unknown byte at offset +0x09; purpose unclear.
     pub misc_type: u8,
     /// Skeleton extension resource IDs (selfIds of skeleton extender prototypes).
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64_vec"))]
     pub skel_ext_res_ids: Vec<u64>,
     /// Animation entries (each has the same layout as a ModelPrototype record).
     pub animations: Vec<ModelPrototype>,
@@ -43,6 +61,7 @@ pub struct ModelPrototype {
 
 /// Material dye/tint replacement entry.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DyeEntry {
     /// String ID of the target material name.
     pub matter_id: u32,
@@ -51,6 +70,7 @@ pub struct DyeEntry {
     /// String IDs of tint variant names.
     pub tint_name_ids: Vec<u32>,
     /// selfIds of tint variant .mfm material files.
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64_vec"))]
     pub tint_material_ids: Vec<u64>,
 }
 

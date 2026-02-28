@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::fs::{self};
 use std::io::BufWriter;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use pickled::HashableValue;
 use serde::Serialize;
 use serde_cbor::ser::IoWrite;
-use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
+use wowsunpack::data::assets_bin_vfs::{AssetsBinVfs, PrototypeType};
 use wowsunpack::game_params::convert::game_params_to_pickle;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
@@ -179,7 +179,10 @@ impl Drop for ContentSearchTab {
 }
 
 /// Result sent from the background assets.bin loading thread.
-type AssetsBinLoadResult = Result<(VfsPath, Vec<(Arc<PathBuf>, VfsPath)>), String>;
+pub(crate) struct AssetsBinLoadResult {
+    pub vfs: VfsPath,
+    pub files: Vec<(Arc<PathBuf>, VfsPath)>,
+}
 
 /// State for the explorer-style resource browser.
 pub struct ResourceBrowserState {
@@ -190,9 +193,11 @@ pub struct ResourceBrowserState {
     /// Next unique ID for search tabs.
     pub next_search_id: u64,
     /// Receiver for background assets.bin parse result.
-    pub assets_bin_rx: Option<mpsc::Receiver<AssetsBinLoadResult>>,
+    pub assets_bin_rx: Option<mpsc::Receiver<Result<AssetsBinLoadResult, String>>>,
     /// Build number the assets.bin loading was initiated for.
     pub assets_bin_loading_build: Option<u32>,
+    /// When true, batch extraction decodes supported Assets.bin prototypes to JSON.
+    pub decode_prototypes_as_json: bool,
 }
 
 impl Default for ResourceBrowserState {
@@ -206,6 +211,7 @@ impl Default for ResourceBrowserState {
             next_search_id: 0,
             assets_bin_rx: None,
             assets_bin_loading_build: None,
+            decode_prototypes_as_json: false,
         }
     }
 }
@@ -261,12 +267,7 @@ impl TabViewer for UnpackerPaneViewer<'_> {
             UnpackerPane::Browser(b) => {
                 let (icon, label) = match b.source {
                     BrowserSource::Pkg => (icons::ARCHIVE, "PKG"),
-                    BrowserSource::AssetsBin => {
-                        if b.loading {
-                            return format!("{} Assets.bin ...", icons::HOURGLASS_MEDIUM).into();
-                        }
-                        (icons::DATABASE, "Assets.bin")
-                    }
+                    BrowserSource::AssetsBin => (icons::DATABASE, "Assets.bin"),
                 };
                 format!("{} {}", icon, label).into()
             }
@@ -680,16 +681,38 @@ fn open_file_viewer(file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewe
     }
 }
 
+/// Infer a decodable `PrototypeType` from a filename's extension.
+/// Returns `Some` only if the extension maps to a type we can decode to JSON.
+fn decodable_prototype_type(filename: &str) -> Option<PrototypeType> {
+    let dot = filename.rfind('.')?;
+    let ext = &filename[dot..];
+    let pt = PrototypeType::from_extension(ext)?;
+    if wowsunpack::models::can_decode_prototype(pt) { Some(pt) } else { None }
+}
+
 /// Add a "View Contents" context menu to a response for viewable file types.
-/// Assets.bin files are binary prototype records and cannot be viewed as their original content.
+/// For Assets.bin files, shows "View as JSON" / "Extract as JSON" for decodable prototype types.
 fn add_view_file_context_menu(
     file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
     response: &egui::Response,
     node: &VfsPath,
     source: &BrowserSource,
 ) {
-    // Assets.bin entries are binary prototype records, not viewable as original files
     if *source == BrowserSource::AssetsBin {
+        if let Some(pt) = decodable_prototype_type(&node.filename()) {
+            let node_view = node.clone();
+            let node_extract = node.clone();
+            response.context_menu(|ui| {
+                if ui.button(icon_str!(icons::EYE, "View as JSON")).clicked() {
+                    open_decoded_json_viewer(file_viewer, &node_view, pt);
+                    ui.close_kind(UiKind::Menu);
+                }
+                if ui.button(icon_str!(icons::DOWNLOAD_SIMPLE, "Extract as JSON")).clicked() {
+                    extract_single_as_json(&node_extract, pt);
+                    ui.close_kind(UiKind::Menu);
+                }
+            });
+        }
         return;
     }
 
@@ -704,6 +727,55 @@ fn add_view_file_context_menu(
                 ui.close_kind(UiKind::Menu);
             }
         });
+    }
+}
+
+/// Open a decoded JSON viewer for an Assets.bin prototype record.
+fn open_decoded_json_viewer(
+    file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
+    node: &VfsPath,
+    proto_type: PrototypeType,
+) {
+    let mut data = Vec::new();
+    if let Ok(mut reader) = node.open_file() {
+        let _ = reader.read_to_end(&mut data);
+    }
+    match wowsunpack::models::decode_prototype_to_json(&data, proto_type) {
+        Ok(json) => {
+            let path_str = node.as_str().trim_start_matches('/');
+            let viewer = plaintext_viewer::PlaintextFileViewer {
+                title: Arc::new(format!("res/{path_str} (JSON)")),
+                file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_string(), contents: json })),
+                open: Arc::new(AtomicBool::new(true)),
+            };
+            file_viewer.lock().push(viewer);
+        }
+        Err(e) => {
+            eprintln!("Failed to decode {}: {}", node.as_str(), e);
+        }
+    }
+}
+
+/// Extract a single Assets.bin file as decoded JSON via file dialog.
+fn extract_single_as_json(node: &VfsPath, proto_type: PrototypeType) {
+    let filename = node.filename();
+    let json_filename = format!("{filename}.json");
+
+    if let Some(path) = rfd::FileDialog::new().set_file_name(&json_filename).save_file() {
+        let mut data = Vec::new();
+        if let Ok(mut reader) = node.open_file() {
+            let _ = reader.read_to_end(&mut data);
+        }
+        match wowsunpack::models::decode_prototype_to_json(&data, proto_type) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json.as_bytes()) {
+                    eprintln!("Failed to write {}: {}", path.display(), e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to decode {}: {}", node.as_str(), e);
+            }
+        }
     }
 }
 
@@ -895,9 +967,13 @@ fn render_file_listing_table(
                     ui.label(file_icon_rich_text(&entry.name, entry.is_dir));
                 });
 
-                let (_, name_response) = row.col(|ui| {
-                    ui.label(&entry.name);
-                });
+                let (_, name_response, name_label_response) = {
+                    let mut label_resp = None;
+                    let (rect, cell_resp) = row.col(|ui| {
+                        label_resp = Some(ui.label(&entry.name));
+                    });
+                    (rect, cell_resp, label_resp.unwrap())
+                };
 
                 row.col(|ui| {
                     if !entry.is_dir {
@@ -917,7 +993,7 @@ fn render_file_listing_table(
                     }
                     row_response.on_hover_text("Double-click to open");
                 } else {
-                    // Attach context menu to both the name cell and the row for maximum coverage
+                    add_view_file_context_menu(file_viewer, &name_label_response, &entry.vfs_path, source);
                     add_view_file_context_menu(file_viewer, &name_response, &entry.vfs_path, source);
                     add_view_file_context_menu(file_viewer, &row_response, &entry.vfs_path, source);
                     row_response.on_hover_text(format!("res/{}", entry.vfs_path.as_str().trim_start_matches('/')));
@@ -984,11 +1060,15 @@ fn render_filter_results_table(
                     ui.label(file_icon_rich_text(&filename, false));
                 });
 
-                let (_, path_response) = row.col(|ui| {
-                    let path_str = path.to_string_lossy();
-                    let display = format!("res/{}", path_str.trim_start_matches('/'));
-                    ui.label(&display);
-                });
+                let (_, path_response, path_label_response) = {
+                    let mut label_resp = None;
+                    let (rect, cell_resp) = row.col(|ui| {
+                        let path_str = path.to_string_lossy();
+                        let display = format!("res/{}", path_str.trim_start_matches('/'));
+                        label_resp = Some(ui.label(&display));
+                    });
+                    (rect, cell_resp, label_resp.unwrap())
+                };
 
                 row.col(|ui| {
                     let size = vfs_path
@@ -1003,6 +1083,7 @@ fn render_filter_results_table(
                 });
 
                 let row_response = row.response();
+                add_view_file_context_menu(file_viewer, &path_label_response, vfs_path, source);
                 add_view_file_context_menu(file_viewer, &path_response, vfs_path, source);
                 add_view_file_context_menu(file_viewer, &row_response, vfs_path, source);
                 if row_response.clicked() {
@@ -1402,7 +1483,7 @@ impl ToolkitTabViewer<'_> {
         });
     }
 
-    fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[VfsPath]) {
+    fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[VfsPath], decode_json: bool) {
         let (tx, rx) = mpsc::channel();
 
         self.tab_state.unpacker_progress = Some(rx);
@@ -1433,7 +1514,8 @@ impl ToolkitTabViewer<'_> {
                     let vfs_path_str = file.as_str().trim_start_matches('/');
                     let parent_path = Path::new(vfs_path_str).parent().unwrap_or(Path::new(""));
                     let path = output_dir.join(parent_path);
-                    let file_path = path.join(file.filename());
+                    let filename = file.filename();
+                    let file_path = path.join(&filename);
                     tx.send(UnpackerProgress {
                         file_name: file_path.to_string_lossy().into(),
                         progress: (files_written as f32) / (file_count as f32),
@@ -1442,6 +1524,23 @@ impl ToolkitTabViewer<'_> {
                     if !folders_created.contains(&path) {
                         fs::create_dir_all(&path).expect("failed to create folder");
                         folders_created.insert(path.clone());
+                    }
+
+                    // Try JSON decode for Assets.bin prototypes when toggle is on
+                    if decode_json {
+                        if let Some(pt) = decodable_prototype_type(&filename) {
+                            let mut data = Vec::new();
+                            if let Ok(mut reader) = file.open_file() {
+                                let _ = reader.read_to_end(&mut data);
+                            }
+                            if let Ok(json) = wowsunpack::models::decode_prototype_to_json(&data, pt) {
+                                let json_path = path.join(format!("{filename}.json"));
+                                let mut out_file = File::create(json_path).expect("failed to create output file");
+                                out_file.write_all(json.as_bytes()).expect("Failed to write JSON");
+                                continue;
+                            }
+                            // Decode failed — fall through to raw extraction
+                        }
                     }
 
                     let mut out_file = File::create(file_path).expect("failed to create output file");
@@ -1457,8 +1556,9 @@ impl ToolkitTabViewer<'_> {
     fn extract_files_clicked(&mut self, _ui: &mut Ui) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
         let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
+        let decode_json = self.tab_state.browser_state.decode_prototypes_as_json;
 
-        self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice());
+        self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice(), decode_json);
     }
 
     fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat, base_params: bool) {
@@ -1584,7 +1684,7 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.browser_state.assets_bin_rx = Some(rx);
 
         std::thread::spawn(move || {
-            let result = (|| -> Result<(VfsPath, Vec<(Arc<PathBuf>, VfsPath)>), String> {
+            let result = (|| -> Result<AssetsBinLoadResult, String> {
                 let assets_bin_path = vfs.join("content/assets.bin").map_err(|e| format!("{}", e))?;
                 let mut assets_data = Vec::new();
                 assets_bin_path
@@ -1594,9 +1694,10 @@ impl ToolkitTabViewer<'_> {
 
                 let assets_vfs =
                     AssetsBinVfs::new(assets_data).map_err(|e| format!("Failed to parse assets.bin: {}", e))?;
+
                 let vfs = VfsPath::new(assets_vfs);
                 let files = collect_vfs_files(&vfs, "");
-                Ok((vfs, files))
+                Ok(AssetsBinLoadResult { vfs, files })
             })();
             let _ = tx.send(result);
         });
@@ -1607,14 +1708,14 @@ impl ToolkitTabViewer<'_> {
         let Some(rx) = &self.tab_state.browser_state.assets_bin_rx else { return };
 
         match rx.try_recv() {
-            Ok(Ok((vfs, files))) => {
+            Ok(Ok(result)) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 // Find the assets.bin browser pane and populate it
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
                     if let UnpackerPane::Browser(browser) = pane {
                         if browser.source == BrowserSource::AssetsBin {
-                            browser.vfs = Some(vfs.clone());
-                            browser.files = Some(files.clone());
+                            browser.vfs = Some(result.vfs.clone());
+                            browser.files = Some(result.files.clone());
                             browser.loading = false;
                             break;
                         }
@@ -1802,6 +1903,14 @@ impl ToolkitTabViewer<'_> {
                     if ui.add_enabled(extract_enabled, egui::Button::new(extract_label)).clicked() {
                         self.extract_files_clicked(ui);
                     }
+
+                    ui.checkbox(
+                        &mut self.tab_state.browser_state.decode_prototypes_as_json,
+                        "Decode prototypes as JSON",
+                    )
+                    .on_hover_text(
+                        "Decode supported Assets.bin prototypes (.visual, .model, .mfm) to JSON on extraction",
+                    );
 
                     // Queue popover button
                     let queue_label = if queue_count > 0 {

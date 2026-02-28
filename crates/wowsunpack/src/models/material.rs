@@ -60,6 +60,7 @@ pub enum MaterialError {
 
 /// The 9 property value types supported by MaterialPrototype.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[repr(u8)]
 pub enum PropertyType {
     Bool = 0,
@@ -107,6 +108,7 @@ impl PropertyType {
 
 /// A decoded property value.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum PropertyValue {
     Bool(bool),
     Int32(i32),
@@ -120,7 +122,11 @@ pub enum PropertyValue {
 
 /// A single material property with its name hash, type, and decoded value.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MaterialProperty {
+    /// Resolved property name (if known from the built-in dictionary).
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub name: Option<&'static str>,
     /// MurmurHash3_32(seed=0) of the property name.
     pub name_hash: u32,
     /// The property type.
@@ -135,6 +141,7 @@ pub struct MaterialProperty {
 
 /// A parsed MaterialPrototype record.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MaterialPrototype {
     /// Number of properties.
     pub property_count: u16,
@@ -250,6 +257,7 @@ pub fn parse_material(record_data: &[u8]) -> Result<MaterialPrototype, Report<Ma
 
     let count = hdr.property_count as usize;
     let mut properties = Vec::with_capacity(count);
+    let name_table = build_property_name_table();
 
     if count > 0 {
         // Pointers are unsigned offsets from record start (= start of record_data).
@@ -296,7 +304,8 @@ pub fn parse_material(record_data: &[u8]) -> Result<MaterialPrototype, Report<Ma
                 }
             };
 
-            properties.push(MaterialProperty { name_hash, property_type, array_index, value });
+            let name = name_table.get(&name_hash).copied();
+            properties.push(MaterialProperty { name, name_hash, property_type, array_index, value });
         }
     }
 
