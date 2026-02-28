@@ -25,10 +25,17 @@ pub enum VisualError {
 /// Item size for VisualPrototype records in the database blob.
 pub const VISUAL_ITEM_SIZE: usize = 0x70;
 
+#[cfg(feature = "serde")]
+fn serialize_hex_u64<S: serde::Serializer>(val: &u64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&format!("0x{val:016x}"))
+}
+
 /// A parsed VisualPrototype record.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VisualPrototype {
     pub nodes: VisualNodes,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64"))]
     pub merged_geometry_path_id: u64,
     pub underwater_model: bool,
     pub abovewater_model: bool,
@@ -39,6 +46,7 @@ pub struct VisualPrototype {
 
 /// Scene graph node hierarchy.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VisualNodes {
     pub name_map_name_ids: Vec<u32>,
     pub name_map_node_ids: Vec<u16>,
@@ -49,11 +57,13 @@ pub struct VisualNodes {
 
 /// A render set binding a mesh to a material.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RenderSet {
     pub name_id: u32,
     pub material_name_id: u32,
     pub vertices_mapping_id: u32,
     pub indices_mapping_id: u32,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "serialize_hex_u64"))]
     pub material_mfm_path_id: u64,
     pub skinned: bool,
     pub node_name_ids: Vec<u32>,
@@ -61,6 +71,7 @@ pub struct RenderSet {
 
 /// A level-of-detail entry.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Lod {
     pub extent: f32,
     pub casts_shadow: bool,
