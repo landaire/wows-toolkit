@@ -80,6 +80,14 @@ pub enum BrowserSource {
     AssetsBin,
 }
 
+/// Pre-computed directory tree node for the folder tree sidebar.
+/// Built once when the VFS loads, reused every frame to avoid per-frame `read_dir()` calls.
+struct FolderTreeNode {
+    name: String,
+    path: String,
+    children: Vec<FolderTreeNode>,
+}
+
 /// State for a single file browser pane (directory tree + file listing).
 pub struct BrowserPane {
     pub source: BrowserSource,
@@ -105,6 +113,8 @@ pub struct BrowserPane {
     pub filtered_file_list: Option<Arc<Vec<(Arc<PathBuf>, VfsPath)>>>,
     /// Cached directory entries: (dir_path, entries). Invalidated when selected_dir changes.
     cached_dir_entries: Option<(String, Vec<FileEntry>)>,
+    /// Cached folder tree structure. Built once when VFS loads.
+    cached_folder_tree: Option<Vec<FolderTreeNode>>,
 }
 
 impl BrowserPane {
@@ -122,6 +132,7 @@ impl BrowserPane {
             used_filter: None,
             filtered_file_list: None,
             cached_dir_entries: None,
+            cached_folder_tree: None,
         }
     }
 
@@ -139,6 +150,7 @@ impl BrowserPane {
             used_filter: None,
             filtered_file_list: None,
             cached_dir_entries: None,
+            cached_folder_tree: None,
         }
     }
 
@@ -393,7 +405,7 @@ impl UnpackerPaneViewer<'_> {
 
                 // Folder tree
                 egui::ScrollArea::both().id_salt(format!("folder_tree_scroll_{}", source_id)).show(ui, |ui| {
-                    if let Some(vfs) = &browser.vfs {
+                    if let Some(cached_tree) = &browser.cached_folder_tree {
                         let tree_id = ui.make_persistent_id(format!("resource_folder_tree_{}", source_id));
 
                         let mut id_to_path: std::collections::HashMap<egui::Id, String> =
@@ -401,8 +413,6 @@ impl UnpackerPaneViewer<'_> {
 
                         let root_id = egui::Id::new(("browser_dir", source_id, "/"));
                         id_to_path.insert(root_id, "/".to_string());
-
-                        let id_to_path_cell = std::cell::RefCell::new(id_to_path);
 
                         let tree = egui_ltreeview::TreeView::new(tree_id);
 
@@ -418,12 +428,10 @@ impl UnpackerPaneViewer<'_> {
 
                             let is_open = builder.node(root_node);
                             if is_open {
-                                build_folder_tree_with_ids(builder, vfs, "", &id_to_path_cell, source_id);
+                                render_folder_tree(builder, cached_tree, &mut id_to_path, source_id);
                             }
                             builder.close_dir();
                         });
-
-                        let id_to_path = id_to_path_cell.into_inner();
 
                         for action in actions {
                             match action {
@@ -1216,50 +1224,55 @@ fn render_search_results_table(
         });
 }
 
-/// Build folder tree recursively, collecting id-to-path mappings.
-fn build_folder_tree_with_ids(
+/// Build a cached folder tree structure from a VFS root (called once at load time).
+fn build_folder_tree(vfs: &VfsPath, path_prefix: &str) -> Vec<FolderTreeNode> {
+    let Ok(entries) = vfs.read_dir() else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<VfsPath> = entries.filter(|e| e.is_dir().unwrap_or(false)).collect();
+    dirs.sort_by_key(|d| d.filename());
+
+    dirs.iter()
+        .map(|child_dir| {
+            let name = child_dir.filename();
+            let path = if path_prefix.is_empty() { format!("/{name}") } else { format!("{path_prefix}/{name}") };
+            let children = build_folder_tree(child_dir, &path);
+            FolderTreeNode { name, path, children }
+        })
+        .collect()
+}
+
+/// Render the cached folder tree into the egui tree view builder.
+fn render_folder_tree(
     builder: &mut egui_ltreeview::TreeViewBuilder<'_, egui::Id>,
-    dir: &VfsPath,
-    path_prefix: &str,
-    id_to_path: &std::cell::RefCell<std::collections::HashMap<egui::Id, String>>,
+    nodes: &[FolderTreeNode],
+    id_to_path: &mut std::collections::HashMap<egui::Id, String>,
     source_id: &str,
 ) {
-    if let Ok(entries) = dir.read_dir() {
-        let mut dirs: Vec<VfsPath> = entries.filter(|e| e.is_dir().unwrap_or(false)).collect();
-        dirs.sort_by_key(|d| d.filename());
+    for node in nodes {
+        let dir_id = egui::Id::new(("browser_dir", source_id, &node.path));
+        id_to_path.insert(dir_id, node.path.clone());
 
-        for child_dir in &dirs {
-            let name = child_dir.filename();
-            let child_path = if path_prefix.is_empty() { format!("/{name}") } else { format!("{path_prefix}/{name}") };
-            let dir_id = egui::Id::new(("browser_dir", source_id, &child_path));
-            id_to_path.borrow_mut().insert(dir_id, child_path.clone());
+        if node.children.is_empty() {
+            let leaf = egui_ltreeview::NodeBuilder::leaf(dir_id)
+                .icon(|ui| {
+                    ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
+                })
+                .label(&node.name);
+            builder.node(leaf);
+        } else {
+            let dir = egui_ltreeview::NodeBuilder::dir(dir_id)
+                .default_open(false)
+                .icon(|ui| {
+                    ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
+                })
+                .label(&node.name);
 
-            let has_subdirs = child_dir
-                .read_dir()
-                .map(|entries| entries.into_iter().any(|e| e.is_dir().unwrap_or(false)))
-                .unwrap_or(false);
-
-            if has_subdirs {
-                let node = egui_ltreeview::NodeBuilder::dir(dir_id)
-                    .default_open(false)
-                    .icon(|ui| {
-                        ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
-                    })
-                    .label(&name);
-
-                let is_open = builder.node(node);
-                if is_open {
-                    build_folder_tree_with_ids(builder, child_dir, &child_path, id_to_path, source_id);
-                }
-                builder.close_dir();
-            } else {
-                let node = egui_ltreeview::NodeBuilder::leaf(dir_id)
-                    .icon(|ui| {
-                        ui.label(RichText::new(icons::FOLDER).color(egui::Color32::from_rgb(200, 180, 120)));
-                    })
-                    .label(&name);
-                builder.node(node);
+            let is_open = builder.node(dir);
+            if is_open {
+                render_folder_tree(builder, &node.children, id_to_path, source_id);
             }
+            builder.close_dir();
         }
     }
 }
@@ -1647,6 +1660,7 @@ impl ToolkitTabViewer<'_> {
         for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
             if let UnpackerPane::Browser(browser) = pane {
                 if browser.source == BrowserSource::Pkg && browser.vfs.is_none() {
+                    browser.cached_folder_tree = Some(build_folder_tree(&wows_data.vfs, ""));
                     browser.vfs = Some(wows_data.vfs.clone());
                     browser.files = Some(wows_data.filtered_files.clone());
                 }
@@ -1714,6 +1728,7 @@ impl ToolkitTabViewer<'_> {
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
                     if let UnpackerPane::Browser(browser) = pane {
                         if browser.source == BrowserSource::AssetsBin {
+                            browser.cached_folder_tree = Some(build_folder_tree(&result.vfs, ""));
                             browser.vfs = Some(result.vfs.clone());
                             browser.files = Some(result.files.clone());
                             browser.loading = false;
@@ -1796,10 +1811,12 @@ impl ToolkitTabViewer<'_> {
                                                     browser.vfs = None;
                                                     browser.files = None;
                                                     browser.selected_dir = None;
+                                                    browser.cached_folder_tree = None;
                                                 } else if browser.source == BrowserSource::AssetsBin {
                                                     browser.vfs = None;
                                                     browser.files = None;
                                                     browser.selected_dir = None;
+                                                    browser.cached_folder_tree = None;
                                                     browser.loading = true;
                                                     browser.error = None;
                                                 }
