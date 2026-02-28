@@ -8511,6 +8511,7 @@ dependencies = [
  "octocrab",
  "parking_lot",
  "pickled",
+ "regex",
  "reqwest",
  "rfd",
  "rkyv",
