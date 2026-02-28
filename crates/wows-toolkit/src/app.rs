@@ -551,8 +551,7 @@ impl WowsToolkitApp {
                                     self.tab_state.update_wows_dir(&new_dir, &replays_dir);
                                     let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
                                     self.tab_state.replay_files = replays;
-                                    self.tab_state.filtered_file_list = None;
-                                    self.tab_state.used_filter = None;
+                                    self.tab_state.browser_state.reset_filters();
 
                                     self.tab_state.toasts.lock().success("Successfully loaded game data");
 
@@ -566,8 +565,7 @@ impl WowsToolkitApp {
                                 }
                                 BackgroundTaskCompletion::BuildDataLoaded { build } => {
                                     self.tab_state.selected_browser_build = build;
-                                    self.tab_state.filtered_file_list = None;
-                                    self.tab_state.used_filter = None;
+                                    self.tab_state.browser_state.reset_filters();
                                     self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded {

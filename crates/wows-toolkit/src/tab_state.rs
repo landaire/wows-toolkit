@@ -33,7 +33,7 @@ use crate::task::DataExportSettings;
 use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
-use crate::ui::file_unpacker::UnpackerProgress;
+use crate::ui::file_unpacker::{ResourceBrowserState, UnpackerProgress};
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::replay_parser::Replay;
@@ -128,8 +128,6 @@ pub enum NotifyFileEvent {
     TempArenaInfoCreated(PathBuf),
 }
 
-pub type PathFileNodePair = (Arc<PathBuf>, VfsPath);
-
 /// An action that requires user confirmation before executing.
 #[derive(Clone)]
 pub enum ConfirmableAction {
@@ -162,13 +160,6 @@ impl ConfirmableAction {
 pub struct TabState {
     #[serde(skip)]
     pub world_of_warships_data: Option<SharedWoWsData>,
-
-    pub filter: String,
-
-    #[serde(skip)]
-    pub used_filter: Option<String>,
-    #[serde(skip)]
-    pub filtered_file_list: Option<Arc<Vec<PathFileNodePair>>>,
 
     #[serde(skip)]
     pub items_to_extract: Mutex<Vec<VfsPath>>,
@@ -287,6 +278,10 @@ pub struct TabState {
     #[serde(skip)]
     pub selected_browser_build: u32,
 
+    /// Explorer-style resource browser state (selected dir, filter, queue popover).
+    #[serde(skip)]
+    pub browser_state: ResourceBrowserState,
+
     /// Shared flag for "suppress GPU encoder warning" — synced from Settings on startup.
     #[serde(skip)]
     pub suppress_gpu_encoder_warning: Arc<std::sync::atomic::AtomicBool>,
@@ -327,7 +322,6 @@ impl Default for TabState {
         let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
             world_of_warships_data: None,
-            filter: Default::default(),
             items_to_extract: Default::default(),
             settings: Default::default(),
             translations: Default::default(),
@@ -345,8 +339,6 @@ impl Default for TabState {
             can_change_wows_dir: true,
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
             current_replay: None,
-            used_filter: None,
-            filtered_file_list: None,
             auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
@@ -369,6 +361,7 @@ impl Default for TabState {
             wows_data_map: None,
             available_builds: Vec::new(),
             selected_browser_build: 0,
+            browser_state: Default::default(),
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
             settings_needs_attention: false,
@@ -508,8 +501,7 @@ impl TabState {
     pub(crate) fn reset_game_state(&mut self) {
         self.current_replay = None;
         self.replay_files = None;
-        self.filtered_file_list = None;
-        self.used_filter = None;
+        self.browser_state = Default::default();
         self.settings.session_stats.clear();
         self.show_session_stats = false;
         self.show_session_stats_chart = false;
