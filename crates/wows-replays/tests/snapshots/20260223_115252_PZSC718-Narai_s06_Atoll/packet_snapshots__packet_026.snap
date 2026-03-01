@@ -1,0 +1,74 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 5
+payload:
+  EntityCreate:
+    entity_id: 433424
+    entity_type: Building
+    position:
+      x: 109.1353988647461
+      y: 0.41029998660087585
+      z: 496.7597961425781
+    props:
+      airDefenseDispRadius: 0
+      airDefenseTargetIds:
+        - []
+      antiAirAuras:
+        - enabled: 1
+          id: 0
+      burningFlags: 0
+      debugText: []
+      effects: []
+      hasAirTargetsInRange: 0
+      health: 80000
+      isAlive: 1
+      isAntiAirMode: 0
+      isSuppressed: 0
+      maxHealth: 80000
+      paramsId: 4276386736
+      regeneratedHealth: 0
+      regenerationHealth: 0
+      sounds: []
+      state:
+        atba:
+          atbaTargets: []
+      targetPos:
+        - -100000
+        - -100000
+        - -100000
+      teamId: 0
+      weatherParams:
+        AAMaxDist: 1
+        GMIdealRadius: 1
+        GSIdealRadius: 1
+        GSMIdealRadius: 1
+        airDefenseVisibilityTime: 2
+        bad: 0
+        burnDamage: 1
+        burnTime: 1
+        maxPlaneVisionDistance: 2000
+        maxShipVisionDistance: 2000
+        maxVisibilityDistance: 2000
+        maxVisibilityDistanceByPlane: 2000
+        mgVisibilityTime: 20
+        planeMaxVisibilityDistance: 2000
+        planeMaxVisibilityDistanceByPlane: 2000
+        planeSpeed: 1
+        planeVisibilityFactor: 1
+        planeVisibilityFactorByPlane: 1
+        shootShift: 1
+        speedCoef: 1
+        transparency: 1
+        visibilityFactor: 1
+        visibilityFactorByPlane: 1
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: 2.316091537475586
+    space_id: 0
+    spec_idx: 9
+    state_length: 166
+    vehicle_id: 2840

@@ -1,0 +1,18 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 44
+payload:
+  PlayerOrientation:
+    parent_id: 0
+    pid: 433436
+    position:
+      x: 705.0451049804688
+      y: 0
+      z: -459.3214111328125
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: -0.22683632373809814

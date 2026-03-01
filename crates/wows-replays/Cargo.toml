@@ -24,6 +24,15 @@ bon = { workspace = true }
 rootcause = { workspace = true }
 modular-bitfield = "0.13"
 
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+sha2 = { workspace = true }
+wows-game-data-dl = { path = "../wows-game-data-dl" }
+
 [features]
 default = ["arc"]
 arc = ["wowsunpack/arc"]

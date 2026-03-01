@@ -8,6 +8,8 @@ pub mod idx;
 pub mod idx_vfs;
 /// Shared winnow parsing utilities
 pub mod parser_utils;
+/// Ship configuration (loadout) binary parser
+pub mod ship_config;
 /// Utilities for helping load and maintain `.pkg` files
 pub mod pkg;
 // File tree serialization utilities

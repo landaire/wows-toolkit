@@ -1,0 +1,20 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 38
+payload:
+  Invalid:
+    message: "Cut(RpcValueParseFailed { method: \"BasePlayerCreate::spaID\", argnum: 1, argtype: \"Property { name: \\\"spaID\\\", prop_type: Primitive(Int64), flags: BaseAndClient }\", error: \"Parse(Backtrack(ContextError { context: [], cause: None }))\" })"
+    raw:
+      - 27
+      - 157
+      - 6
+      - 0
+      - 3
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0

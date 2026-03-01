@@ -1,0 +1,9 @@
+---
+source: crates/wowsunpack/tests/parser_snapshots.rs
+expression: parsed
+---
+visual_resource_id: "0x19600ae7a300bba1"
+misc_type: 4
+skel_ext_res_ids: []
+animations: []
+dyes: []

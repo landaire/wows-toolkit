@@ -1,0 +1,14 @@
+---
+source: crates/wowsunpack/tests/parser_snapshots.rs
+expression: counts
+---
+AtlasContour: 401
+Effect: 3265
+EffectMetadata: 2187
+EffectPreset: 2187
+Material: 29518
+Model: 34778
+PointLight: 5
+SkeletonExtender: 15411
+VelocityField: 10
+Visual: 34783

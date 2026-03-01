@@ -3,21 +3,19 @@ use std::{cell::RefCell, collections::HashMap, str::FromStr, time::Duration};
 use serde::{Deserialize, Serialize};
 
 use tracing::{Level, debug, span, trace};
-use winnow::Parser;
-use winnow::binary::le_u32;
-use winnow::combinator::repeat;
 use wowsunpack::{
-    data::{ResourceLoader, Version},
+    data::{ResourceLoader, Version, ship_config::parse_ship_config},
     game_params::types::{BigWorldDistance, CrewSkill, Param, Species},
     game_types::{BattleStage, BattleType},
     rpc::typedefs::ArgValue,
 };
+pub use wowsunpack::data::ship_config::ShipConfig;
 
 static TIME_UNTIL_GAME_START: Duration = Duration::from_secs(30);
 
 use crate::game_constants::GameConstants;
 use crate::{
-    PResult, Rc, ReplayMeta, RwCellExt,
+    Rc, ReplayMeta, RwCellExt,
     analyzer::{
         analyzer::Analyzer,
         decoder::{BuoyancyState, ChatMessageExtra, DeathCause, FinishType, PlayerStateData, Recognized, WeaponType},
@@ -34,63 +32,7 @@ use super::state::{
     MinimapPosition, ResolvedShotHit, ScoringRules, ShipPosition, SmokeScreenEntity, TeamScore,
 };
 
-#[derive(Debug, Default, Clone, Serialize)]
-pub struct ShipConfig {
-    ship_params_id: GameParamId,
-    abilities: Vec<GameParamId>,
-    hull: GameParamId,
-    modernization: Vec<GameParamId>,
-    units: Vec<GameParamId>,
-    /// Exterior slot items (signals, camos, flags). Despite the field name, this covers
-    /// all ExteriorSlots items, not just signal flags.
-    exteriors: Vec<GameParamId>,
-    ensigns: Vec<GameParamId>,
-    ecoboosts: Vec<GameParamId>,
-    naval_flag: u32,
-    last_boarded_crew: u32,
-}
 
-impl ShipConfig {
-    pub fn ship_params_id(&self) -> GameParamId {
-        self.ship_params_id
-    }
-
-    pub fn exteriors(&self) -> &[GameParamId] {
-        self.exteriors.as_ref()
-    }
-
-    pub fn units(&self) -> &[GameParamId] {
-        self.units.as_ref()
-    }
-
-    pub fn modernization(&self) -> &[GameParamId] {
-        self.modernization.as_ref()
-    }
-
-    pub fn hull(&self) -> GameParamId {
-        self.hull
-    }
-
-    pub fn abilities(&self) -> &[GameParamId] {
-        self.abilities.as_ref()
-    }
-
-    pub fn ensigns(&self) -> &[GameParamId] {
-        self.ensigns.as_ref()
-    }
-
-    pub fn ecoboosts(&self) -> &[GameParamId] {
-        self.ecoboosts.as_ref()
-    }
-
-    pub fn naval_flag(&self) -> u32 {
-        self.naval_flag
-    }
-
-    pub fn last_boarded_crew(&self) -> u32 {
-        self.last_boarded_crew
-    }
-}
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Skills {
@@ -1479,70 +1421,6 @@ pub enum ChatChannel {
     Unknown(String),
 }
 
-fn parse_ship_config(blob: &[u8], version: Version) -> PResult<ShipConfig> {
-    let i = &mut &*blob;
-    // Header: version, ship_params_id, element_count
-    let _version = le_u32.parse_next(i)?;
-    let ship_params_id = le_u32.parse_next(i)?;
-    let _element_count = le_u32.parse_next(i)?;
-
-    // Unit type slots (14 fixed slots from UNIT_TYPE_NAMES, some may be 0)
-    let unit_count = le_u32.parse_next(i)?;
-    let units: Vec<u32> = repeat(unit_count as usize, le_u32).parse_next(i)?;
-
-    if version.is_at_least(&Version { major: 13, minor: 2, patch: 0, build: 0 }) {
-        let _unk = le_u32.parse_next(i)?;
-    }
-
-    // ModernizationSlots: count + items
-    let modernization_count = le_u32.parse_next(i)?;
-    let modernization: Vec<u32> = repeat(modernization_count as usize, le_u32).parse_next(i)?;
-
-    // ExteriorSlots: count + items (signals, camos, flags)
-    let exterior_count = le_u32.parse_next(i)?;
-    let exteriors: Vec<u32> = repeat(exterior_count as usize, le_u32).parse_next(i)?;
-
-    // Supply state (purpose unknown, typically 0)
-    let _supply_state = le_u32.parse_next(i)?;
-
-    // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs
-    let color_scheme_count = le_u32.parse_next(i)?;
-    let _color_schemes: Vec<(u32, u32)> = repeat(color_scheme_count as usize, (le_u32, le_u32)).parse_next(i)?;
-
-    // AbilitySlots: count + items (consumables)
-    let abilities_count = le_u32.parse_next(i)?;
-    let abilities: Vec<u32> = repeat(abilities_count as usize, le_u32).parse_next(i)?;
-
-    // EnsignSlots: count + items
-    let ensign_count = le_u32.parse_next(i)?;
-    let ensigns: Vec<u32> = repeat(ensign_count as usize, le_u32).parse_next(i)?;
-
-    // EcoboostSlots: count + items (typically 4 slots, some may be 0)
-    let ecoboost_count = le_u32.parse_next(i)?;
-    let ecoboosts: Vec<u32> = repeat(ecoboost_count as usize, le_u32).parse_next(i)?;
-
-    // Naval flag ID (NationFlags index)
-    let naval_flag = le_u32.parse_next(i)?;
-
-    // Full format extras: isOwned, lastBoardedCrew (commander/crew param ID)
-    let _is_owned = le_u32.parse_next(i)?;
-    let last_boarded_crew = le_u32.parse_next(i)?;
-
-    let to_ids = |v: Vec<u32>| v.into_iter().map(GameParamId::from).collect();
-    Ok(ShipConfig {
-        ship_params_id: GameParamId::from(ship_params_id),
-        abilities: to_ids(abilities),
-        hull: GameParamId::from(units[0]),
-        modernization: to_ids(modernization),
-        units: to_ids(units),
-        exteriors: to_ids(exteriors),
-        ensigns: to_ids(ensigns),
-        ecoboosts: to_ids(ecoboosts),
-        naval_flag,
-        last_boarded_crew,
-    })
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GameMessage {
     pub clock: GameClock,
@@ -2224,7 +2102,7 @@ impl UpdateFromReplayArgs for VehicleProps {
         // TODO: sounds
 
         if args.contains_key(SHIP_CONFIG_KEY) {
-            let ship_config = parse_ship_config(arg_value_to_type!(args, SHIP_CONFIG_KEY, &[u8]), version)
+            let ship_config = parse_ship_config(arg_value_to_type!(args, SHIP_CONFIG_KEY, &[u8]), &version)
                 .expect("failed to parse ship config");
 
             self.ship_config = ship_config;

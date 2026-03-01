@@ -1,0 +1,11 @@
+---
+source: crates/wowsunpack/tests/parser_snapshots.rs
+expression: summary
+---
+vertices_mapping_count: 1
+indices_mapping_count: 1
+merged_vertices_count: 1
+merged_indices_count: 1
+collision_model_count: 0
+armor_model_count: 0
+armor_triangle_counts: []

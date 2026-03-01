@@ -6,7 +6,7 @@
 //! # Quick start
 //! ```no_run
 //! use wowsunpack::export::ship::{ShipAssets, ShipExportOptions};
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> rootcause::Result<()> {
 //! # let vfs: vfs::VfsPath = todo!();
 //! let assets = ShipAssets::load(&vfs)?;
 //! let ctx = assets.load_ship("Yamato", &ShipExportOptions::default())?;

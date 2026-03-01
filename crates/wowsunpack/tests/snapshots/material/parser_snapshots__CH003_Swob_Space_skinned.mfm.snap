@@ -1,0 +1,45 @@
+---
+source: crates/wowsunpack/tests/parser_snapshots.rs
+expression: parsed
+---
+property_count: 6
+flags: 0
+shader_id: 327936
+material_hash: 953713079217043899
+properties:
+  - name: animMap
+    name_hash: 3252248758
+    property_type: Texture
+    array_index: 0
+    value:
+      Texture: 8462592365165467929
+  - name: diffuseMap
+    name_hash: 2182021760
+    property_type: Texture
+    array_index: 1
+    value:
+      Texture: 16133299379283488814
+  - name: normalMap
+    name_hash: 1213756509
+    property_type: Texture
+    array_index: 2
+    value:
+      Texture: 1935975310341112471
+  - name: ambientOcclusionMap
+    name_hash: 172348487
+    property_type: Texture
+    array_index: 3
+    value:
+      Texture: 2488575629629108435
+  - name: metallicGlossMap
+    name_hash: 2310717415
+    property_type: Texture
+    array_index: 4
+    value:
+      Texture: 5016654667429102242
+  - name: emissivePower
+    name_hash: 3670554153
+    property_type: FloatB
+    array_index: 0
+    value:
+      Float: 10

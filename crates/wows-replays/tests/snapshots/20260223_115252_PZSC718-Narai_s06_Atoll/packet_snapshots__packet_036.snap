@@ -1,0 +1,53 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 5
+payload:
+  EntityCreate:
+    entity_id: 433423
+    entity_type: BattleEntity
+    position:
+      x: 0
+      y: 0
+      z: 0
+    props:
+      className:
+        - 66
+        - 97
+        - 116
+        - 116
+        - 108
+        - 101
+        - 69
+        - 110
+        - 116
+        - 105
+        - 116
+        - 121
+      friendlyFireEnabled: 0
+      isBot: 1
+      name:
+        - 70
+        - 111
+        - 114
+        - 95
+        - 83
+        - 105
+        - 103
+        - 110
+        - 97
+        - 108
+        - 115
+      owner: 0
+      paramsId: 0
+      teamId: 0
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: 0
+    space_id: 0
+    spec_idx: 8
+    state_length: 44
+    vehicle_id: 2840

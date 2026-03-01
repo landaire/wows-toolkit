@@ -1,0 +1,11 @@
+---
+source: crates/wowsunpack/tests/parser_snapshots.rs
+expression: summary
+---
+width: 2096
+height: 2096
+tile_size: 16
+tiles_per_axis: 131
+heightmap_len: 4393216
+heightmap_min: -20
+heightmap_max: -2.7960002

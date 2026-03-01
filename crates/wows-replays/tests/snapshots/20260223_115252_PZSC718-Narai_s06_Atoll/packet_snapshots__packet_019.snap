@@ -1,0 +1,16 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 8
+payload:
+  EntityMethod:
+    args:
+      - 4199530704
+      - 0
+      - 3975052496
+      - 0
+      - []
+    entity_id: 433435
+    method: onConnected

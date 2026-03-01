@@ -1,0 +1,132 @@
+---
+source: crates/wows-replays/tests/packet_snapshots.rs
+expression: value
+---
+clock: 0
+packet_type: 5
+payload:
+  EntityCreate:
+    entity_id: 433421
+    entity_type: BattleLogic
+    position:
+      x: 0
+      y: 0
+      z: 0
+    props:
+      battleResult:
+        finishReason: 0
+        winnerTeamId: -2
+      battleStage: 2
+      battleType: 476
+      debugText: []
+      duration: 0
+      mapBorder:
+        paramsId: 4287416240
+        position:
+          - 0
+          - 0
+          - 0
+      playerShipFoamEmission:
+        - 0
+        - 0
+        - 0
+      prerequisiteData:
+        drops: []
+        effects: []
+        ensigns: []
+        flags:
+          - 4280119216
+          - 4274876336
+          - 4275924912
+          - 4276973488
+          - 4288507824
+          - 4289556400
+          - 4285362096
+          - 4287459248
+          - 4286410672
+        ships:
+          - camoParamsId: 4293849008
+            maxUpgrades: 1
+            shipParamsId: 4288591856
+          - camoParamsId: 4293849008
+            maxUpgrades: 1
+            shipParamsId: 3720263664
+          - camoParamsId: 4293849008
+            maxUpgrades: 1
+            shipParamsId: 3762173936
+          - camoParamsId: 4293849008
+            maxUpgrades: 1
+            shipParamsId: 3540924400
+        squadrons: []
+        weather: []
+      state:
+        attentionMarkers: []
+        clientAnimations:
+          ids: []
+          targetType: 0
+        controlPoints:
+          - 201868
+          - 201869
+          - 201870
+          - 201871
+          - 201872
+          - 201873
+          - 201874
+        diplomacy: ~
+        drop:
+          data: []
+          picked: []
+          plane: ~
+        effects: []
+        entities: []
+        entityStates: []
+        expectedActions: ~
+        keyObjects: []
+        missions:
+          capture: []
+          hold: []
+          kill: []
+          protect: []
+          pullTargets: []
+          reachDestination: []
+          teamLoseScore: 0
+          teamWinScore: 1000
+          teamsScore:
+            - score: 300
+              teamId: 0
+            - score: 300
+              teamId: 1
+        physics:
+          collisionResolutionType: 0
+        resources: []
+        respawns: ~
+        sounds: []
+        successStoryProgress: []
+        tasks: []
+        uiInfo:
+          battleCardSelectorType: 0
+          miniMapType: 0
+          timeToInstallBattleCards: 60
+        weather:
+          globalWeather:
+            item: ~
+            notification: ~
+            param: 4285843376
+          localWeather: []
+          mainWeather: 0
+      teams:
+        default: 2
+        teams:
+          - state: 2
+            teamId: 0
+          - state: 2
+            teamId: 1
+      timeLeft: 0
+    rotation:
+      pitch: 0
+      roll: 0
+      yaw: 0
+    space_id: 0
+    spec_idx: 11
+    state_length: 218
+    vehicle_id: 2840
