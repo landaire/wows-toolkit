@@ -724,6 +724,33 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
+    /// Parse a bare BasePlayerCreate (packet 0x26) that carries no inline base properties.
+    /// Unlike packet 0x0, this packet only has entity_id + entity_type + a small data blob
+    /// (typically 4 zero bytes). The entity receives its real property values later via
+    /// property-update packets or gets superseded by a full BasePlayerCreate (packet 0x0).
+    fn parse_base_player_create_stub<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+        let entity_id = le_u32.parse_next(i)?;
+        let entity_type = le_u16.parse_next(i)?;
+        let spec = &self.specs[entity_type as usize - 1];
+
+        let component_data = i.to_vec();
+        *i = &[];
+
+        self.entities.insert(
+            entity_id,
+            Entity {
+                entity_type,
+                properties: vec![],
+            },
+        );
+        Ok(PacketType::BasePlayerCreate(BasePlayerCreatePacket {
+            entity_id: entity_id.into(),
+            entity_type: &spec.name,
+            props: HashMap::new(),
+            component_data,
+        }))
+    }
+
     fn parse_entity_create<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
@@ -941,7 +968,7 @@ impl<'argtype> Parser<'argtype> {
                 *i = &[];
                 PacketType::InitMarker
             }
-            0x26 => self.parse_base_player_create(i)?,
+            0x26 => self.parse_base_player_create_stub(i)?,
             _ => self.parse_unknown_packet(i, (*i).len().try_into().unwrap())?,
         };
         Ok(payload)

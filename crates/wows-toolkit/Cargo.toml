@@ -5,6 +5,7 @@ authors = ["Lander Brandt <landaire>"]
 publish = false
 edition.workspace = true
 rust-version.workspace = true
+default-run = "wows_toolkit"
 
 [package.metadata.winresource]
 
