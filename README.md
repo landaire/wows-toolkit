@@ -8,18 +8,6 @@ A monorepo of tools for interacting with World of Warships game data, replays, a
 <p>
   <img src="assets/armor_viewer.png" alt="Armor Viewer" width="800">
 </p>
-<p>
-  <img src="assets/armor_trajectory.png" alt="Ballistic Trajectory Analysis" width="800">
-</p>
-<p>
-  <img src="assets/session_stats.png" alt="Session Stats" width="800">
-</p>
-<p>
-  <img src="assets/replay_renderer.png" alt="Replay Renderer" width="500">
-</p>
-<p>
-  <img src="assets/resource_browser.png" alt="Resource Browser" width="800">
-</p>
 
 ## Crates
 
