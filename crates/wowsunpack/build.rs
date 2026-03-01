@@ -13,7 +13,8 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Deserialize, Default)]
 struct Registry {
@@ -58,10 +59,8 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
     };
 
     let registry_path = data_dir.join("versions.toml");
-    let registry: Registry = std::fs::read_to_string(&registry_path)
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default();
+    let registry: Registry =
+        std::fs::read_to_string(&registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
 
     let mut builds: Vec<u32> = Vec::new();
 
@@ -87,16 +86,15 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
 
     // Also scan game_data/builds/ for any unregistered builds
     let builds_dir = data_dir.join("builds");
-    if builds_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&builds_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    if let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
-                        if !builds.contains(&build) {
-                            builds.push(build);
-                        }
-                    }
-                }
+    if builds_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&builds_dir)
+    {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                && let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok())
+                && !builds.contains(&build)
+            {
+                builds.push(build);
             }
         }
     }
@@ -145,9 +143,6 @@ fn main() {
         Ok(d) => PathBuf::from(d),
         Err(_) => workspace_root.join("game_data"),
     };
-    println!(
-        "cargo:rerun-if-changed={}",
-        data_dir.join("versions.toml").display()
-    );
+    println!("cargo:rerun-if-changed={}", data_dir.join("versions.toml").display());
     println!("cargo:rerun-if-env-changed=WOWS_GAME_DATA");
 }

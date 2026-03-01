@@ -3738,7 +3738,6 @@ impl ToolkitTabViewer<'_> {
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
                 });
-
         });
     }
 
@@ -3773,7 +3772,6 @@ impl ToolkitTabViewer<'_> {
         self.pick_up_replay_controls_request(ui.ctx());
         self.show_replay_controls_window(ui.ctx());
     }
-
 
     fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
         if self.tab_state.pending_confirmation.is_none() {

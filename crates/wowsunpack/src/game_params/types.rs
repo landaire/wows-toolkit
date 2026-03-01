@@ -1,10 +1,16 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::{Add, Mul, Sub};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::ops::Add;
+use std::ops::Mul;
+use std::ops::Sub;
 
 use bon::Builder;
 use variantly::Variantly;
 
-use crate::{Rc, data::ResourceLoader, game_types::GameParamId};
+use crate::Rc;
+use crate::data::ResourceLoader;
+use crate::game_types::GameParamId;
 
 use super::provider::GameMetadataProvider;
 
@@ -1681,14 +1687,16 @@ impl CrewSkill {
     }
 
     pub fn translated_name(&self, metadata_provider: &GameMetadataProvider) -> Option<String> {
-        use convert_case::{Case, Casing};
+        use convert_case::Case;
+        use convert_case::Casing;
         let translation_id = format!("IDS_SKILL_{}", self.internal_name().to_case(Case::UpperSnake));
 
         metadata_provider.localized_name_from_id(&translation_id)
     }
 
     pub fn translated_description(&self, metadata_provider: &GameMetadataProvider) -> Option<String> {
-        use convert_case::{Case, Casing};
+        use convert_case::Case;
+        use convert_case::Casing;
         let translation_id = format!("IDS_SKILL_DESC_{}", self.internal_name().to_case(Case::UpperSnake));
 
         let description = metadata_provider.localized_name_from_id(&translation_id);

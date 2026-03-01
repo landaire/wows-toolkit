@@ -1,5 +1,6 @@
 use thiserror::Error;
-use winnow::error::{ErrMode, ParserError};
+use winnow::error::ErrMode;
+use winnow::error::ParserError;
 
 #[derive(Error, Debug)]
 pub enum ParseError {

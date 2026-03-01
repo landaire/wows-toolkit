@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use rootcause::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LocalRegistry {
@@ -66,18 +68,14 @@ impl LocalRegistry {
     /// Merges explicitly registered/downloaded builds with any builds
     /// found at `latest_path`.
     pub fn available_builds(&self) -> Vec<u32> {
-        let mut builds: Vec<u32> = self
-            .builds
-            .keys()
-            .filter_map(|k| k.parse::<u32>().ok())
-            .collect();
+        let mut builds: Vec<u32> = self.builds.keys().filter_map(|k| k.parse::<u32>().ok()).collect();
 
-        if let Some(ref latest) = self.latest_path {
-            if let Ok(latest_builds) = wowsunpack::game_data::list_available_builds(latest) {
-                for b in latest_builds {
-                    if !builds.contains(&b) {
-                        builds.push(b);
-                    }
+        if let Some(ref latest) = self.latest_path
+            && let Ok(latest_builds) = wowsunpack::game_data::list_available_builds(latest)
+        {
+            for b in latest_builds {
+                if !builds.contains(&b) {
+                    builds.push(b);
                 }
             }
         }
@@ -102,21 +100,16 @@ impl LocalRegistry {
         }
 
         // Check latest_path
-        if let Some(ref latest) = self.latest_path {
-            if let Ok(builds) = wowsunpack::game_data::list_available_builds(latest) {
-                if builds.contains(&build) {
-                    return Some(latest.clone());
-                }
-            }
+        if let Some(ref latest) = self.latest_path
+            && let Ok(builds) = wowsunpack::game_data::list_available_builds(latest)
+            && builds.contains(&build)
+        {
+            return Some(latest.clone());
         }
 
         // Fallback: check if downloaded dir exists even without registry entry
         let dir = data_dir.join("builds").join(build.to_string());
-        if dir.exists() {
-            Some(dir)
-        } else {
-            None
-        }
+        if dir.exists() { Some(dir) } else { None }
     }
 }
 
@@ -133,12 +126,10 @@ pub fn load_registry(path: &Path) -> LocalRegistry {
 
 pub fn save_registry(registry: &LocalRegistry, path: &Path) -> Result<(), Report> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .attach_with(|| format!("Failed to create directory {}", parent.display()))?;
+        std::fs::create_dir_all(parent).attach_with(|| format!("Failed to create directory {}", parent.display()))?;
     }
-    let content = toml::to_string_pretty(registry)
-        .map_err(|e| rootcause::report!("Failed to serialize registry: {e}"))?;
-    std::fs::write(path, content)
-        .attach_with(|| format!("Failed to write {}", path.display()))?;
+    let content =
+        toml::to_string_pretty(registry).map_err(|e| rootcause::report!("Failed to serialize registry: {e}"))?;
+    std::fs::write(path, content).attach_with(|| format!("Failed to write {}", path.display()))?;
     Ok(())
 }

@@ -1,22 +1,41 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use image::RgbaImage;
-use wowsunpack::data::{ResourceLoader as _, Version};
+use wowsunpack::data::ResourceLoader as _;
+use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::{GameParamProvider, Meters, PlaneCategory, Species};
+use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Meters;
+use wowsunpack::game_params::types::PlaneCategory;
+use wowsunpack::game_params::types::Species;
 
-use wows_replays::analyzer::decoder::{BattleStage, BuoyancyState, FinishType, Recognized, TorpedoData, WeaponType};
+use wows_replays::analyzer::decoder::BattleStage;
+use wows_replays::analyzer::decoder::BuoyancyState;
+use wows_replays::analyzer::decoder::FinishType;
+use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::analyzer::decoder::TorpedoData;
+use wows_replays::analyzer::decoder::WeaponType;
 
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::decoder::Consumable;
-use wows_replays::types::{EntityId, GameClock, GameParamId, PlaneId, Relation, WorldPos};
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
+use wows_replays::types::GameParamId;
+use wows_replays::types::PlaneId;
+use wows_replays::types::Relation;
+use wows_replays::types::WorldPos;
 
 use crate::assets::GameFonts;
-use crate::draw_command::{
-    ChatEntry, DrawCommand, FontHint, KillFeedEntry, ShipConfigCircleKind, ShipConfigVisibility, ShipVisibility,
-};
+use crate::draw_command::ChatEntry;
+use crate::draw_command::DrawCommand;
+use crate::draw_command::FontHint;
+use crate::draw_command::KillFeedEntry;
+use crate::draw_command::ShipConfigCircleKind;
+use crate::draw_command::ShipConfigVisibility;
+use crate::draw_command::ShipVisibility;
 use crate::map_data;
 
 use crate::MINIMAP_SIZE;
@@ -546,7 +565,10 @@ impl<'a> MinimapRenderer<'a> {
     /// and team1 = enemy. When the replay owner is on internal team 1, all
     /// per-team values are swapped. See TEAM_ADVANTAGE_SCORING.md for details.
     fn calculate_team_advantage(&self, controller: &dyn BattleControllerState) -> crate::advantage::AdvantageResult {
-        use crate::advantage::{ScoringParams, TeamState, calculate_advantage, swap_breakdown};
+        use crate::advantage::ScoringParams;
+        use crate::advantage::TeamState;
+        use crate::advantage::calculate_advantage;
+        use crate::advantage::swap_breakdown;
         use std::cell::RefCell;
 
         let players = controller.player_entities();
@@ -1901,7 +1923,8 @@ fn torpedo_position(torp: &TorpedoData, elapsed: f32) -> WorldPos {
 
 /// Build the icon base name from species, consumable flag, and ammo type.
 fn species_to_icon_base(species: Species, is_consumable: bool, ammo_type: &str) -> String {
-    use convert_case::{Case, Casing};
+    use convert_case::Case;
+    use convert_case::Casing;
 
     let snake = ammo_type.to_case(Case::Snake);
     let ammo = match snake.as_str() {

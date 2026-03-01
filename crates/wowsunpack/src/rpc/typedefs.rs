@@ -1,10 +1,23 @@
 use crate::data::parser_utils::WResult;
 #[cfg(feature = "serde")]
-use serde::ser::{SerializeMap, SerializeSeq, SerializeTuple};
+use serde::ser::SerializeMap;
+#[cfg(feature = "serde")]
+use serde::ser::SerializeSeq;
+#[cfg(feature = "serde")]
+use serde::ser::SerializeTuple;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use winnow::Parser;
-use winnow::binary::{le_f32, le_f64, le_i8, le_i16, le_i32, le_i64, le_u8, le_u16, le_u32, le_u64};
+use winnow::binary::le_f32;
+use winnow::binary::le_f64;
+use winnow::binary::le_i8;
+use winnow::binary::le_i16;
+use winnow::binary::le_i32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
 use winnow::token::take;
 
 /// Type alias matching winnow's default error for binary parsers.

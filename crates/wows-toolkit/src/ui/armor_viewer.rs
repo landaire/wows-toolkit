@@ -1,5 +1,6 @@
 extern crate nalgebra as na;
-use na::{Rotation3, Vector3};
+use na::Rotation3;
+use na::Vector3;
 
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -1478,25 +1479,24 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         }
                     }
 
-                    if pane.trajectory_mode {
-                        if ui.checkbox(&mut pane.continue_on_ricochet, "Continue past ricochet").changed()
-                            && !pane.trajectories.is_empty()
-                        {
-                            let cam_dist = pane.viewport.camera.distance;
-                            let mo = pane.marker_opacity;
-                            for ti in 0..pane.trajectories.len() {
-                                recompute_trajectory_for_range(
-                                    &mut pane.trajectories[ti],
-                                    comparison_ships,
-                                    &mut pane.viewport,
-                                    pane.loaded_armor.as_ref(),
-                                    &render_state.device,
-                                    cam_dist,
-                                    mo,
-                                    comparison_ships_version,
-                                    pane.continue_on_ricochet,
-                                );
-                            }
+                    if pane.trajectory_mode
+                        && ui.checkbox(&mut pane.continue_on_ricochet, "Continue past ricochet").changed()
+                        && !pane.trajectories.is_empty()
+                    {
+                        let cam_dist = pane.viewport.camera.distance;
+                        let mo = pane.marker_opacity;
+                        for ti in 0..pane.trajectories.len() {
+                            recompute_trajectory_for_range(
+                                &mut pane.trajectories[ti],
+                                comparison_ships,
+                                &mut pane.viewport,
+                                pane.loaded_armor.as_ref(),
+                                &render_state.device,
+                                cam_dist,
+                                mo,
+                                comparison_ships_version,
+                                pane.continue_on_ricochet,
+                            );
                         }
                     }
 

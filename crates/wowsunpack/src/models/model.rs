@@ -8,13 +8,19 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_i32, le_i64, le_u8, le_u32, le_u64};
+use winnow::binary::le_i32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
 use winnow::combinator::repeat;
 use winnow::token::take;
 
-use winnow::error::{ContextError, ErrMode};
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 
-use crate::data::parser_utils::{WResult, resolve_relptr};
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::resolve_relptr;
 
 /// Errors that can occur during ModelPrototype parsing.
 #[derive(Debug, Error)]

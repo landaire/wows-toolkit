@@ -1,10 +1,13 @@
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{self, Cursor, Write},
-    path::{Path, PathBuf},
-    sync::RwLock,
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Cursor;
+use std::io::Write;
+use std::io::{
+    self,
 };
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::RwLock;
 
 use flate2::read::DeflateDecoder;
 use memmap2::MmapOptions;

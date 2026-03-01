@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use image::RgbaImage;
-use wows_replays::analyzer::decoder::{DeathCause, Recognized};
-use wows_replays::types::{ElapsedClock, EntityId, PlaneId};
+use wows_replays::analyzer::decoder::DeathCause;
+use wows_replays::analyzer::decoder::Recognized;
+use wows_replays::types::ElapsedClock;
+use wows_replays::types::EntityId;
+use wows_replays::types::PlaneId;
 
 use crate::map_data::MinimapPos;
 

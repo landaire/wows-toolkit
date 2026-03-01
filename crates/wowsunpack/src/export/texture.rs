@@ -368,7 +368,10 @@ use image_dds::SurfaceRgba8;
 use image_dds::image::RgbaImage;
 
 use crate::models::assets_bin::PrototypeDatabase;
-use crate::models::material::{self, MaterialPrototype};
+use crate::models::material::MaterialPrototype;
+use crate::models::material::{
+    self,
+};
 
 /// Resolve a texture selfId hash from an MFM property to a VFS path,
 /// load the DDS bytes, and return them.
@@ -523,13 +526,13 @@ pub fn bake_tiledland_albedo(
             // Apply addSheenTintColor — the TILEDLAND shader uses this to add
             // vegetation coloring (green tint) on top of the earth-tone atlas tiles.
             // We lerp toward the tint color by the sheen amount.
-            if let Some(tint) = sheen_tint {
-                if sheen_amount > 0.0 {
-                    let t = sheen_amount;
-                    r = r * (1.0 - t) + (tint[0] * 255.0) * t;
-                    g = g * (1.0 - t) + (tint[1] * 255.0) * t;
-                    b = b * (1.0 - t) + (tint[2] * 255.0) * t;
-                }
+            if let Some(tint) = sheen_tint
+                && sheen_amount > 0.0
+            {
+                let t = sheen_amount;
+                r = r * (1.0 - t) + (tint[0] * 255.0) * t;
+                g = g * (1.0 - t) + (tint[1] * 255.0) * t;
+                b = b * (1.0 - t) + (tint[2] * 255.0) * t;
             }
 
             output.put_pixel(
@@ -616,16 +619,14 @@ pub fn load_or_bake_albedo(
     if let Some(db) = db
         && let Some(idx) = self_id_index
         && mfm_path_id != 0
+        && let Some(mat) = parse_mfm_from_db(db, mfm_path_id)
+        && is_tiledland_material(&mat)
     {
-        if let Some(mat) = parse_mfm_from_db(db, mfm_path_id) {
-            if is_tiledland_material(&mat) {
-                eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
-                if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, max_size) {
-                    return Some(png);
-                }
-                eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
-            }
+        eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
+        if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, max_size) {
+            return Some(png);
         }
+        eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
     }
 
     // Fall back to simple filename-based lookup (works for standard PBS materials).

@@ -8,10 +8,10 @@ pub mod idx;
 pub mod idx_vfs;
 /// Shared winnow parsing utilities
 pub mod parser_utils;
-/// Ship configuration (loadout) binary parser
-pub mod ship_config;
 /// Utilities for helping load and maintain `.pkg` files
 pub mod pkg;
+/// Ship configuration (loadout) binary parser
+pub mod ship_config;
 // File tree serialization utilities
 pub mod serialization;
 /// Wrapper types for VFS data sources

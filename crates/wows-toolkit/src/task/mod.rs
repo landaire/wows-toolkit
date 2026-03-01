@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 
 use parking_lot::RwLock;
 use rootcause::Report;

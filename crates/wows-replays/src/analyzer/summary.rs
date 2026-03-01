@@ -1,6 +1,8 @@
 use wowsunpack::rpc::typedefs::ArgValue;
 
-use crate::packet2::{EntityMethodPacket, Packet, PacketType};
+use crate::packet2::EntityMethodPacket;
+use crate::packet2::Packet;
+use crate::packet2::PacketType;
 use std::collections::HashMap;
 
 use super::analyzer::Analyzer;

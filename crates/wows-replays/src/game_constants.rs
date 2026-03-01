@@ -1,8 +1,10 @@
 use std::sync::LazyLock;
 
-pub use wowsunpack::game_constants::{
-    BattleConstants, ChannelConstants, CommonConstants, ShipsConstants, WeaponsConstants,
-};
+pub use wowsunpack::game_constants::BattleConstants;
+pub use wowsunpack::game_constants::ChannelConstants;
+pub use wowsunpack::game_constants::CommonConstants;
+pub use wowsunpack::game_constants::ShipsConstants;
+pub use wowsunpack::game_constants::WeaponsConstants;
 use wowsunpack::vfs::VfsPath;
 
 pub static DEFAULT_GAME_CONSTANTS: LazyLock<GameConstants> = LazyLock::new(GameConstants::defaults);

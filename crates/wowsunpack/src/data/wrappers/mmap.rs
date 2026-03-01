@@ -6,8 +6,10 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 use memmap2::MmapOptions;
 use vfs::VfsError;

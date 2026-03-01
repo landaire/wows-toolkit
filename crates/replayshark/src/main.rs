@@ -1,16 +1,22 @@
-use anyhow::{Context, anyhow};
-use clap::{Parser, Subcommand};
+use anyhow::Context;
+use anyhow::anyhow;
+use clap::Parser;
+use clap::Subcommand;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
-use std::{collections::HashMap, path::Path};
 use wowsunpack::data::DataFileWithCallback;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
 
-use wows_replays::{ParseError, ReplayFile, analyzer::Analyzer, types::EntityId};
+use wows_replays::ParseError;
+use wows_replays::ReplayFile;
+use wows_replays::analyzer::Analyzer;
+use wows_replays::types::EntityId;
 
 /// Parses & processes World of Warships replay files
 #[derive(Parser)]

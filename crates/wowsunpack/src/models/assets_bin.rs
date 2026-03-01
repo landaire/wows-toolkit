@@ -3,9 +3,13 @@ use std::collections::HashMap;
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_i64, le_u16, le_u32};
+use winnow::binary::le_i64;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
 
-use crate::data::parser_utils::{WResult, parse_packed_string_fields, resolve_relptr};
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::parse_packed_string_fields;
+use crate::data::parser_utils::resolve_relptr;
 
 const BWDB_MAGIC: u32 = 0x42574442;
 const BWDB_VERSION: u32 = 0x01010000;

@@ -1,14 +1,32 @@
 use std::collections::HashMap;
 
-use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
-use image::{Rgb, RgbImage, RgbaImage};
-use tiny_skia::{
-    BlendMode, FillRule, FilterQuality, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, StrokeDash,
-    Transform,
-};
+use ab_glyph::Font;
+use ab_glyph::FontArc;
+use ab_glyph::PxScale;
+use ab_glyph::ScaleFont;
+use image::Rgb;
+use image::RgbImage;
+use image::RgbaImage;
+use tiny_skia::BlendMode;
+use tiny_skia::FillRule;
+use tiny_skia::FilterQuality;
+use tiny_skia::LineCap;
+use tiny_skia::LineJoin;
+use tiny_skia::Paint;
+use tiny_skia::PathBuilder;
+use tiny_skia::Pixmap;
+use tiny_skia::PixmapPaint;
+use tiny_skia::Stroke;
+use tiny_skia::StrokeDash;
+use tiny_skia::Transform;
 
 use crate::assets::GameFonts;
-use crate::draw_command::{ChatEntry, DrawCommand, FontHint, KillFeedEntry, RenderTarget, ShipVisibility};
+use crate::draw_command::ChatEntry;
+use crate::draw_command::DrawCommand;
+use crate::draw_command::FontHint;
+use crate::draw_command::KillFeedEntry;
+use crate::draw_command::RenderTarget;
+use crate::draw_command::ShipVisibility;
 use wows_replays::types::ElapsedClock;
 
 // ── Pixmap conversion helpers ──────────────────────────────────────────────
@@ -1250,7 +1268,9 @@ fn draw_battle_result_overlay(
 
 // ── ImageTarget (RenderTarget implementation) ──────────────────────────────
 
-use crate::{CANVAS_HEIGHT, HUD_HEIGHT, MINIMAP_SIZE};
+use crate::CANVAS_HEIGHT;
+use crate::HUD_HEIGHT;
+use crate::MINIMAP_SIZE;
 
 /// Pre-rasterized ship icon (RGBA, white/alpha mask to be tinted at draw time).
 pub type ShipIcon = RgbaImage;

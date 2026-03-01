@@ -1,9 +1,12 @@
 extern crate nalgebra as na;
 use na::Vector4;
 
+use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
-use crate::viewport_3d::camera::{ArcballCamera, mat4_to_na};
-use crate::viewport_3d::types::{HitResult, MeshId, Vec3};
+use crate::viewport_3d::camera::mat4_to_na;
+use crate::viewport_3d::types::HitResult;
+use crate::viewport_3d::types::MeshId;
+use crate::viewport_3d::types::Vec3;
 
 /// CPU-side mesh data retained for picking.
 pub(crate) struct PickableMesh {

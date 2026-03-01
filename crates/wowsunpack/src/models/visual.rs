@@ -1,17 +1,30 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_i64, le_u8, le_u16, le_u32, le_u64};
-use winnow::error::{ContextError, ErrMode};
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::parse_lod_fields;
+use crate::data::parser_utils::parse_matrix_array;
+use crate::data::parser_utils::parse_render_set_fields;
+use crate::data::parser_utils::parse_u16_array;
+use crate::data::parser_utils::parse_u32_array;
+use crate::data::parser_utils::resolve_relptr;
 use crate::data::parser_utils::{
-    self, WResult, parse_lod_fields, parse_matrix_array, parse_render_set_fields, parse_u16_array, parse_u32_array,
-    resolve_relptr,
+    self,
 };
-use crate::models::assets_bin::{PrototypeDatabase, StringsSection};
+use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::assets_bin::StringsSection;
 
 // Re-export shared types so existing `use crate::models::visual::Matrix4x4` etc. still work.
-pub use crate::data::parser_utils::{BoundingBox, Matrix4x4};
+pub use crate::data::parser_utils::BoundingBox;
+pub use crate::data::parser_utils::Matrix4x4;
 
 /// Errors that can occur during VisualPrototype parsing.
 #[derive(Debug, Error)]

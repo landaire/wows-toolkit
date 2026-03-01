@@ -6,7 +6,9 @@
 use std::fmt;
 
 use crate::data::Version;
-use crate::game_constants::{BattleConstants, CommonConstants, ShipsConstants};
+use crate::game_constants::BattleConstants;
+use crate::game_constants::CommonConstants;
+use crate::game_constants::ShipsConstants;
 use crate::recognized::Recognized;
 
 use crate::game_params::types::Meters;

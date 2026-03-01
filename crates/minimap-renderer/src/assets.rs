@@ -1,8 +1,12 @@
-use ab_glyph::{Font, FontArc, PxScale};
-use image::{RgbImage, RgbaImage};
+use ab_glyph::Font;
+use ab_glyph::FontArc;
+use ab_glyph::PxScale;
+use image::RgbImage;
+use image::RgbaImage;
 use std::collections::HashMap;
 use std::io::Read;
-use tracing::{debug, warn};
+use tracing::debug;
+use tracing::warn;
 use wowsunpack::vfs::VfsPath;
 
 use crate::MINIMAP_SIZE;

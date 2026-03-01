@@ -3,10 +3,16 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::LazyLock;
 
-use crate::game_types::{
-    BuoyancyState, CameraMode, CollisionType, Consumable, ControlPointType, DeathCause, FinishType,
-    InteractiveZoneType, ShellHitType, WeaponType,
-};
+use crate::game_types::BuoyancyState;
+use crate::game_types::CameraMode;
+use crate::game_types::CollisionType;
+use crate::game_types::Consumable;
+use crate::game_types::ControlPointType;
+use crate::game_types::DeathCause;
+use crate::game_types::FinishType;
+use crate::game_types::InteractiveZoneType;
+use crate::game_types::ShellHitType;
+use crate::game_types::WeaponType;
 
 fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Result<Vec<u8>, vfs::VfsError> {
     let mut buf = Vec::new();

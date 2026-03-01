@@ -1,9 +1,12 @@
 use crate::icon_str;
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::{self};
+use std::fs::{
+    self,
+};
 use std::io::BufWriter;
-use std::io::{Read, Write};
+use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,14 +30,17 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use pickled::HashableValue;
 use serde::Serialize;
 use serde_cbor::ser::IoWrite;
-use wowsunpack::data::assets_bin_vfs::{AssetsBinVfs, PrototypeType};
+use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
+use wowsunpack::data::assets_bin_vfs::PrototypeType;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::app::ToolkitTabViewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{self};
+use crate::plaintext_viewer::{
+    self,
+};
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -524,7 +530,7 @@ impl UnpackerPaneViewer<'_> {
                 if let Some(vfs) = &browser.vfs {
                     // Use cached dir entries to avoid per-frame read_dir/metadata calls
                     let needs_refresh =
-                        browser.cached_dir_entries.as_ref().map_or(true, |(cached_dir, _)| cached_dir != &selected_dir);
+                        browser.cached_dir_entries.as_ref().is_none_or(|(cached_dir, _)| cached_dir != &selected_dir);
                     if needs_refresh {
                         let entries = get_dir_entries(vfs, &selected_dir);
                         browser.cached_dir_entries = Some((selected_dir.clone(), entries));
@@ -555,7 +561,7 @@ impl UnpackerPaneViewer<'_> {
                         egui::ScrollArea::both().id_salt(format!("file_listing_scroll_{}", source_id)).show(ui, |ui| {
                             render_file_listing_table(
                                 ui,
-                                &entries,
+                                entries,
                                 &queued_paths,
                                 self.items_to_extract,
                                 self.file_viewer,
@@ -919,7 +925,8 @@ fn render_file_listing_table(
     navigate_to: &std::cell::Cell<Option<(BrowserSource, String)>>,
     source: &BrowserSource,
 ) {
-    use egui_extras::{Column, TableBuilder};
+    use egui_extras::Column;
+    use egui_extras::TableBuilder;
 
     let table = TableBuilder::new(ui)
         .striped(true)
@@ -1021,7 +1028,8 @@ fn render_filter_results_table(
     clear_filter: &std::cell::Cell<Option<BrowserSource>>,
     source: &BrowserSource,
 ) {
-    use egui_extras::{Column, TableBuilder};
+    use egui_extras::Column;
+    use egui_extras::TableBuilder;
 
     let table = TableBuilder::new(ui)
         .striped(true)
@@ -1119,7 +1127,8 @@ fn render_search_results_table(
     clear_filter: &std::cell::Cell<Option<BrowserSource>>,
     source: &BrowserSource,
 ) {
-    use egui_extras::{Column, TableBuilder};
+    use egui_extras::Column;
+    use egui_extras::TableBuilder;
 
     let items_snapshot = items_to_extract.lock().clone();
     let queued_paths: HashSet<String> = items_snapshot.iter().map(|v| v.as_str().to_string()).collect();
@@ -1354,15 +1363,15 @@ impl ToolkitTabViewer<'_> {
         let (query, path_filter, source, active_vfs, active_files) = {
             let mut found = None;
             for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs() {
-                if let UnpackerPane::Browser(browser) = pane {
-                    if browser.source == target_source {
-                        let q = browser.content_search_query.trim().to_string();
-                        let pf = browser.content_search_path_filter.trim().to_string();
-                        if let (Some(vfs), Some(files)) = (&browser.vfs, &browser.files) {
-                            found = Some((q, pf, browser.source.clone(), vfs.clone(), files.clone()));
-                        }
-                        break;
+                if let UnpackerPane::Browser(browser) = pane
+                    && browser.source == target_source
+                {
+                    let q = browser.content_search_query.trim().to_string();
+                    let pf = browser.content_search_path_filter.trim().to_string();
+                    if let (Some(vfs), Some(files)) = (&browser.vfs, &browser.files) {
+                        found = Some((q, pf, browser.source.clone(), vfs.clone(), files.clone()));
                     }
+                    break;
                 }
             }
             match found {
@@ -1398,10 +1407,10 @@ impl ToolkitTabViewer<'_> {
 
         // Find if there's already a search tab node to add to
         let existing_search_node = tree.iter().enumerate().find_map(|(idx, node)| {
-            if let egui_dock::Node::Leaf(leaf) = node {
-                if leaf.tabs().iter().any(|t| matches!(t, UnpackerPane::Search(_))) {
-                    return Some(NodeIndex(idx));
-                }
+            if let egui_dock::Node::Leaf(leaf) = node
+                && leaf.tabs().iter().any(|t| matches!(t, UnpackerPane::Search(_)))
+            {
+                return Some(NodeIndex(idx));
             }
             None
         });
@@ -1540,20 +1549,18 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     // Try JSON decode for Assets.bin prototypes when toggle is on
-                    if decode_json {
-                        if let Some(pt) = decodable_prototype_type(&filename) {
-                            let mut data = Vec::new();
-                            if let Ok(mut reader) = file.open_file() {
-                                let _ = reader.read_to_end(&mut data);
-                            }
-                            if let Ok(json) = wowsunpack::models::decode_prototype_to_json(&data, pt) {
-                                let json_path = path.join(format!("{filename}.json"));
-                                let mut out_file = File::create(json_path).expect("failed to create output file");
-                                out_file.write_all(json.as_bytes()).expect("Failed to write JSON");
-                                continue;
-                            }
-                            // Decode failed — fall through to raw extraction
+                    if decode_json && let Some(pt) = decodable_prototype_type(&filename) {
+                        let mut data = Vec::new();
+                        if let Ok(mut reader) = file.open_file() {
+                            let _ = reader.read_to_end(&mut data);
                         }
+                        if let Ok(json) = wowsunpack::models::decode_prototype_to_json(&data, pt) {
+                            let json_path = path.join(format!("{filename}.json"));
+                            let mut out_file = File::create(json_path).expect("failed to create output file");
+                            out_file.write_all(json.as_bytes()).expect("Failed to write JSON");
+                            continue;
+                        }
+                        // Decode failed — fall through to raw extraction
                     }
 
                     let mut out_file = File::create(file_path).expect("failed to create output file");
@@ -1658,12 +1665,13 @@ impl ToolkitTabViewer<'_> {
         let wows_data = wows_data.read();
 
         for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-            if let UnpackerPane::Browser(browser) = pane {
-                if browser.source == BrowserSource::Pkg && browser.vfs.is_none() {
-                    browser.cached_folder_tree = Some(build_folder_tree(&wows_data.vfs, ""));
-                    browser.vfs = Some(wows_data.vfs.clone());
-                    browser.files = Some(wows_data.filtered_files.clone());
-                }
+            if let UnpackerPane::Browser(browser) = pane
+                && browser.source == BrowserSource::Pkg
+                && browser.vfs.is_none()
+            {
+                browser.cached_folder_tree = Some(build_folder_tree(&wows_data.vfs, ""));
+                browser.vfs = Some(wows_data.vfs.clone());
+                browser.files = Some(wows_data.filtered_files.clone());
             }
         }
     }
@@ -1726,26 +1734,26 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 // Find the assets.bin browser pane and populate it
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-                    if let UnpackerPane::Browser(browser) = pane {
-                        if browser.source == BrowserSource::AssetsBin {
-                            browser.cached_folder_tree = Some(build_folder_tree(&result.vfs, ""));
-                            browser.vfs = Some(result.vfs.clone());
-                            browser.files = Some(result.files.clone());
-                            browser.loading = false;
-                            break;
-                        }
+                    if let UnpackerPane::Browser(browser) = pane
+                        && browser.source == BrowserSource::AssetsBin
+                    {
+                        browser.cached_folder_tree = Some(build_folder_tree(&result.vfs, ""));
+                        browser.vfs = Some(result.vfs.clone());
+                        browser.files = Some(result.files.clone());
+                        browser.loading = false;
+                        break;
                     }
                 }
             }
             Ok(Err(err)) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-                    if let UnpackerPane::Browser(browser) = pane {
-                        if browser.source == BrowserSource::AssetsBin {
-                            browser.loading = false;
-                            browser.error = Some(err.clone());
-                            break;
-                        }
+                    if let UnpackerPane::Browser(browser) = pane
+                        && browser.source == BrowserSource::AssetsBin
+                    {
+                        browser.loading = false;
+                        browser.error = Some(err.clone());
+                        break;
                     }
                 }
             }
@@ -1753,12 +1761,12 @@ impl ToolkitTabViewer<'_> {
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-                    if let UnpackerPane::Browser(browser) = pane {
-                        if browser.source == BrowserSource::AssetsBin {
-                            browser.loading = false;
-                            browser.error = Some("Background thread disconnected".to_string());
-                            break;
-                        }
+                    if let UnpackerPane::Browser(browser) = pane
+                        && browser.source == BrowserSource::AssetsBin
+                    {
+                        browser.loading = false;
+                        browser.error = Some("Background thread disconnected".to_string());
+                        break;
                     }
                 }
             }
@@ -2040,21 +2048,21 @@ impl ToolkitTabViewer<'_> {
             // Apply deferred navigation
             if let Some((source, dir)) = navigate_to.take() {
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-                    if let UnpackerPane::Browser(browser) = pane {
-                        if browser.source == source {
-                            browser.selected_dir = Some(dir);
-                            break;
-                        }
+                    if let UnpackerPane::Browser(browser) = pane
+                        && browser.source == source
+                    {
+                        browser.selected_dir = Some(dir);
+                        break;
                     }
                 }
             }
             if let Some(source) = clear_filter.take() {
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
-                    if let UnpackerPane::Browser(browser) = pane {
-                        if browser.source == source {
-                            browser.reset_filter();
-                            break;
-                        }
+                    if let UnpackerPane::Browser(browser) = pane
+                        && browser.source == source
+                    {
+                        browser.reset_filter();
+                        break;
                     }
                 }
             }

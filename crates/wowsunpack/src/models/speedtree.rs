@@ -15,9 +15,12 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_f32, le_u16, le_u32};
+use winnow::binary::le_f32;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
 use winnow::combinator::repeat;
-use winnow::error::{ContextError, ErrMode};
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 use winnow::token::take;
 
 use crate::data::parser_utils::WResult;

@@ -1,8 +1,9 @@
 //use crate::script_type::TypeAliases;
-use crate::{
-    data::DataFileLoader,
-    rpc::typedefs::{ArgType, TypeAliases, parse_aliases, parse_type},
-};
+use crate::data::DataFileLoader;
+use crate::rpc::typedefs::ArgType;
+use crate::rpc::typedefs::TypeAliases;
+use crate::rpc::typedefs::parse_aliases;
+use crate::rpc::typedefs::parse_type;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Flags {

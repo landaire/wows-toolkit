@@ -9,16 +9,34 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_i64, le_u8, le_u16, le_u32, le_u64};
-use winnow::error::{ContextError, ErrMode};
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 use winnow::token::take;
 
+use crate::data::parser_utils::BoundingBox;
+use crate::data::parser_utils::Matrix4x4;
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::parse_lod_fields;
+use crate::data::parser_utils::parse_matrix_array;
+use crate::data::parser_utils::parse_render_set_fields;
+use crate::data::parser_utils::parse_u16_array;
+use crate::data::parser_utils::parse_u32_array;
+use crate::data::parser_utils::resolve_relptr;
+use crate::data::parser_utils::resolve_relptr_at;
 use crate::data::parser_utils::{
-    self, BoundingBox, Matrix4x4, WResult, parse_lod_fields, parse_matrix_array, parse_render_set_fields,
-    parse_u16_array, parse_u32_array, resolve_relptr, resolve_relptr_at,
+    self,
 };
-use crate::models::model::{ModelPrototype, parse_model};
-use crate::models::visual::{Lod, RenderSet, VisualNodes, VisualPrototype};
+use crate::models::model::ModelPrototype;
+use crate::models::model::parse_model;
+use crate::models::visual::Lod;
+use crate::models::visual::RenderSet;
+use crate::models::visual::VisualNodes;
+use crate::models::visual::VisualPrototype;
 
 /// Errors during `models.bin` parsing.
 #[derive(Debug, Error)]

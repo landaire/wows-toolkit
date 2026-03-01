@@ -10,10 +10,16 @@ use std::io::Cursor;
 use std::ops::Range;
 
 use flate2::read::DeflateDecoder;
+use vfs::FileSystem;
+use vfs::VfsError;
+use vfs::VfsMetadata;
 use vfs::error::VfsErrorKind;
-use vfs::{FileSystem, VfsError, VfsMetadata};
 
-use crate::data::idx::{self, IdxFile, VfsEntry};
+use crate::data::idx::IdxFile;
+use crate::data::idx::VfsEntry;
+use crate::data::idx::{
+    self,
+};
 
 /// Trait for providing raw byte access to PKG volume data (sync).
 ///
@@ -263,7 +269,8 @@ where
 mod async_impl {
     use super::*;
     use async_trait::async_trait;
-    use vfs::async_vfs::{AsyncFileSystem, SeekAndRead};
+    use vfs::async_vfs::AsyncFileSystem;
+    use vfs::async_vfs::SeekAndRead;
 
     #[async_trait]
     impl<T> AsyncFileSystem for IdxVfs<T>

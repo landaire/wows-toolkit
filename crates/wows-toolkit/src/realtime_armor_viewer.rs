@@ -2159,14 +2159,14 @@ impl RealtimeArmorViewer {
                         egui::RichText::new(format!("{:.0}mm", hit.thickness_mm)).strong().small().color(plate_color),
                     );
                     ui.label(egui::RichText::new(format!("{:.1}°", hit.angle_deg)).small().color(plate_color));
-                    if i == 0 {
-                        if let Some(server_angle) = shell_entry.server_material_angle {
-                            ui.label(
-                                egui::RichText::new(format!("(Server: {:.1}°)", server_angle.to_degrees()))
-                                    .small()
-                                    .color(egui::Color32::GRAY),
-                            );
-                        }
+                    if i == 0
+                        && let Some(server_angle) = shell_entry.server_material_angle
+                    {
+                        ui.label(
+                            egui::RichText::new(format!("(Server: {:.1}°)", server_angle.to_degrees()))
+                                .small()
+                                .color(egui::Color32::GRAY),
+                        );
                     }
                 });
                 ui.label(

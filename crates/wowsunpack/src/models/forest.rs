@@ -34,12 +34,16 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_f32, le_i64, le_u64};
+use winnow::binary::le_f32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u64;
 use winnow::combinator::repeat;
 
-use winnow::error::{ContextError, ErrMode};
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 
-use crate::data::parser_utils::{WResult, resolve_relptr};
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::resolve_relptr;
 
 const INSTANCE_SIZE: usize = 16;
 

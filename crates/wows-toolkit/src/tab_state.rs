@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::time::Duration;
 
 use egui::mutex::Mutex;
@@ -33,7 +35,8 @@ use crate::task::DataExportSettings;
 use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
-use crate::ui::file_unpacker::{ResourceBrowserState, UnpackerProgress};
+use crate::ui::file_unpacker::ResourceBrowserState;
+use crate::ui::file_unpacker::UnpackerProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::replay_parser::Replay;

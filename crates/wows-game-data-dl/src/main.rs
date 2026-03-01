@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use clap::Subcommand;
 use rootcause::prelude::*;
 use std::path::PathBuf;
 
@@ -107,7 +108,9 @@ fn main() -> Result<(), Report> {
             } else if let Some(b) = build {
                 b
             } else if let Some(ref v) = version {
-                manifest.find_by_version(v).ok_or_else(|| rootcause::report!("No build found matching version '{v}'"))?
+                manifest
+                    .find_by_version(v)
+                    .ok_or_else(|| rootcause::report!("No build found matching version '{v}'"))?
             } else {
                 bail!("Specify --latest, --build, or --version");
             };
@@ -144,7 +147,7 @@ fn main() -> Result<(), Report> {
                 println!();
             }
 
-            println!("{:<12} {:<10} {:<24} {}", "BUILD", "VERSION", "MANIFEST", "STATUS");
+            println!("{:<12} {:<10} {:<24} STATUS", "BUILD", "VERSION", "MANIFEST");
             println!("{}", "-".repeat(72));
 
             let mut builds: Vec<_> = manifest.versions.keys().collect();
@@ -233,10 +236,10 @@ fn main() -> Result<(), Report> {
             } else if let Some(ref v) = version {
                 let mut matched = Vec::new();
                 for &b in &builds {
-                    if let Ok(detected) = detect::detect_version_at_path(&path, b) {
-                        if manifest::version_matches(&detected, v) {
-                            matched.push(b);
-                        }
+                    if let Ok(detected) = detect::detect_version_at_path(&path, b)
+                        && manifest::version_matches(&detected, v)
+                    {
+                        matched.push(b);
                     }
                 }
                 if matched.is_empty() {

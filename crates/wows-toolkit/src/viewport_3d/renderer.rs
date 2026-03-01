@@ -1,13 +1,20 @@
 use std::collections::HashMap;
 
 extern crate nalgebra as na;
-use na::{Rotation3, Vector3};
+use na::Rotation3;
+use na::Vector3;
 
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
 use crate::viewport_3d::picking::PickableMesh;
-use crate::viewport_3d::picking::{self};
-use crate::viewport_3d::types::{HitResult, MeshId, Uniforms, Vec3, Vertex};
+use crate::viewport_3d::picking::{
+    self,
+};
+use crate::viewport_3d::types::HitResult;
+use crate::viewport_3d::types::MeshId;
+use crate::viewport_3d::types::Uniforms;
+use crate::viewport_3d::types::Vec3;
+use crate::viewport_3d::types::Vertex;
 
 const MAT4_IDENTITY: [[f32; 4]; 4] =
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];

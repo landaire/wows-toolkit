@@ -1,16 +1,22 @@
 use kinded::Kinded;
-use winnow::{
-    Parser as _,
-    binary::{le_f32, le_i16, le_i32, le_i64, le_u8, le_u16, le_u32},
-    token::take,
-};
+use winnow::Parser as _;
+use winnow::binary::le_f32;
+use winnow::binary::le_i16;
+use winnow::binary::le_i32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::token::take;
 
 use serde::Serialize;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
 use crate::error::*;
-use crate::types::{EntityId, GameClock, GameParamId};
+use crate::types::EntityId;
+use crate::types::GameClock;
+use crate::types::GameParamId;
 use wowsunpack::rpc::entitydefs::*;
 use wowsunpack::rpc::typedefs::ArgValue;
 
@@ -736,13 +742,7 @@ impl<'argtype> Parser<'argtype> {
         let component_data = i.to_vec();
         *i = &[];
 
-        self.entities.insert(
-            entity_id,
-            Entity {
-                entity_type,
-                properties: vec![],
-            },
-        );
+        self.entities.insert(entity_id, Entity { entity_type, properties: vec![] });
         Ok(PacketType::BasePlayerCreate(BasePlayerCreatePacket {
             entity_id: entity_id.into(),
             entity_type: &spec.name,

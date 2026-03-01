@@ -9,24 +9,22 @@ use std::collections::BTreeMap;
 use std::io::Read;
 
 use serde::Serialize;
-use wowsunpack::data::assets_bin_vfs::{AssetsBinVfs, PrototypeType};
-use wowsunpack::models::{geometry, material, model, terrain, visual};
+use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
+use wowsunpack::data::assets_bin_vfs::PrototypeType;
+use wowsunpack::models::geometry;
+use wowsunpack::models::material;
+use wowsunpack::models::model;
+use wowsunpack::models::terrain;
+use wowsunpack::models::visual;
 use wowsunpack::vfs::VfsPath;
 
 fn game_vfs() -> VfsPath {
-    wows_game_data_dl::latest_build()
-        .expect("game data should be available")
-        .1
+    wows_game_data_dl::latest_build().expect("game data should be available").1
 }
 
 fn load_assets_bin_vfs(vfs: &VfsPath) -> AssetsBinVfs {
     let mut data = Vec::new();
-    vfs.join("content/assets.bin")
-        .unwrap()
-        .open_file()
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    vfs.join("content/assets.bin").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
     AssetsBinVfs::new(data).unwrap()
 }
 
@@ -39,10 +37,8 @@ fn assets_bin_vfs_file_and_dir_counts() {
     let abvfs = load_assets_bin_vfs(&vfs);
 
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/assets_bin_vfs"),
-    );
+    settings
+        .set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/assets_bin_vfs"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!("file_count", abvfs.file_count());
         insta::assert_yaml_snapshot!("dir_count", abvfs.dir_count());
@@ -61,10 +57,8 @@ fn assets_bin_vfs_prototype_type_distribution() {
     }
 
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/assets_bin_vfs"),
-    );
+    settings
+        .set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/assets_bin_vfs"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!("type_distribution", counts);
     });
@@ -90,22 +84,13 @@ fn parse_material_snapshot() {
 
     let mut data = Vec::new();
     let abvfs_path: VfsPath = abvfs.into();
-    abvfs_path
-        .join(path)
-        .unwrap()
-        .open_file()
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    abvfs_path.join(path).unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
 
     let parsed = material::parse_material(&data).expect("should parse material");
 
     let name = path.rsplit('/').next().unwrap_or(path);
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/material"),
-    );
+    settings.set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/material"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!(name.to_string(), parsed);
     });
@@ -130,22 +115,13 @@ fn parse_visual_snapshot() {
 
     let mut data = Vec::new();
     let abvfs_path: VfsPath = abvfs.into();
-    abvfs_path
-        .join(path)
-        .unwrap()
-        .open_file()
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    abvfs_path.join(path).unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
 
     let parsed = visual::parse_visual(&data).expect("should parse visual");
 
     let name = path.rsplit('/').next().unwrap_or(path);
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/visual"),
-    );
+    settings.set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/visual"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!(name.to_string(), parsed);
     });
@@ -170,22 +146,13 @@ fn parse_model_snapshot() {
 
     let mut data = Vec::new();
     let abvfs_path: VfsPath = abvfs.into();
-    abvfs_path
-        .join(path)
-        .unwrap()
-        .open_file()
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    abvfs_path.join(path).unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
 
     let parsed = model::parse_model(&data).expect("should parse model");
 
     let name = path.rsplit('/').next().unwrap_or(path);
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/model"),
-    );
+    settings.set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/model"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!(name.to_string(), parsed);
     });
@@ -212,8 +179,7 @@ fn parse_geometry_snapshot() {
     // Geometry files live in the PKG VFS, not assets.bin.
     // Walk content/gameplay/ to find a .geometry file.
     let gameplay = vfs.join("content/gameplay").expect("gameplay dir");
-    let geom_path = find_file_recursive(&gameplay, ".geometry")
-        .expect("should find a .geometry file");
+    let geom_path = find_file_recursive(&gameplay, ".geometry").expect("should find a .geometry file");
 
     let mut data = Vec::new();
     geom_path.open_file().unwrap().read_to_end(&mut data).unwrap();
@@ -232,10 +198,7 @@ fn parse_geometry_snapshot() {
 
     let name = geom_path.filename();
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/geometry"),
-    );
+    settings.set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/geometry"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!(name, summary);
     });
@@ -260,21 +223,14 @@ fn parse_terrain_snapshot() {
     let vfs = game_vfs();
 
     let spaces = vfs.join("spaces").expect("spaces dir");
-    let terrain_path = find_file_recursive(&spaces, "terrain.bin")
-        .expect("should find a terrain.bin file");
+    let terrain_path = find_file_recursive(&spaces, "terrain.bin").expect("should find a terrain.bin file");
 
     let mut data = Vec::new();
-    terrain_path
-        .open_file()
-        .unwrap()
-        .read_to_end(&mut data)
-        .unwrap();
+    terrain_path.open_file().unwrap().read_to_end(&mut data).unwrap();
 
     let parsed = terrain::parse_terrain(&data).expect("should parse terrain");
 
-    let (min, max) = parsed.heightmap.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| {
-        (lo.min(v), hi.max(v))
-    });
+    let (min, max) = parsed.heightmap.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
 
     let summary = TerrainSummary {
         width: parsed.width,
@@ -287,14 +243,9 @@ fn parse_terrain_snapshot() {
     };
 
     // Use the space directory name as the snapshot name
-    let space_name = terrain_path
-        .parent()
-        .filename();
+    let space_name = terrain_path.parent().filename();
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_path(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/snapshots/terrain"),
-    );
+    settings.set_snapshot_path(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/terrain"));
     settings.bind(|| {
         insta::assert_yaml_snapshot!(space_name, summary);
     });

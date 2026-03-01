@@ -6,7 +6,8 @@
 //! reference a `colorScheme` that provides 4 RGBA colors used to colorize a
 //! repeating tile pattern texture.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
 
 use vfs::VfsPath;

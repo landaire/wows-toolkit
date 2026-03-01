@@ -1,16 +1,33 @@
 use crate::PResult;
-use crate::packet2::{EntityMethodPacket, Packet, PacketType};
-use crate::types::{AccountId, AvatarId, EntityId, GameParamId, NormalizedPos, PlaneId, ShotId, WorldPos, WorldPos2D};
+use crate::packet2::EntityMethodPacket;
+use crate::packet2::Packet;
+use crate::packet2::PacketType;
+use crate::types::AccountId;
+use crate::types::AvatarId;
+use crate::types::EntityId;
+use crate::types::GameParamId;
+use crate::types::NormalizedPos;
+use crate::types::PlaneId;
+use crate::types::ShotId;
+use crate::types::WorldPos;
+use crate::types::WorldPos2D;
 use kinded::Kinded;
 use pickled::Value;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter::FromIterator;
 use winnow::Parser;
-use winnow::binary::{le_f32, le_u8, le_u16, le_u64};
+use winnow::binary::le_f32;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u64;
 use wowsunpack::data::Version;
-use wowsunpack::game_constants::{DEFAULT_BATTLE_CONSTANTS, DEFAULT_COMMON_CONSTANTS, DEFAULT_SHIPS_CONSTANTS};
+use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
+use wowsunpack::game_constants::DEFAULT_COMMON_CONSTANTS;
+use wowsunpack::game_constants::DEFAULT_SHIPS_CONSTANTS;
 use wowsunpack::game_params::convert::pickle_to_json;
 use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::rpc::typedefs::ArgValue;
@@ -45,10 +62,18 @@ impl DecoderBuilder {
         Box::new(decoder)
     }
 }
-pub use wowsunpack::game_types::{
-    BatteryState, BattleStage, BuoyancyState, CameraMode, CollisionType, Consumable, DeathCause, FinishType, Ribbon,
-    ShellHitType, VoiceLine, WeaponType,
-};
+pub use wowsunpack::game_types::BatteryState;
+pub use wowsunpack::game_types::BattleStage;
+pub use wowsunpack::game_types::BuoyancyState;
+pub use wowsunpack::game_types::CameraMode;
+pub use wowsunpack::game_types::CollisionType;
+pub use wowsunpack::game_types::Consumable;
+pub use wowsunpack::game_types::DeathCause;
+pub use wowsunpack::game_types::FinishType;
+pub use wowsunpack::game_types::Ribbon;
+pub use wowsunpack::game_types::ShellHitType;
+pub use wowsunpack::game_types::VoiceLine;
+pub use wowsunpack::game_types::WeaponType;
 pub use wowsunpack::recognized::Recognized;
 
 /// Properties only present for human players (not bots)

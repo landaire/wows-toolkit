@@ -1,38 +1,75 @@
-use std::{cell::RefCell, collections::HashMap, str::FromStr, time::Duration};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use tracing::{Level, debug, span, trace};
-use wowsunpack::{
-    data::{ResourceLoader, Version, ship_config::parse_ship_config},
-    game_params::types::{BigWorldDistance, CrewSkill, Param, Species},
-    game_types::{BattleStage, BattleType},
-    rpc::typedefs::ArgValue,
-};
+use tracing::Level;
+use tracing::debug;
+use tracing::span;
+use tracing::trace;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
 pub use wowsunpack::data::ship_config::ShipConfig;
+use wowsunpack::data::ship_config::parse_ship_config;
+use wowsunpack::game_params::types::BigWorldDistance;
+use wowsunpack::game_params::types::CrewSkill;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::BattleStage;
+use wowsunpack::game_types::BattleType;
+use wowsunpack::rpc::typedefs::ArgValue;
 
 static TIME_UNTIL_GAME_START: Duration = Duration::from_secs(30);
 
+use crate::Rc;
+use crate::ReplayMeta;
+use crate::RwCellExt;
+use crate::analyzer::analyzer::Analyzer;
+use crate::analyzer::decoder::BuoyancyState;
+use crate::analyzer::decoder::ChatMessageExtra;
+use crate::analyzer::decoder::DeathCause;
+use crate::analyzer::decoder::FinishType;
+use crate::analyzer::decoder::PlayerStateData;
+use crate::analyzer::decoder::Recognized;
+use crate::analyzer::decoder::WeaponType;
 use crate::game_constants::GameConstants;
-use crate::{
-    Rc, ReplayMeta, RwCellExt,
-    analyzer::{
-        analyzer::Analyzer,
-        decoder::{BuoyancyState, ChatMessageExtra, DeathCause, FinishType, PlayerStateData, Recognized, WeaponType},
-    },
-    nested_property_path::{PropertyNestLevel, UpdateAction},
-    packet2::{EntityCreatePacket, Packet},
-    types::{AccountId, ElapsedClock, EntityId, GameClock, GameParamId, PlaneId, Relation, WorldPos},
-};
+use crate::nested_property_path::PropertyNestLevel;
+use crate::nested_property_path::UpdateAction;
+use crate::packet2::EntityCreatePacket;
+use crate::packet2::Packet;
+use crate::types::AccountId;
+use crate::types::ElapsedClock;
+use crate::types::EntityId;
+use crate::types::GameClock;
+use crate::types::GameParamId;
+use crate::types::PlaneId;
+use crate::types::Relation;
+use crate::types::WorldPos;
 
 use super::listener::BattleControllerState;
-use super::state::{
-    ActiveConsumable, ActivePlane, ActiveShot, ActiveTorpedo, ActiveWard, BuffZoneState, BuildingEntity,
-    CapturePointState, CapturedBuff, ControlPointType, DeadShip, InteractiveZoneType, KillRecord, LocalWeatherZone,
-    MinimapPosition, ResolvedShotHit, ScoringRules, ShipPosition, SmokeScreenEntity, TeamScore,
-};
-
-
+use super::state::ActiveConsumable;
+use super::state::ActivePlane;
+use super::state::ActiveShot;
+use super::state::ActiveTorpedo;
+use super::state::ActiveWard;
+use super::state::BuffZoneState;
+use super::state::BuildingEntity;
+use super::state::CapturePointState;
+use super::state::CapturedBuff;
+use super::state::ControlPointType;
+use super::state::DeadShip;
+use super::state::InteractiveZoneType;
+use super::state::KillRecord;
+use super::state::LocalWeatherZone;
+use super::state::MinimapPosition;
+use super::state::ResolvedShotHit;
+use super::state::ScoringRules;
+use super::state::ShipPosition;
+use super::state::SmokeScreenEntity;
+use super::state::TeamScore;
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Skills {

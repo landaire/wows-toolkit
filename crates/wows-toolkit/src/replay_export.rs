@@ -7,9 +7,9 @@ use serde::Serializer;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
-use wowsunpack::data::ship_config::ShipConfig;
 use wows_replays::types::AccountId;
 use wowsunpack::data::Version;
+use wowsunpack::data::ship_config::ShipConfig;
 use wowsunpack::game_params::types::Species;
 
 use wows_replays::types::Relation;

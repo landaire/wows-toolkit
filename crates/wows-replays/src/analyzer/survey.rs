@@ -2,7 +2,8 @@ use super::analyzer::Analyzer;
 use crate::analyzer::decoder::PacketDecoder;
 use crate::analyzer::*;
 use crate::packet2::Packet;
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
+use std::cell::RefMut;
 use std::rc::Rc;
 
 pub struct SurveyStats {

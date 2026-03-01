@@ -32,8 +32,11 @@ use std::collections::HashMap;
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_u16, le_u32, le_u64};
-use winnow::error::{ContextError, ErrMode};
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
+use winnow::error::ContextError;
+use winnow::error::ErrMode;
 
 use crate::data::parser_utils::WResult;
 

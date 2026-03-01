@@ -1,8 +1,11 @@
 //! Export ship visual + geometry to glTF/GLB format.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{Read, Write};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::io::Read;
+use std::io::Write;
 
 use gltf_json as json;
 use json::validation::Checked::Valid;
@@ -13,10 +16,15 @@ use thiserror::Error;
 use crate::game_params::types::ArmorMap;
 use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::geometry::MergedGeometry;
-use crate::models::merged_models::{MergedModels, SpaceInstances};
+use crate::models::merged_models::MergedModels;
+use crate::models::merged_models::SpaceInstances;
 use crate::models::speedtree::SpeedTreeMesh;
 use crate::models::terrain::Terrain;
-use crate::models::vertex_format::{self, AttributeSemantic, VertexFormat};
+use crate::models::vertex_format::AttributeSemantic;
+use crate::models::vertex_format::VertexFormat;
+use crate::models::vertex_format::{
+    self,
+};
 use crate::models::visual::VisualPrototype;
 
 use super::texture;

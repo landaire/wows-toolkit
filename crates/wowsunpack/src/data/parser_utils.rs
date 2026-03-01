@@ -3,7 +3,12 @@
 use rootcause::Report;
 use thiserror::Error;
 use winnow::Parser;
-use winnow::binary::{le_f32, le_i64, le_u8, le_u16, le_u32, le_u64};
+use winnow::binary::le_f32;
+use winnow::binary::le_i64;
+use winnow::binary::le_u8;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
 use winnow::combinator::repeat;
 use winnow::error::ContextError;
 use winnow::token::take;

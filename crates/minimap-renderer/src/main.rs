@@ -1,10 +1,12 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
 use rootcause::prelude::*;
 use std::cell::Cell;
 use std::fs::File;
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
+use tracing::warn;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -14,14 +16,21 @@ use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::game_constants::GameConstants;
 
-use wows_minimap_renderer::assets::{
-    load_consumable_icons, load_death_cause_icons, load_flag_icons, load_game_fonts, load_map_image, load_map_info,
-    load_plane_icons, load_powerup_icons, load_ship_icons,
-};
+use wows_minimap_renderer::assets::load_consumable_icons;
+use wows_minimap_renderer::assets::load_death_cause_icons;
+use wows_minimap_renderer::assets::load_flag_icons;
+use wows_minimap_renderer::assets::load_game_fonts;
+use wows_minimap_renderer::assets::load_map_image;
+use wows_minimap_renderer::assets::load_map_info;
+use wows_minimap_renderer::assets::load_plane_icons;
+use wows_minimap_renderer::assets::load_powerup_icons;
+use wows_minimap_renderer::assets::load_ship_icons;
 use wows_minimap_renderer::config::RendererConfig;
 use wows_minimap_renderer::drawing::ImageTarget;
 use wows_minimap_renderer::renderer::MinimapRenderer;
-use wows_minimap_renderer::video::{DumpMode, RenderStage, VideoEncoder};
+use wows_minimap_renderer::video::DumpMode;
+use wows_minimap_renderer::video::RenderStage;
+use wows_minimap_renderer::video::VideoEncoder;
 
 /// Generates a minimap timelapse video from a WoWS replay
 #[derive(Parser)]

@@ -1,6 +1,7 @@
 use wowsunpack::data::Version;
 
-use crate::analyzer::decoder::{DecodedPacketPayload, PacketDecoder};
+use crate::analyzer::decoder::DecodedPacketPayload;
+use crate::analyzer::decoder::PacketDecoder;
 use crate::packet2::Packet;
 use crate::types::AccountId;
 use std::collections::HashMap;

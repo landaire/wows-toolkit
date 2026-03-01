@@ -26,8 +26,7 @@ pub fn download_build(
 
     // Create output directory
     let output_dir = data_dir.join("builds").join(build.to_string());
-    std::fs::create_dir_all(&output_dir)
-        .attach_with(|| format!("Failed to create {}", output_dir.display()))?;
+    std::fs::create_dir_all(&output_dir).attach_with(|| format!("Failed to create {}", output_dir.display()))?;
 
     // Write filelist for selective download
     let filelist = write_filelist(data_dir)?;
@@ -54,9 +53,7 @@ pub fn download_build(
     }
     println!();
 
-    let status = cmd
-        .status()
-        .attach_with(|| "Failed to run DepotDownloader")?;
+    let status = cmd.status().attach_with(|| "Failed to run DepotDownloader")?;
 
     // Clean up filelist
     let _ = std::fs::remove_file(&filelist);
@@ -103,10 +100,8 @@ fn resolve_username(override_username: Option<&str>, repo_root: &Path) -> Result
 
     let steam_user_file = repo_root.join(".steam-user");
     if steam_user_file.exists() {
-        let user = std::fs::read_to_string(&steam_user_file)
-            .attach_with(|| "Failed to read .steam-user")?
-            .trim()
-            .to_string();
+        let user =
+            std::fs::read_to_string(&steam_user_file).attach_with(|| "Failed to read .steam-user")?.trim().to_string();
         if !user.is_empty() {
             println!("Using saved Steam username: {user}");
             println!("(delete .steam-user to change)");
@@ -128,8 +123,7 @@ fn resolve_username(override_username: Option<&str>, repo_root: &Path) -> Result
         bail!("No username provided");
     }
 
-    std::fs::write(&steam_user_file, &username)
-        .attach_with(|| "Failed to save .steam-user")?;
+    std::fs::write(&steam_user_file, &username).attach_with(|| "Failed to save .steam-user")?;
 
     Ok(username)
 }

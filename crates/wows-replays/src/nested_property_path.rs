@@ -1,5 +1,6 @@
 use serde::Serialize;
-use wowsunpack::rpc::typedefs::{ArgType, ArgValue};
+use wowsunpack::rpc::typedefs::ArgType;
+use wowsunpack::rpc::typedefs::ArgValue;
 
 /// MSB-first bit reader over a byte slice.
 pub(crate) struct BitReader<'a> {

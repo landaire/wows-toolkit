@@ -16,8 +16,10 @@
 //! # }
 //! ```
 
-use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -27,14 +29,31 @@ use vfs::VfsPath;
 use crate::data::ResourceLoader;
 use crate::game_params::keys;
 use crate::game_params::provider::GameMetadataProvider;
-use crate::game_params::types::{ArmorMap, GameParamProvider, MountPoint, Vehicle};
-use crate::models::assets_bin::{self, PrototypeDatabase};
+use crate::game_params::types::ArmorMap;
+use crate::game_params::types::GameParamProvider;
+use crate::game_params::types::MountPoint;
+use crate::game_params::types::Vehicle;
+use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::assets_bin::{
+    self,
+};
 use crate::models::geometry;
 use crate::models::model;
-use crate::models::visual::{self, VisualPrototype};
+use crate::models::visual::VisualPrototype;
+use crate::models::visual::{
+    self,
+};
 
-use super::camouflage::{self, CamouflageDb};
-use super::gltf_export::{self, InteractiveArmorMesh, SubModel, TextureSet};
+use super::camouflage::CamouflageDb;
+use super::camouflage::{
+    self,
+};
+use super::gltf_export::InteractiveArmorMesh;
+use super::gltf_export::SubModel;
+use super::gltf_export::TextureSet;
+use super::gltf_export::{
+    self,
+};
 use super::texture;
 
 // ---------------------------------------------------------------------------

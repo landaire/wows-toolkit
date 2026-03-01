@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use rootcause::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GameVersionManifest {
@@ -20,10 +21,7 @@ pub struct GameVersionEntry {
 impl GameVersionManifest {
     /// Returns the highest build number in the manifest.
     pub fn latest_build(&self) -> Option<u32> {
-        self.versions
-            .keys()
-            .filter_map(|k| k.parse::<u32>().ok())
-            .max()
+        self.versions.keys().filter_map(|k| k.parse::<u32>().ok()).max()
     }
 
     /// Look up a build number by version string (supports shorthand like "15.1").
@@ -55,22 +53,16 @@ pub fn version_matches(full: &str, query: &str) -> bool {
         return false;
     }
 
-    full_parts
-        .iter()
-        .zip(query_parts.iter())
-        .all(|(f, q)| f == q)
+    full_parts.iter().zip(query_parts.iter()).all(|(f, q)| f == q)
 }
 
 pub fn load_manifest(path: &Path) -> Result<GameVersionManifest, Report> {
     if !path.exists() {
-        return Ok(GameVersionManifest {
-            versions: BTreeMap::new(),
-        });
+        return Ok(GameVersionManifest { versions: BTreeMap::new() });
     }
-    let content = std::fs::read_to_string(path)
-        .attach_with(|| format!("Failed to read {}", path.display()))?;
-    let manifest: GameVersionManifest = toml::from_str(&content)
-        .map_err(|e| rootcause::report!("Failed to parse {}: {e}", path.display()))?;
+    let content = std::fs::read_to_string(path).attach_with(|| format!("Failed to read {}", path.display()))?;
+    let manifest: GameVersionManifest =
+        toml::from_str(&content).map_err(|e| rootcause::report!("Failed to parse {}: {e}", path.display()))?;
     Ok(manifest)
 }
 
@@ -108,19 +100,11 @@ mod test {
         let mut versions = BTreeMap::new();
         versions.insert(
             "11791718".to_string(),
-            GameVersionEntry {
-                version: "15.0.0".to_string(),
-                depot_id: 552991,
-                manifest_id: "aaa".to_string(),
-            },
+            GameVersionEntry { version: "15.0.0".to_string(), depot_id: 552991, manifest_id: "aaa".to_string() },
         );
         versions.insert(
             "11965230".to_string(),
-            GameVersionEntry {
-                version: "15.1.0".to_string(),
-                depot_id: 552991,
-                manifest_id: "bbb".to_string(),
-            },
+            GameVersionEntry { version: "15.1.0".to_string(), depot_id: 552991, manifest_id: "bbb".to_string() },
         );
         let manifest = GameVersionManifest { versions };
 

@@ -1,23 +1,24 @@
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
-};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use gettext::Catalog;
 use itertools::Itertools;
 
-use pickled::{HashableValue, Value};
+use pickled::HashableValue;
+use pickled::Value;
 use tracing::debug;
 
-use crate::{
-    Rc,
-    data::{DataFileWithCallback, ResourceLoader},
-    error::GameDataError,
-    game_params::convert::game_params_to_pickle,
-    game_types::GameParamId,
-    rpc::entitydefs::{EntitySpec, parse_scripts},
-};
+use crate::Rc;
+use crate::data::DataFileWithCallback;
+use crate::data::ResourceLoader;
+use crate::error::GameDataError;
+use crate::game_params::convert::game_params_to_pickle;
+use crate::game_types::GameParamId;
+use crate::rpc::entitydefs::EntitySpec;
+use crate::rpc::entitydefs::parse_scripts;
 
 use super::keys;
 use super::types::*;

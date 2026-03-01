@@ -1,18 +1,37 @@
 use std::collections::HashMap;
 
-use wowsunpack::game_types::{BattleStage, BattleType};
+use wowsunpack::game_types::BattleStage;
+use wowsunpack::game_types::BattleType;
 use wowsunpack::recognized::Recognized;
 
 use crate::Rc;
 use crate::analyzer::decoder::FinishType;
-use crate::types::{ElapsedClock, EntityId, GameClock, GameParamId, PlaneId};
+use crate::types::ElapsedClock;
+use crate::types::EntityId;
+use crate::types::GameClock;
+use crate::types::GameParamId;
+use crate::types::PlaneId;
 
-use super::controller::{Entity, GameMessage, Player, SharedPlayer};
-use super::state::{
-    ActiveConsumable, ActivePlane, ActiveShot, ActiveTorpedo, ActiveWard, BuffZoneState, CapturePointState,
-    CapturedBuff, DeadShip, KillRecord, LocalWeatherZone, MinimapPosition, ResolvedShotHit, ScoringRules, ShipPosition,
-    TeamScore,
-};
+use super::controller::Entity;
+use super::controller::GameMessage;
+use super::controller::Player;
+use super::controller::SharedPlayer;
+use super::state::ActiveConsumable;
+use super::state::ActivePlane;
+use super::state::ActiveShot;
+use super::state::ActiveTorpedo;
+use super::state::ActiveWard;
+use super::state::BuffZoneState;
+use super::state::CapturePointState;
+use super::state::CapturedBuff;
+use super::state::DeadShip;
+use super::state::KillRecord;
+use super::state::LocalWeatherZone;
+use super::state::MinimapPosition;
+use super::state::ResolvedShotHit;
+use super::state::ScoringRules;
+use super::state::ShipPosition;
+use super::state::TeamScore;
 
 /// Readonly view into BattleController state.
 ///

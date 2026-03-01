@@ -6,19 +6,22 @@
 use std::borrow::Cow;
 use std::fs::read_dir;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use rootcause::prelude::*;
 use vfs::VfsPath;
 use vfs::impls::overlay::OverlayFS;
 
+use crate::data::DataFileWithCallback;
+use crate::data::Version;
 use crate::data::assets_bin_vfs::AssetsBinVfs;
 use crate::data::idx;
 use crate::data::idx_vfs::IdxVfs;
 use crate::data::wrappers::mmap::MmapPkgSource;
-use crate::data::{DataFileWithCallback, Version};
 use crate::error::GameDataError;
-use crate::rpc::entitydefs::{EntitySpec, parse_scripts};
+use crate::rpc::entitydefs::EntitySpec;
+use crate::rpc::entitydefs::parse_scripts;
 
 /// List all available build numbers in the game directory's `bin/` folder, sorted ascending.
 pub fn list_available_builds(game_dir: &Path) -> Result<Vec<u32>, GameDataError> {

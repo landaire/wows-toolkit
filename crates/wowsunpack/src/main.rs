@@ -2,33 +2,43 @@ use rootcause::prelude::*;
 
 use pickled::HashableValue;
 use serde::Serialize;
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
-    fs::{self, File},
-    io::{BufWriter, Read, Write, stdout},
-    path::{Path, PathBuf},
-    sync::{
-        Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Instant,
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fs::File;
+use std::fs::{
+    self,
 };
+use std::io::BufWriter;
+use std::io::Read;
+use std::io::Write;
+use std::io::stdout;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Instant;
 use thread_local::ThreadLocal;
 use vfs::VfsPath;
 use vfs::impls::overlay::OverlayFS;
-use wowsunpack::data::{
-    assets_bin_vfs::AssetsBinVfs,
-    idx::{self, VfsEntry},
-    idx_vfs::IdxVfs,
-    serialization,
-    wrappers::mmap::MmapPkgSource,
+use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
+use wowsunpack::data::idx::VfsEntry;
+use wowsunpack::data::idx::{
+    self,
 };
+use wowsunpack::data::idx_vfs::IdxVfs;
+use wowsunpack::data::serialization;
+use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::export::gltf_export;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use indicatif::{ParallelProgressIterator, ProgressBar};
+use clap::Parser;
+use clap::Subcommand;
+use clap::ValueEnum;
+use indicatif::ParallelProgressIterator;
+use indicatif::ProgressBar;
 use rayon::prelude::*;
 
 /// Utility for interacting with World of Warships game assets
@@ -1385,7 +1395,8 @@ struct ExportModelParams<'a> {
 fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
     let ExportModelParams { file, output, lod, no_textures, damaged, list_textures, no_vfs, vfs } = *params;
     use wowsunpack::export::gltf_export;
-    use wowsunpack::export::ship::{build_texture_set, collect_mfm_info};
+    use wowsunpack::export::ship::build_texture_set;
+    use wowsunpack::export::ship::collect_mfm_info;
     use wowsunpack::export::texture;
     use wowsunpack::models::assets_bin;
     use wowsunpack::models::geometry;
@@ -1826,7 +1837,8 @@ fn run_export_ship(
     list_textures: bool,
     debug: bool,
 ) -> Result<(), Report> {
-    use wowsunpack::export::ship::{ShipAssets, ShipExportOptions};
+    use wowsunpack::export::ship::ShipAssets;
+    use wowsunpack::export::ship::ShipExportOptions;
 
     let mut assets = ShipAssets::load(vfs)?;
 
@@ -1923,7 +1935,8 @@ fn run_armor(
     game_version: Option<u64>,
     hull_selection: Option<&str>,
 ) -> Result<(), Report> {
-    use wowsunpack::export::ship::{ShipAssets, ShipExportOptions};
+    use wowsunpack::export::ship::ShipAssets;
+    use wowsunpack::export::ship::ShipExportOptions;
     use wowsunpack::models::geometry;
 
     let mut assets = ShipAssets::load(vfs)?;
@@ -1946,7 +1959,8 @@ fn run_armor(
 
     let armor_map = ctx.armor_map();
 
-    use wowsunpack::export::gltf_export::{collision_material_name, zone_from_material_name};
+    use wowsunpack::export::gltf_export::collision_material_name;
+    use wowsunpack::export::gltf_export::zone_from_material_name;
 
     // Helper to print armor layer info for materials found in a geometry.
     fn print_armor_layers(
@@ -2204,7 +2218,8 @@ fn run_dump_uvs(
     _game_version: Option<u64>,
     _hull_selection: Option<&str>,
 ) -> Result<(), Report> {
-    use wowsunpack::models::{geometry, vertex_format};
+    use wowsunpack::models::geometry;
+    use wowsunpack::models::vertex_format;
 
     // Try to find and extract .geometry files matching the name from VFS.
     let mut geom_files: Vec<(String, Vec<u8>)> = Vec::new();

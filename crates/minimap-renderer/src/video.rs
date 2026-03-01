@@ -3,17 +3,19 @@ use std::io::BufWriter;
 
 use bytes::Bytes;
 use rootcause::prelude::*;
-use tracing::{error, info};
+use tracing::error;
+use tracing::info;
 
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::types::GameClock;
 
 use crate::error::VideoError;
 
+use crate::CANVAS_HEIGHT;
+use crate::MINIMAP_SIZE;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
 use crate::renderer::MinimapRenderer;
-use crate::{CANVAS_HEIGHT, MINIMAP_SIZE};
 
 pub const FPS: f64 = 30.0;
 /// Target output video duration in seconds. The game is compressed to fit this length.
@@ -50,9 +52,17 @@ mod gpu {
     use std::num::NonZeroU32;
 
     use rootcause::prelude::*;
-    use vk_video::parameters::{RateControl, VideoParameters};
-    use vk_video::{BytesEncoder, Frame, RawFrameData, VulkanInstance};
-    use yuvutils_rs::{BufferStoreMut, YuvBiPlanarImageMut, YuvConversionMode, YuvRange, YuvStandardMatrix};
+    use vk_video::BytesEncoder;
+    use vk_video::Frame;
+    use vk_video::RawFrameData;
+    use vk_video::VulkanInstance;
+    use vk_video::parameters::RateControl;
+    use vk_video::parameters::VideoParameters;
+    use yuvutils_rs::BufferStoreMut;
+    use yuvutils_rs::YuvBiPlanarImageMut;
+    use yuvutils_rs::YuvConversionMode;
+    use yuvutils_rs::YuvRange;
+    use yuvutils_rs::YuvStandardMatrix;
 
     use super::FPS;
     use crate::error::VideoError;
@@ -160,8 +170,13 @@ mod gpu {
 #[cfg(feature = "cpu")]
 mod cpu {
     use openh264::OpenH264API;
-    use openh264::encoder::{BitRate, Complexity, Encoder, EncoderConfig, FrameRate};
-    use openh264::formats::{RgbSliceU8, YUVBuffer};
+    use openh264::encoder::BitRate;
+    use openh264::encoder::Complexity;
+    use openh264::encoder::Encoder;
+    use openh264::encoder::EncoderConfig;
+    use openh264::encoder::FrameRate;
+    use openh264::formats::RgbSliceU8;
+    use openh264::formats::YUVBuffer;
     use rootcause::prelude::*;
 
     use super::FPS;

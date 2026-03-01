@@ -1,9 +1,22 @@
 use serde::Serialize;
 use wowsunpack::game_params::types::BigWorldDistance;
-pub use wowsunpack::game_types::{ControlPointType, InteractiveZoneType};
+pub use wowsunpack::game_types::ControlPointType;
+pub use wowsunpack::game_types::InteractiveZoneType;
 
-use crate::analyzer::decoder::{ArtillerySalvo, Consumable, DeathCause, Recognized, ShotHit, TorpedoData};
-use crate::types::{AvatarId, EntityId, GameClock, GameParamId, NormalizedPos, PlaneId, WorldPos, WorldPos2D};
+use crate::analyzer::decoder::ArtillerySalvo;
+use crate::analyzer::decoder::Consumable;
+use crate::analyzer::decoder::DeathCause;
+use crate::analyzer::decoder::Recognized;
+use crate::analyzer::decoder::ShotHit;
+use crate::analyzer::decoder::TorpedoData;
+use crate::types::AvatarId;
+use crate::types::EntityId;
+use crate::types::GameClock;
+use crate::types::GameParamId;
+use crate::types::NormalizedPos;
+use crate::types::PlaneId;
+use crate::types::WorldPos;
+use crate::types::WorldPos2D;
 
 /// Last known world-space position of a ship entity.
 #[derive(Debug, Clone, Serialize)]

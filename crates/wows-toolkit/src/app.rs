@@ -49,7 +49,9 @@ use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{self};
+use crate::task::{
+    self,
+};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]
@@ -205,7 +207,8 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new(
-                [Tab::ReplayParser, Tab::Stats, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings].to_vec(),
+                [Tab::ReplayParser, Tab::Stats, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings]
+                    .to_vec(),
             ),
             show_error_window: false,
             error_to_show: None,

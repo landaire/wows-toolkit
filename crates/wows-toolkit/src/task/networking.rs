@@ -2,7 +2,9 @@ use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{self};
+use std::sync::mpsc::{
+    self,
+};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -494,7 +496,9 @@ pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
 use crate::twitch::Token;
 use crate::twitch::TwitchState;
 use crate::twitch::TwitchUpdate;
-use crate::twitch::{self};
+use crate::twitch::{
+    self,
+};
 use jiff::Timestamp;
 use parking_lot::RwLock;
 use twitch_api::twitch_oauth2::AccessToken;

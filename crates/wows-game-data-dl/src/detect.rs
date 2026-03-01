@@ -15,12 +15,7 @@ pub fn detect_version_for_build(data_dir: &Path, build: u32) -> Result<String, R
 /// Detect the game version for a specific build at an arbitrary path.
 /// The path should be a valid WoWs game root (containing `bin/<build>/idx/` and `res_packages/`).
 pub fn detect_version_at_path(game_dir: &Path, build: u32) -> Result<String, Report> {
-    let version = Version {
-        major: 0,
-        minor: 0,
-        patch: 0,
-        build,
-    };
+    let version = Version { major: 0, minor: 0, patch: 0, build };
 
     let resources = game_data::load_game_resources(game_dir, &version)
         .attach_with(|| format!("Failed to load game resources for build {build} at {}", game_dir.display()))?;
@@ -33,8 +28,7 @@ pub fn detect_version_at_path(game_dir: &Path, build: u32) -> Result<String, Rep
         .map_err(|e| rootcause::report!("Failed to open {account_def_path} in VFS for build {build}: {e}"))?;
 
     let mut content = String::new();
-    std::io::BufReader::new(file).read_to_string(&mut content)
-        .attach_with(|| "Failed to read Account.def")?;
+    std::io::BufReader::new(file).read_to_string(&mut content).attach_with(|| "Failed to read Account.def")?;
 
     let parsed = Version::from_account_def(&content)
         .ok_or_else(|| rootcause::report!("Failed to parse version from Account.def"))?;
@@ -52,8 +46,7 @@ pub fn detect_all_versions(scan_path: &Path) -> Result<Vec<(u32, String)>, Repor
     let mut results = Vec::new();
 
     // Each subdirectory in scan_path could be a build directory
-    let entries = std::fs::read_dir(scan_path)
-        .attach_with(|| format!("Failed to read {}", scan_path.display()))?;
+    let entries = std::fs::read_dir(scan_path).attach_with(|| format!("Failed to read {}", scan_path.display()))?;
 
     for entry in entries {
         let entry: std::fs::DirEntry = entry?;
@@ -82,7 +75,10 @@ pub fn detect_all_versions(scan_path: &Path) -> Result<Vec<(u32, String)>, Repor
                             match detect_version_at_path(&build_path, sub_build) {
                                 Ok(version) => results.push((sub_build, version)),
                                 Err(e) => {
-                                    eprintln!("Warning: could not detect version for build {sub_build} at {}: {e}", build_path.display());
+                                    eprintln!(
+                                        "Warning: could not detect version for build {sub_build} at {}: {e}",
+                                        build_path.display()
+                                    );
                                 }
                             }
                         }

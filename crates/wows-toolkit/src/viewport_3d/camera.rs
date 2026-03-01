@@ -1,5 +1,6 @@
 extern crate nalgebra as na;
-use na::{Matrix4, Vector4};
+use na::Matrix4;
+use na::Vector4;
 
 use super::types::Vec3;
 

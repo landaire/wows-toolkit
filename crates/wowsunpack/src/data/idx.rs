@@ -13,9 +13,11 @@ use std::io;
 use thiserror::Error;
 use tracing::warn;
 use winnow::Parser;
-use winnow::binary::{le_u32, le_u64};
+use winnow::binary::le_u32;
+use winnow::binary::le_u64;
 
-use crate::data::parser_utils::{WResult, read_null_terminated_string};
+use crate::data::parser_utils::WResult;
+use crate::data::parser_utils::read_null_terminated_string;
 
 #[derive(Debug, Error)]
 pub enum IdxError {

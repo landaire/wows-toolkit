@@ -5,14 +5,20 @@
 //! record data from the record start through the end of the containing blob,
 //! preserving relative pointer resolution into out-of-line data.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Cursor;
 
+use vfs::FileSystem;
+use vfs::VfsMetadata;
 use vfs::error::VfsErrorKind;
-use vfs::{FileSystem, VfsMetadata};
 
-use crate::models::assets_bin::{self, AssetsBinError, PrototypeDatabase};
+use crate::models::assets_bin::AssetsBinError;
+use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::assets_bin::{
+    self,
+};
 
 /// The type of prototype stored in a given assets.bin blob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
