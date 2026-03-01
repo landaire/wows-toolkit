@@ -21,11 +21,10 @@
       pkgs = import nixpkgs {inherit system overlays;};
 
       rustToolchainToml = fromTOML (builtins.readFile ./rust-toolchain);
-      inherit (rustToolchainToml.toolchain) channel targets components;
+      inherit (rustToolchainToml.toolchain) channel components;
 
       rustToolchain = pkgs.rust-bin.stable.${channel}.default.override {
         extensions = components;
-        inherit targets;
       };
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
