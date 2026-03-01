@@ -46,11 +46,33 @@ impl Version {
         let parts: Vec<_> = version.split(",").collect();
         assert!(parts.len() == 4);
         Version {
-            major: parts[0].parse::<u32>().unwrap(),
-            minor: parts[1].parse::<u32>().unwrap(),
-            patch: parts[2].parse::<u32>().unwrap(),
-            build: parts[3].parse::<u32>().unwrap(),
+            major: parts[0].trim().parse::<u32>().unwrap(),
+            minor: parts[1].trim().parse::<u32>().unwrap(),
+            patch: parts[2].trim().parse::<u32>().unwrap(),
+            build: parts[3].trim().parse::<u32>().unwrap(),
         }
+    }
+
+    /// Extract the game version from the `Account.def` entity definition XML.
+    ///
+    /// The file contains a node like `<curVersion_15_1_0_11965230></curVersion_15_1_0_11965230>`
+    /// whose tag name encodes the version as `curVersion_{major}_{minor}_{patch}_{build}`.
+    pub fn from_account_def(xml: &str) -> Option<Version> {
+        let doc = roxmltree::Document::parse(xml).ok()?;
+        for node in doc.descendants() {
+            if let Some(rest) = node.tag_name().name().strip_prefix("curVersion_") {
+                let parts: Vec<&str> = rest.splitn(4, '_').collect();
+                if parts.len() == 4 {
+                    return Some(Version {
+                        major: parts[0].parse().ok()?,
+                        minor: parts[1].parse().ok()?,
+                        patch: parts[2].parse().ok()?,
+                        build: parts[3].parse().ok()?,
+                    });
+                }
+            }
+        }
+        None
     }
 
     pub fn to_path(&self) -> String {
@@ -127,5 +149,21 @@ mod test {
         let older = Version::from_client_exe("0,11,5,0");
         let newer = Version::from_client_exe("1,0,0,0");
         assert_older_newer(older, newer);
+    }
+
+    #[test]
+    fn from_account_def_parses_version() {
+        let xml = r#"<root><Properties><curVersion_15_1_0_11965230></curVersion_15_1_0_11965230></Properties></root>"#;
+        let v = Version::from_account_def(xml).unwrap();
+        assert_eq!(v.major, 15);
+        assert_eq!(v.minor, 1);
+        assert_eq!(v.patch, 0);
+        assert_eq!(v.build, 11965230);
+    }
+
+    #[test]
+    fn from_account_def_returns_none_on_missing() {
+        let xml = r#"<root><Properties><someOtherNode/></Properties></root>"#;
+        assert!(Version::from_account_def(xml).is_none());
     }
 }
