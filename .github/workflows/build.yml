@@ -7,8 +7,9 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and upload release
+  # ── Windows (signed) ──────────────────────────────────────────────────
+  windows:
+    name: Windows
     runs-on: windows-latest
     environment: release-signing
     steps:
@@ -59,3 +60,172 @@ jobs:
           files: |
             wows_toolkit_${{ github.event.release.tag_name }}_windows.zip
             target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb
+
+  # ── Linux (AppImage) ──────────────────────────────────────────────────
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libgl-dev \
+            libfontconfig-dev \
+            libssl-dev \
+            libvulkan-dev \
+            pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.92.0
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build release binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit
+
+      - name: Download linuxdeploy
+        run: |
+          curl -fSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+
+      - name: Build AppImage
+        run: |
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp target/x86_64-unknown-linux-gnu/release/wows_toolkit AppDir/usr/bin/
+          cp assets/wows-toolkit.desktop AppDir/usr/share/applications/
+          cp assets/icon-256.png AppDir/usr/share/icons/hicolor/256x256/apps/wows_toolkit.png
+
+          # linuxdeploy needs FUSE or extract-and-run
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export OUTPUT="WoWs_Toolkit-x86_64.AppImage"
+          ./linuxdeploy --appdir AppDir --output appimage
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WoWs_Toolkit-x86_64.AppImage
+
+  # ── macOS (universal .app in .dmg) ────────────────────────────────────
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.92.0
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build release binaries
+        run: |
+          cargo build --release --target aarch64-apple-darwin -p wows_toolkit
+          cargo build --release --target x86_64-apple-darwin -p wows_toolkit
+
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            target/aarch64-apple-darwin/release/wows_toolkit \
+            target/x86_64-apple-darwin/release/wows_toolkit \
+            -output wows_toolkit_universal
+
+      - name: Generate .icns icon
+        run: |
+          mkdir -p wows_toolkit.iconset
+          sips -z 16 16     assets/icon-1024.png --out wows_toolkit.iconset/icon_16x16.png
+          sips -z 32 32     assets/icon-1024.png --out wows_toolkit.iconset/icon_16x16@2x.png
+          sips -z 32 32     assets/icon-1024.png --out wows_toolkit.iconset/icon_32x32.png
+          sips -z 64 64     assets/icon-1024.png --out wows_toolkit.iconset/icon_32x32@2x.png
+          sips -z 128 128   assets/icon-1024.png --out wows_toolkit.iconset/icon_128x128.png
+          sips -z 256 256   assets/icon-1024.png --out wows_toolkit.iconset/icon_128x128@2x.png
+          sips -z 256 256   assets/icon-1024.png --out wows_toolkit.iconset/icon_256x256.png
+          sips -z 512 512   assets/icon-1024.png --out wows_toolkit.iconset/icon_256x256@2x.png
+          sips -z 512 512   assets/icon-1024.png --out wows_toolkit.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icon-1024.png --out wows_toolkit.iconset/icon_512x512@2x.png
+          iconutil -c icns wows_toolkit.iconset
+
+      - name: Create .app bundle
+        run: |
+          APP="WoWs Toolkit.app"
+          VERSION="${{ github.event.release.tag_name }}"
+
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+
+          cp wows_toolkit_universal "$APP/Contents/MacOS/wows_toolkit"
+          chmod +x "$APP/Contents/MacOS/wows_toolkit"
+          cp wows_toolkit.icns "$APP/Contents/Resources/"
+
+          cat > "$APP/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>WoWs Toolkit</string>
+              <key>CFBundleDisplayName</key>
+              <string>WoWs Toolkit</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.github.landaire.wows-toolkit</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleExecutable</key>
+              <string>wows_toolkit</string>
+              <key>CFBundleIconFile</key>
+              <string>wows_toolkit</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create .dmg
+        run: |
+          hdiutil create -volname "WoWs Toolkit" \
+            -srcfolder "WoWs Toolkit.app" \
+            -ov -format UDZO \
+            "wows_toolkit_${{ github.event.release.tag_name }}_macos.dmg"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wows_toolkit_${{ github.event.release.tag_name }}_macos.dmg

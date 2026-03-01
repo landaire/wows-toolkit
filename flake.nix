@@ -42,14 +42,67 @@
           openssl
         ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
           pkgs.vulkan-loader
-        ];
+        ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
+          Security
+          SystemConfiguration
+        ]);
       };
 
       # Build workspace deps once, share across packages
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
     in
       with pkgs; {
-        packages = {
+        packages = let
+          # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan)
+          guiRuntimeLibs = lib.optionals stdenv.hostPlatform.isLinux [
+            libxkbcommon
+            libGL
+            fontconfig
+            wayland
+            vulkan-loader
+            xorg.libXcursor
+            xorg.libXrandr
+            xorg.libXi
+            xorg.libX11
+          ];
+
+          guiBuildInputs = commonArgs.buildInputs ++ lib.optionals stdenv.hostPlatform.isLinux [
+            libxkbcommon
+            wayland
+            xorg.libXcursor
+            xorg.libXrandr
+            xorg.libXi
+            xorg.libX11
+            fontconfig
+          ] ++ lib.optionals stdenv.hostPlatform.isDarwin (with darwin.apple_sdk.frameworks; [
+            AppKit
+            CoreGraphics
+            CoreServices
+            Metal
+            QuartzCore
+          ]);
+
+          unwrapped = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            cargoExtraArgs = "-p wows_toolkit";
+            buildInputs = guiBuildInputs;
+          });
+        in {
+          wows-toolkit = if stdenv.hostPlatform.isLinux then
+            pkgs.symlinkJoin {
+              name = "wows-toolkit-${unwrapped.version or "dev"}";
+              paths = [unwrapped];
+              nativeBuildInputs = [pkgs.makeWrapper];
+              postBuild = ''
+                wrapProgram $out/bin/wows_toolkit \
+                  --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath guiRuntimeLibs}
+              '';
+            }
+          else
+            unwrapped;
+
+          default = self.packages.${system}.wows-toolkit;
+
           wowsunpack = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
             cargoExtraArgs = "-p wowsunpack";
@@ -77,7 +130,7 @@
             # misc. libraries
             openssl
             pkg-config
-
+          ] ++ lib.optionals stdenv.hostPlatform.isLinux [
             # GUI libs
             libxkbcommon
             libGL
@@ -91,9 +144,18 @@
             xorg.libXrandr
             xorg.libXi
             xorg.libX11
-          ];
+          ] ++ lib.optionals stdenv.hostPlatform.isDarwin (with darwin.apple_sdk.frameworks; [
+            AppKit
+            CoreGraphics
+            CoreServices
+            Metal
+            QuartzCore
+            Security
+            SystemConfiguration
+          ]);
 
-          LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
+          LD_LIBRARY_PATH = lib.optionalString stdenv.hostPlatform.isLinux
+            "${lib.makeLibraryPath buildInputs}";
         };
       });
 }

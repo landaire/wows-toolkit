@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=WoWs Toolkit
+Comment=World of Warships replay analysis and game file browser
+Exec=wows_toolkit
+Icon=wows_toolkit
+Terminal=false
+Type=Application
+Categories=Game;Utility;

@@ -264,6 +264,24 @@
                 text-transform: uppercase;
                 letter-spacing: 0.1em;
             }
+            .nix-cmd {
+                display: inline-block;
+                margin-top: 20px;
+                padding: 12px 20px;
+                background: var(--bg-raised);
+                border: 1px solid var(--border);
+                font-size: 13px;
+                color: var(--text);
+                text-align: left;
+                line-height: 1.8;
+                text-transform: none;
+                letter-spacing: normal;
+            }
+            .nix-prompt {
+                color: var(--text-dim);
+                user-select: none;
+                margin-right: 6px;
+            }
 
             /* Screenshots */
             .screenshot {
@@ -378,13 +396,6 @@
                 text-shadow: 0 0 6px var(--glow-green);
             }
 
-            .specs-footnote {
-                font-size: 11px;
-                color: #55aa66;
-                margin-top: 12px;
-                opacity: 0.7;
-            }
-
             /* Footer */
             footer {
                 border-top: 1px solid var(--border);
@@ -484,9 +495,11 @@
                     >
                 </div>
                 <p class="hero-meta">
-                    Windows, Linux*, macOS* &middot; Portable &middot; MIT
-                    License
+                    Windows, Linux, macOS &middot; Portable &middot; MIT License
                 </p>
+                <pre
+                    class="nix-cmd"
+                ><span class="nix-prompt">$</span> nix run github:landaire/wows-toolkit</pre>
             </div>
         </section>
 
@@ -591,7 +604,7 @@
                     </div>
                     <div class="spec">
                         <div class="spec-label">Platform</div>
-                        <div class="spec-value">Windows, Linux*, macOS*</div>
+                        <div class="spec-value">Windows, Linux, macOS</div>
                     </div>
                     <div class="spec">
                         <div class="spec-label">Install</div>
@@ -610,7 +623,6 @@
                         <div class="spec-value">In-app</div>
                     </div>
                 </div>
-                <p class="specs-footnote">* Requires compilation from source</p>
             </div>
         </section>
 
@@ -662,8 +674,15 @@
                     const tag = data.tag_name;
                     const el = document.getElementById("download-version");
                     if (el && tag) el.textContent = tag;
+
+                    // Detect platform and pick the right asset
+                    const ua = navigator.userAgent.toLowerCase();
+                    let suffix = "_windows.zip";
+                    if (ua.includes("mac")) suffix = "_macos.dmg";
+                    else if (ua.includes("linux")) suffix = ".AppImage";
+
                     const asset = data.assets?.find((a) =>
-                        a.name.endsWith("_windows.zip"),
+                        a.name.endsWith(suffix),
                     );
                     if (asset)
                         document.getElementById("download-btn").href =

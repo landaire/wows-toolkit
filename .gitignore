@@ -5,3 +5,5 @@ wows_toolkit.log.*
 .claude/
 *.glb
 dump_out/
+game_data/
+.steam-user
