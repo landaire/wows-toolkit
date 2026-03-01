@@ -6,6 +6,7 @@ members = [
     "crates/wows-replays",
     "crates/minimap-renderer",
     "crates/replayshark",
+    "crates/wows-game-data-dl",
 ]
 default-members = ["crates/wows-toolkit"]
 

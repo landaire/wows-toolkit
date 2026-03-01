@@ -1,0 +1,14 @@
+[package]
+name = "wows-game-data-dl"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wowsunpack = { workspace = true, features = ["vfs"] }
+clap = { workspace = true }
+rootcause = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+jiff = { workspace = true }

@@ -1,0 +1,16 @@
+# Known World of Warships game versions.
+#
+# Maps build numbers to game versions and Steam depot manifest IDs.
+# Build numbers are the directory names under bin/ in a WoWs installation.
+# Manifest IDs can be found on SteamDB: https://steamdb.info/app/552990/depots/
+#
+# To download a specific version:
+#   cargo run -p wows-game-data-dl -- download --version 15.1
+#
+# To download the latest:
+#   cargo run -p wows-game-data-dl -- download --latest
+
+# [versions.11965230]
+# version = "15.1.0"
+# depot_id = 552991
+# manifest_id = "<look up on SteamDB>"

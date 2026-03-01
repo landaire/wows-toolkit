@@ -8426,6 +8426,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-game-data-dl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "jiff",
+ "rootcause",
+ "serde",
+ "toml 1.0.3+spec-1.1.0",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows_minimap_renderer"
 version = "0.16.0"
 dependencies = [
