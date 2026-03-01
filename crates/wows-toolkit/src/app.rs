@@ -71,6 +71,7 @@ pub enum Tab {
     PlayerTracker,
     ModManager,
     ArmorViewer,
+    Stats,
 }
 
 impl Tab {
@@ -82,6 +83,7 @@ impl Tab {
             Tab::PlayerTracker => icon_str!(icons::DETECTIVE, "Player Tracker"),
             Tab::ModManager => icon_str!(icons::WRENCH, "Mod Manager"),
             Tab::ArmorViewer => icon_str!(icons::SHIELD, "Armor Viewer"),
+            Tab::Stats => icon_str!(icons::CHART_BAR, "Stats"),
         }
     }
 }
@@ -108,6 +110,7 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::PlayerTracker => self.build_player_tracker_tab(ui),
             Tab::ModManager => self.build_mod_manager_tab(ui),
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
+            Tab::Stats => self.build_stats_tab(ui),
         }
     }
 
@@ -202,7 +205,7 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new(
-                [Tab::ReplayParser, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings].to_vec(),
+                [Tab::ReplayParser, Tab::Stats, Tab::PlayerTracker, Tab::ArmorViewer, Tab::Unpacker, Tab::Settings].to_vec(),
             ),
             show_error_window: false,
             error_to_show: None,

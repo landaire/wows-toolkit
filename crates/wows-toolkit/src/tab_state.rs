@@ -47,6 +47,14 @@ use crate::wows_data::WoWsDataMap;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 
+/// Sub-tab selection for the Stats tab
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatsSubTab {
+    #[default]
+    Overview,
+    Charts,
+}
+
 /// Available statistics for charting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChartableStat {
@@ -248,9 +256,7 @@ pub struct TabState {
     pub parser_lock: Arc<parking_lot::Mutex<()>>,
 
     #[serde(skip)]
-    pub show_session_stats: bool,
-    #[serde(skip)]
-    pub show_session_stats_chart: bool,
+    pub stats_dock_state: egui_dock::DockState<StatsSubTab>,
     #[serde(skip)]
     pub session_stats_chart_config: SessionStatsChartConfig,
     #[serde(skip)]
@@ -352,8 +358,16 @@ impl Default for TabState {
             background_task_sender,
             background_parser_tx: None,
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
-            show_session_stats: false,
-            show_session_stats_chart: false,
+            stats_dock_state: {
+                let mut dock = egui_dock::DockState::new(vec![StatsSubTab::Overview]);
+                dock.split(
+                    (egui_dock::SurfaceIndex::main(), egui_dock::NodeIndex::root()),
+                    egui_dock::Split::Right,
+                    0.5,
+                    egui_dock::Node::leaf(StatsSubTab::Charts),
+                );
+                dock
+            },
             session_stats_chart_config: Default::default(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
@@ -503,8 +517,6 @@ impl TabState {
         self.replay_files = None;
         self.browser_state = Default::default();
         self.settings.session_stats.clear();
-        self.show_session_stats = false;
-        self.show_session_stats_chart = false;
         self.session_stats_chart_config = Default::default();
         self.replays_for_session_reset = None;
         self.replay_parser_tab.lock().game_chat.clear();
@@ -555,8 +567,10 @@ impl TabState {
             }
         }
 
-        // Show session stats window automatically
-        self.show_session_stats = true;
+        // Focus the Overview sub-tab automatically
+        if let Some((surface, node, tab_idx)) = self.stats_dock_state.find_tab(&StatsSubTab::Overview) {
+            self.stats_dock_state.set_active_tab((surface, node, tab_idx));
+        }
     }
 
     pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
