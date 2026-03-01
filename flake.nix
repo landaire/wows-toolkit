@@ -42,10 +42,7 @@
           openssl
         ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
           pkgs.vulkan-loader
-        ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
-          Security
-          SystemConfiguration
-        ]);
+        ];
       };
 
       # Build workspace deps once, share across packages
@@ -74,13 +71,7 @@
             xorg.libXi
             xorg.libX11
             fontconfig
-          ] ++ lib.optionals stdenv.hostPlatform.isDarwin (with darwin.apple_sdk.frameworks; [
-            AppKit
-            CoreGraphics
-            CoreServices
-            Metal
-            QuartzCore
-          ]);
+          ];
 
           unwrapped = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
@@ -144,15 +135,7 @@
             xorg.libXrandr
             xorg.libXi
             xorg.libX11
-          ] ++ lib.optionals stdenv.hostPlatform.isDarwin (with darwin.apple_sdk.frameworks; [
-            AppKit
-            CoreGraphics
-            CoreServices
-            Metal
-            QuartzCore
-            Security
-            SystemConfiguration
-          ]);
+          ];
 
           LD_LIBRARY_PATH = lib.optionalString stdenv.hostPlatform.isLinux
             "${lib.makeLibraryPath buildInputs}";
