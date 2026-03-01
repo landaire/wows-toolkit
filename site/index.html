@@ -39,12 +39,12 @@
                 position: relative;
             }
 
-            /* CRT scan line overlay */
+            /* CRT scan line overlay — sits below screenshots and lightbox */
             body::after {
                 content: "";
                 position: fixed;
                 inset: 0;
-                z-index: 9999;
+                z-index: 1;
                 pointer-events: none;
                 background: repeating-linear-gradient(
                     0deg,
@@ -283,12 +283,13 @@
                 margin-right: 6px;
             }
 
-            /* Screenshots */
+            /* Screenshots — above the CRT overlay so images render clean */
             .screenshot {
+                position: relative;
+                z-index: 2;
                 border: 1px solid var(--border);
                 border-radius: 0;
                 overflow: hidden;
-                background: #030503;
                 cursor: pointer;
                 transition:
                     border-color 0.15s,
@@ -301,6 +302,10 @@
             .screenshot img {
                 display: block;
                 width: 100%;
+            }
+            .screenshot--narrow {
+                max-width: 560px;
+                margin: 0 auto;
             }
             .screenshot-caption {
                 font-size: 11px;
@@ -507,7 +512,7 @@
             <div class="container">
                 <div class="screenshot" onclick="openLightbox(this)">
                     <img
-                        src="img/replay.png"
+                        src="img/replay_inspector.png"
                         alt="Replay analysis showing post-battle statistics"
                     />
                 </div>
@@ -535,32 +540,20 @@
                         data.
                     </p>
                     <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/replay.png" alt="Replay analysis" />
+                        <img src="img/replay_inspector.png" alt="Replay inspector showing player stats, ribbons, and builds" />
                     </div>
                 </div>
 
                 <div class="feature">
-                    <h3>Stat Tracking</h3>
+                    <h3>Replay Renderer</h3>
                     <p>
-                        Performance tracking computed locally from your replay
-                        files. Damage, win rate, XP, per-ship breakdowns. No API
-                        keys or account linking needed.
+                        Animated minimap playback of any replay. Watch ship
+                        movements, torpedo spreads, and engagements unfold in
+                        real time. Scrub through the timeline, zoom and pan,
+                        or export to video.
                     </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/stats.svg" alt="Stat tracking" />
-                    </div>
-                </div>
-
-                <div class="feature">
-                    <h3>Player Tracker</h3>
-                    <p>
-                        Logs every player you encounter in battle. See how often
-                        you face the same opponents, spot recurring division
-                        mates, build a local matchmaking history. All offline
-                        from replay files.
-                    </p>
-                    <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/tracker.svg" alt="Player tracker" />
+                    <div class="screenshot screenshot--narrow" onclick="openLightbox(this)">
+                        <img src="img/replay_renderer.png" alt="Replay renderer showing animated minimap playback" />
                     </div>
                 </div>
 
@@ -568,13 +561,27 @@
                     <h3>Armor Viewer</h3>
                     <p>
                         3D armor model inspection for any ship. Color-coded
-                        thickness visualization. Simulate artillery impacts at
-                        any angle and range against layered
-                        protection&mdash;deck plating, belt armor, citadel
-                        bulkheads, torpedo protection.
+                        thickness visualization with detailed layer tooltips.
+                        Simulate artillery impacts at any angle and range
+                        against layered protection&mdash;deck plating, belt
+                        armor, citadel bulkheads, torpedo protection.
                     </p>
                     <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/armor.svg" alt="Armor model viewer" />
+                        <img src="img/armor_viewer.png" alt="Armor viewer showing color-coded thickness on Montana" />
+                    </div>
+                </div>
+
+                <div class="feature">
+                    <h3>Ballistic Trajectory Analysis</h3>
+                    <p>
+                        Trace shell trajectories through layered armor.
+                        See exactly which plates get hit, whether shells
+                        overmatch, ricochet, or penetrate, with per-plate
+                        angle and velocity breakdowns. AP and HE analysis
+                        side by side.
+                    </p>
+                    <div class="screenshot" onclick="openLightbox(this)">
+                        <img src="img/armor_trajectory.png" alt="Trajectory analysis showing shell path through armor plates" />
                     </div>
                 </div>
 
@@ -587,7 +594,7 @@
                         modders, data miners, and the curious.
                     </p>
                     <div class="screenshot" onclick="openLightbox(this)">
-                        <img src="img/browser.png" alt="Resource browser" />
+                        <img src="img/resource_browser.png" alt="Resource browser showing game file tree" />
                     </div>
                 </div>
             </div>

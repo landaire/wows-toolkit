@@ -2,11 +2,21 @@
 
 A monorepo of tools for interacting with World of Warships game data, replays, and assets.
 
-![WoWs Toolkit Replay Tab](assets/wows_toolkit_replay_screenshot.png)
-
-![WoWs Toolkit Unpacker Tab](assets/wows_toolkit_unpacker_screenshot.png)
-
-![WoWs Toolkit Unpacker Tab With Filtering](assets/wows_toolkit_unpacker_filtering.png)
+<p>
+  <img src="assets/replay_inspector.png" alt="Replay Inspector" width="800">
+</p>
+<p>
+  <img src="assets/armor_viewer.png" alt="Armor Viewer" width="800">
+</p>
+<p>
+  <img src="assets/armor_trajectory.png" alt="Ballistic Trajectory Analysis" width="800">
+</p>
+<p>
+  <img src="assets/replay_renderer.png" alt="Replay Renderer" width="500">
+</p>
+<p>
+  <img src="assets/resource_browser.png" alt="Resource Browser" width="800">
+</p>
 
 ## Crates
 
