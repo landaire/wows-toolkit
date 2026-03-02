@@ -27,30 +27,16 @@ const REQUIRED_VFS_DIRS: &[&str] = &[
 ];
 
 /// Individual VFS files required beyond the directory dumps.
-const REQUIRED_VFS_FILES: &[&str] = &[
-    "content/GameParams.data",
-    "scripts/entities.xml",
-];
+const REQUIRED_VFS_FILES: &[&str] = &["content/GameParams.data", "scripts/entities.xml"];
 
 /// Files to extract per map from `spaces/<map>/`.
 /// The renderer only needs minimap images and map metadata, not geometry/models.
-const MAP_FILES_SPACES: &[&str] = &[
-    "minimap.png",
-    "minimap_water.png",
-    "space.settings",
-];
+const MAP_FILES_SPACES: &[&str] = &["minimap.png", "minimap_water.png", "space.settings"];
 
 /// Files to extract per map from `content/gameplay/<map>/`.
-const MAP_FILES_GAMEPLAY: &[&str] = &[
-    "space.settings",
-];
+const MAP_FILES_GAMEPLAY: &[&str] = &["space.settings"];
 
-pub fn dump_renderer_data(
-    game_dir: &Path,
-    build: u32,
-    version_str: &str,
-    output_base: &Path,
-) -> Result<(), Report> {
+pub fn dump_renderer_data(game_dir: &Path, build: u32, version_str: &str, output_base: &Path) -> Result<(), Report> {
     let output_dir = output_base.join(format!("{version_str}_{build}"));
     let vfs_dir = output_dir.join("vfs");
 
@@ -98,13 +84,11 @@ pub fn dump_renderer_data(
 
     // Serialize GameParams via rkyv
     println!("Serializing GameParams...");
-    let game_params =
-        GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams: {e:?}"))?;
+    let game_params = GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams: {e:?}"))?;
     let params: Vec<Param> = game_params.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params)
-        .map_err(|e| report!("Failed to serialize GameParams: {e}"))?;
-    std::fs::write(output_dir.join("game_params.rkyv"), &bytes)
-        .attach_with(|| "Failed to write game_params.rkyv")?;
+    let bytes =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize GameParams: {e}"))?;
+    std::fs::write(output_dir.join("game_params.rkyv"), &bytes).attach_with(|| "Failed to write game_params.rkyv")?;
 
     // Copy translations
     let mo_src = game_data::translations_path(game_dir, build);
@@ -128,12 +112,12 @@ pub fn dump_renderer_data(
 /// Count files in a VFS directory recursively.
 fn count_vfs_dir_files(vfs: &VfsPath, dir: &str) -> u64 {
     let mut count = 0;
-    if let Ok(vfs_dir_path) = vfs.join(dir) {
-        if let Ok(walker) = vfs_dir_path.walk_dir() {
-            for entry in walker.flatten() {
-                if entry.metadata().map(|m| m.file_type == VfsFileType::File).unwrap_or(false) {
-                    count += 1;
-                }
+    if let Ok(vfs_dir_path) = vfs.join(dir)
+        && let Ok(walker) = vfs_dir_path.walk_dir()
+    {
+        for entry in walker.flatten() {
+            if entry.metadata().map(|m| m.file_type == VfsFileType::File).unwrap_or(false) {
+                count += 1;
             }
         }
     }
@@ -143,14 +127,14 @@ fn count_vfs_dir_files(vfs: &VfsPath, dir: &str) -> u64 {
 /// Count how many specific files exist across all map subdirectories.
 fn count_map_files(vfs: &VfsPath, parent_dir: &str, filenames: &[&str]) -> u64 {
     let mut count = 0;
-    if let Ok(parent) = vfs.join(parent_dir) {
-        if let Ok(entries) = parent.read_dir() {
-            for entry in entries {
-                if entry.metadata().map(|m| m.file_type == VfsFileType::Directory).unwrap_or(false) {
-                    for filename in filenames {
-                        if entry.join(filename).is_ok_and(|f: VfsPath| f.exists().unwrap_or(false)) {
-                            count += 1;
-                        }
+    if let Ok(parent) = vfs.join(parent_dir)
+        && let Ok(entries) = parent.read_dir()
+    {
+        for entry in entries {
+            if entry.metadata().map(|m| m.file_type == VfsFileType::Directory).unwrap_or(false) {
+                for filename in filenames {
+                    if entry.join(filename).is_ok_and(|f: VfsPath| f.exists().unwrap_or(false)) {
+                        count += 1;
                     }
                 }
             }
@@ -206,9 +190,7 @@ fn extract_map_files(
                 std::fs::create_dir_all(parent_path)?;
             }
 
-            let mut src = file_path
-                .open_file()
-                .attach_with(|| format!("Failed to open VFS file: {rel}"))?;
+            let mut src = file_path.open_file().attach_with(|| format!("Failed to open VFS file: {rel}"))?;
             let mut buf = Vec::new();
             src.read_to_end(&mut buf)?;
             std::fs::write(&dest, &buf)?;

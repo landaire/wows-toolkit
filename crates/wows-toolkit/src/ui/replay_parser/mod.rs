@@ -128,9 +128,7 @@ use std::cmp::Reverse;
 /// Colorize a label based on battle result. Selected items get white-on-dark.
 fn colorize_label(label: &str, battle_result: Option<BattleResult>, is_selected: bool) -> RichText {
     if is_selected {
-        RichText::new(label)
-            .color(Color32::WHITE)
-            .background_color(Color32::DARK_GRAY)
+        RichText::new(label).color(Color32::WHITE).background_color(Color32::DARK_GRAY)
     } else {
         match battle_result {
             Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
@@ -143,21 +141,14 @@ fn colorize_label(label: &str, battle_result: Option<BattleResult>, is_selected:
 
 /// Calculate a win/loss rate summary string like " - 5W/3L (63%)".
 fn win_rate_label(replays: &[ReplayEntry]) -> String {
-    let (wins, losses) = replays.iter().fold((0u32, 0u32), |(w, l), (_, replay)| {
-        match replay.read().battle_result() {
-            Some(BattleResult::Win(_)) => (w + 1, l),
-            Some(BattleResult::Loss(_)) => (w, l + 1),
-            _ => (w, l),
-        }
+    let (wins, losses) = replays.iter().fold((0u32, 0u32), |(w, l), (_, replay)| match replay.read().battle_result() {
+        Some(BattleResult::Win(_)) => (w + 1, l),
+        Some(BattleResult::Loss(_)) => (w, l + 1),
+        _ => (w, l),
     });
     let total = wins + losses;
     if total > 0 {
-        format!(
-            " - {}W/{}L ({:.0}%)",
-            wins,
-            losses,
-            (wins as f64 / total as f64) * 100.0
-        )
+        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total as f64) * 100.0)
     } else {
         String::new()
     }
@@ -207,9 +198,7 @@ fn show_leaf_context_menu(
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
                         egui::Id::new("pending_confirmation_request"),
-                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                            replay_path: path.clone(),
-                        }),
+                        Some(crate::tab_state::ConfirmableAction::OpenInGame { replay_path: path.clone() }),
                     );
                 });
             }
@@ -227,38 +216,25 @@ fn show_leaf_context_menu(
         ui.ctx().data_mut(|data| {
             data.insert_temp(
                 egui::Id::new("pending_confirmation_request"),
-                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                    replays: vec![replay_weak.clone()],
-                }),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: vec![replay_weak.clone()] }),
             );
         });
         ui.close_kind(UiKind::Menu);
     }
     if ui.button("Add to Session Stats (1 replay)").clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(
-                egui::Id::new("add_to_session_stats_request"),
-                vec![replay_weak.clone()],
-            );
+            data.insert_temp(egui::Id::new("add_to_session_stats_request"), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
 }
 
 /// Show context menu items for a group node (date or ship).
-fn show_group_context_menu(
-    ui: &mut egui::Ui,
-    paths: &[std::path::PathBuf],
-    replays: &[Weak<RwLock<Replay>>],
-) {
+fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], replays: &[Weak<RwLock<Replay>>]) {
     let count = replays.len();
-    let copy_label = if count == 1 {
-        "Copy Replay".to_string()
-    } else {
-        format!("Copy {} Replays", count)
-    };
+    let copy_label = if count == 1 { "Copy Replay".to_string() } else { format!("Copy {} Replays", count) };
     if ui.button(copy_label).clicked() {
-        copy_files_to_clipboard(&paths);
+        copy_files_to_clipboard(paths);
         ui.close_kind(UiKind::Menu);
     }
     let session_label = if count == 1 {
@@ -282,10 +258,7 @@ fn show_group_context_menu(
     };
     if ui.button(add_label).clicked() {
         ui.ctx().data_mut(|data| {
-            data.insert_temp(
-                egui::Id::new("add_to_session_stats_request"),
-                replays.to_vec(),
-            );
+            data.insert_temp(egui::Id::new("add_to_session_stats_request"), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
@@ -309,12 +282,8 @@ struct GroupedTreeMaps {
 impl GroupedTreeMaps {
     /// Collect replays and paths from a set of selected node IDs, deduplicating
     /// leaf nodes that are already covered by a selected group.
-    fn collect_selected(
-        &self,
-        selected_ids: &[egui::Id],
-    ) -> (Vec<Weak<RwLock<Replay>>>, Vec<std::path::PathBuf>) {
-        let mut covered_by_group: std::collections::HashSet<egui::Id> =
-            std::collections::HashSet::new();
+    fn collect_selected(&self, selected_ids: &[egui::Id]) -> (Vec<Weak<RwLock<Replay>>>, Vec<std::path::PathBuf>) {
+        let mut covered_by_group: std::collections::HashSet<egui::Id> = std::collections::HashSet::new();
         let mut replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
         let mut paths: Vec<std::path::PathBuf> = Vec::new();
         for id in selected_ids {
@@ -380,10 +349,7 @@ impl GroupedTreeMaps {
             };
             if ui.button(add_label).clicked() {
                 ui.ctx().data_mut(|data| {
-                    data.insert_temp(
-                        egui::Id::new("add_to_session_stats_request"),
-                        selected_replays,
-                    );
+                    data.insert_temp(egui::Id::new("add_to_session_stats_request"), selected_replays);
                 });
                 ui.close_kind(UiKind::Menu);
             }
@@ -3254,11 +3220,9 @@ impl ToolkitTabViewer<'_> {
                         drop(replay_guard);
 
                         let label_text = colorize_label(&label, battle_result, false);
-                        let node = egui_ltreeview::NodeBuilder::leaf(id)
-                            .label(label_text)
-                            .context_menu(move |ui| {
-                                show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
-                            });
+                        let node = egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                            show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
+                        });
                         builder.node(node);
                     }
                 }
@@ -3414,40 +3378,41 @@ impl ToolkitTabViewer<'_> {
 
                 let mut default_width = 250.0f32;
 
-                if has_files && !self.tab_state.replay_listing_auto_sized {
-                    if let Some(metadata_provider) = self.metadata_provider() {
-                        let font_id = egui::TextStyle::Body.resolve(ui.style());
-                        let max_width = self
-                            .tab_state
-                            .replay_files
-                            .as_ref()
-                            .unwrap()
-                            .values()
-                            .map(|replay| {
-                                let guard = replay.read();
-                                let label = guard.label(&metadata_provider);
-                                label
-                                    .lines()
-                                    .map(|line| {
-                                        ui.painter()
-                                            .layout_no_wrap(line.to_string(), font_id.clone(), Color32::WHITE)
-                                            .size()
-                                            .x
-                                    })
-                                    .fold(0.0f32, f32::max)
-                            })
-                            .fold(0.0f32, f32::max);
+                if has_files
+                    && !self.tab_state.replay_listing_auto_sized
+                    && let Some(metadata_provider) = self.metadata_provider()
+                {
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let max_width = self
+                        .tab_state
+                        .replay_files
+                        .as_ref()
+                        .unwrap()
+                        .values()
+                        .map(|replay| {
+                            let guard = replay.read();
+                            let label = guard.label(&metadata_provider);
+                            label
+                                .lines()
+                                .map(|line| {
+                                    ui.painter()
+                                        .layout_no_wrap(line.to_string(), font_id.clone(), Color32::WHITE)
+                                        .size()
+                                        .x
+                                })
+                                .fold(0.0f32, f32::max)
+                        })
+                        .fold(0.0f32, f32::max);
 
-                        // Add padding for tree indentation, margins, scrollbar
-                        default_width = (max_width + 60.0).max(200.0);
+                    // Add padding for tree indentation, margins, scrollbar
+                    default_width = (max_width + 60.0).max(200.0);
 
-                        self.tab_state.replay_listing_auto_sized = true;
+                    self.tab_state.replay_listing_auto_sized = true;
 
-                        // Clear stored panel state so default_width takes effect
-                        ui.ctx().data_mut(|d| {
-                            d.remove::<egui::containers::panel::PanelState>(panel_id);
-                        });
-                    }
+                    // Clear stored panel state so default_width takes effect
+                    ui.ctx().data_mut(|d| {
+                        d.remove::<egui::containers::panel::PanelState>(panel_id);
+                    });
                 }
 
                 egui::SidePanel::left("replay_listing_panel")

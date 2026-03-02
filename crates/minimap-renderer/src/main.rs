@@ -152,14 +152,13 @@ fn main() -> Result<(), Report> {
     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
     // Load game data from either a full game install or pre-extracted directory
-    let (vfs_owned, specs, game_params, controller_game_params) =
-        if let Some(ref extracted) = args.extracted_dir {
-            let resolved = resolve_extracted_dir(extracted, &replay_version)?;
-            load_from_extracted(&resolved, &replay_version)?
-        } else {
-            let game_dir = args.game_dir.as_ref().expect("game directory is required");
-            load_from_game_dir(game_dir, &replay_version)?
-        };
+    let (vfs_owned, specs, game_params, controller_game_params) = if let Some(ref extracted) = args.extracted_dir {
+        let resolved = resolve_extracted_dir(extracted, &replay_version)?;
+        load_from_extracted(&resolved, &replay_version)?
+    } else {
+        let game_dir = args.game_dir.as_ref().expect("game directory is required");
+        load_from_game_dir(game_dir, &replay_version)?
+    };
     let vfs = &vfs_owned;
 
     info!("Loading fonts and icons");
@@ -338,7 +337,8 @@ fn main() -> Result<(), Report> {
     Ok(())
 }
 
-type LoadedGameData = (VfsPath, Vec<wowsunpack::rpc::entitydefs::EntitySpec>, GameMetadataProvider, GameMetadataProvider);
+type LoadedGameData =
+    (VfsPath, Vec<wowsunpack::rpc::entitydefs::EntitySpec>, GameMetadataProvider, GameMetadataProvider);
 
 /// Load game data from a full WoWS game installation.
 fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> Result<LoadedGameData, Report> {
@@ -374,26 +374,25 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
 
     // Otherwise, scan for version subdirectories
     let mut candidates: Vec<(PathBuf, String, u32)> = Vec::new();
-    let entries = std::fs::read_dir(path)
-        .attach_with(|| format!("Failed to read directory: {}", path.display()))?;
+    let entries = std::fs::read_dir(path).attach_with(|| format!("Failed to read directory: {}", path.display()))?;
 
     for entry in entries.flatten() {
         let sub = entry.path();
         let meta_path = sub.join("metadata.toml");
-        if meta_path.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&meta_path) {
-                // Parse version and build from metadata.toml
-                let mut version = String::new();
-                let mut build = 0u32;
-                for line in contents.lines() {
-                    if let Some(v) = line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
-                        version = v.to_string();
-                    } else if let Some(b) = line.strip_prefix("build = ") {
-                        build = b.trim().parse().unwrap_or(0);
-                    }
+        if meta_path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&meta_path)
+        {
+            // Parse version and build from metadata.toml
+            let mut version = String::new();
+            let mut build = 0u32;
+            for line in contents.lines() {
+                if let Some(v) = line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+                    version = v.to_string();
+                } else if let Some(b) = line.strip_prefix("build = ") {
+                    build = b.trim().parse().unwrap_or(0);
                 }
-                candidates.push((sub, version, build));
             }
+            candidates.push((sub, version, build));
         }
     }
 
@@ -415,10 +414,7 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     // If only one candidate, use it with a warning
     if candidates.len() == 1 {
         let (ref dir, ref ver, build) = candidates[0];
-        warn!(
-            "No exact build match for replay (build {}). Using {ver} (build {build}).",
-            replay_version.build
-        );
+        warn!("No exact build match for replay (build {}). Using {ver} (build {build}).", replay_version.build);
         return Ok(dir.clone());
     }
 
@@ -463,8 +459,7 @@ fn load_from_extracted(extracted_dir: &std::path::Path, _replay_version: &Versio
     // Load GameParams from rkyv cache
     let rkyv_path = extracted_dir.join("game_params.rkyv");
     info!("Loading game params from rkyv cache");
-    let rkyv_data = std::fs::read(&rkyv_path)
-        .attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+    let rkyv_data = std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
     let params: Vec<Param> = rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&rkyv_data)
         .map_err(|e| report!("Failed to deserialize GameParams: {e}"))?;
 
