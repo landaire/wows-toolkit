@@ -292,11 +292,14 @@ pub struct TabState {
     #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
 
-    /// Replays selected for resetting session stats. When Some, they will be
-    /// processed and added to session stats, clearing the old ones first.
+    /// Replays selected for session stats update. When Some, they will be
+    /// processed and added to session stats. If `clear_before_session_reset` is true,
+    /// existing stats are cleared first.
     /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
     #[serde(skip)]
     pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
+    #[serde(skip)]
+    pub clear_before_session_reset: bool,
 
     /// Pending action awaiting user confirmation.
     #[serde(skip)]
@@ -395,6 +398,7 @@ impl Default for TabState {
             chart_configs: HashMap::new(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
+            clear_before_session_reset: true,
             pending_confirmation: None,
             wows_data_map: None,
             available_builds: Vec::new(),
@@ -605,6 +609,7 @@ impl TabState {
         self.settings.session_stats.clear();
         self.chart_configs.clear();
         self.replays_for_session_reset = None;
+        self.clear_before_session_reset = true;
         self.replay_parser_tab.lock().game_chat.clear();
         self.file_viewer.lock().clear();
         self.replay_renderers.lock().clear();
@@ -613,16 +618,17 @@ impl TabState {
         self.wows_data_map = None;
     }
 
-    /// Process replays selected for session stats reset.
-    /// Clears the current session stats and populates with the selected replays.
+    /// Process replays selected for session stats update.
+    /// If `clear_before_session_reset` is true, clears existing stats first.
     /// If any replays haven't been parsed yet, they will be queued for parsing.
     pub(crate) fn process_session_stats_reset(&mut self) {
         let Some(weak_replays) = self.replays_for_session_reset.take() else {
             return;
         };
 
-        // Clear current session stats
-        self.settings.session_stats.clear();
+        if self.clear_before_session_reset {
+            self.settings.session_stats.clear();
+        }
 
         // Upgrade weak references and add to session stats
         for weak_replay in weak_replays {

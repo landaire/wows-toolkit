@@ -909,6 +909,17 @@ impl WowsToolkitApp {
         }
 
         self.tab_state.try_update_replays();
+
+        // Pick up "Add to Session Stats" requests (no confirmation needed)
+        if let Some(replays) = ctx.data_mut(|data| {
+            data.remove_temp::<Vec<std::sync::Weak<parking_lot::RwLock<crate::ui::replay_parser::Replay>>>>(
+                egui::Id::new("add_to_session_stats_request"),
+            )
+        }) {
+            self.tab_state.clear_before_session_reset = false;
+            self.tab_state.replays_for_session_reset = Some(replays);
+        }
+
         self.tab_state.process_session_stats_reset();
 
         if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
@@ -1502,6 +1513,7 @@ impl WowsToolkitApp {
                 self.tab_state.settings.session_stats.clear_ship(&ship_name);
             }
             crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
+                self.tab_state.clear_before_session_reset = true;
                 self.tab_state.replays_for_session_reset = Some(replays);
             }
         }

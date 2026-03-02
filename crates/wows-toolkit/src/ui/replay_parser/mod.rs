@@ -234,6 +234,15 @@ fn show_leaf_context_menu(
         });
         ui.close_kind(UiKind::Menu);
     }
+    if ui.button("Add to Session Stats (1 replay)").clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("add_to_session_stats_request"),
+                vec![replay_weak.clone()],
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
 }
 
 /// Show context menu items for a group node (date or ship).
@@ -262,6 +271,20 @@ fn show_group_context_menu(
             data.insert_temp(
                 egui::Id::new("pending_confirmation_request"),
                 Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: replays.to_vec() }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let add_label = if count == 1 {
+        "Add to Session Stats (1 replay)".to_string()
+    } else {
+        format!("Add to Session Stats ({} replays)", count)
+    };
+    if ui.button(add_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("add_to_session_stats_request"),
+                replays.to_vec(),
             );
         });
         ui.close_kind(UiKind::Menu);
@@ -334,18 +357,32 @@ impl GroupedTreeMaps {
 
         if !selected_replays.is_empty() {
             let count = selected_replays.len();
-            let label = if count == 1 {
+            let set_label = if count == 1 {
                 "Set as Session Stats (1 replay)".to_string()
             } else {
                 format!("Set as Session Stats ({} replays)", count)
             };
-            if ui.button(label).clicked() {
+            if ui.button(set_label).clicked() {
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
                         egui::Id::new("pending_confirmation_request"),
                         Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                            replays: selected_replays,
+                            replays: selected_replays.clone(),
                         }),
+                    );
+                });
+                ui.close_kind(UiKind::Menu);
+            }
+            let add_label = if count == 1 {
+                "Add to Session Stats (1 replay)".to_string()
+            } else {
+                format!("Add to Session Stats ({} replays)", count)
+            };
+            if ui.button(add_label).clicked() {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("add_to_session_stats_request"),
+                        selected_replays,
                     );
                 });
                 ui.close_kind(UiKind::Menu);
