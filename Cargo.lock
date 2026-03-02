@@ -8556,7 +8556,7 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -8590,7 +8590,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "bon",
  "flate2",
@@ -8682,7 +8682,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "async-std",
  "async-trait",

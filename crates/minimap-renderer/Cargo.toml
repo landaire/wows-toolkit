@@ -1,6 +1,6 @@
 [package]
 name = "wows_minimap_renderer"
-version = "0.16.0"
+version = "0.17.0"
 publish = true
 description = """
 Library/CLI application for rendering World of Warships replay files as a minimap render

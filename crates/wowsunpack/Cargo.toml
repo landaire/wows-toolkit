@@ -1,7 +1,7 @@
 [package]
 name = "wowsunpack"
 description = "Utility for interacting with World of Warships game assets"
-version = "0.23.0"
+version = "0.24.0"
 repository = "https://github.com/landaire/wows-toolkit"
 documentation = "https://docs.rs/wowsunpack/"
 exclude = ["format_templates/"]
