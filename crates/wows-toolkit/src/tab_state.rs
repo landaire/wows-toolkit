@@ -120,6 +120,9 @@ pub struct SessionStatsChartConfig {
     pub selected_ships_manually_changed: bool,
     /// Whether to show rolling average instead of per-game values (line chart only)
     pub rolling_average: bool,
+    /// Whether to combine all ships into a single rolling series
+    #[serde(default)]
+    pub combined: bool,
     /// Whether to show value labels on data points
     pub show_labels: bool,
     /// Whether a screenshot has been requested (waiting for the event)

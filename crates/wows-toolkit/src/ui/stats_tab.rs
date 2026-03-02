@@ -45,7 +45,36 @@ impl TabViewer for StatsTabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
             StatsSubTab::Overview => icon_str!(icons::LIST, "Overview").into(),
-            StatsSubTab::Charts(_) => icon_str!(icons::CHART_LINE, "Charts").into(),
+            StatsSubTab::Charts(id) => {
+                let cfg = self.tab_state.chart_config(*id);
+                let stat = cfg.selected_stat;
+                let combined = cfg.combined;
+                let rolling_average = cfg.rolling_average || combined;
+                let mode = cfg.mode;
+
+                let title = match mode {
+                    ChartMode::Bar => match stat {
+                        ChartableStat::WinRate => stat.name().to_string(),
+                        _ => format!("Avg {}", stat.name()),
+                    },
+                    ChartMode::Line => {
+                        if combined {
+                            format!("{} (Combined)", stat.name())
+                        } else if rolling_average {
+                            format!("{} (Rolling Average)", stat.name())
+                        } else {
+                            stat.name().to_string()
+                        }
+                    }
+                };
+
+                let icon = match mode {
+                    ChartMode::Line => icons::CHART_LINE,
+                    ChartMode::Bar => icons::CHART_BAR,
+                };
+
+                format!("{icon} {title}").into()
+            }
         }
     }
 
@@ -584,83 +613,105 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
         cfg.selected_ships = ship_names.clone();
     }
 
-    // ── Controls bar: stat, chart type, options, copy button — all on one line ──
-    ui.horizontal_wrapped(|ui| {
-        let cfg = tab_state.chart_config(chart_id);
+    // ── Toolbar: settings popover + copy button ──
+    ui.horizontal(|ui| {
+        // Settings button with popover
+        let settings_btn = ui.button(icon_str!(icons::GEAR_FINE, "Settings"));
+        egui::Popup::from_toggle_button_response(&settings_btn)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                let cfg = tab_state.chart_config(chart_id);
 
-        // Stat selector
-        ui.label("Stat:");
-        ComboBox::from_id_salt(("chart_stat_select", chart_id))
-            .selected_text(cfg.selected_stat.name())
-            .show_ui(ui, |ui| {
-                for stat in ChartableStat::all() {
-                    let is_selected = cfg.selected_stat == *stat;
-                    if ui.selectable_label(is_selected, stat.name()).clicked() {
-                        cfg.selected_stat = *stat;
-                        cfg.reset_plot = true;
-                    }
-                }
+                ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                    ui.set_min_width(280.0);
+
+                    // ── Chart Type ──
+                    ui.strong("Chart Type");
+                    ui.indent(("chart_type_indent", chart_id), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Stat:");
+                            ComboBox::from_id_salt(("chart_stat_select", chart_id))
+                                .selected_text(cfg.selected_stat.name())
+                                .show_ui(ui, |ui| {
+                                    for stat in ChartableStat::all() {
+                                        let is_selected = cfg.selected_stat == *stat;
+                                        if ui.selectable_label(is_selected, stat.name()).clicked() {
+                                            cfg.selected_stat = *stat;
+                                            cfg.reset_plot = true;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Mode:");
+                            ui.add_enabled_ui(!cfg.combined, |ui| {
+                                if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
+                                    cfg.reset_plot = true;
+                                }
+                                if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
+                                    cfg.reset_plot = true;
+                                }
+                            });
+                        });
+                    });
+
+                    ui.separator();
+
+                    // ── Options ──
+                    ui.strong("Options");
+                    ui.indent(("options_indent", chart_id), |ui| {
+                        if ui.checkbox(&mut cfg.combined, "Combined").changed() {
+                            cfg.reset_plot = true;
+                            if cfg.combined {
+                                cfg.mode = ChartMode::Line;
+                            }
+                        }
+                        if cfg.mode == ChartMode::Line {
+                            ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, "Rolling Avg"));
+                        }
+                        ui.checkbox(&mut cfg.show_labels, "Labels");
+                    });
+
+                    ui.separator();
+
+                    // ── Ships ──
+                    ui.strong("Ships");
+                    ui.indent(("ships_indent", chart_id), |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("All").clicked() {
+                                cfg.selected_ships = ship_names.clone();
+                                cfg.selected_ships_manually_changed = true;
+                            }
+                            if ui.button("None").clicked() {
+                                cfg.selected_ships.clear();
+                                cfg.selected_ships_manually_changed = true;
+                            }
+                        });
+                        for ship_name in &ship_names {
+                            let mut is_selected = cfg.selected_ships.contains(ship_name);
+                            if ui.checkbox(&mut is_selected, ship_name).changed() {
+                                if is_selected {
+                                    cfg.selected_ships.push(ship_name.clone());
+                                } else {
+                                    cfg.selected_ships.retain(|s| s != ship_name);
+                                }
+                                cfg.selected_ships_manually_changed = true;
+                            }
+                        }
+                    });
+                });
             });
 
-        ui.separator();
-
-        // Chart type
-        if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
-            cfg.reset_plot = true;
-        }
-        if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
-            cfg.reset_plot = true;
-        }
-
-        ui.separator();
-
-        // Options
-        if cfg.mode == ChartMode::Line {
-            ui.checkbox(&mut cfg.rolling_average, "Rolling Avg");
-        }
-        ui.checkbox(&mut cfg.show_labels, "Labels");
-
-        ui.separator();
-
-        // Ship selection: All / None buttons
-        if ui.button("All Ships").clicked() {
-            cfg.selected_ships = ship_names.clone();
-            cfg.selected_ships_manually_changed = true;
-        }
-        if ui.button("None").clicked() {
-            cfg.selected_ships.clear();
-            cfg.selected_ships_manually_changed = true;
-        }
-
-        // Copy as Image button (inline with controls)
-        if cfg.plot_rect.is_some() {
-            ui.separator();
+        // Copy as Image button (stays outside popover)
+        let has_plot = tab_state.chart_config(chart_id).plot_rect.is_some();
+        if has_plot {
             if ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
+                let cfg = tab_state.chart_config(chart_id);
                 cfg.screenshot_requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
         }
     });
-
-    let cfg = tab_state.chart_config(chart_id);
-
-    // Ship checkboxes — compact horizontal row
-    ui.horizontal_wrapped(|ui| {
-        for ship_name in &ship_names {
-            let mut is_selected = cfg.selected_ships.contains(ship_name);
-            if ui.checkbox(&mut is_selected, ship_name).changed() {
-                if is_selected {
-                    cfg.selected_ships.push(ship_name.clone());
-                } else {
-                    cfg.selected_ships.retain(|s| s != ship_name);
-                }
-
-                cfg.selected_ships_manually_changed = true;
-            }
-        }
-    });
-
-    ui.separator();
 
     // ── Chart fills all remaining space ──
     let cfg = tab_state.chart_config(chart_id);
@@ -669,7 +720,8 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
     let show_labels = cfg.show_labels;
     let reset_plot = std::mem::take(&mut cfg.reset_plot);
     let mode = cfg.mode;
-    let rolling_average = cfg.rolling_average;
+    let rolling_average = cfg.rolling_average || cfg.combined;
+    let combined = cfg.combined;
 
     let mut plot_rect: Option<egui::Rect> = None;
 
@@ -686,6 +738,7 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                     &selected_ships,
                     &pr_data,
                     rolling_average,
+                    combined,
                     show_labels,
                     reset_plot,
                     chart_id,

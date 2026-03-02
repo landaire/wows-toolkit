@@ -13,7 +13,12 @@ use egui_plot::PlotPoints;
 use egui_plot::Points;
 use egui_plot::Text;
 
+use std::collections::HashMap;
+
+use wows_replays::types::GameParamId;
+
 use crate::personal_rating::PersonalRatingData;
+use crate::personal_rating::ShipBattleStats;
 use crate::session_stats::PerGameStat;
 use crate::session_stats::PerformanceInfo;
 use crate::tab_state::ChartableStat;
@@ -60,6 +65,7 @@ pub fn render_line_chart(
     selected_ships: &[String],
     pr_data: &PersonalRatingData,
     rolling_average: bool,
+    combined: bool,
     show_labels: bool,
     reset: bool,
     chart_id: u64,
@@ -70,73 +76,138 @@ pub fn render_line_chart(
         return None;
     }
 
-    // Get unique ships from the data that are in selected_ships, preserving order
-    let mut unique_ships: Vec<String> = Vec::new();
-    for game in per_game_data {
-        if selected_ships.contains(&game.ship_name) && !unique_ships.contains(&game.ship_name) {
-            unique_ships.push(game.ship_name.clone());
-        }
-    }
-
-    // Prepare data for each ship
+    // Prepare data for each series
     let mut ship_data: Vec<(String, Vec<[f64; 2]>, Color32)> = Vec::new();
 
     let pr_data_opt = if pr_data.is_loaded() { Some(pr_data) } else { None };
 
-    for ship_name in &unique_ships {
-        // For win rate with rolling average, we need to track wins separately
-        if stat == ChartableStat::WinRate && rolling_average {
-            let ship_games: Vec<bool> =
-                per_game_data.iter().filter(|g| &g.ship_name == ship_name).map(|g| g.is_win).collect();
+    if combined {
+        // Combined mode: single line across all games, proper rolling aggregation
+        let all_games: Vec<&&PerGameStat> = per_game_data
+            .iter()
+            .filter(|g| selected_ships.contains(&g.ship_name))
+            .collect();
 
-            if ship_games.is_empty() {
-                continue;
-            }
-
-            // Calculate rolling win rate
-            let mut wins = 0u64;
-            let points: Vec<[f64; 2]> = ship_games
-                .iter()
-                .enumerate()
-                .map(|(i, &is_win)| {
-                    if is_win {
-                        wins += 1;
-                    }
-                    let win_rate = (wins as f64 / (i + 1) as f64) * 100.0;
-                    [i as f64 + 1.0, win_rate]
-                })
-                .collect();
-
-            ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
-        } else {
-            let ship_games: Vec<f64> = per_game_data
-                .iter()
-                .filter(|g| &g.ship_name == ship_name)
-                .map(|g| g.get_stat(stat, pr_data_opt))
-                .collect();
-
-            if ship_games.is_empty() {
-                continue;
-            }
-
-            let points: Vec<[f64; 2]> = if rolling_average {
-                // Calculate rolling average
-                let mut sum = 0.0;
-                ship_games
+        if !all_games.is_empty() {
+            let points = if stat == ChartableStat::PersonalRating && pr_data.is_loaded() {
+                // Proper rolling PR: accumulate ShipBattleStats and recalculate at each point
+                let mut accum: HashMap<GameParamId, ShipBattleStats> = HashMap::new();
+                all_games
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| {
-                        sum += v;
+                    .filter_map(|(i, game)| {
+                        let entry = accum.entry(game.ship_id).or_insert(ShipBattleStats {
+                            ship_id: game.ship_id,
+                            battles: 0,
+                            damage: 0,
+                            wins: 0,
+                            frags: 0,
+                        });
+                        entry.battles += 1;
+                        entry.damage += game.damage;
+                        entry.wins += if game.is_win { 1 } else { 0 };
+                        entry.frags += game.frags;
+
+                        let stats: Vec<_> = accum.values().cloned().collect();
+                        let pr = pr_data.calculate_pr(&stats)?.pr;
+                        Some([i as f64 + 1.0, pr])
+                    })
+                    .collect()
+            } else if stat == ChartableStat::WinRate {
+                // Rolling win rate
+                let mut wins = 0u64;
+                all_games
+                    .iter()
+                    .enumerate()
+                    .map(|(i, game)| {
+                        if game.is_win {
+                            wins += 1;
+                        }
+                        let win_rate = (wins as f64 / (i + 1) as f64) * 100.0;
+                        [i as f64 + 1.0, win_rate]
+                    })
+                    .collect()
+            } else {
+                // Simple rolling average for other stats
+                let mut sum = 0.0;
+                all_games
+                    .iter()
+                    .enumerate()
+                    .map(|(i, game)| {
+                        sum += game.get_stat(stat, pr_data_opt);
                         let avg = sum / (i + 1) as f64;
                         [i as f64 + 1.0, avg]
                     })
                     .collect()
-            } else {
-                // Use raw values
-                ship_games.iter().enumerate().map(|(i, v)| [i as f64 + 1.0, *v]).collect()
             };
 
-            ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
+            ship_data.push(("Combined".to_string(), points, Color32::from_rgb(100, 180, 255)));
+        }
+    } else {
+        // Per-ship mode (original behavior)
+        // Get unique ships from the data that are in selected_ships, preserving order
+        let mut unique_ships: Vec<String> = Vec::new();
+        for game in per_game_data {
+            if selected_ships.contains(&game.ship_name) && !unique_ships.contains(&game.ship_name) {
+                unique_ships.push(game.ship_name.clone());
+            }
+        }
+
+        for ship_name in &unique_ships {
+            // For win rate with rolling average, we need to track wins separately
+            if stat == ChartableStat::WinRate && rolling_average {
+                let ship_games: Vec<bool> =
+                    per_game_data.iter().filter(|g| &g.ship_name == ship_name).map(|g| g.is_win).collect();
+
+                if ship_games.is_empty() {
+                    continue;
+                }
+
+                // Calculate rolling win rate
+                let mut wins = 0u64;
+                let points: Vec<[f64; 2]> = ship_games
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &is_win)| {
+                        if is_win {
+                            wins += 1;
+                        }
+                        let win_rate = (wins as f64 / (i + 1) as f64) * 100.0;
+                        [i as f64 + 1.0, win_rate]
+                    })
+                    .collect();
+
+                ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
+            } else {
+                let ship_games: Vec<f64> = per_game_data
+                    .iter()
+                    .filter(|g| &g.ship_name == ship_name)
+                    .map(|g| g.get_stat(stat, pr_data_opt))
+                    .collect();
+
+                if ship_games.is_empty() {
+                    continue;
+                }
+
+                let points: Vec<[f64; 2]> = if rolling_average {
+                    // Calculate rolling average
+                    let mut sum = 0.0;
+                    ship_games
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| {
+                            sum += v;
+                            let avg = sum / (i + 1) as f64;
+                            [i as f64 + 1.0, avg]
+                        })
+                        .collect()
+                } else {
+                    // Use raw values
+                    ship_games.iter().enumerate().map(|(i, v)| [i as f64 + 1.0, *v]).collect()
+                };
+
+                ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
+            }
         }
     }
 
@@ -160,8 +231,13 @@ pub fn render_line_chart(
     // Wrap in a group to get the full rect including axis labels
     let group_response = ui.group(|ui| {
         // Chart title (centered)
-        let title =
-            if rolling_average { format!("{} (Rolling Average)", stat.name()) } else { stat.name().to_string() };
+        let title = if combined {
+            format!("{} (Combined)", stat.name())
+        } else if rolling_average {
+            format!("{} (Rolling Average)", stat.name())
+        } else {
+            stat.name().to_string()
+        };
         ui.vertical_centered(|ui| ui.heading(&title));
 
         let mut plot = Plot::new(egui::Id::new(("line_chart", chart_id)))
