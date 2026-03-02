@@ -9,12 +9,12 @@ use tracing::info;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::types::GameClock;
 
-use crate::error::VideoError;
-
 use crate::CANVAS_HEIGHT;
 use crate::MINIMAP_SIZE;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
+use crate::encoder::EncoderBackend;
+use crate::error::VideoError;
 use crate::renderer::MinimapRenderer;
 
 pub const FPS: f64 = 30.0;
@@ -43,304 +43,12 @@ pub struct RenderProgress {
     pub total: u64,
 }
 
-// ---------------------------------------------------------------------------
-// GPU backend (vk-video + yuvutils-rs)
-// ---------------------------------------------------------------------------
-
-#[cfg(feature = "gpu")]
-mod gpu {
-    use std::num::NonZeroU32;
-
-    use rootcause::prelude::*;
-    use vk_video::BytesEncoder;
-    use vk_video::Frame;
-    use vk_video::RawFrameData;
-    use vk_video::VulkanInstance;
-    use vk_video::parameters::RateControl;
-    use vk_video::parameters::VideoParameters;
-    use yuvutils_rs::BufferStoreMut;
-    use yuvutils_rs::YuvBiPlanarImageMut;
-    use yuvutils_rs::YuvConversionMode;
-    use yuvutils_rs::YuvRange;
-    use yuvutils_rs::YuvStandardMatrix;
-
-    use super::FPS;
-    use crate::error::VideoError;
-
-    pub struct GpuEncoder {
-        encoder: BytesEncoder,
-        nv12_buf: Vec<u8>,
-        frame_count: u64,
-    }
-
-    impl GpuEncoder {
-        pub fn new(width: u32, height: u32) -> rootcause::Result<Self, VideoError> {
-            let instance = VulkanInstance::new()
-                .map_err(|e| report!(VideoError::EncoderInit(format!("Vulkan init failed: {e:?}"))))?;
-            let adapter = instance
-                .create_adapter(None)
-                .map_err(|e| report!(VideoError::EncoderInit(format!("No Vulkan adapter: {e:?}"))))?;
-
-            if !adapter.supports_encoding() {
-                bail!(VideoError::EncoderInit(format!(
-                    "Vulkan adapter '{}' does not support video encoding",
-                    adapter.info().name
-                )));
-            }
-
-            let device = adapter
-                .create_device(
-                    wgpu::Features::empty(),
-                    wgpu::ExperimentalFeatures::disabled(),
-                    wgpu::Limits { max_immediate_size: 128, ..Default::default() },
-                )
-                .map_err(|e| report!(VideoError::EncoderInit(format!("Vulkan device creation failed: {e:?}"))))?;
-
-            let params = device
-                .encoder_parameters_high_quality(
-                    VideoParameters {
-                        width: NonZeroU32::new(width).expect("non-zero width"),
-                        height: NonZeroU32::new(height).expect("non-zero height"),
-                        target_framerate: (FPS as u32).into(),
-                    },
-                    RateControl::VariableBitrate {
-                        average_bitrate: 20_000_000,
-                        max_bitrate: 40_000_000,
-                        virtual_buffer_size: std::time::Duration::from_secs(2),
-                    },
-                )
-                .map_err(|e| report!(VideoError::EncoderInit(format!("Encoder params failed: {e:?}"))))?;
-
-            let encoder = device
-                .create_bytes_encoder(params)
-                .map_err(|e| report!(VideoError::EncoderInit(format!("Encoder creation failed: {e:?}"))))?;
-
-            let nv12_size = (width as usize) * (height as usize) * 3 / 2;
-
-            Ok(Self { encoder, nv12_buf: vec![0u8; nv12_size], frame_count: 0 })
-        }
-
-        pub fn encode_frame(&mut self, rgb: &[u8], width: u32, height: u32) -> rootcause::Result<Vec<u8>, VideoError> {
-            let y_len = (width * height) as usize;
-            let uv_len = (width * height / 2) as usize;
-
-            // Split nv12_buf into Y and UV planes
-            let (y_plane, uv_plane) = self.nv12_buf[..y_len + uv_len].split_at_mut(y_len);
-
-            let mut nv12_image = YuvBiPlanarImageMut {
-                y_plane: BufferStoreMut::Borrowed(y_plane),
-                y_stride: width,
-                uv_plane: BufferStoreMut::Borrowed(uv_plane),
-                uv_stride: width,
-                width,
-                height,
-            };
-
-            yuvutils_rs::rgb_to_yuv_nv12(
-                &mut nv12_image,
-                rgb,
-                width * 3,
-                YuvRange::Full,
-                YuvStandardMatrix::Bt709,
-                YuvConversionMode::Balanced,
-            )
-            .map_err(|e| report!(VideoError::EncodeFailed(format!("RGB→NV12 conversion failed: {e:?}"))))?;
-
-            let force_keyframe = self.frame_count == 0;
-            let frame = Frame {
-                data: RawFrameData { frame: self.nv12_buf.clone(), width, height },
-                pts: Some(self.frame_count),
-            };
-
-            let output = self
-                .encoder
-                .encode(&frame, force_keyframe)
-                .map_err(|e| report!(VideoError::EncodeFailed(format!("GPU encode failed: {e:?}"))))?;
-
-            self.frame_count += 1;
-            Ok(output.data)
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CPU backend (openh264)
-// ---------------------------------------------------------------------------
-
-#[cfg(feature = "cpu")]
-mod cpu {
-    use openh264::OpenH264API;
-    use openh264::encoder::BitRate;
-    use openh264::encoder::Complexity;
-    use openh264::encoder::Encoder;
-    use openh264::encoder::EncoderConfig;
-    use openh264::encoder::FrameRate;
-    use openh264::formats::RgbSliceU8;
-    use openh264::formats::YUVBuffer;
-    use rootcause::prelude::*;
-
-    use super::FPS;
-    use crate::error::VideoError;
-
-    pub struct CpuEncoder {
-        encoder: Encoder,
-    }
-
-    impl CpuEncoder {
-        pub fn new() -> rootcause::Result<Self, VideoError> {
-            let config = EncoderConfig::new()
-                .max_frame_rate(FrameRate::from_hz(FPS as f32))
-                .rate_control_mode(openh264::encoder::RateControlMode::Quality)
-                .bitrate(BitRate::from_bps(20_000_000))
-                .complexity(Complexity::High);
-            let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
-                .map_err(|e| report!(VideoError::EncoderInit(format!("Failed to create H.264 encoder: {e:?}"))))?;
-            Ok(Self { encoder })
-        }
-
-        pub fn encode_frame(
-            &mut self,
-            rgb: &[u8],
-            width: usize,
-            height: usize,
-        ) -> rootcause::Result<Vec<u8>, VideoError> {
-            let rgb_slice = RgbSliceU8::new(rgb, (width, height));
-            let yuv = YUVBuffer::from_rgb_source(rgb_slice);
-            let bitstream = self
-                .encoder
-                .encode(&yuv)
-                .map_err(|e| report!(VideoError::EncodeFailed(format!("H.264 encode error: {e:?}"))))?;
-            Ok(bitstream.to_vec())
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Encoder availability check
-// ---------------------------------------------------------------------------
-
-/// Result of checking encoder availability.
-#[derive(Debug)]
-pub struct EncoderStatus {
-    pub gpu_available: bool,
-    pub gpu_error: Option<String>,
-    pub gpu_adapter_name: Option<String>,
-    pub cpu_available: bool,
-}
-
-impl std::fmt::Display for EncoderStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Encoder status:")?;
-        if self.gpu_available {
-            writeln!(f, "  GPU: available ({})", self.gpu_adapter_name.as_deref().unwrap_or("unknown"))?;
-        } else if let Some(ref err) = self.gpu_error {
-            writeln!(f, "  GPU: unavailable - {err}")?;
-        } else {
-            writeln!(f, "  GPU: not compiled in (enable 'gpu' feature)")?;
-        }
-        if self.cpu_available {
-            writeln!(f, "  CPU: available (openh264)")?;
-        } else {
-            writeln!(f, "  CPU: not compiled in (enable 'cpu' feature)")?;
-        }
-        Ok(())
-    }
-}
-
 /// Check which encoder backends are available on this system.
 ///
-/// This probes the GPU for Vulkan Video encoding support without actually
+/// This probes the GPU for video encoding support without actually
 /// creating a full encoder. Useful for diagnostics and UI.
-pub fn check_encoder() -> EncoderStatus {
-    let mut status = EncoderStatus {
-        gpu_available: false,
-        gpu_error: None,
-        gpu_adapter_name: None,
-        cpu_available: cfg!(feature = "cpu"),
-    };
-
-    #[cfg(feature = "gpu")]
-    {
-        use vk_video::VulkanInstance;
-        match VulkanInstance::new() {
-            Err(e) => {
-                status.gpu_error = Some(format!("Vulkan init failed: {e:?}"));
-            }
-            Ok(instance) => match instance.create_adapter(None) {
-                Err(e) => {
-                    status.gpu_error = Some(format!("No Vulkan adapter: {e:?}"));
-                }
-                Ok(adapter) => {
-                    let name = adapter.info().name.clone();
-                    status.gpu_adapter_name = Some(name.clone());
-                    if adapter.supports_encoding() {
-                        status.gpu_available = true;
-                    } else {
-                        status.gpu_error = Some(format!("Vulkan adapter '{name}' does not support video encoding"));
-                    }
-                }
-            },
-        }
-    }
-
-    #[cfg(not(feature = "gpu"))]
-    {
-        status.gpu_error = Some("GPU feature not compiled in".to_string());
-    }
-
-    status
-}
-
-// ---------------------------------------------------------------------------
-// Encoder backend dispatch
-// ---------------------------------------------------------------------------
-
-enum EncoderBackend {
-    #[cfg(feature = "gpu")]
-    Gpu(Box<gpu::GpuEncoder>),
-    #[cfg(feature = "cpu")]
-    Cpu(Box<cpu::CpuEncoder>),
-}
-
-impl EncoderBackend {
-    fn create(_width: u32, _height: u32, prefer_cpu: bool) -> rootcause::Result<Self, VideoError> {
-        let _ = prefer_cpu; // suppress unused warning when neither feature is enabled
-
-        // GPU preferred (default): try GPU, fail if unavailable
-        #[cfg(feature = "gpu")]
-        if !prefer_cpu {
-            match gpu::GpuEncoder::new(_width, _height) {
-                Ok(enc) => {
-                    info!("Using GPU (Vulkan Video) encoder");
-                    return Ok(Self::Gpu(Box::new(enc)));
-                }
-                Err(e) => {
-                    return Err(e.attach("GPU encoder failed. Enable prefer_cpu to use the CPU encoder instead."));
-                }
-            }
-        }
-
-        // CPU explicitly requested via prefer_cpu
-        #[cfg(feature = "cpu")]
-        {
-            info!("Using CPU (openh264) encoder");
-            Ok(Self::Cpu(Box::new(cpu::CpuEncoder::new()?)))
-        }
-
-        #[cfg(not(feature = "cpu"))]
-        {
-            bail!(VideoError::EncoderInit("CPU encoder requested but 'cpu' feature is not enabled".into()));
-        }
-    }
-
-    fn encode_frame(&mut self, rgb: &[u8], width: u32, height: u32) -> rootcause::Result<Vec<u8>, VideoError> {
-        match self {
-            #[cfg(feature = "gpu")]
-            Self::Gpu(enc) => enc.encode_frame(rgb, width, height),
-            #[cfg(feature = "cpu")]
-            Self::Cpu(enc) => enc.encode_frame(rgb, width as usize, height as usize),
-        }
-    }
+pub fn check_encoder() -> crate::encoder::EncoderStatus {
+    crate::encoder::check_encoder()
 }
 
 // ---------------------------------------------------------------------------
@@ -352,8 +60,9 @@ impl EncoderBackend {
 /// Encodes frames on-the-fly to avoid storing raw RGB data in memory.
 /// Stores encoded H.264 Annex B NAL data per frame, then muxes to MP4 at the end.
 ///
-/// Uses GPU (vk-video) by default, falls back to CPU (openh264) if the `cpu`
-/// feature is enabled and GPU is unavailable.
+/// Uses GPU acceleration by default (VideoToolbox on macOS, Vulkan Video on
+/// Linux/Windows), falls back to CPU (openh264) if the `cpu` feature is enabled
+/// and GPU is unavailable.
 pub struct VideoEncoder {
     output_path: String,
     dump_mode: Option<DumpMode>,

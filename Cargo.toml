@@ -10,9 +10,13 @@ members = [
 ]
 
 [workspace.package]
+version = "0.1.54"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
+
+[workspace.metadata.crane]
+name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (version + path for publishable crates)

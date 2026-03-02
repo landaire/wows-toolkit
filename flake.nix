@@ -29,19 +29,30 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
+      # Include embedded assets in addition to standard Cargo sources
+      srcFilter = path: type:
+        (craneLib.filterCargoSources path type)
+        || (builtins.match ".*embedded_resources.*" path != null)
+        || (builtins.match ".*assets.*" path != null);
+
       commonArgs = {
-        src = craneLib.cleanCargoSource ./.;
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = srcFilter;
+        };
         strictDeps = true;
 
         nativeBuildInputs = with pkgs; [
           pkg-config
         ];
 
-        buildInputs = with pkgs; [
-          openssl
-        ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-          pkgs.vulkan-loader
-        ];
+        buildInputs = with pkgs;
+          [
+            openssl
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            pkgs.vulkan-loader
+          ];
       };
 
       # Build workspace deps once, share across packages
@@ -62,81 +73,100 @@
             xorg.libX11
           ];
 
-          guiBuildInputs = commonArgs.buildInputs ++ lib.optionals stdenv.hostPlatform.isLinux [
-            libxkbcommon
-            wayland
-            xorg.libXcursor
-            xorg.libXrandr
-            xorg.libXi
-            xorg.libX11
-            fontconfig
-          ];
+          guiBuildInputs =
+            commonArgs.buildInputs
+            ++ lib.optionals stdenv.hostPlatform.isLinux [
+              libxkbcommon
+              wayland
+              xorg.libXcursor
+              xorg.libXrandr
+              xorg.libXi
+              xorg.libX11
+              fontconfig
+            ];
 
-          unwrapped = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
-            cargoExtraArgs = "-p wows_toolkit";
-            buildInputs = guiBuildInputs;
-          });
+          unwrapped = craneLib.buildPackage (commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "-p wows_toolkit";
+              buildInputs = guiBuildInputs;
+              meta.mainProgram = "wows_toolkit";
+            });
         in {
-          wows-toolkit = if stdenv.hostPlatform.isLinux then
-            pkgs.symlinkJoin {
-              name = "wows-toolkit-${unwrapped.version or "dev"}";
-              paths = [unwrapped];
-              nativeBuildInputs = [pkgs.makeWrapper];
-              postBuild = ''
-                wrapProgram $out/bin/wows_toolkit \
-                  --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath guiRuntimeLibs}
-              '';
-            }
-          else
-            unwrapped;
+          wows-toolkit =
+            if stdenv.hostPlatform.isLinux
+            then
+              (pkgs.symlinkJoin {
+                name = "wows-toolkit-${unwrapped.version or "dev"}";
+                paths = [unwrapped];
+                nativeBuildInputs = [pkgs.makeWrapper];
+                postBuild = ''
+                  wrapProgram $out/bin/wows_toolkit \
+                    --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath guiRuntimeLibs}
+                '';
+              }).overrideAttrs {meta.mainProgram = "wows_toolkit";}
+            else unwrapped;
 
           default = self.packages.${system}.wows-toolkit;
 
-          wowsunpack = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
-            cargoExtraArgs = "-p wowsunpack";
-          });
+          wowsunpack = craneLib.buildPackage (commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "-p wowsunpack";
+            });
 
-          minimap-renderer = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
-            cargoExtraArgs = "-p wows_minimap_renderer --features bin,gpu";
-            buildInputs = commonArgs.buildInputs ++ lib.optionals stdenv.hostPlatform.isLinux [
-              vulkan-loader
-            ];
-          });
+          minimap-renderer = craneLib.buildPackage (commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs =
+                "-p wows_minimap_renderer --features bin,cpu"
+                + lib.optionalString stdenv.hostPlatform.isLinux ",vulkan"
+                + lib.optionalString stdenv.hostPlatform.isDarwin ",videotoolbox";
+              buildInputs =
+                commonArgs.buildInputs
+                ++ lib.optionals stdenv.hostPlatform.isLinux [
+                  vulkan-loader
+                ];
+            });
 
-          replayshark = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
-            cargoExtraArgs = "-p replayshark";
-          });
+          replayshark = craneLib.buildPackage (commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "-p replayshark";
+            });
         };
 
         devShells.default = mkShell rec {
-          buildInputs = [
-            # Rust
-            rustToolchain
+          buildInputs =
+            [
+              # Rust
+              rustToolchain
 
-            # misc. libraries
-            openssl
-            pkg-config
-          ] ++ lib.optionals stdenv.hostPlatform.isLinux [
-            # GUI libs
-            libxkbcommon
-            libGL
-            fontconfig
+              # misc. libraries
+              openssl
+              pkg-config
 
-            # wayland libraries
-            wayland
+              # Development tools
+              depotdownloader
+            ]
+            ++ lib.optionals stdenv.hostPlatform.isLinux [
+              # GUI libs
+              libxkbcommon
+              libGL
+              fontconfig
 
-            # x11 libraries
-            xorg.libXcursor
-            xorg.libXrandr
-            xorg.libXi
-            xorg.libX11
-          ];
+              # wayland libraries
+              wayland
 
-          LD_LIBRARY_PATH = lib.optionalString stdenv.hostPlatform.isLinux
+              # x11 libraries
+              xorg.libXcursor
+              xorg.libXrandr
+              xorg.libXi
+              xorg.libX11
+            ];
+
+          LD_LIBRARY_PATH =
+            lib.optionalString stdenv.hostPlatform.isLinux
             "${lib.makeLibraryPath buildInputs}";
         };
       });
