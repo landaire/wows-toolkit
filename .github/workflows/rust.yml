@@ -28,7 +28,8 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      - uses: dtolnay/rust-toolchain@nightly
+      # Reads toolchain from rust-toolchain file
+      - uses: dtolnay/rust-toolchain@master
       - run: cargo check --workspace --all-features
 
   fmt:
@@ -36,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Nightly required for rustfmt edition 2024 support
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -62,9 +64,8 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
+      # Reads toolchain from rust-toolchain file
+      - uses: dtolnay/rust-toolchain@master
       - run: cargo clippy --workspace --all-features -- -D warnings
 
   test:
@@ -88,5 +89,6 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      - uses: dtolnay/rust-toolchain@nightly
+      # Reads toolchain from rust-toolchain file
+      - uses: dtolnay/rust-toolchain@master
       - run: cargo test --workspace
