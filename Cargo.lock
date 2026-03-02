@@ -1691,6 +1691,7 @@ dependencies = [
  "duplicate",
  "egui",
  "paste",
+ "serde",
 ]
 
 [[package]]

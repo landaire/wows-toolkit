@@ -53,15 +53,14 @@ use crate::wows_data::WoWsDataMap;
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 
 /// Sub-tab selection for the Stats tab
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatsSubTab {
-    #[default]
     Overview,
-    Charts,
+    Charts(u64),
 }
 
 /// Available statistics for charting
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ChartableStat {
     #[default]
     Damage,
@@ -100,7 +99,7 @@ impl ChartableStat {
 }
 
 /// Chart display mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ChartMode {
     /// Line chart showing stat over each game played
     #[default]
@@ -109,8 +108,8 @@ pub enum ChartMode {
     Bar,
 }
 
-/// Configuration for the session stats chart
-#[derive(Default)]
+/// Configuration for the session stats chart (one per Charts tab)
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct SessionStatsChartConfig {
     /// Selected stat to display
     pub selected_stat: ChartableStat,
@@ -124,11 +123,26 @@ pub struct SessionStatsChartConfig {
     /// Whether to show value labels on data points
     pub show_labels: bool,
     /// Whether a screenshot has been requested (waiting for the event)
+    #[serde(skip)]
     pub screenshot_requested: bool,
     /// The plot rectangle from the last frame (used to crop the screenshot)
+    #[serde(skip)]
     pub plot_rect: Option<egui::Rect>,
     /// Whether the plot should be reset (e.g. after stat/mode change)
+    #[serde(skip)]
     pub reset_plot: bool,
+}
+
+/// Default stats dock: Overview on the left, Charts(0) on the right, 50/50 split.
+pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
+    let mut dock = egui_dock::DockState::new(vec![StatsSubTab::Overview]);
+    dock.split(
+        (egui_dock::SurfaceIndex::main(), egui_dock::NodeIndex::root()),
+        egui_dock::Split::Right,
+        0.5,
+        egui_dock::Node::leaf(StatsSubTab::Charts(0)),
+    );
+    dock
 }
 
 /// File system events for replay monitoring
@@ -263,10 +277,12 @@ pub struct TabState {
     #[serde(skip)]
     pub parser_lock: Arc<parking_lot::Mutex<()>>,
 
-    #[serde(skip)]
+    #[serde(default = "default_stats_dock_state")]
     pub stats_dock_state: egui_dock::DockState<StatsSubTab>,
-    #[serde(skip)]
-    pub session_stats_chart_config: SessionStatsChartConfig,
+    #[serde(default)]
+    pub next_chart_tab_id: u64,
+    #[serde(default)]
+    pub chart_configs: HashMap<u64, SessionStatsChartConfig>,
     #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
 
@@ -367,17 +383,9 @@ impl Default for TabState {
             background_task_sender,
             background_parser_tx: None,
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
-            stats_dock_state: {
-                let mut dock = egui_dock::DockState::new(vec![StatsSubTab::Overview]);
-                dock.split(
-                    (egui_dock::SurfaceIndex::main(), egui_dock::NodeIndex::root()),
-                    egui_dock::Split::Right,
-                    0.5,
-                    egui_dock::Node::leaf(StatsSubTab::Charts),
-                );
-                dock
-            },
-            session_stats_chart_config: Default::default(),
+            stats_dock_state: default_stats_dock_state(),
+            next_chart_tab_id: 1,
+            chart_configs: HashMap::new(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
             pending_confirmation: None,
@@ -574,6 +582,16 @@ impl TabState {
         self.can_change_wows_dir = true;
     }
 
+    /// Get (or create) the chart config for a given chart tab ID.
+    pub fn chart_config(&mut self, id: u64) -> &mut SessionStatsChartConfig {
+        self.chart_configs.entry(id).or_default()
+    }
+
+    /// Remove the chart config for a closed tab.
+    pub fn remove_chart_config(&mut self, id: u64) {
+        self.chart_configs.remove(&id);
+    }
+
     /// Clears all game-related state. Called when the WoWs directory changes
     /// to ensure no stale data from the previous directory persists.
     pub(crate) fn reset_game_state(&mut self) {
@@ -582,7 +600,7 @@ impl TabState {
         self.replay_files = None;
         self.browser_state = Default::default();
         self.settings.session_stats.clear();
-        self.session_stats_chart_config = Default::default();
+        self.chart_configs.clear();
         self.replays_for_session_reset = None;
         self.replay_parser_tab.lock().game_chat.clear();
         self.file_viewer.lock().clear();

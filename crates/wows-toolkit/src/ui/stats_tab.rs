@@ -5,6 +5,7 @@ use egui::RichText;
 use egui::ScrollArea;
 use egui_dock::DockArea;
 use egui_dock::TabViewer;
+use egui_dock::tab_viewer::OnCloseResponse;
 
 use crate::app::ToolkitTabViewer;
 use crate::icon_str;
@@ -27,6 +28,11 @@ use std::sync::Arc;
 /// render its content inside the `egui_dock` DockArea.
 struct StatsTabViewer<'a> {
     tab_state: &'a mut crate::tab_state::TabState,
+    /// Cached count of Charts tabs — used to decide closability.
+    chart_tab_count: usize,
+    /// Pending tab additions (surface, node) — applied after show_inside returns,
+    /// because the dock state is swapped out during rendering.
+    pending_adds: Vec<(egui_dock::SurfaceIndex, egui_dock::NodeIndex)>,
 }
 
 impl TabViewer for StatsTabViewer<'_> {
@@ -38,21 +44,35 @@ impl TabViewer for StatsTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
-            StatsSubTab::Overview => icon_str!(icons::LIST, "Overview"),
-            StatsSubTab::Charts => icon_str!(icons::CHART_LINE, "Charts"),
+            StatsSubTab::Overview => icon_str!(icons::LIST, "Overview").into(),
+            StatsSubTab::Charts(_) => icon_str!(icons::CHART_LINE, "Charts").into(),
         }
-        .into()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        match tab {
+        match *tab {
             StatsSubTab::Overview => build_stats_overview(self.tab_state, ui),
-            StatsSubTab::Charts => build_stats_charts(self.tab_state, ui),
+            StatsSubTab::Charts(id) => build_stats_charts(self.tab_state, id, ui),
         }
     }
 
-    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
-        false
+    fn closeable(&mut self, tab: &mut Self::Tab) -> bool {
+        match tab {
+            StatsSubTab::Overview => false,
+            // Charts tabs are only closeable when there are more than one.
+            StatsSubTab::Charts(_) => self.chart_tab_count > 1,
+        }
+    }
+
+    fn on_close(&mut self, tab: &mut Self::Tab) -> OnCloseResponse {
+        if let StatsSubTab::Charts(id) = tab {
+            self.tab_state.remove_chart_config(*id);
+        }
+        OnCloseResponse::Close
+    }
+
+    fn on_add(&mut self, surface: egui_dock::SurfaceIndex, node: egui_dock::NodeIndex) {
+        self.pending_adds.push((surface, node));
     }
 
     fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
@@ -134,19 +154,48 @@ impl ToolkitTabViewer<'_> {
             self.tab_state.settings.session_stats_game_mode_filter.iter().cloned().collect();
 
         // ── Dock area with sub-tabs ──
+        // Validate persisted dock state: must have Overview and at least one Charts tab.
+        {
+            let has_overview = self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Overview));
+            let has_chart = self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Charts(_)));
+            if !has_overview || !has_chart {
+                self.tab_state.stats_dock_state = crate::tab_state::default_stats_dock_state();
+            }
+        }
+
         // Move dock state out temporarily to avoid double-borrow of tab_state
         let mut dock_state = std::mem::replace(&mut self.tab_state.stats_dock_state, egui_dock::DockState::new(vec![]));
 
-        let mut viewer = StatsTabViewer { tab_state: self.tab_state };
+        let chart_tab_count = dock_state
+            .iter_all_tabs()
+            .filter(|(_, tab)| matches!(tab, StatsSubTab::Charts(_)))
+            .count();
+
+        let mut viewer = StatsTabViewer {
+            tab_state: self.tab_state,
+            chart_tab_count,
+            pending_adds: Vec::new(),
+        };
 
         DockArea::new(&mut dock_state)
             .id(egui::Id::new("stats_dock"))
             .style(egui_dock::Style::from_egui(ui.style().as_ref()))
-            .show_close_buttons(false)
+            .show_add_buttons(true)
+            .show_close_buttons(true)
             .show_leaf_collapse_buttons(false)
             .show_leaf_close_all_buttons(false)
             .allowed_splits(egui_dock::AllowedSplits::All)
             .show_inside(ui, &mut viewer);
+
+        // Apply pending tab additions now that we have the real dock_state
+        for (surface, node) in viewer.pending_adds {
+            let id = self.tab_state.next_chart_tab_id;
+            self.tab_state.next_chart_tab_id += 1;
+            let tab = StatsSubTab::Charts(id);
+            if let Some(leaf) = dock_state[surface][node].get_leaf_mut() {
+                leaf.append_tab(tab);
+            }
+        }
 
         // Put the dock state back
         self.tab_state.stats_dock_state = dock_state;
@@ -462,8 +511,9 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
 // ─── Charts Sub-Tab ──────────────────────────────────────────────────────────
 
-fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui::Ui) {
-    // Get ship stats for bar chart — per-ship count limits
+fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64, ui: &mut egui::Ui) {
+    // Collect all session data into owned locals first to avoid borrow conflicts
+    // with chart_configs (which requires &mut self via chart_config()).
     let ship_stats: Vec<(String, PerformanceInfo)> = tab_state
         .settings
         .session_stats
@@ -472,16 +522,23 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
         .filter(|(_, perf)| perf.win_rate().is_some())
         .collect();
 
-    // Get per-game data for line chart — per-ship count limits
-    let per_game_data = tab_state.settings.session_stats.per_ship_limited_games();
+    let per_game_data: Vec<crate::session_stats::PerGameStat> = tab_state
+        .settings
+        .session_stats
+        .per_ship_limited_games()
+        .into_iter()
+        .cloned()
+        .collect();
 
-    // Get PR data for calculations
-    let pr_data = tab_state.personal_rating_data.read();
+    // Clone Arc so the read guard doesn't borrow tab_state
+    let pr_data_lock = Arc::clone(&tab_state.personal_rating_data);
+    let pr_data = pr_data_lock.read();
 
     let ctx = ui.ctx().clone();
+    let cfg = tab_state.chart_config(chart_id);
 
     // Handle screenshot capture if one was requested
-    if tab_state.session_stats_chart_config.screenshot_requested {
+    if cfg.screenshot_requested {
         let screenshot = ctx.input(|i| {
             for event in &i.raw.events {
                 if let egui::Event::Screenshot { image, .. } = event {
@@ -492,9 +549,9 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
         });
 
         if let Some(screenshot) = screenshot {
-            tab_state.session_stats_chart_config.screenshot_requested = false;
+            cfg.screenshot_requested = false;
 
-            if let Some(plot_rect) = tab_state.session_stats_chart_config.plot_rect {
+            if let Some(plot_rect) = cfg.plot_rect {
                 let pixels_per_point = ctx.pixels_per_point();
                 let plot_image = screenshot.region(&plot_rect, Some(pixels_per_point));
 
@@ -520,23 +577,27 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
     let mut ship_names: Vec<String> = ship_stats.iter().map(|(name, _)| name.clone()).collect();
     ship_names.sort();
 
+    let cfg = tab_state.chart_config(chart_id);
+
     // If no ships selected, select all by default
-    if !tab_state.session_stats_chart_config.selected_ships_manually_changed {
-        tab_state.session_stats_chart_config.selected_ships = ship_names.clone();
+    if !cfg.selected_ships_manually_changed {
+        cfg.selected_ships = ship_names.clone();
     }
 
     // ── Controls bar: stat, chart type, options, copy button — all on one line ──
     ui.horizontal_wrapped(|ui| {
+        let cfg = tab_state.chart_config(chart_id);
+
         // Stat selector
         ui.label("Stat:");
-        ComboBox::from_id_salt("chart_stat_select")
-            .selected_text(tab_state.session_stats_chart_config.selected_stat.name())
+        ComboBox::from_id_salt(("chart_stat_select", chart_id))
+            .selected_text(cfg.selected_stat.name())
             .show_ui(ui, |ui| {
                 for stat in ChartableStat::all() {
-                    let is_selected = tab_state.session_stats_chart_config.selected_stat == *stat;
+                    let is_selected = cfg.selected_stat == *stat;
                     if ui.selectable_label(is_selected, stat.name()).clicked() {
-                        tab_state.session_stats_chart_config.selected_stat = *stat;
-                        tab_state.session_stats_chart_config.reset_plot = true;
+                        cfg.selected_stat = *stat;
+                        cfg.reset_plot = true;
                     }
                 }
             });
@@ -544,55 +605,57 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
         ui.separator();
 
         // Chart type
-        if ui.selectable_value(&mut tab_state.session_stats_chart_config.mode, ChartMode::Line, "Line").clicked() {
-            tab_state.session_stats_chart_config.reset_plot = true;
+        if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
+            cfg.reset_plot = true;
         }
-        if ui.selectable_value(&mut tab_state.session_stats_chart_config.mode, ChartMode::Bar, "Bar").clicked() {
-            tab_state.session_stats_chart_config.reset_plot = true;
+        if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
+            cfg.reset_plot = true;
         }
 
         ui.separator();
 
         // Options
-        if tab_state.session_stats_chart_config.mode == ChartMode::Line {
-            ui.checkbox(&mut tab_state.session_stats_chart_config.rolling_average, "Rolling Avg");
+        if cfg.mode == ChartMode::Line {
+            ui.checkbox(&mut cfg.rolling_average, "Rolling Avg");
         }
-        ui.checkbox(&mut tab_state.session_stats_chart_config.show_labels, "Labels");
+        ui.checkbox(&mut cfg.show_labels, "Labels");
 
         ui.separator();
 
         // Ship selection: All / None buttons
         if ui.button("All Ships").clicked() {
-            tab_state.session_stats_chart_config.selected_ships = ship_names.clone();
-            tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+            cfg.selected_ships = ship_names.clone();
+            cfg.selected_ships_manually_changed = true;
         }
         if ui.button("None").clicked() {
-            tab_state.session_stats_chart_config.selected_ships.clear();
-            tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+            cfg.selected_ships.clear();
+            cfg.selected_ships_manually_changed = true;
         }
 
         // Copy as Image button (inline with controls)
-        if tab_state.session_stats_chart_config.plot_rect.is_some() {
+        if cfg.plot_rect.is_some() {
             ui.separator();
             if ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
-                tab_state.session_stats_chart_config.screenshot_requested = true;
+                cfg.screenshot_requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
         }
     });
 
+    let cfg = tab_state.chart_config(chart_id);
+
     // Ship checkboxes — compact horizontal row
     ui.horizontal_wrapped(|ui| {
         for ship_name in &ship_names {
-            let mut is_selected = tab_state.session_stats_chart_config.selected_ships.contains(ship_name);
+            let mut is_selected = cfg.selected_ships.contains(ship_name);
             if ui.checkbox(&mut is_selected, ship_name).changed() {
                 if is_selected {
-                    tab_state.session_stats_chart_config.selected_ships.push(ship_name.clone());
+                    cfg.selected_ships.push(ship_name.clone());
                 } else {
-                    tab_state.session_stats_chart_config.selected_ships.retain(|s| s != ship_name);
+                    cfg.selected_ships.retain(|s| s != ship_name);
                 }
 
-                tab_state.session_stats_chart_config.selected_ships_manually_changed = true;
+                cfg.selected_ships_manually_changed = true;
             }
         }
     });
@@ -600,30 +663,32 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
     ui.separator();
 
     // ── Chart fills all remaining space ──
-    let selected_stat = tab_state.session_stats_chart_config.selected_stat;
-    let selected_ships = &tab_state.session_stats_chart_config.selected_ships;
+    let cfg = tab_state.chart_config(chart_id);
+    let selected_stat = cfg.selected_stat;
+    let selected_ships = cfg.selected_ships.clone();
+    let show_labels = cfg.show_labels;
+    let reset_plot = std::mem::take(&mut cfg.reset_plot);
+    let mode = cfg.mode;
+    let rolling_average = cfg.rolling_average;
 
     let mut plot_rect: Option<egui::Rect> = None;
 
-    let show_labels = tab_state.session_stats_chart_config.show_labels;
-    let reset_plot = std::mem::take(&mut tab_state.session_stats_chart_config.reset_plot);
-
-    match tab_state.session_stats_chart_config.mode {
+    match mode {
         ChartMode::Line => {
             let filtered_data: Vec<&crate::session_stats::PerGameStat> =
-                per_game_data.iter().copied().filter(|g| selected_ships.contains(&g.ship_name)).collect();
+                per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
 
             if !filtered_data.is_empty() {
-                let rolling_average = tab_state.session_stats_chart_config.rolling_average;
                 plot_rect = render_line_chart(
                     ui,
                     &filtered_data,
                     selected_stat,
-                    selected_ships,
+                    &selected_ships,
                     &pr_data,
                     rolling_average,
                     show_labels,
                     reset_plot,
+                    chart_id,
                 );
             }
         }
@@ -638,11 +703,11 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, ui: &mut egui:
 
             if !selected_stats.is_empty() {
                 plot_rect =
-                    Some(render_bar_chart(ui, &selected_stats, selected_stat, &pr_data, show_labels, reset_plot));
+                    Some(render_bar_chart(ui, &selected_stats, selected_stat, &pr_data, show_labels, reset_plot, chart_id));
             }
         }
     }
 
     // Store the plot rect for screenshot cropping
-    tab_state.session_stats_chart_config.plot_rect = plot_rect;
+    tab_state.chart_config(chart_id).plot_rect = plot_rect;
 }

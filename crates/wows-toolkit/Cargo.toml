@@ -21,7 +21,7 @@ eframe = { version = "0.33.3", default-features = false, features = [
     "wayland",       # To support Linux (and CI)
 ] }
 egui_extras = { version = "0.33.3", features = ["syntect", "image", "svg"] }
-egui_dock = "0.18.0"
+egui_dock = { version = "0.18.0", features = ["serde"] }
 egui-phosphor = "0.11"
 egui_table = "0.7.0"
 egui_commonmark = "0.22"

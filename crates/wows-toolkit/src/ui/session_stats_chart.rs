@@ -62,6 +62,7 @@ pub fn render_line_chart(
     rolling_average: bool,
     show_labels: bool,
     reset: bool,
+    chart_id: u64,
 ) -> Option<egui::Rect> {
     // Win rate doesn't make sense per-game (but rolling average win rate does)
     if stat == ChartableStat::WinRate && !rolling_average {
@@ -163,13 +164,12 @@ pub fn render_line_chart(
             if rolling_average { format!("{} (Rolling Average)", stat.name()) } else { stat.name().to_string() };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        let mut plot = Plot::new("line_chart")
+        let mut plot = Plot::new(egui::Id::new(("line_chart", chart_id)))
             .legend(Legend::default())
             .x_axis_label("Game #")
             .y_axis_label(y_label)
             .auto_bounds([true, true])
-            .include_y(0.0_f64.min(min_y))
-            .view_aspect(2.0);
+            .include_y(0.0_f64.min(min_y));
         if reset {
             plot = plot.reset();
         }
@@ -218,6 +218,7 @@ pub fn render_bar_chart(
     pr_data: &PersonalRatingData,
     show_labels: bool,
     reset: bool,
+    chart_id: u64,
 ) -> egui::Rect {
     // Collect bar data with values for later text labels
     let mut bar_data: Vec<(usize, String, f64, Color32)> = Vec::new();
@@ -258,15 +259,14 @@ pub fn render_bar_chart(
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 
-        let mut plot = Plot::new("bar_chart")
+        let mut plot = Plot::new(egui::Id::new(("bar_chart", chart_id)))
             .legend(Legend::default())
             .y_axis_label(y_label)
             .show_axes([false, true])
             .allow_zoom(false)
             .allow_drag(false)
             .allow_scroll(false)
-            .include_y(0.0_f64.min(min_y))
-            .view_aspect(2.0);
+            .include_y(0.0_f64.min(min_y));
         if reset {
             plot = plot.reset();
         }
