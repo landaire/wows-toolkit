@@ -6,10 +6,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fs;
 use std::fs::File;
-use std::fs::{
-    self,
-};
 use std::io::BufWriter;
 use std::io::Read;
 use std::io::Write;
@@ -24,10 +22,8 @@ use thread_local::ThreadLocal;
 use vfs::VfsPath;
 use vfs::impls::overlay::OverlayFS;
 use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
+use wowsunpack::data::idx;
 use wowsunpack::data::idx::VfsEntry;
-use wowsunpack::data::idx::{
-    self,
-};
 use wowsunpack::data::idx_vfs::IdxVfs;
 use wowsunpack::data::serialization;
 use wowsunpack::data::wrappers::mmap::MmapPkgSource;

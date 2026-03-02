@@ -368,10 +368,8 @@ use image_dds::SurfaceRgba8;
 use image_dds::image::RgbaImage;
 
 use crate::models::assets_bin::PrototypeDatabase;
+use crate::models::material;
 use crate::models::material::MaterialPrototype;
-use crate::models::material::{
-    self,
-};
 
 /// Resolve a texture selfId hash from an MFM property to a VFS path,
 /// load the DDS bytes, and return them.

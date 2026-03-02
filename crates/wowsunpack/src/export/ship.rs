@@ -33,27 +33,19 @@ use crate::game_params::types::ArmorMap;
 use crate::game_params::types::GameParamProvider;
 use crate::game_params::types::MountPoint;
 use crate::game_params::types::Vehicle;
+use crate::models::assets_bin;
 use crate::models::assets_bin::PrototypeDatabase;
-use crate::models::assets_bin::{
-    self,
-};
 use crate::models::geometry;
 use crate::models::model;
+use crate::models::visual;
 use crate::models::visual::VisualPrototype;
-use crate::models::visual::{
-    self,
-};
 
+use super::camouflage;
 use super::camouflage::CamouflageDb;
-use super::camouflage::{
-    self,
-};
+use super::gltf_export;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
-use super::gltf_export::{
-    self,
-};
 use super::texture;
 
 // ---------------------------------------------------------------------------

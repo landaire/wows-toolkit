@@ -1,9 +1,7 @@
 use crate::icon_str;
 use std::collections::HashSet;
+use std::fs;
 use std::fs::File;
-use std::fs::{
-    self,
-};
 use std::io::BufWriter;
 use std::io::Read;
 use std::io::Write;
@@ -37,10 +35,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::app::ToolkitTabViewer;
+use crate::plaintext_viewer;
 use crate::plaintext_viewer::FileType;
-use crate::plaintext_viewer::{
-    self,
-};
 type FilteredFileList = Arc<Vec<(Arc<PathBuf>, VfsPath)>>;
 
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);

@@ -14,11 +14,9 @@ use vfs::FileSystem;
 use vfs::VfsMetadata;
 use vfs::error::VfsErrorKind;
 
+use crate::models::assets_bin;
 use crate::models::assets_bin::AssetsBinError;
 use crate::models::assets_bin::PrototypeDatabase;
-use crate::models::assets_bin::{
-    self,
-};
 
 /// The type of prototype stored in a given assets.bin blob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

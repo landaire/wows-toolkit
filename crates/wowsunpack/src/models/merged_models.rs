@@ -18,6 +18,7 @@ use winnow::error::ContextError;
 use winnow::error::ErrMode;
 use winnow::token::take;
 
+use crate::data::parser_utils;
 use crate::data::parser_utils::BoundingBox;
 use crate::data::parser_utils::Matrix4x4;
 use crate::data::parser_utils::WResult;
@@ -28,9 +29,6 @@ use crate::data::parser_utils::parse_u16_array;
 use crate::data::parser_utils::parse_u32_array;
 use crate::data::parser_utils::resolve_relptr;
 use crate::data::parser_utils::resolve_relptr_at;
-use crate::data::parser_utils::{
-    self,
-};
 use crate::models::model::ModelPrototype;
 use crate::models::model::parse_model;
 use crate::models::visual::Lod;

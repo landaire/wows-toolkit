@@ -7,10 +7,8 @@ use jiff::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use twitch_api::HelixClient;
+use twitch_api::helix;
 use twitch_api::helix::chat::get_chatters;
-use twitch_api::helix::{
-    self,
-};
 use twitch_api::twitch_oauth2::TwitchToken;
 use twitch_api::twitch_oauth2::UserToken;
 use twitch_api::types::UserId;

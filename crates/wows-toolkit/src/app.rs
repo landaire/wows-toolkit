@@ -44,14 +44,12 @@ use wows_replays::analyzer::battle_controller::GameMessage;
 use crate::error::ToolkitError;
 use crate::icons;
 use crate::tab_state::TabState;
+use crate::task;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
-use crate::task::{
-    self,
-};
 use crate::ui::file_unpacker::UNPACKER_STOP;
 
 #[macro_export]

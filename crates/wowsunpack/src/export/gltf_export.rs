@@ -20,11 +20,9 @@ use crate::models::merged_models::MergedModels;
 use crate::models::merged_models::SpaceInstances;
 use crate::models::speedtree::SpeedTreeMesh;
 use crate::models::terrain::Terrain;
+use crate::models::vertex_format;
 use crate::models::vertex_format::AttributeSemantic;
 use crate::models::vertex_format::VertexFormat;
-use crate::models::vertex_format::{
-    self,
-};
 use crate::models::visual::VisualPrototype;
 
 use super::texture;

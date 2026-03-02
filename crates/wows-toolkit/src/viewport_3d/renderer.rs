@@ -6,10 +6,8 @@ use na::Vector3;
 
 use crate::viewport_3d::camera::ArcballCamera;
 use crate::viewport_3d::camera::mat4_mul;
+use crate::viewport_3d::picking;
 use crate::viewport_3d::picking::PickableMesh;
-use crate::viewport_3d::picking::{
-    self,
-};
 use crate::viewport_3d::types::HitResult;
 use crate::viewport_3d::types::MeshId;
 use crate::viewport_3d::types::Uniforms;

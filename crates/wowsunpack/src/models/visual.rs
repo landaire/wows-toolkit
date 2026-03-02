@@ -9,6 +9,7 @@ use winnow::binary::le_u64;
 use winnow::error::ContextError;
 use winnow::error::ErrMode;
 
+use crate::data::parser_utils;
 use crate::data::parser_utils::WResult;
 use crate::data::parser_utils::parse_lod_fields;
 use crate::data::parser_utils::parse_matrix_array;
@@ -16,9 +17,6 @@ use crate::data::parser_utils::parse_render_set_fields;
 use crate::data::parser_utils::parse_u16_array;
 use crate::data::parser_utils::parse_u32_array;
 use crate::data::parser_utils::resolve_relptr;
-use crate::data::parser_utils::{
-    self,
-};
 use crate::models::assets_bin::PrototypeDatabase;
 use crate::models::assets_bin::StringsSection;
 

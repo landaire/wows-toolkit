@@ -15,11 +15,9 @@ use vfs::VfsError;
 use vfs::VfsMetadata;
 use vfs::error::VfsErrorKind;
 
+use crate::data::idx;
 use crate::data::idx::IdxFile;
 use crate::data::idx::VfsEntry;
-use crate::data::idx::{
-    self,
-};
 
 /// Trait for providing raw byte access to PKG volume data (sync).
 ///

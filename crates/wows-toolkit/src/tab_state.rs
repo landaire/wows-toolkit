@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::mpsc::{
-    self,
-};
 use std::time::Duration;
 
 use egui::mutex::Mutex;

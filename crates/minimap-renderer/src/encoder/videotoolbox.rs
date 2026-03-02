@@ -3,10 +3,8 @@
 //! Uses Apple's VideoToolbox framework for hardware-accelerated encoding.
 
 use std::ffi::c_void;
+use std::ptr;
 use std::ptr::NonNull;
-use std::ptr::{
-    self,
-};
 use std::sync::Mutex;
 
 use objc2::rc::Retained;
