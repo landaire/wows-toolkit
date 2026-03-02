@@ -3,6 +3,7 @@ on: [push, pull_request]
 name: CI
 
 env:
+  RUST_TOOLCHAIN: "1.92.0"
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
 
@@ -28,8 +29,9 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      # Reads toolchain from rust-toolchain file
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo check --workspace --all-features
 
   fmt:
@@ -64,8 +66,9 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      # Reads toolchain from rust-toolchain file
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo clippy --workspace --all-features -- -D warnings
 
   test:
@@ -89,6 +92,7 @@ jobs:
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
             libssl-dev libvulkan-dev pkg-config
-      # Reads toolchain from rust-toolchain file
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo test --workspace
