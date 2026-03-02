@@ -241,6 +241,11 @@ pub struct TabState {
     #[serde(skip)]
     pub next_replay_tab_id: u64,
 
+    /// Whether the replay listing panel has been auto-sized to fit content.
+    /// Reset when game state is cleared so the panel re-auto-sizes on next load.
+    #[serde(skip)]
+    pub replay_listing_auto_sized: bool,
+
     #[serde(default = "default_bool::<true>")]
     pub auto_load_latest_replay: bool,
 
@@ -371,6 +376,7 @@ impl Default for TabState {
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
             replay_dock_state: egui_dock::DockState::new(vec![]),
             next_replay_tab_id: 0,
+            replay_listing_auto_sized: false,
             auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
@@ -594,6 +600,7 @@ impl TabState {
         self.replay_dock_state = egui_dock::DockState::new(vec![]);
         self.next_replay_tab_id = 0;
         self.replay_files = None;
+        self.replay_listing_auto_sized = false;
         self.browser_state = Default::default();
         self.settings.session_stats.clear();
         self.chart_configs.clear();

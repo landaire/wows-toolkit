@@ -3785,22 +3785,56 @@ impl ToolkitTabViewer<'_> {
             self.build_replay_header(ui);
 
             {
-                // Read the content width measured on the previous frame
-                let content_width: f32 =
-                    ui.ctx().data(|d| d.get_temp(egui::Id::new("replay_listing_content_width"))).unwrap_or(300.0);
+                let panel_id = egui::Id::new("replay_listing_panel");
+
+                // Auto-size the panel to the widest label when files are first populated.
+                // Uses a flag on TabState (not egui temp data) to survive GC.
+                let has_files = self.tab_state.replay_files.as_ref().is_some_and(|f| !f.is_empty());
+
+                let mut default_width = 250.0f32;
+
+                if has_files && !self.tab_state.replay_listing_auto_sized {
+                    if let Some(metadata_provider) = self.metadata_provider() {
+                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                        let max_width = self
+                            .tab_state
+                            .replay_files
+                            .as_ref()
+                            .unwrap()
+                            .values()
+                            .map(|replay| {
+                                let guard = replay.read();
+                                let label = guard.label(&metadata_provider);
+                                label
+                                    .lines()
+                                    .map(|line| {
+                                        ui.painter()
+                                            .layout_no_wrap(line.to_string(), font_id.clone(), Color32::WHITE)
+                                            .size()
+                                            .x
+                                    })
+                                    .fold(0.0f32, f32::max)
+                            })
+                            .fold(0.0f32, f32::max);
+
+                        // Add padding for tree indentation, margins, scrollbar
+                        default_width = (max_width + 60.0).max(200.0);
+
+                        self.tab_state.replay_listing_auto_sized = true;
+
+                        // Clear stored panel state so default_width takes effect
+                        ui.ctx().data_mut(|d| {
+                            d.remove::<egui::containers::panel::PanelState>(panel_id);
+                        });
+                    }
+                }
 
                 egui::SidePanel::left("replay_listing_panel")
-                    .default_width(content_width)
-                    .width_range(100.0..=content_width.max(300.0))
+                    .default_width(default_width)
+                    .width_range(100.0..=f32::INFINITY)
                     .show_inside(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt("replay_listing_scroll_area").show(ui, |ui| {
+                        egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);
-
-                            // Measure and store the actual content width for next frame
-                            let used_width = ui.min_rect().width();
-                            ui.ctx().data_mut(|d| {
-                                d.insert_temp(egui::Id::new("replay_listing_content_width"), used_width);
-                            });
                         });
                     });
             }
