@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Utilities for interacting with the game's data files
 pub mod data;
 /// Error definitions

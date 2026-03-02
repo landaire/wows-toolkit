@@ -610,61 +610,70 @@ impl TabState {
             crate::task::start_background_parsing_thread(background_thread_data);
         }
 
-        let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
-            Ok(event) => {
-                // TODO: maybe properly handle moves?
-                debug!("filesytem event: {:?}", event);
-                match event.kind {
-                    EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
-                        for path in event.paths {
-                            if path.is_file() {
-                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
-                                    && path.file_name().expect("path has no filename") != "temp.wowsreplay"
-                                {
-                                    tx.send(NotifyFileEvent::Added(path.clone()))
-                                        .expect("failed to send file creation event");
-                                    // Send this path to the thread watching for replays in background
-                                    let _ = background_tx
-                                        .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
-                                } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
-                                    tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
-                                        .expect("failed to send file creation event");
+        let mut watcher =
+            match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    // TODO: maybe properly handle moves?
+                    debug!("filesytem event: {:?}", event);
+                    match event.kind {
+                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) | EventKind::Create(_) => {
+                            for path in event.paths {
+                                if path.is_file() {
+                                    if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false)
+                                        && path.file_name().expect("path has no filename") != "temp.wowsreplay"
+                                    {
+                                        tx.send(NotifyFileEvent::Added(path.clone()))
+                                            .expect("failed to send file creation event");
+                                        // Send this path to the thread watching for replays in background
+                                        let _ = background_tx
+                                            .send(crate::task::ReplayBackgroundParserThreadMessage::NewReplay(path));
+                                    } else if path.file_name().expect("path has no file name") == "tempArenaInfo.json" {
+                                        tx.send(NotifyFileEvent::TempArenaInfoCreated(path.clone()))
+                                            .expect("failed to send file creation event");
+                                    }
                                 }
                             }
                         }
-                    }
-                    EventKind::Modify(ModifyKind::Data(_)) => {
-                        for path in event.paths {
-                            if let Some(filename) = path.file_name()
-                                && filename == "preferences.xml"
-                            {
-                                debug!("Sending preferences changed event");
-                                tx.send(NotifyFileEvent::PreferencesChanged)
-                                    .expect("failed to send file creation event");
-                            }
-                            if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
-                                tx.send(NotifyFileEvent::Modified(path.clone()))
-                                    .expect("failed to send file modification event");
-                                let _ = background_tx
-                                    .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
+                        EventKind::Modify(ModifyKind::Data(_)) => {
+                            for path in event.paths {
+                                if let Some(filename) = path.file_name()
+                                    && filename == "preferences.xml"
+                                {
+                                    debug!("Sending preferences changed event");
+                                    tx.send(NotifyFileEvent::PreferencesChanged)
+                                        .expect("failed to send file creation event");
+                                }
+                                if path.extension().map(|ext| ext == "wowsreplay").unwrap_or(false) {
+                                    tx.send(NotifyFileEvent::Modified(path.clone()))
+                                        .expect("failed to send file modification event");
+                                    let _ = background_tx
+                                        .send(crate::task::ReplayBackgroundParserThreadMessage::ModifiedReplay(path));
+                                }
                             }
                         }
-                    }
-                    EventKind::Remove(_) => {
-                        for path in event.paths {
-                            tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                        EventKind::Remove(_) => {
+                            for path in event.paths {
+                                tx.send(NotifyFileEvent::Removed(path)).expect("failed to send file removal event");
+                            }
                         }
-                    }
-                    _ => {
-                        // TODO: handle RenameMode::From for proper file moves
+                        _ => {
+                            // TODO: handle RenameMode::From for proper file moves
+                        }
                     }
                 }
-            }
-            Err(e) => debug!("watch error: {:?}", e),
-        })
-        .expect("failed to create fs watcher for replays dir");
+                Err(e) => debug!("watch error: {:?}", e),
+            }) {
+                Ok(w) => w,
+                Err(e) => {
+                    self.toasts.lock().error(format!("Failed to create file watcher: {e}"));
+                    return;
+                }
+            };
 
-        watcher.watch(replay_dir, RecursiveMode::NonRecursive).expect("failed to watch directory");
+        if let Err(e) = watcher.watch(replay_dir, RecursiveMode::NonRecursive) {
+            self.toasts.lock().error(format!("Failed to watch replay directory: {e}"));
+            return;
+        }
 
         self.file_watcher = Some(watcher);
         self.file_receiver = Some(rx);
