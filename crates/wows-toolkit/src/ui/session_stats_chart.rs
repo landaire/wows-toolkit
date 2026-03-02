@@ -83,10 +83,8 @@ pub fn render_line_chart(
 
     if combined {
         // Combined mode: single line across all games, proper rolling aggregation
-        let all_games: Vec<&&PerGameStat> = per_game_data
-            .iter()
-            .filter(|g| selected_ships.contains(&g.ship_name))
-            .collect();
+        let all_games: Vec<&&PerGameStat> =
+            per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
 
         if !all_games.is_empty() {
             let points = if stat == ChartableStat::PersonalRating && pr_data.is_loaded() {

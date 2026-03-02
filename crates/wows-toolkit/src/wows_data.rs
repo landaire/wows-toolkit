@@ -307,16 +307,12 @@ impl ReplayDependencies {
         replay.game_constants = Some(game_constants);
         replay.source_path = Some(path.to_path_buf());
 
-        ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay)))
-            .source(source)
-            .load()
+        ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay))).source(source).load()
     }
 
     /// Load an already-parsed replay in the background.
     pub fn load_replay(&self, replay: Arc<RwLock<Replay>>, source: ReplaySource) -> Option<BackgroundTask> {
-        ReplayLoader::new(self.clone(), replay)
-            .source(source)
-            .load()
+        ReplayLoader::new(self.clone(), replay).source(source).load()
     }
 }
 

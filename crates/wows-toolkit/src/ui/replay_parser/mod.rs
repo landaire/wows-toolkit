@@ -2952,9 +2952,11 @@ impl ToolkitTabViewer<'_> {
         self.handle_context_menu_render(ui);
 
         // Check for "Open in New Tab" from context menu
-        if let Some(replay) = ui.ctx().data_mut(|data| {
-            data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
-        }).and_then(|w| w.upgrade()) {
+        if let Some(replay) = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
+            .and_then(|w| w.upgrade())
+        {
             replay_to_open_new = Some(replay);
         }
 
@@ -2962,12 +2964,18 @@ impl ToolkitTabViewer<'_> {
         if let Some(replay) = replay_to_open_new {
             self.tab_state.open_replay_in_new_tab(replay.clone());
             if let Some(deps) = self.tab_state.replay_dependencies() {
-                update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    deps.load_replay(replay, ReplaySource::FileListing)
+                );
             }
         } else if let Some(replay) = replay_to_open {
             self.tab_state.open_replay_in_focused_tab(replay.clone());
             if let Some(deps) = self.tab_state.replay_dependencies() {
-                update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    deps.load_replay(replay, ReplaySource::FileListing)
+                );
             }
         }
     }
@@ -3187,7 +3195,10 @@ impl ToolkitTabViewer<'_> {
                                     if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
                                         if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
                                             ui.ctx().data_mut(|data| {
-                                                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                                                data.insert_temp(
+                                                    egui::Id::new("open_replay_new_tab"),
+                                                    Arc::downgrade(&r),
+                                                );
                                             });
                                         }
                                         ui.close_kind(UiKind::Menu);
@@ -3311,9 +3322,11 @@ impl ToolkitTabViewer<'_> {
             }
 
             // Check for "Open in New Tab" from context menu
-            if let Some(replay) = ui.ctx().data_mut(|data| {
-                data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
-            }).and_then(|w| w.upgrade()) {
+            if let Some(replay) = ui
+                .ctx()
+                .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
+                .and_then(|w| w.upgrade())
+            {
                 replay_to_open_new = Some(replay);
             }
 
@@ -3321,12 +3334,18 @@ impl ToolkitTabViewer<'_> {
             if let Some(replay) = replay_to_open_new {
                 self.tab_state.open_replay_in_new_tab(replay.clone());
                 if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        deps.load_replay(replay, ReplaySource::FileListing)
+                    );
                 }
             } else if let Some(replay) = replay_to_open {
                 self.tab_state.open_replay_in_focused_tab(replay.clone());
                 if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        deps.load_replay(replay, ReplaySource::FileListing)
+                    );
                 }
             }
         }
@@ -3549,7 +3568,10 @@ impl ToolkitTabViewer<'_> {
                                     if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
                                         if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
                                             ui.ctx().data_mut(|data| {
-                                                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                                                data.insert_temp(
+                                                    egui::Id::new("open_replay_new_tab"),
+                                                    Arc::downgrade(&r),
+                                                );
                                             });
                                         }
                                         ui.close_kind(UiKind::Menu);
@@ -3673,9 +3695,11 @@ impl ToolkitTabViewer<'_> {
             }
 
             // Check for "Open in New Tab" from context menu
-            if let Some(replay) = ui.ctx().data_mut(|data| {
-                data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
-            }).and_then(|w| w.upgrade()) {
+            if let Some(replay) = ui
+                .ctx()
+                .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
+                .and_then(|w| w.upgrade())
+            {
                 replay_to_open_new = Some(replay);
             }
 
@@ -3683,12 +3707,18 @@ impl ToolkitTabViewer<'_> {
             if let Some(replay) = replay_to_open_new {
                 self.tab_state.open_replay_in_new_tab(replay.clone());
                 if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        deps.load_replay(replay, ReplaySource::FileListing)
+                    );
                 }
             } else if let Some(replay) = replay_to_open {
                 self.tab_state.open_replay_in_focused_tab(replay.clone());
                 if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                    update_background_task!(
+                        self.tab_state.background_tasks,
+                        deps.load_replay(replay, ReplaySource::FileListing)
+                    );
                 }
             }
         }
@@ -3704,7 +3734,10 @@ impl ToolkitTabViewer<'_> {
                 if let Some(deps) = self.tab_state.replay_dependencies() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), ReplaySource::ManualOpen)
+                        deps.parse_replay_from_path(
+                            self.tab_state.settings.current_replay_path.clone(),
+                            ReplaySource::ManualOpen
+                        )
                     );
                 }
             }
@@ -3753,42 +3786,31 @@ impl ToolkitTabViewer<'_> {
 
             {
                 // Read the content width measured on the previous frame
-                let content_width: f32 = ui
-                    .ctx()
-                    .data(|d| d.get_temp(egui::Id::new("replay_listing_content_width")))
-                    .unwrap_or(300.0);
+                let content_width: f32 =
+                    ui.ctx().data(|d| d.get_temp(egui::Id::new("replay_listing_content_width"))).unwrap_or(300.0);
 
                 egui::SidePanel::left("replay_listing_panel")
                     .default_width(content_width)
                     .width_range(100.0..=content_width.max(300.0))
                     .show_inside(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("replay_listing_scroll_area")
-                            .show(ui, |ui| {
-                                self.build_file_listing(ui);
+                        egui::ScrollArea::vertical().id_salt("replay_listing_scroll_area").show(ui, |ui| {
+                            self.build_file_listing(ui);
 
-                                // Measure and store the actual content width for next frame
-                                let used_width = ui.min_rect().width();
-                                ui.ctx().data_mut(|d| {
-                                    d.insert_temp(egui::Id::new("replay_listing_content_width"), used_width);
-                                });
+                            // Measure and store the actual content width for next frame
+                            let used_width = ui.min_rect().width();
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(egui::Id::new("replay_listing_content_width"), used_width);
                             });
+                        });
                     });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                let has_tabs = self.tab_state.replay_dock_state
-                    .iter_all_tabs()
-                    .next()
-                    .is_some();
+                let has_tabs = self.tab_state.replay_dock_state.iter_all_tabs().next().is_some();
                 if has_tabs {
-                    let mut dock_state = std::mem::replace(
-                        &mut self.tab_state.replay_dock_state,
-                        egui_dock::DockState::new(vec![]),
-                    );
-                    let mut viewer = ReplayTabViewer {
-                        tab_state: self.tab_state,
-                    };
+                    let mut dock_state =
+                        std::mem::replace(&mut self.tab_state.replay_dock_state, egui_dock::DockState::new(vec![]));
+                    let mut viewer = ReplayTabViewer { tab_state: self.tab_state };
                     egui_dock::DockArea::new(&mut dock_state)
                         .id(egui::Id::new("replay_parser_dock"))
                         .style(egui_dock::Style::from_egui(ui.style().as_ref()))
@@ -3844,31 +3866,67 @@ impl ToolkitTabViewer<'_> {
                     if ui.button(icon_str!(icons::COPY, "Copy All")).clicked() {
                         let mut buf = std::io::BufWriter::new(Vec::new());
                         for message in chat_messages {
-                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                                entity_id: _,
+                                player,
+                                clock: _,
+                            } = message;
                             match player {
                                 Some(player) if !player.initial_state().clan().is_empty() => {
-                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                    let _ = writeln!(
+                                        buf,
+                                        "[{}] {} ({:?}): {}",
+                                        player.initial_state().clan(),
+                                        sender_name,
+                                        channel,
+                                        message
+                                    );
                                 }
                                 _ => {
                                     let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
                                 }
                             }
                         }
-                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner"))
+                            .expect("failed to convert game chat buffer to string");
                         ui.ctx().copy_text(game_chat);
                         toasts.lock().success("Chat copied");
                     }
                     if ui.button(icon_str!(icons::FLOPPY_DISK, "Save To File")).clicked()
                         && let Some(path) = rfd::FileDialog::new()
-                            .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
+                            .set_file_name(format!(
+                                "{} {} {} - Game Chat.txt",
+                                report.game_type(),
+                                report.game_mode(),
+                                report.map_name()
+                            ))
                             .save_file()
                         && let Ok(mut file) = std::fs::File::create(path)
                     {
                         for message in chat_messages {
-                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                                entity_id: _,
+                                player,
+                                clock: _,
+                            } = message;
                             match player {
                                 Some(player) if !player.initial_state().clan().is_empty() => {
-                                    let _ = writeln!(file, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                    let _ = writeln!(
+                                        file,
+                                        "[{}] {} ({:?}): {}",
+                                        player.initial_state().clan(),
+                                        sender_name,
+                                        channel,
+                                        message
+                                    );
                                 }
                                 _ => {
                                     let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
@@ -4098,9 +4156,7 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         let replay = tab.replay.read();
-        let viewer = ToolkitTabViewer {
-            tab_state: self.tab_state,
-        };
+        let viewer = ToolkitTabViewer { tab_state: self.tab_state };
         if let Some(mp) = viewer.metadata_provider() {
             let ship = replay.vehicle_name(&mp);
             let map = replay.map_name(&mp);
@@ -4111,12 +4167,8 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        let viewer = ToolkitTabViewer {
-            tab_state: self.tab_state,
-        };
-        let metadata_provider = viewer
-            .metadata_provider()
-            .expect("no metadata provider?");
+        let viewer = ToolkitTabViewer { tab_state: self.tab_state };
+        let metadata_provider = viewer.metadata_provider().expect("no metadata provider?");
         let mut replay = tab.replay.write();
         viewer.build_replay_view(&mut replay, ui, metadata_provider.as_ref());
     }
@@ -4153,11 +4205,8 @@ fn build_replay_chat_content(
                 (None, None)
             };
 
-        let message = if let Ok(decoded) = decode_html(message.as_str()) {
-            Cow::Owned(decoded)
-        } else {
-            Cow::Borrowed(message)
-        };
+        let message =
+            if let Ok(decoded) = decode_html(message.as_str()) { Cow::Owned(decoded) } else { Cow::Borrowed(message) };
 
         let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
         let message: Cow<'_, str> = match translated_text {
@@ -4206,18 +4255,13 @@ fn build_replay_chat_content(
 
         let label_response = ui.add(Label::new(job));
         // Full-width hover row so the copy button appears when hovering anywhere on the row
-        let row_rect = egui::Rect::from_x_y_ranges(
-            ui.max_rect().x_range(),
-            label_response.rect.y_range(),
-        );
+        let row_rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), label_response.rect.y_range());
         let row_hovered = ui.rect_contains_pointer(row_rect);
         if row_hovered {
             // Place button using a child ui so it doesn't affect parent layout
             let padded_row = row_rect.shrink2(egui::vec2(8.0, 0.0));
-            let btn_rect = egui::Align2::RIGHT_CENTER.align_size_within_rect(
-                egui::vec2(20.0, label_response.rect.height()),
-                padded_row,
-            );
+            let btn_rect = egui::Align2::RIGHT_CENTER
+                .align_size_within_rect(egui::vec2(20.0, label_response.rect.height()), padded_row);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(btn_rect));
             if child.small_button(crate::icons::COPY).on_hover_text("Copy message").clicked() {
                 ui.ctx().copy_text(text);

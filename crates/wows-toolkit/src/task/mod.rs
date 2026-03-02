@@ -307,11 +307,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("available_builds", available_builds)
                 .finish(),
             Self::BuildDataLoaded { build } => f.debug_struct("BuildDataLoaded").field("build", build).finish(),
-            Self::ReplayLoaded { replay: _, source } => f
-                .debug_struct("ReplayLoaded")
-                .field("replay", &"<...>")
-                .field("source", source)
-                .finish(),
+            Self::ReplayLoaded { replay: _, source } => {
+                f.debug_struct("ReplayLoaded").field("replay", &"<...>").field("source", source).finish()
+            }
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
             Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),

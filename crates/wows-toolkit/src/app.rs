@@ -574,15 +574,15 @@ impl WowsToolkitApp {
                                     self.tab_state.browser_state.reset_filters();
                                     self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
                                 }
-                                BackgroundTaskCompletion::ReplayLoaded {
-                                    replay,
-                                    source,
-                                } => {
+                                BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
                                     use crate::task::ReplaySource;
 
                                     let track_session_stats = matches!(
                                         source,
-                                        ReplaySource::FileListing | ReplaySource::AutoLoad | ReplaySource::Reload | ReplaySource::SessionStatsOnly
+                                        ReplaySource::FileListing
+                                            | ReplaySource::AutoLoad
+                                            | ReplaySource::Reload
+                                            | ReplaySource::SessionStatsOnly
                                     );
                                     let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
                                     let open_tab = matches!(
@@ -887,7 +887,10 @@ impl WowsToolkitApp {
             self.tab_state.settings.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), crate::task::ReplaySource::ManualOpen)
+                deps.parse_replay_from_path(
+                    self.tab_state.settings.current_replay_path.clone(),
+                    crate::task::ReplaySource::ManualOpen
+                )
             );
         }
     }
@@ -1408,7 +1411,10 @@ impl WowsToolkitApp {
                     if let Some(focused) = self.tab_state.focused_replay()
                         && let Some(deps) = self.tab_state.replay_dependencies()
                     {
-                        update_background_task!(self.tab_state.background_tasks, deps.load_replay(focused, crate::task::ReplaySource::Reload));
+                        update_background_task!(
+                            self.tab_state.background_tasks,
+                            deps.load_replay(focused, crate::task::ReplaySource::Reload)
+                        );
                     }
 
                     self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");

@@ -185,8 +185,10 @@ impl ToolkitTabViewer<'_> {
         // ── Dock area with sub-tabs ──
         // Validate persisted dock state: must have Overview and at least one Charts tab.
         {
-            let has_overview = self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Overview));
-            let has_chart = self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Charts(_)));
+            let has_overview =
+                self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Overview));
+            let has_chart =
+                self.tab_state.stats_dock_state.iter_all_tabs().any(|(_, t)| matches!(t, StatsSubTab::Charts(_)));
             if !has_overview || !has_chart {
                 self.tab_state.stats_dock_state = crate::tab_state::default_stats_dock_state();
             }
@@ -195,16 +197,10 @@ impl ToolkitTabViewer<'_> {
         // Move dock state out temporarily to avoid double-borrow of tab_state
         let mut dock_state = std::mem::replace(&mut self.tab_state.stats_dock_state, egui_dock::DockState::new(vec![]));
 
-        let chart_tab_count = dock_state
-            .iter_all_tabs()
-            .filter(|(_, tab)| matches!(tab, StatsSubTab::Charts(_)))
-            .count();
+        let chart_tab_count =
+            dock_state.iter_all_tabs().filter(|(_, tab)| matches!(tab, StatsSubTab::Charts(_))).count();
 
-        let mut viewer = StatsTabViewer {
-            tab_state: self.tab_state,
-            chart_tab_count,
-            pending_adds: Vec::new(),
-        };
+        let mut viewer = StatsTabViewer { tab_state: self.tab_state, chart_tab_count, pending_adds: Vec::new() };
 
         DockArea::new(&mut dock_state)
             .id(egui::Id::new("stats_dock"))
@@ -551,13 +547,8 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
         .filter(|(_, perf)| perf.win_rate().is_some())
         .collect();
 
-    let per_game_data: Vec<crate::session_stats::PerGameStat> = tab_state
-        .settings
-        .session_stats
-        .per_ship_limited_games()
-        .into_iter()
-        .cloned()
-        .collect();
+    let per_game_data: Vec<crate::session_stats::PerGameStat> =
+        tab_state.settings.session_stats.per_ship_limited_games().into_iter().cloned().collect();
 
     // Clone Arc so the read guard doesn't borrow tab_state
     let pr_data_lock = Arc::clone(&tab_state.personal_rating_data);
@@ -704,12 +695,10 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
         // Copy as Image button (stays outside popover)
         let has_plot = tab_state.chart_config(chart_id).plot_rect.is_some();
-        if has_plot {
-            if ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
-                let cfg = tab_state.chart_config(chart_id);
-                cfg.screenshot_requested = true;
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
-            }
+        if has_plot && ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
+            let cfg = tab_state.chart_config(chart_id);
+            cfg.screenshot_requested = true;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
     });
 
@@ -755,8 +744,15 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
             selected_stats.sort_by_key(|a| a.0);
 
             if !selected_stats.is_empty() {
-                plot_rect =
-                    Some(render_bar_chart(ui, &selected_stats, selected_stat, &pr_data, show_labels, reset_plot, chart_id));
+                plot_rect = Some(render_bar_chart(
+                    ui,
+                    &selected_stats,
+                    selected_stat,
+                    &pr_data,
+                    show_labels,
+                    reset_plot,
+                    chart_id,
+                ));
             }
         }
     }
