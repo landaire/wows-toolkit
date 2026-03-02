@@ -1034,6 +1034,8 @@ impl WowsToolkitApp {
                 .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
         });
 
+        self.show_confirmation_dialog(ctx);
+
         // Pop open something to view the clicked file from the unpacker tab
         let mut file_viewer = self.tab_state.file_viewer.lock();
         let mut remove_viewers = Vec::new();
@@ -1434,6 +1436,75 @@ impl WowsToolkitApp {
         self.show_error_window = true;
         let formatted = err.format_with(&DefaultReportFormatter::ASCII);
         self.error_to_show = Some(format!("{formatted}"));
+    }
+
+    fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
+        if self.tab_state.pending_confirmation.is_none() {
+            let request: Option<Option<crate::tab_state::ConfirmableAction>> =
+                ctx.data_mut(|data| data.remove_temp(egui::Id::new("pending_confirmation_request")));
+            if let Some(Some(action)) = request {
+                self.tab_state.pending_confirmation = Some(action);
+            }
+        }
+    }
+
+    fn show_confirmation_dialog(&mut self, ctx: &egui::Context) {
+        self.pick_up_confirmation_request(ctx);
+
+        let Some(action) = self.tab_state.pending_confirmation.clone() else {
+            return;
+        };
+
+        let message = action.confirmation_message();
+
+        let mut confirmed = false;
+        let mut dismissed = false;
+
+        egui::Window::new("Confirm")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(message);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Yes").clicked() {
+                        confirmed = true;
+                    }
+                    if ui.button("No").clicked() {
+                        dismissed = true;
+                    }
+                });
+            });
+
+        if confirmed {
+            let action = self.tab_state.pending_confirmation.take().unwrap();
+            self.execute_confirmed_action(action, ctx);
+        } else if dismissed {
+            self.tab_state.pending_confirmation = None;
+        }
+    }
+
+    fn execute_confirmed_action(&mut self, action: crate::tab_state::ConfirmableAction, ctx: &egui::Context) {
+        match action {
+            crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
+                let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
+                let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
+                // Signal the replay parser to open the controls window
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                });
+            }
+            crate::tab_state::ConfirmableAction::ClearSessionStats => {
+                self.tab_state.settings.session_stats.clear();
+            }
+            crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_name } => {
+                self.tab_state.settings.session_stats.clear_ship(&ship_name);
+            }
+            crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
+                self.tab_state.replays_for_session_reset = Some(replays);
+            }
+        }
     }
 }
 
