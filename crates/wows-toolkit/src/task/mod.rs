@@ -52,6 +52,7 @@ pub use networking::NetworkResult;
 pub use networking::load_constants;
 pub use networking::load_personal_rating_data;
 pub use networking::load_versioned_constants_from_disk_with_fallback;
+#[cfg(target_os = "windows")]
 pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
