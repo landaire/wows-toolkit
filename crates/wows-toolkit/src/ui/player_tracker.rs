@@ -29,7 +29,7 @@ use crate::ui::replay_parser::Replay;
 pub struct PlayerTracker {
     tracked_players_by_time: BTreeMap<Timestamp, Vec<AccountId>>,
     tracked_players: HashMap<AccountId, TrackedPlayer>,
-    filter_time_period: TimePeriod,
+    pub filter_time_period: TimePeriod,
     sort_order: SortedBy,
     player_filter: String,
 
@@ -48,16 +48,6 @@ impl PlayerTracker {
         self.live_game_players = Some((timestamp, players))
     }
     pub fn update_from_replay(&mut self, replay: &Replay) {
-        let version = wowsunpack::data::Version::from_client_exe(&replay.replay_file.meta.clientVersionFromExe);
-        let battle_type = wowsunpack::game_types::BattleType::from_value(&replay.replay_file.meta.gameType, version);
-        if !matches!(
-            battle_type.known(),
-            Some(wowsunpack::game_types::BattleType::Random | wowsunpack::game_types::BattleType::Ranked)
-        ) {
-            // Only update from randoms / ranked
-            return;
-        }
-
         if let Some(report) = replay.battle_report.as_ref() {
             let tracked_players = &mut self.tracked_players;
             let tracked_players_by_ts = &mut self.tracked_players_by_time;
@@ -149,7 +139,7 @@ pub struct TrackedPlayer {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
-enum TimePeriod {
+pub enum TimePeriod {
     LastHour,
     LastSixHours,
     #[default]

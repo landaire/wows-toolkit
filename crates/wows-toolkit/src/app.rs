@@ -642,7 +642,11 @@ impl WowsToolkitApp {
                                         }
                                     }
                                 }
-                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {}
+                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
+                                    // Switch to "All Time" so historical data is visible
+                                    self.tab_state.settings.player_tracker.write().filter_time_period =
+                                        crate::ui::player_tracker::TimePeriod::AllTime;
+                                }
                                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
                                     *self.tab_state.game_constants.write() = constants;
                                     self.check_constants_version_mismatch();
