@@ -2080,12 +2080,10 @@ fn extract_timeline_events(
     let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
 
     // Advantage tracking
+    use wows_minimap_renderer::advantage;
     use wows_minimap_renderer::advantage::ScoringParams;
     use wows_minimap_renderer::advantage::TeamAdvantage;
     use wows_minimap_renderer::advantage::TeamState;
-    use wows_minimap_renderer::advantage::{
-        self,
-    };
     let mut prev_advantage: TeamAdvantage = TeamAdvantage::Even;
     let mut advantage_check_clock = GameClock(0.0);
 
