@@ -314,10 +314,7 @@ mod tests {
         // Verify the delta computes correctly (the original bug: get_minutes() returned 0)
         let delta = viewer_ts - match_ts;
         let total_mins = delta.total(Unit::Minute).unwrap();
-        assert!(
-            (total_mins - 10.0).abs() < 0.01,
-            "expected ~10.0 minutes, got {total_mins}"
-        );
+        assert!((total_mins - 10.0).abs() < 0.01, "expected ~10.0 minutes, got {total_mins}");
     }
 
     #[test]

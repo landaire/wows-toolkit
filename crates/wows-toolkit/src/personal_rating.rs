@@ -282,3 +282,254 @@ pub fn load_expected_values_from_disk() -> std::io::Result<Vec<u8>> {
     let path = get_expected_values_path();
     fs::read(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Path to the checked-in expected values fixture.
+    fn fixture_bytes() -> Vec<u8> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join("fixtures")
+            .join("pr_expected_values.json");
+        fs::read(&path).unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()))
+    }
+
+    fn loaded_pr_data() -> PersonalRatingData {
+        let mut pr = PersonalRatingData::new();
+        pr.load_from_bytes(&fixture_bytes()).expect("should parse expected values JSON");
+        pr
+    }
+
+    // -- Loading --
+
+    #[test]
+    fn load_from_bytes_parses_fixture() {
+        let pr = loaded_pr_data();
+        assert!(pr.is_loaded());
+    }
+
+    #[test]
+    fn fixture_contains_ships() {
+        let pr = loaded_pr_data();
+        // The first ship ID in the fixture is 3374266064
+        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64));
+        assert!(ev.is_some(), "fixture should contain ship 3374266064");
+        let ev = ev.unwrap();
+        assert!(ev.average_damage_dealt > 0.0);
+        assert!(ev.average_frags > 0.0);
+        assert!(ev.win_rate > 0.0);
+    }
+
+    #[test]
+    fn empty_array_entries_return_none() {
+        let pr = loaded_pr_data();
+        // Ship 3330258928 is [] in the fixture
+        let ev = pr.get_ship_expected(GameParamId::from(3330258928u64));
+        assert!(ev.is_none(), "empty-array entries should return None");
+    }
+
+    #[test]
+    fn missing_ship_returns_none() {
+        let pr = loaded_pr_data();
+        let ev = pr.get_ship_expected(GameParamId::from(9999999999u64));
+        assert!(ev.is_none());
+    }
+
+    // -- PR calculation --
+
+    #[test]
+    fn calculate_pr_empty_stats_returns_none() {
+        let pr = loaded_pr_data();
+        assert!(pr.calculate_pr(&[]).is_none());
+    }
+
+    #[test]
+    fn calculate_pr_all_missing_ships_returns_none() {
+        let pr = loaded_pr_data();
+        let stats = [ShipBattleStats {
+            ship_id: GameParamId::from(9999999999u64),
+            battles: 10,
+            damage: 500000,
+            wins: 5,
+            frags: 10,
+        }];
+        assert!(pr.calculate_pr(&stats).is_none());
+    }
+
+    #[test]
+    fn calculate_pr_known_ship() {
+        let pr = loaded_pr_data();
+        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        // Play exactly at expected values → should give ~1150 (average PR).
+        // At ratio=1.0: nDmg=(1.0-0.4)/0.6=1.0, nFrags=(1.0-0.1)/0.9=1.0, nWins=(1.0-0.7)/0.3=1.0
+        // PR = 700 + 300 + 150 = 1150
+        let stats = [ShipBattleStats {
+            ship_id: GameParamId::from(3374266064u64),
+            battles: 100,
+            damage: (ev.average_damage_dealt * 100.0) as u64,
+            wins: (ev.win_rate / 100.0 * 100.0) as u32,
+            frags: (ev.average_frags * 100.0) as i64,
+        }];
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        // Allow tolerance for float→int truncation in test data
+        assert!((result.pr - 1150.0).abs() < 20.0, "PR at expected values should be ~1150, got {}", result.pr);
+        assert_eq!(result.category, PersonalRatingCategory::Average);
+    }
+
+    #[test]
+    fn calculate_pr_double_expected_is_high() {
+        let pr = loaded_pr_data();
+        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        // Double all metrics → high PR
+        let stats = [ShipBattleStats {
+            ship_id: GameParamId::from(3374266064u64),
+            battles: 100,
+            damage: (ev.average_damage_dealt * 200.0) as u64,
+            wins: 100, // 100% WR
+            frags: (ev.average_frags * 200.0) as i64,
+        }];
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        assert!(result.pr > 2400.0, "double expected should give super unicum, got {}", result.pr);
+        assert_eq!(result.category, PersonalRatingCategory::SuperUnicum);
+    }
+
+    #[test]
+    fn calculate_pr_zero_damage_gives_low() {
+        let pr = loaded_pr_data();
+
+        let stats =
+            [ShipBattleStats { ship_id: GameParamId::from(3374266064u64), battles: 100, damage: 0, wins: 0, frags: 0 }];
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        assert_eq!(result.pr, 0.0, "zero stats should give PR=0");
+        assert_eq!(result.category, PersonalRatingCategory::Bad);
+    }
+
+    #[test]
+    fn calculate_pr_multi_ship_aggregates() {
+        let pr = loaded_pr_data();
+
+        // Use two different ships that both exist in the fixture
+        let ship_a = GameParamId::from(3374266064u64);
+        let ship_b = GameParamId::from(3340645584u64);
+        assert!(pr.get_ship_expected(ship_a).is_some());
+        assert!(pr.get_ship_expected(ship_b).is_some());
+
+        let ev_a = pr.get_ship_expected(ship_a).unwrap();
+        let ev_b = pr.get_ship_expected(ship_b).unwrap();
+
+        // Both at expected values → combined should also be ~1150
+        let stats = [
+            ShipBattleStats {
+                ship_id: ship_a,
+                battles: 50,
+                damage: (ev_a.average_damage_dealt * 50.0) as u64,
+                wins: (ev_a.win_rate / 100.0 * 50.0) as u32,
+                frags: (ev_a.average_frags * 50.0) as i64,
+            },
+            ShipBattleStats {
+                ship_id: ship_b,
+                battles: 50,
+                damage: (ev_b.average_damage_dealt * 50.0) as u64,
+                wins: (ev_b.win_rate / 100.0 * 50.0) as u32,
+                frags: (ev_b.average_frags * 50.0) as i64,
+            },
+        ];
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        assert!((result.pr - 1150.0).abs() < 20.0, "multi-ship at expected should be ~1150, got {}", result.pr);
+    }
+
+    #[test]
+    fn calculate_pr_skips_unknown_ships() {
+        let pr = loaded_pr_data();
+        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        // One real ship + one unknown ship → should only use the real ship
+        let stats = [
+            ShipBattleStats {
+                ship_id: GameParamId::from(3374266064u64),
+                battles: 100,
+                damage: (ev.average_damage_dealt * 100.0) as u64,
+                wins: (ev.win_rate / 100.0 * 100.0) as u32,
+                frags: (ev.average_frags * 100.0) as i64,
+            },
+            ShipBattleStats { ship_id: GameParamId::from(9999999999u64), battles: 100, damage: 0, wins: 0, frags: 0 },
+        ];
+        let result = pr.calculate_pr(&stats).expect("should calculate PR");
+        assert!((result.pr - 1150.0).abs() < 20.0, "should ignore unknown ship, got {}", result.pr);
+    }
+
+    // -- PR categories --
+
+    #[test]
+    fn pr_category_boundaries() {
+        assert_eq!(PersonalRatingCategory::from_pr(0.0), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_pr(749.0), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_pr(750.0), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_pr(1099.0), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_pr(1100.0), PersonalRatingCategory::Average);
+        assert_eq!(PersonalRatingCategory::from_pr(1349.0), PersonalRatingCategory::Average);
+        assert_eq!(PersonalRatingCategory::from_pr(1350.0), PersonalRatingCategory::Good);
+        assert_eq!(PersonalRatingCategory::from_pr(1549.0), PersonalRatingCategory::Good);
+        assert_eq!(PersonalRatingCategory::from_pr(1550.0), PersonalRatingCategory::VeryGood);
+        assert_eq!(PersonalRatingCategory::from_pr(1749.0), PersonalRatingCategory::VeryGood);
+        assert_eq!(PersonalRatingCategory::from_pr(1750.0), PersonalRatingCategory::Great);
+        assert_eq!(PersonalRatingCategory::from_pr(2099.0), PersonalRatingCategory::Great);
+        assert_eq!(PersonalRatingCategory::from_pr(2100.0), PersonalRatingCategory::Unicum);
+        assert_eq!(PersonalRatingCategory::from_pr(2449.0), PersonalRatingCategory::Unicum);
+        assert_eq!(PersonalRatingCategory::from_pr(2450.0), PersonalRatingCategory::SuperUnicum);
+        assert_eq!(PersonalRatingCategory::from_pr(5000.0), PersonalRatingCategory::SuperUnicum);
+    }
+
+    #[test]
+    fn pr_category_names() {
+        assert_eq!(PersonalRatingCategory::Bad.name(), "Bad");
+        assert_eq!(PersonalRatingCategory::BelowAverage.name(), "Below Average");
+        assert_eq!(PersonalRatingCategory::Average.name(), "Average");
+        assert_eq!(PersonalRatingCategory::Good.name(), "Good");
+        assert_eq!(PersonalRatingCategory::VeryGood.name(), "Very Good");
+        assert_eq!(PersonalRatingCategory::Great.name(), "Great");
+        assert_eq!(PersonalRatingCategory::Unicum.name(), "Unicum");
+        assert_eq!(PersonalRatingCategory::SuperUnicum.name(), "Super Unicum");
+    }
+
+    #[test]
+    fn pr_category_ordering() {
+        assert!(PersonalRatingCategory::Bad < PersonalRatingCategory::BelowAverage);
+        assert!(PersonalRatingCategory::BelowAverage < PersonalRatingCategory::Average);
+        assert!(PersonalRatingCategory::Average < PersonalRatingCategory::Good);
+        assert!(PersonalRatingCategory::Good < PersonalRatingCategory::VeryGood);
+        assert!(PersonalRatingCategory::VeryGood < PersonalRatingCategory::Great);
+        assert!(PersonalRatingCategory::Great < PersonalRatingCategory::Unicum);
+        assert!(PersonalRatingCategory::Unicum < PersonalRatingCategory::SuperUnicum);
+    }
+
+    #[test]
+    fn personal_rating_result_new() {
+        let result = PersonalRatingResult::new(1500.0);
+        assert_eq!(result.pr, 1500.0);
+        assert_eq!(result.category, PersonalRatingCategory::Good);
+    }
+
+    #[test]
+    fn unloaded_pr_data_returns_none() {
+        let pr = PersonalRatingData::new();
+        assert!(!pr.is_loaded());
+        assert!(pr.get_ship_expected(GameParamId::from(3374266064u64)).is_none());
+        let stats = [ShipBattleStats {
+            ship_id: GameParamId::from(3374266064u64),
+            battles: 10,
+            damage: 100000,
+            wins: 5,
+            frags: 5,
+        }];
+        assert!(pr.calculate_pr(&stats).is_none());
+    }
+}

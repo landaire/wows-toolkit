@@ -658,3 +658,623 @@ impl SessionStats {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    /// Helper: create a PerGameStat with the given parameters.
+    fn make_game(
+        ship_name: &str,
+        ship_id: u64,
+        game_time: &str,
+        player_id: i64,
+        damage: u64,
+        frags: i64,
+        raw_xp: i64,
+        base_xp: i64,
+        is_win: bool,
+        is_loss: bool,
+        is_draw: bool,
+        is_div: bool,
+        match_group: &str,
+    ) -> PerGameStat {
+        let sort_key = sortable_game_time(game_time);
+        PerGameStat {
+            ship_name: ship_name.to_string(),
+            ship_id: GameParamId::from(ship_id),
+            game_time: game_time.to_string(),
+            sort_key,
+            player_id,
+            damage,
+            spotting_damage: 0,
+            frags,
+            raw_xp,
+            base_xp,
+            is_win,
+            is_loss,
+            is_draw,
+            is_div,
+            match_group: match_group.to_string(),
+            achievements: Vec::new(),
+        }
+    }
+
+    /// Shorthand for a PvP win.
+    fn pvp_win(ship: &str, ship_id: u64, time: &str, damage: u64, frags: i64, xp: i64) -> PerGameStat {
+        make_game(ship, ship_id, time, 1, damage, frags, xp, xp, true, false, false, false, "pvp")
+    }
+
+    /// Shorthand for a PvP loss.
+    fn pvp_loss(ship: &str, ship_id: u64, time: &str, damage: u64, frags: i64, xp: i64) -> PerGameStat {
+        make_game(ship, ship_id, time, 1, damage, frags, xp, xp, false, true, false, false, "pvp")
+    }
+
+    fn fixture_pr_data() -> PersonalRatingData {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join("fixtures")
+            .join("pr_expected_values.json");
+        let bytes = std::fs::read(&path).expect("fixture must exist");
+        let mut pr = PersonalRatingData::new();
+        pr.load_from_bytes(&bytes).unwrap();
+        pr
+    }
+
+    // -- sortable_game_time --
+
+    #[test]
+    fn sortable_game_time_standard_format() {
+        assert_eq!(sortable_game_time("13.02.2026 14:35:18"), "2026-02-13 14:35:18");
+    }
+
+    #[test]
+    fn sortable_game_time_single_digit_day() {
+        assert_eq!(sortable_game_time("01.01.2025 00:00:00"), "2025-01-01 00:00:00");
+    }
+
+    #[test]
+    fn sortable_game_time_invalid_format_passthrough() {
+        let bad = "not a date";
+        assert_eq!(sortable_game_time(bad), bad);
+    }
+
+    #[test]
+    fn sortable_game_time_sorts_correctly() {
+        let early = sortable_game_time("01.01.2025 08:00:00");
+        let late = sortable_game_time("13.02.2026 14:35:18");
+        assert!(early < late);
+    }
+
+    // -- match_group_display_name --
+
+    #[test]
+    fn match_group_display_names() {
+        assert_eq!(match_group_display_name("pvp"), "Random");
+        assert_eq!(match_group_display_name("ranked"), "Ranked");
+        assert_eq!(match_group_display_name("cooperative"), "Co-op");
+        assert_eq!(match_group_display_name("clan"), "Clan Battle");
+        assert_eq!(match_group_display_name("brawl"), "Brawl");
+        assert_eq!(match_group_display_name("event"), "Event");
+        assert_eq!(match_group_display_name("pve"), "PvE");
+        assert_eq!(match_group_display_name(""), "Unknown");
+        assert_eq!(match_group_display_name("some_future_mode"), "some_future_mode");
+    }
+
+    // -- PerformanceInfo --
+
+    #[test]
+    fn performance_info_from_empty_games() {
+        let info = PerformanceInfo::from_games(&[]);
+        assert_eq!(info.wins(), 0);
+        assert_eq!(info.losses(), 0);
+        assert_eq!(info.draws(), 0);
+        assert_eq!(info.total_damage(), 0);
+        assert_eq!(info.min_damage(), 0);
+        assert!(info.win_rate().is_none());
+        assert!(info.avg_damage().is_none());
+    }
+
+    #[test]
+    fn performance_info_single_game() {
+        let game = pvp_win("Vermont", 3374266064, "13.02.2026 14:00:00", 120000, 3, 2500);
+        let info = PerformanceInfo::from_games(&[&game]);
+
+        assert_eq!(info.wins(), 1);
+        assert_eq!(info.losses(), 0);
+        assert_eq!(info.draws(), 0);
+        assert_eq!(info.total_damage(), 120000);
+        assert_eq!(info.max_damage(), 120000);
+        assert_eq!(info.min_damage(), 120000);
+        assert_eq!(info.total_frags(), 3);
+        assert_eq!(info.max_frags(), 3);
+        assert_eq!(info.min_frags(), 3);
+        assert_eq!(info.max_xp(), 2500);
+        assert_eq!(info.min_xp(), 2500);
+        assert!((info.win_rate().unwrap() - 100.0).abs() < f64::EPSILON);
+        assert!((info.avg_damage().unwrap() - 120000.0).abs() < f64::EPSILON);
+        assert!((info.avg_frags().unwrap() - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn performance_info_multi_game_aggregation() {
+        let g1 = pvp_win("Vermont", 3374266064, "13.02.2026 14:00:00", 100000, 2, 2000);
+        let g2 = pvp_loss("Vermont", 3374266064, "13.02.2026 15:00:00", 50000, 0, 1000);
+        let g3 = pvp_win("Vermont", 3374266064, "13.02.2026 16:00:00", 200000, 5, 3000);
+        let info = PerformanceInfo::from_games(&[&g1, &g2, &g3]);
+
+        assert_eq!(info.wins(), 2);
+        assert_eq!(info.losses(), 1);
+        assert_eq!(info.total_damage(), 350000);
+        assert_eq!(info.max_damage(), 200000);
+        assert_eq!(info.min_damage(), 50000);
+        assert_eq!(info.total_frags(), 7);
+        assert_eq!(info.max_frags(), 5);
+        assert_eq!(info.min_frags(), 0);
+        assert_eq!(info.max_xp(), 3000);
+        assert_eq!(info.min_xp(), 1000);
+        assert!((info.win_rate().unwrap() - 66.66666666666667).abs() < 0.01);
+        assert!((info.avg_damage().unwrap() - 116666.666666).abs() < 1.0);
+    }
+
+    #[test]
+    fn performance_info_last_played() {
+        let g1 = pvp_win("Vermont", 1, "01.01.2025 10:00:00", 100000, 1, 1000);
+        let g2 = pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 1, 1000);
+        let info = PerformanceInfo::from_games(&[&g1, &g2]);
+        assert_eq!(info.last_played(), "2026-02-13 14:00:00");
+    }
+
+    #[test]
+    fn performance_info_draw_counted() {
+        let game =
+            make_game("Vermont", 1, "01.01.2025 10:00:00", 1, 50000, 1, 1000, 1000, false, false, true, false, "pvp");
+        let info = PerformanceInfo::from_games(&[&game]);
+        assert_eq!(info.draws(), 1);
+        assert_eq!(info.wins(), 0);
+        assert_eq!(info.losses(), 0);
+        assert!((info.win_rate().unwrap() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn performance_info_calculate_pr() {
+        let pr = fixture_pr_data();
+        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        let game = make_game(
+            "TestShip",
+            3374266064,
+            "13.02.2026 14:00:00",
+            1,
+            ev.average_damage_dealt as u64,
+            ev.average_frags as i64,
+            2000,
+            2000,
+            true,
+            false,
+            false,
+            false,
+            "pvp",
+        );
+        let info = PerformanceInfo::from_games(&[&game]);
+        let result = info.calculate_pr(&pr);
+        assert!(result.is_some(), "should calculate PR for performance info");
+    }
+
+    // -- SessionStats --
+
+    #[test]
+    fn session_stats_add_game_and_count() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 1, 1500));
+        assert_eq!(ss.games.len(), 2);
+        assert_eq!(ss.games_played(), 2);
+        assert_eq!(ss.games_won(), 1);
+        assert_eq!(ss.games_lost(), 1);
+    }
+
+    #[test]
+    fn session_stats_dedup_by_time_and_player() {
+        let mut ss = SessionStats::default();
+        let g1 =
+            make_game("Vermont", 1, "13.02.2026 14:00:00", 42, 100000, 2, 2000, 2000, true, false, false, false, "pvp");
+        let g2 =
+            make_game("Vermont", 1, "13.02.2026 14:00:00", 42, 150000, 3, 2500, 2500, true, false, false, false, "pvp");
+        ss.add_game(g1);
+        ss.add_game(g2);
+        assert_eq!(ss.games.len(), 1, "duplicate game_time+player_id should deduplicate");
+        assert_eq!(ss.games[0].damage, 150000, "should keep the newer entry");
+    }
+
+    #[test]
+    fn session_stats_different_players_not_deduped() {
+        let mut ss = SessionStats::default();
+        let g1 =
+            make_game("Vermont", 1, "13.02.2026 14:00:00", 1, 100000, 2, 2000, 2000, true, false, false, false, "pvp");
+        let g2 =
+            make_game("Vermont", 1, "13.02.2026 14:00:00", 2, 100000, 2, 2000, 2000, true, false, false, false, "pvp");
+        ss.add_game(g1);
+        ss.add_game(g2);
+        assert_eq!(ss.games.len(), 2, "different player_ids should not be deduped");
+    }
+
+    #[test]
+    fn session_stats_win_rate() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_loss("Vermont", 1, "13.02.2026 15:00:00", 80000, 0, 1000));
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 16:00:00", 120000, 3, 2500));
+        assert!((ss.win_rate().unwrap() - 66.66666666666667).abs() < 0.01);
+    }
+
+    #[test]
+    fn session_stats_win_rate_empty() {
+        let ss = SessionStats::default();
+        assert!(ss.win_rate().is_none());
+    }
+
+    #[test]
+    fn session_stats_max_damage() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 200000, 1, 1500));
+        let (ship, dmg) = ss.max_damage().unwrap();
+        assert_eq!(ship, "Marceau");
+        assert_eq!(dmg, 200000);
+    }
+
+    #[test]
+    fn session_stats_max_frags() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 5, 2000));
+        ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 2, 1000));
+        let (ship, frags) = ss.max_frags().unwrap();
+        assert_eq!(ship, "Vermont");
+        assert_eq!(frags, 5);
+    }
+
+    #[test]
+    fn session_stats_total_frags() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 3, 2000));
+        ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 2, 1000));
+        assert_eq!(ss.total_frags(), 5);
+    }
+
+    #[test]
+    fn session_stats_recent_games_limit() {
+        let mut ss = SessionStats::default();
+        for i in 0..10 {
+            ss.add_game(pvp_win("Vermont", 1, &format!("13.02.2026 {:02}:00:00", i), 100000, 1, 1000));
+        }
+        assert_eq!(ss.recent_games().len(), 10);
+
+        ss.game_count_limit = Some(3);
+        let recent = ss.recent_games();
+        assert_eq!(recent.len(), 3);
+        // Should be the last 3 games (07, 08, 09)
+        assert!(recent[0].game_time.contains("07:"));
+        assert!(recent[1].game_time.contains("08:"));
+        assert!(recent[2].game_time.contains("09:"));
+    }
+
+    #[test]
+    fn session_stats_division_filter() {
+        let mut ss = SessionStats::default();
+        let solo =
+            make_game("Vermont", 1, "13.02.2026 14:00:00", 1, 100000, 2, 2000, 2000, true, false, false, false, "pvp");
+        let div =
+            make_game("Marceau", 2, "13.02.2026 15:00:00", 1, 80000, 1, 1500, 1500, false, true, false, true, "pvp");
+        ss.add_game(solo);
+        ss.add_game(div);
+
+        ss.division_filter = DivisionFilter::All;
+        assert_eq!(ss.filtered_games().len(), 2);
+
+        ss.division_filter = DivisionFilter::SoloOnly;
+        let filtered = ss.filtered_games();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].ship_name, "Vermont");
+
+        ss.division_filter = DivisionFilter::DivOnly;
+        let filtered = ss.filtered_games();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].ship_name, "Marceau");
+    }
+
+    #[test]
+    fn session_stats_game_mode_filter() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(make_game(
+            "Marceau",
+            2,
+            "13.02.2026 15:00:00",
+            1,
+            80000,
+            1,
+            1500,
+            1500,
+            false,
+            true,
+            false,
+            false,
+            "ranked",
+        ));
+
+        assert_eq!(ss.filtered_games().len(), 2);
+
+        ss.game_mode_filter = HashSet::from(["pvp".to_string()]);
+        let filtered = ss.filtered_games();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].ship_name, "Vermont");
+
+        ss.game_mode_filter = HashSet::from(["ranked".to_string()]);
+        let filtered = ss.filtered_games();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].ship_name, "Marceau");
+
+        ss.game_mode_filter = HashSet::from(["pvp".to_string(), "ranked".to_string()]);
+        assert_eq!(ss.filtered_games().len(), 2);
+    }
+
+    #[test]
+    fn session_stats_all_match_groups() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(make_game(
+            "Marceau",
+            2,
+            "13.02.2026 15:00:00",
+            1,
+            80000,
+            1,
+            1500,
+            1500,
+            true,
+            false,
+            false,
+            false,
+            "ranked",
+        ));
+        ss.add_game(pvp_loss("Shimakaze", 3, "13.02.2026 16:00:00", 60000, 0, 800));
+
+        let groups = ss.all_match_groups();
+        assert!(groups.contains(&"pvp".to_string()));
+        assert!(groups.contains(&"ranked".to_string()));
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn session_stats_clear() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        assert_eq!(ss.games.len(), 1);
+        ss.clear();
+        assert_eq!(ss.games.len(), 0);
+    }
+
+    #[test]
+    fn session_stats_clear_ship() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_win("Marceau", 2, "13.02.2026 15:00:00", 80000, 1, 1500));
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 16:00:00", 120000, 3, 2500));
+
+        ss.clear_ship("Vermont");
+        assert_eq!(ss.games.len(), 1);
+        assert_eq!(ss.games[0].ship_name, "Marceau");
+    }
+
+    #[test]
+    fn session_stats_sort_backfills_sort_key() {
+        let mut ss = SessionStats::default();
+        ss.games.push(PerGameStat {
+            ship_name: "Vermont".to_string(),
+            ship_id: GameParamId::from(1u64),
+            game_time: "13.02.2026 14:00:00".to_string(),
+            sort_key: String::new(),
+            player_id: 1,
+            damage: 100000,
+            spotting_damage: 0,
+            frags: 2,
+            raw_xp: 2000,
+            base_xp: 2000,
+            is_win: true,
+            is_loss: false,
+            is_draw: false,
+            is_div: false,
+            match_group: "pvp".to_string(),
+            achievements: Vec::new(),
+        });
+        ss.sort_games();
+        assert_eq!(ss.games[0].sort_key, "2026-02-13 14:00:00");
+    }
+
+    #[test]
+    fn session_stats_per_ship_limited_games() {
+        let mut ss = SessionStats::default();
+        for i in 0..5 {
+            ss.add_game(pvp_win("Vermont", 1, &format!("13.02.2026 {:02}:00:00", i), 100000, 1, 1000));
+        }
+        for i in 5..8 {
+            ss.add_game(pvp_win("Marceau", 2, &format!("13.02.2026 {:02}:00:00", i), 80000, 1, 1000));
+        }
+
+        assert_eq!(ss.per_ship_limited_games().len(), 8);
+
+        ss.game_count_limit = Some(2);
+        let limited = ss.per_ship_limited_games();
+        assert_eq!(limited.len(), 4);
+
+        let vermont_games: Vec<_> = limited.iter().filter(|g| g.ship_name == "Vermont").collect();
+        let marceau_games: Vec<_> = limited.iter().filter(|g| g.ship_name == "Marceau").collect();
+        assert_eq!(vermont_games.len(), 2);
+        assert_eq!(marceau_games.len(), 2);
+    }
+
+    #[test]
+    fn session_stats_ship_stats_per_ship_limited() {
+        let mut ss = SessionStats::default();
+        ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
+        ss.add_game(pvp_loss("Vermont", 1, "13.02.2026 15:00:00", 50000, 0, 1000));
+        ss.add_game(pvp_win("Marceau", 2, "13.02.2026 16:00:00", 80000, 1, 1500));
+
+        let stats = ss.ship_stats_per_ship_limited();
+        assert_eq!(stats.len(), 2);
+        assert!(stats.contains_key("Vermont"));
+        assert!(stats.contains_key("Marceau"));
+
+        let vermont = &stats["Vermont"];
+        assert_eq!(vermont.wins(), 1);
+        assert_eq!(vermont.losses(), 1);
+        assert_eq!(vermont.total_damage(), 150000);
+    }
+
+    #[test]
+    fn session_stats_games_drawn() {
+        let mut ss = SessionStats::default();
+        ss.add_game(make_game(
+            "Vermont",
+            1,
+            "13.02.2026 14:00:00",
+            1,
+            100000,
+            0,
+            1000,
+            1000,
+            false,
+            false,
+            true,
+            false,
+            "pvp",
+        ));
+        assert_eq!(ss.games_drawn(), 1);
+        assert_eq!(ss.games_won(), 0);
+        assert_eq!(ss.games_lost(), 0);
+        assert_eq!(ss.games_played(), 1);
+    }
+
+    // -- Per-game PR --
+
+    #[test]
+    fn per_game_stat_calculate_pr() {
+        let pr_data = fixture_pr_data();
+        let ev = pr_data.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        let game = make_game(
+            "TestShip",
+            3374266064,
+            "13.02.2026 14:00:00",
+            1,
+            ev.average_damage_dealt as u64,
+            ev.average_frags as i64,
+            2000,
+            2000,
+            true,
+            false,
+            false,
+            false,
+            "pvp",
+        );
+
+        let pr = game.calculate_pr(Some(&pr_data));
+        assert!(pr.is_some(), "should calculate per-game PR");
+    }
+
+    #[test]
+    fn per_game_stat_calculate_pr_no_data() {
+        let game = pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000);
+        assert!(game.calculate_pr(None).is_none());
+    }
+
+    // -- SessionStats PR --
+
+    #[test]
+    fn session_stats_calculate_pr() {
+        let pr_data = fixture_pr_data();
+        let ev = pr_data.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        let mut ss = SessionStats::default();
+        for i in 0..10 {
+            let game = make_game(
+                "TestShip",
+                3374266064,
+                &format!("13.02.2026 {:02}:00:00", i),
+                1,
+                ev.average_damage_dealt as u64,
+                ev.average_frags as i64,
+                2000,
+                2000,
+                i % 2 == 0,
+                i % 2 != 0,
+                false,
+                false,
+                "pvp",
+            );
+            ss.add_game(game);
+        }
+
+        let result = ss.calculate_pr(&pr_data);
+        assert!(result.is_some(), "session PR should be calculable");
+    }
+
+    // -- PrStats --
+
+    #[test]
+    fn pr_stats_from_games() {
+        let pr_data = fixture_pr_data();
+        let ev = pr_data.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
+
+        let g1 = make_game(
+            "TestShip",
+            3374266064,
+            "13.02.2026 14:00:00",
+            1,
+            (ev.average_damage_dealt * 2.0) as u64,
+            (ev.average_frags * 2.0) as i64,
+            3000,
+            3000,
+            true,
+            false,
+            false,
+            false,
+            "pvp",
+        );
+        let g2 = make_game(
+            "TestShip",
+            3374266064,
+            "13.02.2026 15:00:00",
+            1,
+            (ev.average_damage_dealt * 0.5) as u64,
+            0,
+            1000,
+            1000,
+            false,
+            true,
+            false,
+            false,
+            "pvp",
+        );
+
+        let refs: Vec<&PerGameStat> = vec![&g1, &g2];
+        let stats = PrStats::from_games(&refs, &pr_data).expect("should compute PR stats");
+        assert!(stats.max > stats.min, "high-damage game should have higher PR");
+        assert!(stats.avg > 0.0, "average PR should be positive");
+    }
+
+    #[test]
+    fn pr_stats_no_expected_values_returns_none() {
+        let pr_data = PersonalRatingData::new();
+        let game = pvp_win("Unknown", 9999999999, "13.02.2026 14:00:00", 100000, 2, 2000);
+        let refs: Vec<&PerGameStat> = vec![&game];
+        assert!(PrStats::from_games(&refs, &pr_data).is_none());
+    }
+}
