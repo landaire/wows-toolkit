@@ -2,6 +2,7 @@
 //!
 //! Software encoder fallback for systems without GPU encoding support.
 
+use openh264::OpenH264API;
 use openh264::encoder::BitRate;
 use openh264::encoder::Complexity;
 use openh264::encoder::Encoder;
@@ -9,7 +10,6 @@ use openh264::encoder::EncoderConfig;
 use openh264::encoder::FrameRate;
 use openh264::formats::RgbSliceU8;
 use openh264::formats::YUVBuffer;
-use openh264::OpenH264API;
 use rootcause::prelude::*;
 
 use crate::error::VideoError;
