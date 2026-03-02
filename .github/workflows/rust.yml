@@ -40,9 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Nightly required for rustfmt edition 2024 support
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo fmt --all -- --check
 
   clippy:
