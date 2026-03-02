@@ -31,7 +31,7 @@ toml = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 sha2 = { workspace = true }
-wows-game-data-dl = { path = "../wows-game-data-dl" }
+wows-data-mgr = { path = "../wows-data-mgr" }
 
 [features]
 default = ["arc"]

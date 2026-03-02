@@ -5,11 +5,12 @@ use std::path::PathBuf;
 
 mod detect;
 mod download;
+mod dump;
 mod manifest;
 mod registry;
 
 #[derive(Parser)]
-#[command(name = "wows-game-data-dl", about = "Download and manage World of Warships game data for testing")]
+#[command(name = "wows-data-mgr", about = "Download and manage World of Warships game data")]
 struct Args {
     /// Override the game data directory (default: game_data/ in repo root)
     #[arg(long, global = true)]
@@ -51,6 +52,25 @@ enum Commands {
     Detect {
         /// Path to scan (default: game_data/builds/)
         path: Option<PathBuf>,
+    },
+
+    /// Dump renderer-required game data to a directory for offline use
+    DumpRendererData {
+        /// Dump for the latest available build
+        #[arg(long, conflicts_with_all = &["build", "version"])]
+        latest: bool,
+
+        /// Dump by build number (e.g. 11965230)
+        #[arg(long, conflicts_with_all = &["latest", "version"])]
+        build: Option<u32>,
+
+        /// Dump by version string (e.g. 15.1 or 15.1.0)
+        #[arg(long, conflicts_with_all = &["latest", "build"])]
+        version: Option<String>,
+
+        /// Output directory (a subdirectory named <version>_<build> will be created)
+        #[arg(short, long)]
+        output: PathBuf,
     },
 
     /// Register an existing WoWs installation without downloading
@@ -197,6 +217,33 @@ fn main() -> Result<(), Report> {
                 registry::save_registry(&reg, &data_dir.join("versions.toml"))?;
                 println!("\nRegistry updated.");
             }
+        }
+
+        Commands::DumpRendererData { latest, build, version, output } => {
+            let target = if latest {
+                let builds = reg.available_builds();
+                *builds.last().ok_or_else(|| rootcause::report!("No builds available"))?
+            } else if let Some(b) = build {
+                b
+            } else if let Some(ref v) = version {
+                manifest
+                    .find_by_version(v)
+                    .ok_or_else(|| rootcause::report!("No build found matching version '{v}'"))?
+            } else {
+                bail!("Specify --latest, --build, or --version");
+            };
+
+            let game_dir = reg
+                .game_dir_for_build(target, &data_dir)
+                .ok_or_else(|| rootcause::report!("Build {target} not available locally"))?;
+
+            let version_str = if let Some(entry) = manifest.get(target) {
+                entry.version.clone()
+            } else {
+                detect::detect_version_at_path(&game_dir, target).unwrap_or_else(|_| "unknown".to_string())
+            };
+
+            dump::dump_renderer_data(&game_dir, target, &version_str, &output)?;
         }
 
         Commands::Register { latest, version, build, path } => {

@@ -30,9 +30,9 @@ cargo test --workspace
 
 Some tests exercise game file parsing (VFS, PKG, MFM, GameParams) and require a local copy of World of Warships. These tests are skipped when game data is not available.
 
-#### Using `wows-game-data-dl`
+#### Using `wows-data-mgr`
 
-The `wows-game-data-dl` CLI tool manages game data downloads and version tracking. Install [DepotDownloader](https://github.com/SteamRE/DepotDownloader) first:
+The `wows-data-mgr` CLI tool manages game data downloads and version tracking. Install [DepotDownloader](https://github.com/SteamRE/DepotDownloader) first:
 
 ```bash
 dotnet tool install -g DepotDownloader
@@ -41,19 +41,19 @@ dotnet tool install -g DepotDownloader
 Then download the latest game version:
 
 ```bash
-cargo run -p wows-game-data-dl -- download --latest
+cargo run -p wows-data-mgr -- download --latest
 ```
 
 Or register an existing WoWs installation (no download needed):
 
 ```bash
-cargo run -p wows-game-data-dl -- register --path /path/to/World_of_Warships
+cargo run -p wows-data-mgr -- register --path /path/to/World_of_Warships
 ```
 
 List known versions and their availability:
 
 ```bash
-cargo run -p wows-game-data-dl -- list
+cargo run -p wows-data-mgr -- list
 ```
 
 The tool saves your Steam username to `.steam-user` (gitignored) and uses DepotDownloader's `-remember-password` flag so subsequent runs are non-interactive.

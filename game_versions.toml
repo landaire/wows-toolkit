@@ -5,10 +5,10 @@
 # Manifest IDs can be found on SteamDB: https://steamdb.info/app/552993/depots/
 #
 # To download a specific version:
-#   cargo run -p wows-game-data-dl -- download --version 15.1
+#   cargo run -p wows-data-mgr -- download --version 15.1
 #
 # To download the latest:
-#   cargo run -p wows-game-data-dl -- download --latest
+#   cargo run -p wows-data-mgr -- download --latest
 
 [versions.11965230]
 version = "15.1.0"

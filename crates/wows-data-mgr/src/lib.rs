@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use wows_game_data_dl::{available_builds, vfs_for_build};
+//! use wows_data_mgr::{available_builds, vfs_for_build};
 //!
 //! #[test]
 //! fn test_game_params_load() {

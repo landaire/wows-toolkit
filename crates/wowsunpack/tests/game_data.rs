@@ -1,7 +1,7 @@
 //! Integration tests for game data loading via VFS.
 //!
 //! These tests require game data to be available (either downloaded via
-//! `wows-game-data-dl` or registered with `--latest`).
+//! `wows-data-mgr` or registered with `--latest`).
 //! They are automatically ignored when no game data is present.
 
 use sha2::Digest;
@@ -12,7 +12,7 @@ use std::io::Read;
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn vfs_file_tree_has_expected_directories() {
-    let (build, vfs) = wows_game_data_dl::latest_build().expect("game data should be available");
+    let (build, vfs) = wows_data_mgr::latest_build().expect("game data should be available");
     eprintln!("Testing VFS for build {build}");
 
     let entries: Vec<String> = vfs.read_dir().expect("root read_dir should work").map(|e| e.filename()).collect();
@@ -26,7 +26,7 @@ fn vfs_file_tree_has_expected_directories() {
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn vfs_can_traverse_subdirectories() {
-    let (_build, vfs) = wows_game_data_dl::latest_build().expect("game data should be available");
+    let (_build, vfs) = wows_data_mgr::latest_build().expect("game data should be available");
 
     let scripts = vfs.join("scripts").expect("should join 'scripts'");
     let entries: Vec<String> =
@@ -39,7 +39,7 @@ fn vfs_can_traverse_subdirectories() {
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn vfs_entity_defs_readable() {
-    let (_build, vfs) = wows_game_data_dl::latest_build().expect("game data should be available");
+    let (_build, vfs) = wows_data_mgr::latest_build().expect("game data should be available");
 
     let account_def = vfs.join("scripts/entity_defs/Account.def").expect("should join Account.def path");
 
@@ -61,7 +61,7 @@ fn vfs_entity_defs_readable() {
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn vfs_stable_file_hash() {
-    let (_build, vfs) = wows_game_data_dl::latest_build().expect("game data should be available");
+    let (_build, vfs) = wows_data_mgr::latest_build().expect("game data should be available");
 
     let path = "gui/maps_bg/99_gamemode_test.jpg";
     let file = vfs.join(path).and_then(|p| p.open_file());
@@ -90,7 +90,7 @@ fn vfs_stable_file_hash() {
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn vfs_game_params_readable() {
-    let (_build, vfs) = wows_game_data_dl::latest_build().expect("game data should be available");
+    let (_build, vfs) = wows_data_mgr::latest_build().expect("game data should be available");
 
     let path = "content/GameParams.data";
     let mut data = Vec::new();
@@ -108,11 +108,11 @@ fn vfs_game_params_readable() {
 #[test]
 #[cfg_attr(not(has_game_data), ignore)]
 fn all_builds_construct_vfs() {
-    let builds = wows_game_data_dl::available_builds();
+    let builds = wows_data_mgr::available_builds();
     assert!(!builds.is_empty(), "should have at least one build");
 
     for build in builds {
-        let vfs = wows_game_data_dl::vfs_for_build(build);
+        let vfs = wows_data_mgr::vfs_for_build(build);
         assert!(vfs.is_some(), "should be able to construct VFS for build {build}");
     }
 }

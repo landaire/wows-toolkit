@@ -19,7 +19,7 @@ use wowsunpack::models::visual;
 use wowsunpack::vfs::VfsPath;
 
 fn game_vfs() -> VfsPath {
-    wows_game_data_dl::latest_build().expect("game data should be available").1
+    wows_data_mgr::latest_build().expect("game data should be available").1
 }
 
 fn load_assets_bin_vfs(vfs: &VfsPath) -> AssetsBinVfs {

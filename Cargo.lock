@@ -8543,14 +8543,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "wows-game-data-dl"
+name = "wows-data-mgr"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "indicatif",
  "jiff",
+ "rkyv",
  "rootcause",
  "serde",
  "toml 1.0.3+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
  "wowsunpack",
 ]
 
@@ -8574,6 +8578,7 @@ dependencies = [
  "objc2-video-toolbox",
  "openh264",
  "resvg 0.47.0",
+ "rkyv",
  "rootcause",
  "roxmltree 0.21.1",
  "serde",
@@ -8608,7 +8613,7 @@ dependencies = [
  "toml 1.0.3+spec-1.1.0",
  "tracing",
  "winnow",
- "wows-game-data-dl",
+ "wows-data-mgr",
  "wowsunpack",
 ]
 
@@ -8723,7 +8728,7 @@ dependencies = [
  "variantly",
  "vfs",
  "winnow",
- "wows-game-data-dl",
+ "wows-data-mgr",
 ]
 
 [[package]]
