@@ -20,7 +20,7 @@ required-features = ["bin"]
 
 [features]
 default = ["bin", "vulkan", "videotoolbox", "arc"]
-bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif"]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:rkyv", "wowsunpack/rkyv"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
 vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs"]
 # VideoToolbox encoder (macOS only)
@@ -48,6 +48,7 @@ indicatif = { workspace = true, optional = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+rkyv = { workspace = true, optional = true }
 
 # YUV conversion (shared by vulkan and videotoolbox backends)
 yuvutils-rs = { version = "0.8", optional = true }

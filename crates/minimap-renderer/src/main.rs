@@ -10,6 +10,8 @@ use tracing::warn;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::Param;
+use wowsunpack::vfs::VfsPath;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -37,8 +39,12 @@ use wows_minimap_renderer::video::VideoEncoder;
 #[command(name = "Minimap Renderer")]
 struct Args {
     /// Path to the World of Warships game directory
-    #[arg(short = 'g', long = "game", required_unless_present_any = ["generate_config", "check_encoder"])]
+    #[arg(short = 'g', long = "game", conflicts_with = "extracted_dir", required_unless_present_any = ["generate_config", "check_encoder", "extracted_dir"])]
     game_dir: Option<PathBuf>,
+
+    /// Path to pre-extracted renderer data directory (alternative to --game)
+    #[arg(long, conflicts_with = "game_dir", required_unless_present_any = ["generate_config", "check_encoder", "game_dir"])]
+    extracted_dir: Option<PathBuf>,
 
     /// Output MP4 file path
     #[arg(short, long, required_unless_present_any = ["generate_config", "check_encoder"])]
@@ -131,7 +137,6 @@ fn main() -> Result<(), Report> {
         return Ok(());
     }
 
-    let game_dir = args.game_dir.as_ref().expect("game directory is required");
     let output = args.output.as_ref().expect("output is required");
     let replay_path = args.replay.as_ref().expect("replay is required");
 
@@ -146,31 +151,16 @@ fn main() -> Result<(), Report> {
     let replay_file = ReplayFile::from_file(replay_path)?;
     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
-    info!(build = %replay_version.build, "Loading game data");
-    let wows_dir = game_dir.as_path();
-    let resources = game_data::load_game_resources(wows_dir, &replay_version).map_err(|e| report!("{e}"))?;
-    let vfs = &resources.vfs;
-    let specs = &resources.specs;
-
-    info!("Loading game params");
-    let mut game_params =
-        GameMetadataProvider::from_vfs(vfs).map_err(|e| report!("Failed to load GameParams: {e:?}"))?;
-    let mut controller_game_params =
-        GameMetadataProvider::from_vfs(vfs).map_err(|e| report!("Failed to load GameParams for controller: {e:?}"))?;
-
-    // Load translations for ship name localization
-    let mo_path = game_data::translations_path(wows_dir, replay_version.build);
-    if mo_path.exists() {
-        let catalog =
-            gettext::Catalog::parse(File::open(&mo_path)?).map_err(|e| report!("Failed to parse global.mo: {e:?}"))?;
-        game_params.set_translations(catalog);
-        // Also load translations for the controller (bot name/chat translation)
-        let catalog2 = gettext::Catalog::parse(File::open(&mo_path)?)
-            .map_err(|e| report!("Failed to parse global.mo for controller: {e:?}"))?;
-        controller_game_params.set_translations(catalog2);
-    } else {
-        warn!(path = ?mo_path, "Translations not found, ship names will be unavailable");
-    }
+    // Load game data from either a full game install or pre-extracted directory
+    let (vfs_owned, specs, game_params, controller_game_params) =
+        if let Some(ref extracted) = args.extracted_dir {
+            let resolved = resolve_extracted_dir(extracted, &replay_version)?;
+            load_from_extracted(&resolved, &replay_version)?
+        } else {
+            let game_dir = args.game_dir.as_ref().expect("game directory is required");
+            load_from_game_dir(game_dir, &replay_version)?
+        };
+    let vfs = &vfs_owned;
 
     info!("Loading fonts and icons");
     let game_fonts = load_game_fonts(vfs);
@@ -289,7 +279,7 @@ fn main() -> Result<(), Report> {
 
     // Pre-scan packets to find the last clock for accurate progress reporting.
     {
-        let mut scan_parser = wows_replays::packet2::Parser::new(specs);
+        let mut scan_parser = wows_replays::packet2::Parser::new(&specs);
         let mut scan_remaining = &replay_file.packet_data[..];
         let mut last_clock = wows_replays::types::GameClock(0.0);
         while !scan_remaining.is_empty() {
@@ -307,7 +297,7 @@ fn main() -> Result<(), Report> {
 
     let mut controller = BattleController::new(&replay_file.meta, &controller_game_params, Some(&game_constants));
 
-    let mut parser = wows_replays::packet2::Parser::new(specs);
+    let mut parser = wows_replays::packet2::Parser::new(&specs);
     let mut remaining = &replay_file.packet_data[..];
     let mut prev_clock = wows_replays::types::GameClock(0.0);
 
@@ -346,4 +336,170 @@ fn main() -> Result<(), Report> {
 
     info!("Done");
     Ok(())
+}
+
+type LoadedGameData = (VfsPath, Vec<wowsunpack::rpc::entitydefs::EntitySpec>, GameMetadataProvider, GameMetadataProvider);
+
+/// Load game data from a full WoWS game installation.
+fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> Result<LoadedGameData, Report> {
+    info!(build = %replay_version.build, "Loading game data");
+    let resources = game_data::load_game_resources(game_dir, replay_version).map_err(|e| report!("{e}"))?;
+    let vfs = resources.vfs;
+    let specs = resources.specs;
+
+    info!("Loading game params");
+    let mut game_params =
+        GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams: {e:?}"))?;
+    let mut controller_game_params =
+        GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams for controller: {e:?}"))?;
+
+    let mo_path = game_data::translations_path(game_dir, replay_version.build);
+    load_translations(&mo_path, &mut game_params, &mut controller_game_params);
+
+    Ok((vfs, specs, game_params, controller_game_params))
+}
+
+/// Resolve the extracted data directory. If the user passed a parent directory
+/// containing version subdirectories (e.g. `15.1.0_11965230/`), auto-detect the
+/// right one. If they passed the version dir itself, use it directly.
+fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Result<PathBuf, Report> {
+    if !path.exists() {
+        bail!("Extracted data directory does not exist: {}", path.display());
+    }
+
+    // If the path itself contains metadata.toml, it's already the version dir
+    if path.join("metadata.toml").exists() {
+        return Ok(path.to_path_buf());
+    }
+
+    // Otherwise, scan for version subdirectories
+    let mut candidates: Vec<(PathBuf, String, u32)> = Vec::new();
+    let entries = std::fs::read_dir(path)
+        .attach_with(|| format!("Failed to read directory: {}", path.display()))?;
+
+    for entry in entries.flatten() {
+        let sub = entry.path();
+        let meta_path = sub.join("metadata.toml");
+        if meta_path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&meta_path) {
+                // Parse version and build from metadata.toml
+                let mut version = String::new();
+                let mut build = 0u32;
+                for line in contents.lines() {
+                    if let Some(v) = line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+                        version = v.to_string();
+                    } else if let Some(b) = line.strip_prefix("build = ") {
+                        build = b.trim().parse().unwrap_or(0);
+                    }
+                }
+                candidates.push((sub, version, build));
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        bail!(
+            "No extracted game data found in {}. Expected either a version directory \
+             (containing metadata.toml, vfs/, game_params.rkyv) or a parent directory \
+             containing version subdirectories (e.g. 15.1.0_11965230/).",
+            path.display()
+        );
+    }
+
+    // Try to match by build number first
+    if let Some(matched) = candidates.iter().find(|(_, _, b)| *b == replay_version.build) {
+        info!("Matched extracted data for build {}: {}", replay_version.build, matched.0.display());
+        return Ok(matched.0.clone());
+    }
+
+    // If only one candidate, use it with a warning
+    if candidates.len() == 1 {
+        let (ref dir, ref ver, build) = candidates[0];
+        warn!(
+            "No exact build match for replay (build {}). Using {ver} (build {build}).",
+            replay_version.build
+        );
+        return Ok(dir.clone());
+    }
+
+    // Multiple candidates, none matching
+    let available: Vec<String> = candidates.iter().map(|(_, v, b)| format!("{v} (build {b})")).collect();
+    bail!(
+        "No extracted data matches replay build {}. Available versions in {}: {}",
+        replay_version.build,
+        path.display(),
+        available.join(", ")
+    );
+}
+
+/// Load game data from a pre-extracted renderer data directory.
+fn load_from_extracted(extracted_dir: &std::path::Path, _replay_version: &Version) -> Result<LoadedGameData, Report> {
+    use std::borrow::Cow;
+    use std::io::Read;
+    use wowsunpack::data::DataFileWithCallback;
+    use wowsunpack::rpc::entitydefs::parse_scripts;
+    use wowsunpack::vfs::impls::physical::PhysicalFS;
+
+    info!("Loading from extracted directory: {}", extracted_dir.display());
+
+    let vfs_root = extracted_dir.join("vfs");
+    if !vfs_root.exists() {
+        bail!("VFS directory not found: {}", vfs_root.display());
+    }
+    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+
+    // Load entity specs from VFS
+    info!("Loading entity specs");
+    let specs = {
+        let vfs_ref = &vfs;
+        let loader = DataFileWithCallback::new(move |path: &str| {
+            let mut data = Vec::new();
+            vfs_ref.join(path)?.open_file()?.read_to_end(&mut data)?;
+            Ok(Cow::Owned(data))
+        });
+        parse_scripts(&loader).map_err(|e| report!("Failed to parse entity specs: {e:?}"))?
+    };
+
+    // Load GameParams from rkyv cache
+    let rkyv_path = extracted_dir.join("game_params.rkyv");
+    info!("Loading game params from rkyv cache");
+    let rkyv_data = std::fs::read(&rkyv_path)
+        .attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+    let params: Vec<Param> = rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&rkyv_data)
+        .map_err(|e| report!("Failed to deserialize GameParams: {e}"))?;
+
+    // Use from_params_no_specs since we already have specs separately
+    let mut game_params = GameMetadataProvider::from_params_no_specs(params.clone())
+        .map_err(|e| report!("Failed to build GameMetadataProvider: {e:?}"))?;
+    let mut controller_game_params = GameMetadataProvider::from_params_no_specs(params)
+        .map_err(|e| report!("Failed to build controller GameMetadataProvider: {e:?}"))?;
+
+    // Load translations
+    let mo_path = extracted_dir.join("translations/en/LC_MESSAGES/global.mo");
+    load_translations(&mo_path, &mut game_params, &mut controller_game_params);
+
+    Ok((vfs, specs, game_params, controller_game_params))
+}
+
+fn load_translations(
+    mo_path: &std::path::Path,
+    game_params: &mut GameMetadataProvider,
+    controller_game_params: &mut GameMetadataProvider,
+) {
+    if mo_path.exists() {
+        if let Ok(file) = File::open(mo_path)
+            && let Ok(catalog) = gettext::Catalog::parse(file)
+        {
+            game_params.set_translations(catalog);
+            if let Ok(file2) = File::open(mo_path)
+                && let Ok(catalog2) = gettext::Catalog::parse(file2)
+            {
+                controller_game_params.set_translations(catalog2);
+            }
+        } else {
+            warn!(path = ?mo_path, "Failed to parse translations");
+        }
+    } else {
+        warn!(path = ?mo_path, "Translations not found, ship names will be unavailable");
+    }
 }
