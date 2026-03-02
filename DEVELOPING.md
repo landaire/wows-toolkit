@@ -2,19 +2,34 @@
 
 ## Prerequisites
 
+### Recommended: Nix
+
+[Nix](https://nixos.org/download/) is the recommended way to set up a development environment (even on Windows if you're going to be touching `wows-data-mgr`). Running `nix develop` gives you everything you need in a single command:
+
+- The exact Rust toolchain version from `rust-toolchain` (with all required components)
+- [DepotDownloader](https://github.com/SteamRE/DepotDownloader) for downloading game data (no separate .NET install needed)
+- `openssl` and `pkg-config`
+- All Linux GUI libraries (X11, Wayland, Vulkan, fontconfig) — these are often the most painful to set up manually
+
+This means you can skip the manual Rust installation, skip the DepotDownloader installation, and skip hunting down system libraries. Just:
+
+```bash
+nix develop
+cargo build -p wows_toolkit --release
+```
+
+### Manual setup (without Nix)
+
+If you prefer not to use Nix:
+
 - [Rust](https://rustup.rs/) (1.92+)
-- [Nix](https://nixos.org/download/) (optional, for reproducible builds)
+- [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (only needed for downloading game data; requires .NET)
+- `openssl` and `pkg-config` development headers
+- On Linux: X11/Wayland/Vulkan/fontconfig development libraries
 
 ## Building
 
 ```bash
-cargo build -p wows_toolkit --release
-```
-
-Or with Nix:
-
-```bash
-nix develop
 cargo build -p wows_toolkit --release
 ```
 
@@ -32,7 +47,11 @@ Some tests exercise game file parsing (VFS, PKG, MFM, GameParams) and require a 
 
 #### Using `wows-data-mgr`
 
-The `wows-data-mgr` CLI tool manages game data downloads and version tracking. Install [DepotDownloader](https://github.com/SteamRE/DepotDownloader) first:
+The `wows-data-mgr` CLI tool manages game data downloads and version tracking.
+
+**If using Nix**, DepotDownloader is already available — skip straight to the download command.
+
+**Without Nix**, install [DepotDownloader](https://github.com/SteamRE/DepotDownloader) first:
 
 ```bash
 dotnet tool install -g DepotDownloader
