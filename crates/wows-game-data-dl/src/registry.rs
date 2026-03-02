@@ -67,6 +67,7 @@ impl LocalRegistry {
     /// Returns the sorted list of available build numbers.
     /// Merges explicitly registered/downloaded builds with any builds
     /// found at `latest_path`.
+    #[allow(dead_code)]
     pub fn available_builds(&self) -> Vec<u32> {
         let mut builds: Vec<u32> = self.builds.keys().filter_map(|k| k.parse::<u32>().ok()).collect();
 
@@ -86,6 +87,7 @@ impl LocalRegistry {
 
     /// Returns the game directory for a build.
     /// Checks in order: explicit registry entry, latest_path, downloaded builds.
+    #[allow(dead_code)]
     pub fn game_dir_for_build(&self, build: u32, data_dir: &Path) -> Option<PathBuf> {
         // Check explicit registry entry first
         if let Some(entry) = self.get(build) {

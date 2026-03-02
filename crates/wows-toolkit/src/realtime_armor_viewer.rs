@@ -592,9 +592,7 @@ impl RealtimeArmorViewer {
 
         let rot = Self::inverse_ship_rotation(ship_yaw, hit.victim_pitch, hit.victim_roll);
 
-        let Some(shot) = matched_shot else {
-            return None;
-        };
+        let shot = matched_shot?;
 
         let params = crate::armor_viewer::ballistics::ShellParams::from_shell_info(shell);
         let impact_result = crate::armor_viewer::ballistics::solve_for_range(&params, firing_range);

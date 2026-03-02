@@ -41,6 +41,8 @@ use crate::plaintext_viewer::FileType;
 use crate::plaintext_viewer::{
     self,
 };
+type FilteredFileList = Arc<Vec<(Arc<PathBuf>, VfsPath)>>;
+
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct UnpackerProgress {
@@ -116,7 +118,7 @@ pub struct BrowserPane {
     /// Last-applied filter (to detect changes).
     pub used_filter: Option<String>,
     /// Cached filtered file list.
-    pub filtered_file_list: Option<Arc<Vec<(Arc<PathBuf>, VfsPath)>>>,
+    pub filtered_file_list: Option<FilteredFileList>,
     /// Cached directory entries: (dir_path, entries). Invalidated when selected_dir changes.
     cached_dir_entries: Option<(String, Vec<FileEntry>)>,
     /// Cached folder tree structure. Built once when VFS loads.
@@ -1018,6 +1020,7 @@ fn render_file_listing_table(
 }
 
 /// Render path filter results in a table format.
+#[allow(clippy::too_many_arguments)]
 fn render_filter_results_table(
     ui: &mut Ui,
     filtered_files: &[(Arc<PathBuf>, VfsPath)],

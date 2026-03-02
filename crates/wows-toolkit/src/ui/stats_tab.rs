@@ -233,20 +233,29 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
         ui.horizontal_wrapped(|ui| {
             for (achievement, icon) in all_achievements.iter().zip(icons) {
-                if let Some(icon) = icon {
-                    let image = Image::new(ImageSource::Bytes {
-                        uri: icon.path.clone().into(),
-                        bytes: icon.data.clone().into(),
-                    })
-                    .fit_to_exact_size((48.0, 48.0).into());
-                    ui.add(image).on_hover_text(format!(
-                        "{} (x{}): {}",
-                        &achievement.display_name, achievement.count, &achievement.description
-                    ));
-                } else {
-                    ui.label(RichText::new(format!("{}x", achievement.count)).small())
-                        .on_hover_text(format!("{}: {}", &achievement.display_name, &achievement.description));
-                }
+                let tooltip = format!("{}: {}", &achievement.display_name, &achievement.description);
+                ui.vertical(|ui| {
+                    ui.set_width(56.0);
+                    if let Some(icon) = icon {
+                        let image = Image::new(ImageSource::Bytes {
+                            uri: icon.path.clone().into(),
+                            bytes: icon.data.clone().into(),
+                        })
+                        .fit_to_exact_size((48.0, 48.0).into());
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            ui.add(image);
+                            ui.label(RichText::new(format!("x{}", achievement.count)).small().strong());
+                            ui.label(RichText::new(&achievement.display_name).small().weak());
+                        });
+                    } else {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(format!("x{}", achievement.count)).strong());
+                            ui.label(RichText::new(&achievement.display_name).small().weak());
+                        });
+                    }
+                })
+                .response
+                .on_hover_text(&tooltip);
             }
         });
     }
