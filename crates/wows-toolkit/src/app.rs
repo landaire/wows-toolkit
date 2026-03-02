@@ -576,9 +576,20 @@ impl WowsToolkitApp {
                                 }
                                 BackgroundTaskCompletion::ReplayLoaded {
                                     replay,
-                                    skip_ui_update,
-                                    track_session_stats,
+                                    source,
                                 } => {
+                                    use crate::task::ReplaySource;
+
+                                    let track_session_stats = matches!(
+                                        source,
+                                        ReplaySource::FileListing | ReplaySource::AutoLoad | ReplaySource::Reload | ReplaySource::SessionStatsOnly
+                                    );
+                                    let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
+                                    let open_tab = matches!(
+                                        source,
+                                        ReplaySource::ManualOpen | ReplaySource::AutoLoad | ReplaySource::Reload
+                                    );
+
                                     if track_session_stats {
                                         let replay_guard = replay.read();
                                         if let Some(stat) = crate::session_stats::PerGameStat::from_replay(
@@ -589,18 +600,16 @@ impl WowsToolkitApp {
                                         }
                                         drop(replay_guard);
                                     }
-                                    if !skip_ui_update {
-                                        {
-                                            self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                                    if update_ui {
+                                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                                        self.tab_state
+                                            .settings
+                                            .player_tracker
+                                            .write()
+                                            .update_from_replay(&replay.read());
+                                        if open_tab {
+                                            self.tab_state.open_replay_in_focused_tab(replay);
                                         }
-                                        {
-                                            self.tab_state
-                                                .settings
-                                                .player_tracker
-                                                .write()
-                                                .update_from_replay(&replay.read());
-                                        }
-                                        self.tab_state.current_replay = Some(replay);
                                         self.tab_state.toasts.lock().success("Successfully loaded replay");
                                         self.try_update_constants();
                                     }
@@ -809,9 +818,6 @@ impl WowsToolkitApp {
                                     replay.write().ui_report = None;
                                 }
                             }
-                            if let Some(current) = &self.tab_state.current_replay {
-                                current.write().ui_report = None;
-                            }
                         }
                     }
                 }
@@ -877,7 +883,7 @@ impl WowsToolkitApp {
             self.tab_state.settings.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true, false)
+                deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), crate::task::ReplaySource::ManualOpen)
             );
         }
     }
@@ -1393,15 +1399,12 @@ impl WowsToolkitApp {
                             replay.write().ui_report = None;
                         }
                     }
-                    if let Some(current) = &self.tab_state.current_replay {
-                        current.write().ui_report = None;
-                    }
 
-                    // Re-load the current replay to rebuild its ui_report
-                    if let Some(current) = self.tab_state.current_replay.clone()
+                    // Re-load the focused replay to rebuild its ui_report
+                    if let Some(focused) = self.tab_state.focused_replay()
                         && let Some(deps) = self.tab_state.replay_dependencies()
                     {
-                        update_background_task!(self.tab_state.background_tasks, deps.load_replay(current, true));
+                        update_background_task!(self.tab_state.background_tasks, deps.load_replay(focused, crate::task::ReplaySource::Reload));
                     }
 
                     self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");

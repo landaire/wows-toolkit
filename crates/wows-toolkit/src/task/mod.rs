@@ -27,6 +27,27 @@ use crate::ui::replay_parser::Replay;
 use crate::update_background_task;
 use crate::wows_data::WorldOfWarshipsData;
 
+/// Describes where a replay load request originated from.
+/// This determines what UI actions to take when the replay finishes loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaySource {
+    /// Opened from the file listing (tab already managed by the listing handler).
+    /// Tracks session stats but does NOT open a tab.
+    FileListing,
+    /// Drag-and-drop or manual "Open" button.
+    /// Opens in focused tab but does NOT track session stats.
+    ManualOpen,
+    /// Auto-loaded from file watcher (new/modified replay detected).
+    /// Opens in focused tab and tracks session stats.
+    AutoLoad,
+    /// Re-loading the focused replay after constants changed.
+    /// Opens in focused tab and tracks session stats.
+    Reload,
+    /// Background batch loading for session stats only.
+    /// No UI update, only tracks session stats.
+    SessionStatsOnly,
+}
+
 // Re-export everything so `use crate::task::*` still works
 pub use networking::NetworkJob;
 pub use networking::NetworkResult;
@@ -256,10 +277,7 @@ pub enum BackgroundTaskCompletion {
     },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
-        /// If true, don't update the current replay in the UI (used for batch session stats loading)
-        skip_ui_update: bool,
-        /// If true, add this replay to session stats
-        track_session_stats: bool,
+        source: ReplaySource,
     },
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateDownloaded(PathBuf),
@@ -289,11 +307,10 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("available_builds", available_builds)
                 .finish(),
             Self::BuildDataLoaded { build } => f.debug_struct("BuildDataLoaded").field("build", build).finish(),
-            Self::ReplayLoaded { replay: _, skip_ui_update, track_session_stats } => f
+            Self::ReplayLoaded { replay: _, source } => f
                 .debug_struct("ReplayLoaded")
                 .field("replay", &"<...>")
-                .field("skip_ui_update", skip_ui_update)
-                .field("track_session_stats", track_session_stats)
+                .field("source", source)
                 .finish(),
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),

@@ -23,6 +23,7 @@ use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
+use crate::task::ReplaySource;
 use crate::task::load_wows_data_for_build;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
@@ -281,8 +282,7 @@ impl ReplayDependencies {
     pub fn parse_replay_from_path<P: AsRef<Path>>(
         &self,
         replay_path: P,
-        update_ui: bool,
-        track_session_stats: bool,
+        source: ReplaySource,
     ) -> Option<BackgroundTask> {
         let path = replay_path.as_ref();
 
@@ -307,21 +307,16 @@ impl ReplayDependencies {
         replay.game_constants = Some(game_constants);
         replay.source_path = Some(path.to_path_buf());
 
-        let mut loader = ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay)));
-        if !update_ui {
-            loader = loader.skip_ui_update();
-        }
-        if !track_session_stats {
-            loader = loader.skip_session_stats();
-        }
-        loader.load()
+        ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay)))
+            .source(source)
+            .load()
     }
 
     /// Load an already-parsed replay in the background.
-    pub fn load_replay(&self, replay: Arc<RwLock<Replay>>, update_ui: bool) -> Option<BackgroundTask> {
-        let loader = ReplayLoader::new(self.clone(), replay);
-
-        if update_ui { loader.load() } else { loader.skip_ui_update().load() }
+    pub fn load_replay(&self, replay: Arc<RwLock<Replay>>, source: ReplaySource) -> Option<BackgroundTask> {
+        ReplayLoader::new(self.clone(), replay)
+            .source(source)
+            .load()
     }
 }
 
@@ -329,33 +324,23 @@ impl ReplayDependencies {
 pub struct ReplayLoader {
     deps: ReplayDependencies,
     replay: Arc<RwLock<Replay>>,
-    skip_ui_update: bool,
-    track_session_stats: bool,
+    replay_source: ReplaySource,
 }
 
 impl ReplayLoader {
     pub fn new(deps: ReplayDependencies, replay: Arc<RwLock<Replay>>) -> Self {
-        Self { deps, replay, skip_ui_update: false, track_session_stats: true }
+        Self { deps, replay, replay_source: ReplaySource::FileListing }
     }
 
-    /// Skip updating the UI when the replay finishes loading.
-    /// Useful for batch loading like session stats.
-    pub fn skip_ui_update(mut self) -> Self {
-        self.skip_ui_update = true;
-        self
-    }
-
-    /// Don't track this replay in session stats.
-    /// Used for manually opened or drag-and-dropped replays.
-    pub fn skip_session_stats(mut self) -> Self {
-        self.track_session_stats = false;
+    /// Set the source of this replay load request.
+    pub fn source(mut self, source: ReplaySource) -> Self {
+        self.replay_source = source;
         self
     }
 
     /// Start loading the replay in the background
     pub fn load(self) -> Option<BackgroundTask> {
-        let skip_ui_update = self.skip_ui_update;
-        let track_session_stats = self.track_session_stats;
+        let source = self.replay_source;
 
         let (tx, rx) = mpsc::channel();
 
@@ -420,7 +405,7 @@ impl ReplayLoader {
                     replay_guard.battle_report = Some(report);
                     replay_guard.build_ui_report(&deps);
                 }
-                BackgroundTaskCompletion::ReplayLoaded { replay, skip_ui_update, track_session_stats }
+                BackgroundTaskCompletion::ReplayLoaded { replay, source }
             });
 
             let _ = tx.send(res);

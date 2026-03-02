@@ -42,6 +42,7 @@ use crate::settings::ReplaySettings;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
+use crate::task::ReplaySource;
 use crate::task::ToastMessage;
 use crate::update_background_task;
 use crate::wows_data::GameAsset;
@@ -106,6 +107,14 @@ use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
 
 const CHAT_VIEW_WIDTH: f32 = 500.0;
+
+/// A single replay viewer tab inside the Replay Inspector dock area.
+#[derive(Clone)]
+pub struct ReplayTab {
+    pub replay: Arc<RwLock<Replay>>,
+    /// Unique identifier for this tab instance.
+    pub id: u64,
+}
 
 pub type SharedReplayParserTabState = Arc<Mutex<ReplayParserTabState>>;
 
@@ -2809,7 +2818,8 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing_ungrouped(&mut self, ui: &mut egui::Ui) {
-        let mut replay_to_load: Option<Arc<RwLock<Replay>>> = None;
+        let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
+        let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
 
         ui.vertical(|ui| {
             egui::Grid::new("replay_files_grid").num_columns(1).striped(true).show(ui, |ui| {
@@ -2830,7 +2840,7 @@ impl ToolkitTabViewer<'_> {
 
                         let is_selected = self
                             .tab_state
-                            .current_replay
+                            .focused_replay()
                             .as_ref()
                             .map(|current| Arc::ptr_eq(current, &replay))
                             .unwrap_or(false);
@@ -2856,6 +2866,7 @@ impl ToolkitTabViewer<'_> {
                         };
 
                         let replay_weak = Arc::downgrade(&replay);
+                        let replay_weak_new_tab = Arc::downgrade(&replay);
                         let path_clone = path.clone();
                         let wows_dir = self.tab_state.settings.wows_dir.clone();
                         let label_response = ui
@@ -2863,6 +2874,15 @@ impl ToolkitTabViewer<'_> {
                             .on_hover_text(label.as_str());
                         let replay_weak2 = replay_weak.clone();
                         label_response.context_menu(|ui| {
+                            if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
+                                if let Some(r) = replay_weak_new_tab.upgrade() {
+                                    ui.ctx().data_mut(|data| {
+                                        data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                                    });
+                                }
+                                ui.close_kind(UiKind::Menu);
+                            }
+                            ui.separator();
                             if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                 ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                 ui.close_kind(UiKind::Menu);
@@ -2921,7 +2941,7 @@ impl ToolkitTabViewer<'_> {
                         });
 
                         if label_response.double_clicked() {
-                            replay_to_load = Some(replay.clone());
+                            replay_to_open = Some(replay.clone());
                         }
                         ui.end_row();
                     }
@@ -2931,11 +2951,24 @@ impl ToolkitTabViewer<'_> {
 
         self.handle_context_menu_render(ui);
 
-        // Load replay outside of the closure to avoid borrow issues
-        if let Some(replay) = replay_to_load
-            && let Some(deps) = self.tab_state.replay_dependencies()
-        {
-            update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, true));
+        // Check for "Open in New Tab" from context menu
+        if let Some(replay) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
+        }).and_then(|w| w.upgrade()) {
+            replay_to_open_new = Some(replay);
+        }
+
+        // Handle actions outside the closure to avoid borrow issues
+        if let Some(replay) = replay_to_open_new {
+            self.tab_state.open_replay_in_new_tab(replay.clone());
+            if let Some(deps) = self.tab_state.replay_dependencies() {
+                update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+            }
+        } else if let Some(replay) = replay_to_open {
+            self.tab_state.open_replay_in_focused_tab(replay.clone());
+            if let Some(deps) = self.tab_state.replay_dependencies() {
+                update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+            }
         }
     }
 
@@ -3148,8 +3181,18 @@ impl ToolkitTabViewer<'_> {
                             };
 
                             let replay_weak2 = replay_weak.clone();
+                            let replay_weak_new_tab = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
+                                        if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                                            });
+                                        }
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    ui.separator();
                                     if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                         ui.close_kind(UiKind::Menu);
@@ -3226,16 +3269,17 @@ impl ToolkitTabViewer<'_> {
             self.handle_context_menu_render(ui);
 
             // Handle actions from tree
+            let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
+            let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
             for action in actions {
                 match action {
                     egui_ltreeview::Action::SetSelected(selected_ids) => {
-                        // Expand directory selections to include all children (keeping the directory selected too)
+                        // Expand directory selections to include all children
                         let mut expanded_selection: Vec<egui::Id> = Vec::new();
                         let mut needs_expansion = false;
                         for id in &selected_ids {
                             expanded_selection.push(*id);
                             if let Some(child_ids) = group_id_to_child_ids.get(id) {
-                                // It's a directory - check if children are already selected
                                 for child_id in child_ids {
                                     if !selected_ids.contains(child_id) {
                                         needs_expansion = true;
@@ -3244,7 +3288,6 @@ impl ToolkitTabViewer<'_> {
                                 }
                             }
                         }
-                        // Only update if we actually need to expand
                         if needs_expansion {
                             let tree_id = ui.make_persistent_id("replay_date_tree");
                             ui.ctx().data_mut(|data| {
@@ -3255,20 +3298,35 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                     egui_ltreeview::Action::Activate(activate) => {
-                        // Handle activation (double-click/enter)
+                        // Double-click/enter — open in focused tab
                         for id in activate.selected {
                             if let Some(replay) = id_to_replay.get(&id) {
-                                if let Some(deps) = self.tab_state.replay_dependencies() {
-                                    update_background_task!(
-                                        self.tab_state.background_tasks,
-                                        deps.load_replay(replay.clone(), true)
-                                    );
-                                }
+                                replay_to_open = Some(replay.clone());
                                 break;
                             }
                         }
                     }
                     _ => {}
+                }
+            }
+
+            // Check for "Open in New Tab" from context menu
+            if let Some(replay) = ui.ctx().data_mut(|data| {
+                data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
+            }).and_then(|w| w.upgrade()) {
+                replay_to_open_new = Some(replay);
+            }
+
+            // Handle actions
+            if let Some(replay) = replay_to_open_new {
+                self.tab_state.open_replay_in_new_tab(replay.clone());
+                if let Some(deps) = self.tab_state.replay_dependencies() {
+                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                }
+            } else if let Some(replay) = replay_to_open {
+                self.tab_state.open_replay_in_focused_tab(replay.clone());
+                if let Some(deps) = self.tab_state.replay_dependencies() {
+                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
                 }
             }
         }
@@ -3485,8 +3543,18 @@ impl ToolkitTabViewer<'_> {
                             };
 
                             let replay_weak2 = replay_weak.clone();
+                            let replay_weak_new_tab = replay_weak.clone();
                             let node =
                                 egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
+                                    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
+                                        if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+                                            });
+                                        }
+                                        ui.close_kind(UiKind::Menu);
+                                    }
+                                    ui.separator();
                                     if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
                                         ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
                                         ui.close_kind(UiKind::Menu);
@@ -3563,16 +3631,17 @@ impl ToolkitTabViewer<'_> {
             self.handle_context_menu_render(ui);
 
             // Handle actions from tree
+            let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
+            let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
             for action in actions {
                 match action {
                     egui_ltreeview::Action::SetSelected(selected_ids) => {
-                        // Expand directory selections to include all children (keeping the directory selected too)
+                        // Expand directory selections to include all children
                         let mut expanded_selection: Vec<egui::Id> = Vec::new();
                         let mut needs_expansion = false;
                         for id in &selected_ids {
                             expanded_selection.push(*id);
                             if let Some(child_ids) = group_id_to_child_ids.get(id) {
-                                // It's a directory - check if children are already selected
                                 for child_id in child_ids {
                                     if !selected_ids.contains(child_id) {
                                         needs_expansion = true;
@@ -3581,7 +3650,6 @@ impl ToolkitTabViewer<'_> {
                                 }
                             }
                         }
-                        // Only update if we actually need to expand
                         if needs_expansion {
                             let tree_id = ui.make_persistent_id("replay_ship_tree");
                             ui.ctx().data_mut(|data| {
@@ -3592,20 +3660,35 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                     egui_ltreeview::Action::Activate(activate) => {
-                        // Handle activation (double-click/enter)
+                        // Double-click/enter — open in focused tab
                         for id in activate.selected {
                             if let Some(replay) = id_to_replay.get(&id) {
-                                if let Some(deps) = self.tab_state.replay_dependencies() {
-                                    update_background_task!(
-                                        self.tab_state.background_tasks,
-                                        deps.load_replay(replay.clone(), true)
-                                    );
-                                }
+                                replay_to_open = Some(replay.clone());
                                 break;
                             }
                         }
                     }
                     _ => {}
+                }
+            }
+
+            // Check for "Open in New Tab" from context menu
+            if let Some(replay) = ui.ctx().data_mut(|data| {
+                data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab"))
+            }).and_then(|w| w.upgrade()) {
+                replay_to_open_new = Some(replay);
+            }
+
+            // Handle actions
+            if let Some(replay) = replay_to_open_new {
+                self.tab_state.open_replay_in_new_tab(replay.clone());
+                if let Some(deps) = self.tab_state.replay_dependencies() {
+                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
+                }
+            } else if let Some(replay) = replay_to_open {
+                self.tab_state.open_replay_in_focused_tab(replay.clone());
+                if let Some(deps) = self.tab_state.replay_dependencies() {
+                    update_background_task!(self.tab_state.background_tasks, deps.load_replay(replay, ReplaySource::FileListing));
                 }
             }
         }
@@ -3621,7 +3704,7 @@ impl ToolkitTabViewer<'_> {
                 if let Some(deps) = self.tab_state.replay_dependencies() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), true, false)
+                        deps.parse_replay_from_path(self.tab_state.settings.current_replay_path.clone(), ReplaySource::ManualOpen)
                     );
                 }
             }
@@ -3694,16 +3777,30 @@ impl ToolkitTabViewer<'_> {
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
-                    let mut replay_file = replay_file.write();
-                    self.build_replay_view(
-                        &mut replay_file,
-                        ui,
-                        self.metadata_provider().expect("no metadata provider?").as_ref(),
+                let has_tabs = self.tab_state.replay_dock_state
+                    .iter_all_tabs()
+                    .next()
+                    .is_some();
+                if has_tabs {
+                    let mut dock_state = std::mem::replace(
+                        &mut self.tab_state.replay_dock_state,
+                        egui_dock::DockState::new(vec![]),
                     );
+                    let mut viewer = ReplayTabViewer {
+                        tab_state: self.tab_state,
+                    };
+                    egui_dock::DockArea::new(&mut dock_state)
+                        .id(egui::Id::new("replay_parser_dock"))
+                        .style(egui_dock::Style::from_egui(ui.style().as_ref()))
+                        .show_close_buttons(true)
+                        .show_leaf_collapse_buttons(false)
+                        .show_leaf_close_all_buttons(false)
+                        .allowed_splits(egui_dock::AllowedSplits::All)
+                        .show_inside(ui, &mut viewer);
+                    self.tab_state.replay_dock_state = dock_state;
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                        ui.heading("Double click or load a replay to view data");
+                        ui.heading("Click a replay to view, or double-click to open in a new tab");
                     });
                 }
             });
@@ -3721,10 +3818,10 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        let Some(replay_file) = self.tab_state.current_replay.as_ref() else {
+        let Some(replay_arc) = self.tab_state.focused_replay() else {
             return;
         };
-        let replay_file = replay_file.read();
+        let replay_file = replay_arc.read();
         let Some(report) = replay_file.battle_report.as_ref() else {
             return;
         };
@@ -3985,6 +4082,51 @@ impl ToolkitTabViewer<'_> {
                     ui.label("Controls not available (commands.scheme.xml not found in game files).");
                 }
             });
+    }
+}
+
+struct ReplayTabViewer<'a> {
+    tab_state: &'a mut crate::tab_state::TabState,
+}
+
+impl egui_dock::TabViewer for ReplayTabViewer<'_> {
+    type Tab = ReplayTab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(("replay_tab", tab.id))
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        let replay = tab.replay.read();
+        let viewer = ToolkitTabViewer {
+            tab_state: self.tab_state,
+        };
+        if let Some(mp) = viewer.metadata_provider() {
+            let ship = replay.vehicle_name(&mp);
+            let map = replay.map_name(&mp);
+            format!("{ship} - {map}").into()
+        } else {
+            "Loading...".into()
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        let viewer = ToolkitTabViewer {
+            tab_state: self.tab_state,
+        };
+        let metadata_provider = viewer
+            .metadata_provider()
+            .expect("no metadata provider?");
+        let mut replay = tab.replay.write();
+        viewer.build_replay_view(&mut replay, ui, metadata_provider.as_ref());
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        true
+    }
+
+    fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
+        false
     }
 }
 

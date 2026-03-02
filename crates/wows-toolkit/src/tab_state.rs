@@ -34,12 +34,14 @@ use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
 use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
+use crate::task::ReplaySource;
 use crate::twitch::TwitchState;
 use crate::ui::file_unpacker::ResourceBrowserState;
 use crate::ui::file_unpacker::UnpackerProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
 use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::ReplayTab;
 use crate::ui::replay_parser::SharedReplayParserTabState;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
@@ -219,7 +221,10 @@ pub struct TabState {
     pub can_change_wows_dir: bool,
 
     #[serde(skip)]
-    pub current_replay: Option<Arc<RwLock<Replay>>>,
+    pub replay_dock_state: egui_dock::DockState<ReplayTab>,
+
+    #[serde(skip)]
+    pub next_replay_tab_id: u64,
 
     #[serde(default = "default_bool::<true>")]
     pub auto_load_latest_replay: bool,
@@ -347,7 +352,8 @@ impl Default for TabState {
             background_tasks: Vec::new(),
             can_change_wows_dir: true,
             toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
-            current_replay: None,
+            replay_dock_state: egui_dock::DockState::new(vec![]),
+            next_replay_tab_id: 0,
             auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
@@ -392,6 +398,44 @@ impl Default for TabState {
 }
 
 impl TabState {
+    /// Returns the replay shown in the currently focused (or first) replay dock tab, if any.
+    pub fn focused_replay(&self) -> Option<Arc<RwLock<Replay>>> {
+        // Try focused leaf first
+        if let Some((si, ni)) = self.replay_dock_state.focused_leaf() {
+            if let Some(leaf) = self.replay_dock_state[si][ni].get_leaf() {
+                if let Some(tab) = leaf.tabs.get(leaf.active.0) {
+                    return Some(Arc::clone(&tab.replay));
+                }
+            }
+        }
+        // Fall back to the first tab in any leaf
+        let (_, tab) = self.replay_dock_state.iter_all_tabs().next()?;
+        Some(Arc::clone(&tab.replay))
+    }
+
+    /// Replace the focused tab's replay, or open a new tab if none exists.
+    pub fn open_replay_in_focused_tab(&mut self, replay: Arc<RwLock<Replay>>) {
+        // Try focused tab first
+        if let Some((_rect, tab)) = self.replay_dock_state.find_active_focused() {
+            tab.replay = replay;
+            return;
+        }
+        // Fall back to the first tab in any leaf
+        if let Some((_, tab)) = self.replay_dock_state.iter_all_tabs_mut().next() {
+            tab.replay = replay;
+            return;
+        }
+        self.open_replay_in_new_tab(replay);
+    }
+
+    /// Open a replay in a new dock tab.
+    pub fn open_replay_in_new_tab(&mut self, replay: Arc<RwLock<Replay>>) {
+        let id = self.next_replay_tab_id;
+        self.next_replay_tab_id += 1;
+        self.replay_dock_state
+            .push_to_focused_leaf(ReplayTab { replay, id });
+    }
+
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
     pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
         let wows_data_map = self.wows_data_map.as_ref()?;
@@ -419,60 +463,78 @@ impl TabState {
 
     pub(crate) fn try_update_replays(&mut self) {
         // Sometimes we parse the replay too early. Let's try to parse it a couple times
-        let parser_lock = self.parser_lock.try_lock();
+        let parser_lock_arc = Arc::clone(&self.parser_lock);
+        let parser_lock = parser_lock_arc.try_lock();
         if parser_lock.is_none() {
             // don't make the UI hang
             return;
         }
 
-        if let Some(file) = self.file_receiver.as_ref() {
-            while let Ok(file_event) = file.try_recv() {
+        let events: Vec<_> = self.file_receiver.as_ref()
+            .map(|file| std::iter::from_fn(|| file.try_recv().ok()).collect())
+            .unwrap_or_default();
+
+        for file_event in events {
                 match file_event {
                     NotifyFileEvent::Added(new_file) => {
-                        if let Some(wows_data) = self.world_of_warships_data.as_ref() {
-                            let wows_data = wows_data.read();
-                            if let Some(game_metadata) = wows_data.game_metadata.as_ref() {
-                                for _ in 0..3 {
-                                    if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
-                                        let mut replay = Replay::new(replay_file, game_metadata.clone());
-                                        replay.game_constants = Some(Arc::clone(&wows_data.game_constants));
-                                        replay.source_path = Some(new_file.clone());
-                                        let replay = Arc::new(RwLock::new(replay));
-
-                                        if let Some(replay_files) = &mut self.replay_files {
-                                            replay_files.insert(new_file.clone(), Arc::clone(&replay));
-                                        }
-
-                                        if let Some(deps) = self.replay_dependencies() {
-                                            update_background_task!(
-                                                self.background_tasks,
-                                                deps.load_replay(replay, self.auto_load_latest_replay)
-                                            );
-                                        }
-
-                                        break;
-                                    } else {
-                                        // oops our framerate
-                                        std::thread::sleep(Duration::from_secs(1));
-                                    }
+                        // Build the replay while holding the read guard, then drop it
+                        // before calling &mut self methods.
+                        let new_replay = self.world_of_warships_data.as_ref().and_then(|wd| {
+                            let wows_data = wd.read();
+                            let game_metadata = wows_data.game_metadata.as_ref()?;
+                            for _ in 0..3 {
+                                if let Ok(replay_file) = ReplayFile::from_file(&new_file) {
+                                    let mut replay = Replay::new(replay_file, game_metadata.clone());
+                                    replay.game_constants = Some(Arc::clone(&wows_data.game_constants));
+                                    replay.source_path = Some(new_file.clone());
+                                    return Some(Arc::new(RwLock::new(replay)));
+                                } else {
+                                    // oops our framerate
+                                    std::thread::sleep(Duration::from_secs(1));
                                 }
+                            }
+                            None
+                        });
+
+                        if let Some(replay) = new_replay {
+                            if let Some(replay_files) = &mut self.replay_files {
+                                replay_files.insert(new_file.clone(), Arc::clone(&replay));
+                            }
+
+                            let source = if self.auto_load_latest_replay {
+                                ReplaySource::AutoLoad
+                            } else {
+                                ReplaySource::SessionStatsOnly
+                            };
+                            if let Some(deps) = self.replay_dependencies() {
+                                update_background_task!(
+                                    self.background_tasks,
+                                    deps.load_replay(replay, source)
+                                );
                             }
                         }
                     }
                     NotifyFileEvent::Modified(modified_file) => {
                         // Invalidate cached data when file is modified
-                        if let Some(replay_files) = &self.replay_files
-                            && let Some(replay) = replay_files.get(&modified_file)
-                        {
+                        let replay_clone = self.replay_files.as_ref()
+                            .and_then(|files| files.get(&modified_file))
+                            .map(Arc::clone);
+
+                        if let Some(replay) = replay_clone {
                             let mut replay_inner = replay.write();
                             replay_inner.battle_report = None;
                             replay_inner.ui_report = None;
                             drop(replay_inner);
 
+                            let source = if self.auto_load_latest_replay {
+                                ReplaySource::AutoLoad
+                            } else {
+                                ReplaySource::SessionStatsOnly
+                            };
                             if let Some(deps) = self.replay_dependencies() {
                                 update_background_task!(
                                     self.background_tasks,
-                                    deps.load_replay(Arc::clone(replay), self.auto_load_latest_replay)
+                                    deps.load_replay(Arc::clone(&replay), source)
                                 );
                             }
                         }
@@ -501,7 +563,6 @@ impl TabState {
                         }
                     }
                 }
-            }
         }
     }
 
@@ -516,7 +577,8 @@ impl TabState {
     /// Clears all game-related state. Called when the WoWs directory changes
     /// to ensure no stale data from the previous directory persists.
     pub(crate) fn reset_game_state(&mut self) {
-        self.current_replay = None;
+        self.replay_dock_state = egui_dock::DockState::new(vec![]);
+        self.next_replay_tab_id = 0;
         self.replay_files = None;
         self.browser_state = Default::default();
         self.settings.session_stats.clear();
@@ -563,7 +625,7 @@ impl TabState {
                     if let Some(deps) = self.replay_dependencies() {
                         update_background_task!(
                             self.background_tasks,
-                            ReplayLoader::new(deps, replay.clone()).skip_ui_update().load()
+                            ReplayLoader::new(deps, replay.clone()).source(ReplaySource::SessionStatsOnly).load()
                         );
                     }
                 }
