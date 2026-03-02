@@ -6,7 +6,6 @@
 //! - `videotoolbox`: GPU-accelerated encoding via VideoToolbox (macOS)
 //! - `cpu`: Software encoding via openh264 (all platforms)
 
-use tracing::error;
 use tracing::info;
 
 use crate::error::VideoError;
@@ -111,6 +110,7 @@ pub enum EncoderBackend {
 
 impl EncoderBackend {
     /// Create an encoder backend, preferring GPU acceleration unless `prefer_cpu` is set.
+    #[allow(clippy::needless_return)]
     pub fn create(width: u32, height: u32, prefer_cpu: bool) -> rootcause::Result<Self, VideoError> {
         #[allow(unused_variables)]
         let _ = (width, height, prefer_cpu);
@@ -131,7 +131,7 @@ impl EncoderBackend {
                     return Ok(Self::VideoToolbox(Box::new(enc)));
                 }
                 Err(e) => {
-                    error!("VideoToolbox init failed: {e}");
+                    tracing::error!("VideoToolbox init failed: {e}");
                     #[cfg(feature = "cpu")]
                     {
                         info!("Falling back to CPU encoder");

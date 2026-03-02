@@ -107,7 +107,6 @@ impl ToolkitTabViewer<'_> {
             });
             ui.label("Replay Settings");
             ui.group(|ui| {
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Show Game Chat");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Show Raw XP Column");
                 ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
                 ui.checkbox(

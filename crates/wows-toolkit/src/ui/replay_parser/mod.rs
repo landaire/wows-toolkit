@@ -2466,85 +2466,6 @@ impl ToolkitTabViewer<'_> {
         table.show(ui, ui_report);
     }
 
-    fn build_replay_chat(&self, battle_report: &BattleReport, ui: &mut egui::Ui) {
-        for message in battle_report.game_chat() {
-            let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } =
-                message;
-
-            let (translated_name, translated_text) =
-                if sender_relation.is_none() || player.as_ref().map(|player| player.is_bot()).unwrap_or_default() {
-                    let translated_user = self
-                        .metadata_provider()
-                        .and_then(|provider| provider.localized_name_from_id(sender_name).map(Cow::Owned));
-                    let translated_text = self
-                        .metadata_provider()
-                        .and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned));
-
-                    (translated_user, translated_text)
-                } else {
-                    (None, None)
-                };
-
-            let message = if let Ok(decoded) = decode_html(message.as_str()) {
-                Cow::Owned(decoded)
-            } else {
-                Cow::Borrowed(message)
-            };
-
-            let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
-            let message: Cow<'_, str> = match translated_text {
-                Some(t) => t,
-                None => match message {
-                    Cow::Owned(s) => Cow::Owned(s),
-                    Cow::Borrowed(s) => Cow::Borrowed(s.as_str()),
-                },
-            };
-
-            let text = match player {
-                Some(player) if !player.initial_state().clan().is_empty() => {
-                    format!("[{}] {sender_name} ({channel:?}): {message}", player.initial_state().clan(),)
-                }
-                _ => {
-                    format!("{sender_name} ({channel:?}): {message}")
-                }
-            };
-
-            let name_color = if let Some(relation) = sender_relation {
-                player_color_for_team_relation(*relation)
-            } else {
-                Color32::GRAY
-            };
-
-            let mut job = LayoutJob::default();
-            if let Some(player) = player
-                && !player.initial_state().clan().is_empty()
-            {
-                job.append(
-                    &format!("[{}] ", player.initial_state().clan()),
-                    0.0,
-                    TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() },
-                );
-            }
-            job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
-
-            let text_color = match channel {
-                ChatChannel::Division => Color32::GOLD,
-                ChatChannel::Global => Color32::WHITE,
-                ChatChannel::Team => Color32::LIGHT_GREEN,
-                _ => Color32::ORANGE,
-            };
-
-            job.append(&message, 0.0, TextFormat { color: text_color, ..Default::default() });
-
-            if ui.add(Label::new(job).sense(Sense::click())).on_hover_text("Click to copy").clicked() {
-                ui.ctx().copy_text(text);
-                self.tab_state.toasts.lock().success("Message copied");
-            }
-            ui.add(Separator::default());
-            ui.end_row();
-        }
-    }
-
     fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui, metadata_provider: &GameMetadataProvider) {
         // little hack because of borrowing issues
         let mut hide_my_stats = false;
@@ -2665,6 +2586,19 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
                 });
+
+                {
+                    let has_chat = !report.game_chat().is_empty();
+                    let show_chat: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+                    let response = ui.add_enabled(has_chat, egui::Button::new(icon_str!(icons::CHAT_TEXT, "Chat")).selected(show_chat));
+                    if !has_chat {
+                        response.on_disabled_hover_text("No chat messages were sent in this replay");
+                    } else if response.clicked() {
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new("show_game_chat"), !show_chat);
+                        });
+                    }
+                }
 
                 if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
@@ -2851,17 +2785,6 @@ impl ToolkitTabViewer<'_> {
                     ui_report.player_reports.iter_mut().find(|report| report.relation().is_self())
             {
                 self_report.manual_stat_hide_toggle = hide_my_stats;
-            }
-
-            if self.tab_state.settings.replay_settings.show_game_chat {
-                egui::SidePanel::left("replay_view_chat")
-                    .default_width(CHAT_VIEW_WIDTH)
-                    .max_width(CHAT_VIEW_WIDTH)
-                    .show_inside(ui, |ui| {
-                        egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
-                            self.build_replay_chat(report, ui);
-                        });
-                    });
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -3729,7 +3652,6 @@ impl ToolkitTabViewer<'_> {
                 .selected_text("Column Filters")
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_game_chat, "Game Chat");
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
@@ -3746,11 +3668,30 @@ impl ToolkitTabViewer<'_> {
         ui.vertical(|ui| {
             self.build_replay_header(ui);
 
-            egui::SidePanel::left("replay_listing_panel").show_inside(ui, |ui| {
-                egui::ScrollArea::both().id_salt("replay_chat_scroll_area").show(ui, |ui| {
-                    self.build_file_listing(ui);
-                });
-            });
+            {
+                // Read the content width measured on the previous frame
+                let content_width: f32 = ui
+                    .ctx()
+                    .data(|d| d.get_temp(egui::Id::new("replay_listing_content_width")))
+                    .unwrap_or(300.0);
+
+                egui::SidePanel::left("replay_listing_panel")
+                    .default_width(content_width)
+                    .width_range(100.0..=content_width.max(300.0))
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("replay_listing_scroll_area")
+                            .show(ui, |ui| {
+                                self.build_file_listing(ui);
+
+                                // Measure and store the actual content width for next frame
+                                let used_width = ui.min_rect().width();
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_temp(egui::Id::new("replay_listing_content_width"), used_width);
+                                });
+                            });
+                    });
+            }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 if let Some(replay_file) = self.tab_state.current_replay.as_ref() {
@@ -3769,8 +3710,86 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.show_confirmation_dialog(ui);
+        self.show_game_chat_window(ui.ctx());
         self.pick_up_replay_controls_request(ui.ctx());
         self.show_replay_controls_window(ui.ctx());
+    }
+
+    fn show_game_chat_window(&self, ctx: &egui::Context) {
+        let mut open: bool = ctx.data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+        if !open {
+            return;
+        }
+
+        let Some(replay_file) = self.tab_state.current_replay.as_ref() else {
+            return;
+        };
+        let replay_file = replay_file.read();
+        let Some(report) = replay_file.battle_report.as_ref() else {
+            return;
+        };
+
+        let chat_messages = report.game_chat();
+        if chat_messages.is_empty() {
+            return;
+        }
+
+        let toasts = self.tab_state.toasts.clone();
+        let metadata_provider = self.metadata_provider();
+
+        egui::Window::new(icon_str!(icons::CHAT_TEXT, "Game Chat"))
+            .open(&mut open)
+            .default_width(CHAT_VIEW_WIDTH)
+            .default_height(400.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button(icon_str!(icons::COPY, "Copy All")).clicked() {
+                        let mut buf = std::io::BufWriter::new(Vec::new());
+                        for message in chat_messages {
+                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                            match player {
+                                Some(player) if !player.initial_state().clan().is_empty() => {
+                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                }
+                                _ => {
+                                    let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
+                                }
+                            }
+                        }
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
+                        ui.ctx().copy_text(game_chat);
+                        toasts.lock().success("Chat copied");
+                    }
+                    if ui.button(icon_str!(icons::FLOPPY_DISK, "Save To File")).clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
+                            .save_file()
+                        && let Ok(mut file) = std::fs::File::create(path)
+                    {
+                        for message in chat_messages {
+                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                            match player {
+                                Some(player) if !player.initial_state().clan().is_empty() => {
+                                    let _ = writeln!(file, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                }
+                                _ => {
+                                    let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().id_salt("game_chat_window_scroll").show(ui, |ui| {
+                    build_replay_chat_content(metadata_provider.as_deref(), chat_messages, ui);
+                });
+            });
+
+        // Write back the open state (user may have closed the window via X)
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("show_game_chat"), open);
+        });
     }
 
     fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
@@ -3966,5 +3985,103 @@ impl ToolkitTabViewer<'_> {
                     ui.label("Controls not available (commands.scheme.xml not found in game files).");
                 }
             });
+    }
+}
+
+/// Renders chat messages into a `Ui`. Used by both the inline chat view and the chat window.
+///
+/// Click-to-copy is signaled via a temp data slot `"chat_message_copied"` containing the
+/// plaintext string. The caller is responsible for reading this and performing the copy/toast.
+fn build_replay_chat_content(
+    metadata_provider: Option<&GameMetadataProvider>,
+    messages: &[GameMessage],
+    ui: &mut egui::Ui,
+) {
+    for message in messages {
+        let GameMessage { sender_relation, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+
+        let (translated_name, translated_text) =
+            if sender_relation.is_none() || player.as_ref().map(|player| player.is_bot()).unwrap_or_default() {
+                let translated_user =
+                    metadata_provider.and_then(|provider| provider.localized_name_from_id(sender_name).map(Cow::Owned));
+                let translated_text =
+                    metadata_provider.and_then(|provider| provider.localized_name_from_id(message).map(Cow::Owned));
+                (translated_user, translated_text)
+            } else {
+                (None, None)
+            };
+
+        let message = if let Ok(decoded) = decode_html(message.as_str()) {
+            Cow::Owned(decoded)
+        } else {
+            Cow::Borrowed(message)
+        };
+
+        let sender_name: Cow<'_, str> = translated_name.unwrap_or(Cow::Borrowed(sender_name.as_str()));
+        let message: Cow<'_, str> = match translated_text {
+            Some(t) => t,
+            None => match message {
+                Cow::Owned(s) => Cow::Owned(s),
+                Cow::Borrowed(s) => Cow::Borrowed(s.as_str()),
+            },
+        };
+
+        let text = match player {
+            Some(player) if !player.initial_state().clan().is_empty() => {
+                format!("[{}] {sender_name} ({channel:?}): {message}", player.initial_state().clan())
+            }
+            _ => {
+                format!("{sender_name} ({channel:?}): {message}")
+            }
+        };
+
+        let name_color = if let Some(relation) = sender_relation {
+            player_color_for_team_relation(*relation)
+        } else {
+            Color32::GRAY
+        };
+
+        let mut job = LayoutJob::default();
+        if let Some(player) = player
+            && !player.initial_state().clan().is_empty()
+        {
+            job.append(
+                &format!("[{}] ", player.initial_state().clan()),
+                0.0,
+                TextFormat { color: clan_color_for_player(player).unwrap(), ..Default::default() },
+            );
+        }
+        job.append(&format!("{sender_name}:\n"), 0.0, TextFormat { color: name_color, ..Default::default() });
+
+        let text_color = match channel {
+            ChatChannel::Division => Color32::GOLD,
+            ChatChannel::Global => Color32::WHITE,
+            ChatChannel::Team => Color32::LIGHT_GREEN,
+            _ => Color32::ORANGE,
+        };
+
+        job.append(&message, 0.0, TextFormat { color: text_color, ..Default::default() });
+
+        let label_response = ui.add(Label::new(job));
+        // Full-width hover row so the copy button appears when hovering anywhere on the row
+        let row_rect = egui::Rect::from_x_y_ranges(
+            ui.max_rect().x_range(),
+            label_response.rect.y_range(),
+        );
+        let row_hovered = ui.rect_contains_pointer(row_rect);
+        if row_hovered {
+            // Place button using a child ui so it doesn't affect parent layout
+            let padded_row = row_rect.shrink2(egui::vec2(8.0, 0.0));
+            let btn_rect = egui::Align2::RIGHT_CENTER.align_size_within_rect(
+                egui::vec2(20.0, label_response.rect.height()),
+                padded_row,
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(btn_rect));
+            if child.small_button(crate::icons::COPY).on_hover_text("Copy message").clicked() {
+                ui.ctx().copy_text(text);
+            }
+        }
+        ui.add(Separator::default());
+        ui.end_row();
     }
 }

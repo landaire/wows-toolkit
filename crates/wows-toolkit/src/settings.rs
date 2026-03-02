@@ -37,7 +37,6 @@ impl ReplayGrouping {
 /// Settings specific to replay parsing and display
 #[derive(Serialize, Deserialize)]
 pub struct ReplaySettings {
-    pub show_game_chat: bool,
     pub show_entity_id: bool,
     pub show_observed_damage: bool,
     #[serde(default)]
@@ -67,7 +66,6 @@ pub struct ReplaySettings {
 impl Default for ReplaySettings {
     fn default() -> Self {
         Self {
-            show_game_chat: true,
             show_entity_id: false,
             show_observed_damage: false,
             show_raw_xp: false,
