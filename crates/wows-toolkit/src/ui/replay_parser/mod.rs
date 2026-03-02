@@ -125,6 +125,235 @@ type ReplayGroup = (String, Vec<ReplayEntry>);
 
 use std::cmp::Reverse;
 
+/// Colorize a label based on battle result. Selected items get white-on-dark.
+fn colorize_label(label: &str, battle_result: Option<BattleResult>, is_selected: bool) -> RichText {
+    if is_selected {
+        RichText::new(label)
+            .color(Color32::WHITE)
+            .background_color(Color32::DARK_GRAY)
+    } else {
+        match battle_result {
+            Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
+            Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
+            Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
+            None => RichText::new(label),
+        }
+    }
+}
+
+/// Calculate a win/loss rate summary string like " - 5W/3L (63%)".
+fn win_rate_label(replays: &[ReplayEntry]) -> String {
+    let (wins, losses) = replays.iter().fold((0u32, 0u32), |(w, l), (_, replay)| {
+        match replay.read().battle_result() {
+            Some(BattleResult::Win(_)) => (w + 1, l),
+            Some(BattleResult::Loss(_)) => (w, l + 1),
+            _ => (w, l),
+        }
+    });
+    let total = wins + losses;
+    if total > 0 {
+        format!(
+            " - {}W/{}L ({:.0}%)",
+            wins,
+            losses,
+            (wins as f64 / total as f64) * 100.0
+        )
+    } else {
+        String::new()
+    }
+}
+
+/// Show context menu items for a single replay leaf node.
+fn show_leaf_context_menu(
+    ui: &mut egui::Ui,
+    replay_weak: &Weak<RwLock<Replay>>,
+    path: &std::path::PathBuf,
+    wows_dir: &str,
+) {
+    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
+        if let Some(r) = replay_weak.upgrade() {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
+            });
+        }
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
+        ui.ctx().copy_text(path.to_string_lossy().into_owned());
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
+        copy_files_to_clipboard(std::slice::from_ref(path));
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
+        util::open_file_explorer(path);
+        ui.close_kind(UiKind::Menu);
+    }
+    if !wows_dir.is_empty() {
+        let alt_held = ui.input(|i| i.modifiers.alt);
+        let label = if alt_held {
+            icon_str!(icons::KEYBOARD, "Show Replay Controls")
+        } else {
+            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+        };
+        if ui.button(label).clicked() {
+            if alt_held {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                });
+            } else {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("pending_confirmation_request"),
+                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
+                            replay_path: path.clone(),
+                        }),
+                    );
+                });
+            }
+            ui.close_kind(UiKind::Menu);
+        }
+    }
+    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak.clone());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
+    if ui.button("Set as Session Stats (1 replay)").clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("pending_confirmation_request"),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                    replays: vec![replay_weak.clone()],
+                }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+}
+
+/// Show context menu items for a group node (date or ship).
+fn show_group_context_menu(
+    ui: &mut egui::Ui,
+    paths: &[std::path::PathBuf],
+    replays: &[Weak<RwLock<Replay>>],
+) {
+    let count = replays.len();
+    let copy_label = if count == 1 {
+        "Copy Replay".to_string()
+    } else {
+        format!("Copy {} Replays", count)
+    };
+    if ui.button(copy_label).clicked() {
+        copy_files_to_clipboard(&paths);
+        ui.close_kind(UiKind::Menu);
+    }
+    let session_label = if count == 1 {
+        "Set as Session Stats (1 replay)".to_string()
+    } else {
+        format!("Set as Session Stats ({} replays)", count)
+    };
+    if ui.button(session_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("pending_confirmation_request"),
+                Some(crate::tab_state::ConfirmableAction::SetAsSessionStats { replays: replays.to_vec() }),
+            );
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+}
+
+/// Lookup maps for a grouped tree view, bundling leaf and group ID mappings.
+#[derive(Clone)]
+struct GroupedTreeMaps {
+    /// Leaf node ID → replay (weak ref)
+    leaf_replays: HashMap<egui::Id, Weak<RwLock<Replay>>>,
+    /// Leaf node ID → file path
+    leaf_paths: HashMap<egui::Id, std::path::PathBuf>,
+    /// Group node ID → child replays (weak refs)
+    group_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>>,
+    /// Group node ID → child node IDs
+    group_child_ids: HashMap<egui::Id, Vec<egui::Id>>,
+    /// Group node ID → child file paths
+    group_paths: HashMap<egui::Id, Vec<std::path::PathBuf>>,
+}
+
+impl GroupedTreeMaps {
+    /// Collect replays and paths from a set of selected node IDs, deduplicating
+    /// leaf nodes that are already covered by a selected group.
+    fn collect_selected(
+        &self,
+        selected_ids: &[egui::Id],
+    ) -> (Vec<Weak<RwLock<Replay>>>, Vec<std::path::PathBuf>) {
+        let mut covered_by_group: std::collections::HashSet<egui::Id> =
+            std::collections::HashSet::new();
+        let mut replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        for id in selected_ids {
+            if let Some(group_replays) = self.group_replays.get(id) {
+                replays.extend(group_replays.iter().cloned());
+                if let Some(child_ids) = self.group_child_ids.get(id) {
+                    covered_by_group.extend(child_ids.iter().copied());
+                }
+            }
+            if let Some(group_paths) = self.group_paths.get(id) {
+                paths.extend(group_paths.iter().cloned());
+            }
+            if !covered_by_group.contains(id) {
+                if let Some(replay_weak) = self.leaf_replays.get(id) {
+                    replays.push(replay_weak.clone());
+                }
+                if let Some(path) = self.leaf_paths.get(id) {
+                    paths.push(path.clone());
+                }
+            }
+        }
+        (replays, paths)
+    }
+
+    /// Show the fallback (multi-selection) context menu for tree views.
+    fn show_multi_selection_context_menu(&self, ui: &mut egui::Ui, selected_ids: &[egui::Id]) {
+        let (selected_replays, selected_paths) = self.collect_selected(selected_ids);
+
+        if !selected_paths.is_empty() {
+            let copy_label = if selected_paths.len() == 1 {
+                "Copy Replay".to_string()
+            } else {
+                format!("Copy {} Replays", selected_paths.len())
+            };
+            if ui.button(copy_label).clicked() {
+                copy_files_to_clipboard(&selected_paths);
+                ui.close_kind(UiKind::Menu);
+            }
+        }
+
+        if !selected_replays.is_empty() {
+            let count = selected_replays.len();
+            let label = if count == 1 {
+                "Set as Session Stats (1 replay)".to_string()
+            } else {
+                format!("Set as Session Stats ({} replays)", count)
+            };
+            if ui.button(label).clicked() {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("pending_confirmation_request"),
+                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
+                            replays: selected_replays,
+                        }),
+                    );
+                });
+                ui.close_kind(UiKind::Menu);
+            }
+        }
+    }
+}
+
 /// Transform raw battle results from positional arrays to named objects.
 /// Takes ownership of the parsed JSON to avoid cloning.
 ///
@@ -2812,8 +3041,7 @@ impl ToolkitTabViewer<'_> {
 
         match grouping {
             ReplayGrouping::None => self.build_file_listing_ungrouped(ui),
-            ReplayGrouping::Date => self.build_file_listing_grouped_by_date(ui),
-            ReplayGrouping::Ship => self.build_file_listing_grouped_by_ship(ui),
+            ReplayGrouping::Date | ReplayGrouping::Ship => self.build_file_listing_grouped(ui, grouping),
         }
     }
 
@@ -2829,115 +3057,26 @@ impl ToolkitTabViewer<'_> {
                     .as_ref()
                     .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
                 {
-                    // Sort by filename -- WoWs puts the date first in a sortable format
                     files.sort_by(|a, b| b.0.cmp(&a.0));
                     let metadata_provider = self.metadata_provider().unwrap();
+                    let focused = self.tab_state.focused_replay();
                     for (path, replay) in files {
                         let replay_guard = replay.read();
                         let label = replay_guard.label(&metadata_provider);
                         let battle_result = replay_guard.battle_result();
                         drop(replay_guard);
 
-                        let is_selected = self
-                            .tab_state
-                            .focused_replay()
-                            .as_ref()
-                            .map(|current| Arc::ptr_eq(current, &replay))
-                            .unwrap_or(false);
-
-                        // Apply color based on battle result (white for selected to be readable on dark background)
-                        let label_text = if is_selected {
-                            egui::RichText::new(label.as_str())
-                                .color(Color32::WHITE)
-                                .background_color(Color32::DARK_GRAY)
-                        } else {
-                            match battle_result {
-                                Some(BattleResult::Win(_)) => {
-                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_GREEN)
-                                }
-                                Some(BattleResult::Loss(_)) => {
-                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_RED)
-                                }
-                                Some(BattleResult::Draw) => {
-                                    egui::RichText::new(label.as_str()).color(Color32::LIGHT_YELLOW)
-                                }
-                                None => egui::RichText::new(label.as_str()),
-                            }
-                        };
+                        let is_selected = focused.as_ref().map(|c| Arc::ptr_eq(c, &replay)).unwrap_or(false);
+                        let label_text = colorize_label(&label, battle_result, is_selected);
 
                         let replay_weak = Arc::downgrade(&replay);
-                        let replay_weak_new_tab = Arc::downgrade(&replay);
                         let path_clone = path.clone();
                         let wows_dir = self.tab_state.settings.wows_dir.clone();
                         let label_response = ui
                             .add(Label::new(label_text).selectable(false).sense(Sense::click()))
                             .on_hover_text(label.as_str());
-                        let replay_weak2 = replay_weak.clone();
                         label_response.context_menu(|ui| {
-                            if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
-                                if let Some(r) = replay_weak_new_tab.upgrade() {
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
-                                    });
-                                }
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            ui.separator();
-                            if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
-                                ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                copy_files_to_clipboard(std::slice::from_ref(&path_clone));
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
-                                util::open_file_explorer(&path_clone);
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            if !wows_dir.is_empty() {
-                                let alt_held = ui.input(|i| i.modifiers.alt);
-                                let label = if alt_held {
-                                    icon_str!(icons::KEYBOARD, "Show Replay Controls")
-                                } else {
-                                    icon_str!(icons::GAME_CONTROLLER, "Open in Game")
-                                };
-                                if ui.button(label).clicked() {
-                                    if alt_held {
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
-                                        });
-                                    } else {
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(
-                                                egui::Id::new("pending_confirmation_request"),
-                                                Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                                    replay_path: path_clone.to_path_buf(),
-                                                }),
-                                            );
-                                        });
-                                    }
-                                    ui.close_kind(UiKind::Menu);
-                                }
-                            }
-                            if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak2.clone());
-                                });
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            ui.separator();
-                            if ui.button("Set as Session Stats (1 replay)").clicked() {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        egui::Id::new("pending_confirmation_request"),
-                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                            replays: vec![replay_weak.clone()],
-                                        }),
-                                    );
-                                });
-                                ui.close_kind(UiKind::Menu);
-                            }
+                            show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
                         });
 
                         if label_response.double_clicked() {
@@ -2950,18 +3089,207 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.handle_context_menu_render(ui);
+        self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
+    }
 
-        // Check for "Open in New Tab" from context menu
+    fn build_file_listing_grouped(&mut self, ui: &mut egui::Ui, grouping: ReplayGrouping) {
+        let Some(mut files) = self
+            .tab_state
+            .replay_files
+            .as_ref()
+            .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
+        else {
+            return;
+        };
+
+        files.sort_by(|a, b| b.0.cmp(&a.0));
+        let metadata_provider = self.metadata_provider().unwrap();
+
+        // Build groups based on grouping mode
+        let (groups, group_id_salt, tree_id_salt) = match grouping {
+            ReplayGrouping::Date => {
+                let mut groups: Vec<ReplayGroup> = Vec::new();
+                for (path, replay) in files {
+                    let game_time = replay.read().game_time().to_string();
+                    let date = game_time.split(' ').next().unwrap_or(&game_time).to_string();
+                    if let Some((last_date, last_group)) = groups.last_mut()
+                        && *last_date == date
+                    {
+                        last_group.push((path, replay));
+                        continue;
+                    }
+                    groups.push((date, vec![(path, replay)]));
+                }
+                (groups, "date_group", "replay_date_tree")
+            }
+            ReplayGrouping::Ship => {
+                let mut ship_groups: HashMap<String, Vec<ReplayEntry>> = HashMap::new();
+                let mut ship_most_recent: HashMap<String, std::path::PathBuf> = HashMap::new();
+                for (path, replay) in files {
+                    let ship_name = replay.read().vehicle_name(&metadata_provider);
+                    ship_groups.entry(ship_name.clone()).or_default().push((path.clone(), replay));
+                    ship_most_recent.entry(ship_name).or_insert(path);
+                }
+                let mut groups: Vec<ReplayGroup> = ship_groups.into_iter().collect();
+                groups.sort_by(|a, b| {
+                    let a_recent = ship_most_recent.get(&a.0).unwrap();
+                    let b_recent = ship_most_recent.get(&b.0).unwrap();
+                    b_recent.cmp(a_recent)
+                });
+                (groups, "ship_group", "replay_ship_tree")
+            }
+            ReplayGrouping::None => unreachable!(),
+        };
+
+        // Build lookup maps for tree node IDs
+        let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
+        let mut tree_maps = GroupedTreeMaps {
+            leaf_replays: HashMap::new(),
+            leaf_paths: HashMap::new(),
+            group_replays: HashMap::new(),
+            group_child_ids: HashMap::new(),
+            group_paths: HashMap::new(),
+        };
+
+        for (group_name, replays) in &groups {
+            let group_id = egui::Id::new((group_id_salt, group_name));
+            let mut grp_replays = Vec::new();
+            let mut child_ids = Vec::new();
+            let mut grp_paths = Vec::new();
+            for (path, replay) in replays {
+                let id = egui::Id::new(path);
+                id_to_replay.insert(id, replay.clone());
+                tree_maps.leaf_replays.insert(id, Arc::downgrade(replay));
+                tree_maps.leaf_paths.insert(id, path.clone());
+                grp_replays.push(Arc::downgrade(replay));
+                child_ids.push(id);
+                grp_paths.push(path.clone());
+            }
+            tree_maps.group_replays.insert(group_id, grp_replays);
+            tree_maps.group_child_ids.insert(group_id, child_ids);
+            tree_maps.group_paths.insert(group_id, grp_paths);
+        }
+
+        let fallback_maps = tree_maps.clone();
+
+        let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id(tree_id_salt))
+            .allow_multi_selection(true)
+            .fallback_context_menu(move |ui, selected_ids| {
+                fallback_maps.show_multi_selection_context_menu(ui, selected_ids);
+            });
+
+        let (_response, actions) = tree.show(ui, |builder| {
+            for (group_name, replays) in &groups {
+                let win_rate = win_rate_label(replays);
+                let group_id = egui::Id::new((group_id_salt, group_name));
+                let group_replays = tree_maps.group_replays.get(&group_id).cloned().unwrap_or_default();
+                let group_paths = tree_maps.group_paths.get(&group_id).cloned().unwrap_or_default();
+                let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
+                    .label(format!("{} ({}){}", group_name, replays.len(), win_rate))
+                    .context_menu(move |ui| {
+                        show_group_context_menu(ui, &group_paths, &group_replays);
+                    });
+                let is_open = builder.node(dir_node);
+                if is_open {
+                    for (path, _replay) in replays {
+                        let id = egui::Id::new(path);
+                        let path_clone = path.clone();
+                        let wows_dir = self.tab_state.settings.wows_dir.clone();
+                        let replay_weak = tree_maps.leaf_replays.get(&id).cloned().unwrap();
+
+                        let replay_guard = id_to_replay.get(&id).unwrap().read();
+                        let battle_result = replay_guard.battle_result();
+                        let label = match grouping {
+                            ReplayGrouping::Date => {
+                                let ship_name = replay_guard.vehicle_name(&metadata_provider);
+                                let map_name = replay_guard.map_name(&metadata_provider);
+                                let game_time = replay_guard.game_time().to_string();
+                                let time_part = game_time.split(' ').nth(1).unwrap_or(&game_time).to_string();
+                                format!("{} - {} ({})", ship_name, map_name, time_part)
+                            }
+                            ReplayGrouping::Ship => {
+                                let map_name = replay_guard.map_name(&metadata_provider);
+                                let game_time = replay_guard.game_time().to_string();
+                                format!("{} - {}", map_name, game_time)
+                            }
+                            ReplayGrouping::None => unreachable!(),
+                        };
+                        drop(replay_guard);
+
+                        let label_text = colorize_label(&label, battle_result, false);
+                        let node = egui_ltreeview::NodeBuilder::leaf(id)
+                            .label(label_text)
+                            .context_menu(move |ui| {
+                                show_leaf_context_menu(ui, &replay_weak, &path_clone, &wows_dir);
+                            });
+                        builder.node(node);
+                    }
+                }
+                builder.close_dir();
+            }
+        });
+
+        self.handle_context_menu_render(ui);
+
+        // Handle tree actions
+        let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
+        let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
+        for action in actions {
+            match action {
+                egui_ltreeview::Action::SetSelected(selected_ids) => {
+                    let mut expanded_selection: Vec<egui::Id> = Vec::new();
+                    let mut needs_expansion = false;
+                    for id in &selected_ids {
+                        expanded_selection.push(*id);
+                        if let Some(child_ids) = tree_maps.group_child_ids.get(id) {
+                            for child_id in child_ids {
+                                if !selected_ids.contains(child_id) {
+                                    needs_expansion = true;
+                                    expanded_selection.push(*child_id);
+                                }
+                            }
+                        }
+                    }
+                    if needs_expansion {
+                        let tree_id = ui.make_persistent_id(tree_id_salt);
+                        ui.ctx().data_mut(|data| {
+                            let state =
+                                data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
+                            state.set_selected(expanded_selection);
+                        });
+                    }
+                }
+                egui_ltreeview::Action::Activate(activate) => {
+                    for id in activate.selected {
+                        if let Some(replay) = id_to_replay.get(&id) {
+                            replay_to_open = Some(replay.clone());
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
+    }
+
+    /// Check for "Open in New Tab" from context menu, then open replays in the appropriate tab.
+    fn handle_replay_open_actions(
+        &mut self,
+        ui: &mut egui::Ui,
+        replay_to_open: &mut Option<Arc<RwLock<Replay>>>,
+        replay_to_open_new: &mut Option<Arc<RwLock<Replay>>>,
+    ) {
         if let Some(replay) = ui
             .ctx()
             .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
             .and_then(|w| w.upgrade())
         {
-            replay_to_open_new = Some(replay);
+            *replay_to_open_new = Some(replay);
         }
 
-        // Handle actions outside the closure to avoid borrow issues
-        if let Some(replay) = replay_to_open_new {
+        if let Some(replay) = replay_to_open_new.take() {
             self.tab_state.open_replay_in_new_tab(replay.clone());
             if let Some(deps) = self.tab_state.replay_dependencies() {
                 update_background_task!(
@@ -2969,757 +3297,13 @@ impl ToolkitTabViewer<'_> {
                     deps.load_replay(replay, ReplaySource::FileListing)
                 );
             }
-        } else if let Some(replay) = replay_to_open {
+        } else if let Some(replay) = replay_to_open.take() {
             self.tab_state.open_replay_in_focused_tab(replay.clone());
             if let Some(deps) = self.tab_state.replay_dependencies() {
                 update_background_task!(
                     self.tab_state.background_tasks,
                     deps.load_replay(replay, ReplaySource::FileListing)
                 );
-            }
-        }
-    }
-
-    fn build_file_listing_grouped_by_date(&mut self, ui: &mut egui::Ui) {
-        if let Some(mut files) = self
-            .tab_state
-            .replay_files
-            .as_ref()
-            .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
-        {
-            // Sort by filename (date) descending
-            files.sort_by(|a, b| b.0.cmp(&a.0));
-
-            let metadata_provider = self.metadata_provider().unwrap();
-
-            // Group by date (extract date part from game_time which is "DD.MM.YYYY HH:MM:SS")
-            let mut groups: Vec<ReplayGroup> = Vec::new();
-            for (path, replay) in files {
-                let game_time = replay.read().game_time().to_string();
-                // Extract just the date part (DD.MM.YYYY)
-                let date = game_time.split(' ').next().unwrap_or(&game_time).to_string();
-
-                if let Some((last_date, last_group)) = groups.last_mut()
-                    && *last_date == date
-                {
-                    last_group.push((path, replay));
-                    continue;
-                }
-                groups.push((date, vec![(path, replay)]));
-            }
-
-            // Build maps from Id to replay and path for activation and context menu handling
-            let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
-            let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
-            // Map group IDs to their child replays (weak refs) for multi-selection
-            let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
-            // Map group IDs to their child node IDs (for expanding directory selection)
-            let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
-            let mut group_id_to_paths: HashMap<egui::Id, Vec<std::path::PathBuf>> = HashMap::new();
-
-            // Pre-populate the maps before building the tree
-            for (date, replays) in &groups {
-                let group_id = egui::Id::new(("date_group", date));
-                let mut group_replays = Vec::new();
-                let mut child_ids = Vec::new();
-                let mut group_paths = Vec::new();
-                for (path, replay) in replays {
-                    let id = egui::Id::new(path);
-                    id_to_replay.insert(id, replay.clone());
-                    id_to_path.insert(id, path.clone());
-                    group_replays.push(Arc::downgrade(replay));
-                    child_ids.push(id);
-                    group_paths.push(path.clone());
-                }
-                group_id_to_replays.insert(group_id, group_replays);
-                group_id_to_child_ids.insert(group_id, child_ids);
-                group_id_to_paths.insert(group_id, group_paths);
-            }
-
-            // Clone maps for use in context menu closures (using weak refs)
-            let id_to_replay_weak: HashMap<egui::Id, Weak<RwLock<Replay>>> =
-                id_to_replay.iter().map(|(k, v)| (*k, Arc::downgrade(v))).collect();
-            let group_id_to_replays_for_menu = group_id_to_replays.clone();
-
-            // For fallback context menu (multi-selection)
-            let id_to_replay_weak_fallback = id_to_replay_weak.clone();
-            let id_to_path_fallback = id_to_path.clone();
-            let group_id_to_paths_fallback = group_id_to_paths.clone();
-            let group_id_to_replays_fallback = group_id_to_replays.clone();
-
-            let group_id_to_child_ids_fallback = group_id_to_child_ids.clone();
-
-            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_date_tree"))
-                .allow_multi_selection(true)
-                .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays and paths from selected nodes (both leaf and group nodes).
-                    // When a group and its children are both selected (e.g. shift-click range),
-                    // skip leaf nodes already covered by a selected group to avoid double-counting.
-                    let mut covered_by_group: std::collections::HashSet<egui::Id> = std::collections::HashSet::new();
-                    let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
-                    let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
-                    for id in selected_ids {
-                        // Check if it's a group node
-                        if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
-                            selected_replays.extend(group_replays.iter().cloned());
-                            if let Some(child_ids) = group_id_to_child_ids_fallback.get(id) {
-                                covered_by_group.extend(child_ids.iter().copied());
-                            }
-                        }
-                        if let Some(paths) = group_id_to_paths_fallback.get(id) {
-                            selected_paths.extend(paths.iter().cloned());
-                        }
-                        // Check if it's a leaf node not already covered by a selected group
-                        if !covered_by_group.contains(id) {
-                            if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
-                                selected_replays.push(replay_weak.clone());
-                            }
-                            if let Some(path) = id_to_path_fallback.get(id) {
-                                selected_paths.push(path.clone());
-                            }
-                        }
-                    }
-
-                    if !selected_paths.is_empty() {
-                        let copy_label = if selected_paths.len() == 1 {
-                            "Copy Replay".to_string()
-                        } else {
-                            format!("Copy {} Replays", selected_paths.len())
-                        };
-                        if ui.button(copy_label).clicked() {
-                            copy_files_to_clipboard(&selected_paths);
-                            ui.close_kind(UiKind::Menu);
-                        }
-                    }
-
-                    if !selected_replays.is_empty() {
-                        let count = selected_replays.len();
-                        let label = if count == 1 {
-                            "Set as Session Stats (1 replay)".to_string()
-                        } else {
-                            format!("Set as Session Stats ({} replays)", count)
-                        };
-                        if ui.button(label).clicked() {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(
-                                    egui::Id::new("pending_confirmation_request"),
-                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                        replays: selected_replays,
-                                    }),
-                                );
-                            });
-                            ui.close_kind(UiKind::Menu);
-                        }
-                    }
-                });
-            let (_response, actions) = tree.show(ui, |builder| {
-                for (date, replays) in &groups {
-                    // Calculate win/loss stats for this group
-                    let mut wins = 0;
-                    let mut losses = 0;
-                    for (_, replay) in replays {
-                        match replay.read().battle_result() {
-                            Some(BattleResult::Win(_)) => wins += 1,
-                            Some(BattleResult::Loss(_)) => losses += 1,
-                            _ => {}
-                        }
-                    }
-                    let total_with_result = wins + losses;
-                    let win_rate = if total_with_result > 0 {
-                        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total_with_result as f64) * 100.0)
-                    } else {
-                        String::new()
-                    };
-
-                    let group_id = egui::Id::new(("date_group", date));
-                    let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
-                    let group_paths = group_id_to_paths.get(&group_id).cloned().unwrap_or_default();
-                    let group_count = group_replays.len();
-                    let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
-                        .label(format!("{} ({}){}", date, replays.len(), win_rate))
-                        .context_menu(move |ui| {
-                            let copy_label = if group_count == 1 {
-                                "Copy Replay".to_string()
-                            } else {
-                                format!("Copy {} Replays", group_count)
-                            };
-                            if ui.button(copy_label).clicked() {
-                                copy_files_to_clipboard(&group_paths);
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            let label = if group_count == 1 {
-                                "Set as Session Stats (1 replay)".to_string()
-                            } else {
-                                format!("Set as Session Stats ({} replays)", group_count)
-                            };
-                            if ui.button(label).clicked() {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        egui::Id::new("pending_confirmation_request"),
-                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                            replays: group_replays.clone(),
-                                        }),
-                                    );
-                                });
-                                ui.close_kind(UiKind::Menu);
-                            }
-                        });
-                    let is_open = builder.node(dir_node);
-                    if is_open {
-                        for (path, _replay) in replays {
-                            let id = egui::Id::new(path);
-                            let path_clone = path.clone();
-                            let wows_dir = self.tab_state.settings.wows_dir.clone();
-                            let replay_weak = id_to_replay_weak.get(&id).cloned();
-
-                            let replay_guard = id_to_replay.get(&id).unwrap().read();
-                            let ship_name = replay_guard.vehicle_name(&metadata_provider);
-                            let map_name = replay_guard.map_name(&metadata_provider);
-                            let game_time = replay_guard.game_time().to_string();
-                            let time_part = game_time.split(' ').nth(1).unwrap_or(&game_time);
-                            let battle_result = replay_guard.battle_result();
-                            drop(replay_guard);
-
-                            let label = format!("{} - {} ({})", ship_name, map_name, time_part);
-                            let label_text = match battle_result {
-                                Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
-                                Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
-                                Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
-                                None => RichText::new(label),
-                            };
-
-                            let replay_weak2 = replay_weak.clone();
-                            let replay_weak_new_tab = replay_weak.clone();
-                            let node =
-                                egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
-                                        if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("open_replay_new_tab"),
-                                                    Arc::downgrade(&r),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    ui.separator();
-                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
-                                        ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                        copy_files_to_clipboard(std::slice::from_ref(&path_clone));
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
-                                        util::open_file_explorer(&path_clone);
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if !wows_dir.is_empty() {
-                                        let alt_held = ui.input(|i| i.modifiers.alt);
-                                        let label = if alt_held {
-                                            icon_str!(icons::KEYBOARD, "Show Replay Controls")
-                                        } else {
-                                            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
-                                        };
-                                        if ui.button(label).clicked() {
-                                            if alt_held {
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(
-                                                        egui::Id::new("open_replay_controls_window"),
-                                                        true,
-                                                    );
-                                                });
-                                            } else {
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(
-                                                        egui::Id::new("pending_confirmation_request"),
-                                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                                            replay_path: path_clone.to_path_buf(),
-                                                        }),
-                                                    );
-                                                });
-                                            }
-                                            ui.close_kind(UiKind::Menu);
-                                        }
-                                    }
-                                    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
-                                        if let Some(replay_weak) = replay_weak2.as_ref() {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("context_menu_render_replay"),
-                                                    replay_weak.clone(),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    ui.separator();
-                                    if ui.button("Set as Session Stats (1 replay)").clicked() {
-                                        if let Some(replay_weak) = replay_weak.as_ref() {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("pending_confirmation_request"),
-                                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                                        replays: vec![replay_weak.clone()],
-                                                    }),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                });
-                            builder.node(node);
-                        }
-                    }
-                    builder.close_dir();
-                }
-            });
-
-            self.handle_context_menu_render(ui);
-
-            // Handle actions from tree
-            let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
-            let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
-            for action in actions {
-                match action {
-                    egui_ltreeview::Action::SetSelected(selected_ids) => {
-                        // Expand directory selections to include all children
-                        let mut expanded_selection: Vec<egui::Id> = Vec::new();
-                        let mut needs_expansion = false;
-                        for id in &selected_ids {
-                            expanded_selection.push(*id);
-                            if let Some(child_ids) = group_id_to_child_ids.get(id) {
-                                for child_id in child_ids {
-                                    if !selected_ids.contains(child_id) {
-                                        needs_expansion = true;
-                                        expanded_selection.push(*child_id);
-                                    }
-                                }
-                            }
-                        }
-                        if needs_expansion {
-                            let tree_id = ui.make_persistent_id("replay_date_tree");
-                            ui.ctx().data_mut(|data| {
-                                let state =
-                                    data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
-                                state.set_selected(expanded_selection);
-                            });
-                        }
-                    }
-                    egui_ltreeview::Action::Activate(activate) => {
-                        // Double-click/enter — open in focused tab
-                        for id in activate.selected {
-                            if let Some(replay) = id_to_replay.get(&id) {
-                                replay_to_open = Some(replay.clone());
-                                break;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            // Check for "Open in New Tab" from context menu
-            if let Some(replay) = ui
-                .ctx()
-                .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
-                .and_then(|w| w.upgrade())
-            {
-                replay_to_open_new = Some(replay);
-            }
-
-            // Handle actions
-            if let Some(replay) = replay_to_open_new {
-                self.tab_state.open_replay_in_new_tab(replay.clone());
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.load_replay(replay, ReplaySource::FileListing)
-                    );
-                }
-            } else if let Some(replay) = replay_to_open {
-                self.tab_state.open_replay_in_focused_tab(replay.clone());
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.load_replay(replay, ReplaySource::FileListing)
-                    );
-                }
-            }
-        }
-    }
-
-    fn build_file_listing_grouped_by_ship(&mut self, ui: &mut egui::Ui) {
-        if let Some(mut files) = self
-            .tab_state
-            .replay_files
-            .as_ref()
-            .map(|files| files.iter().map(|(x, y)| (x.clone(), y.clone())).collect::<Vec<_>>())
-        {
-            // Sort by filename (date) descending first
-            files.sort_by(|a, b| b.0.cmp(&a.0));
-
-            let metadata_provider = self.metadata_provider().unwrap();
-
-            // Group by ship name
-            let mut ship_groups: HashMap<String, Vec<ReplayEntry>> = HashMap::new();
-            let mut ship_most_recent: HashMap<String, std::path::PathBuf> = HashMap::new();
-
-            for (path, replay) in files {
-                let ship_name = replay.read().vehicle_name(&metadata_provider);
-
-                ship_groups.entry(ship_name.clone()).or_default().push((path.clone(), replay));
-
-                // Track most recent replay path for each ship (first one since sorted desc)
-                ship_most_recent.entry(ship_name).or_insert(path);
-            }
-
-            // Sort groups by most recently played (using the path which contains the date)
-            let mut groups: Vec<ReplayGroup> = ship_groups.into_iter().collect();
-            groups.sort_by(|a, b| {
-                let a_recent = ship_most_recent.get(&a.0).unwrap();
-                let b_recent = ship_most_recent.get(&b.0).unwrap();
-                b_recent.cmp(a_recent)
-            });
-
-            // Build maps from Id to replay and path for activation and context menu handling
-            let mut id_to_replay: HashMap<egui::Id, Arc<RwLock<Replay>>> = HashMap::new();
-            let mut id_to_path: HashMap<egui::Id, std::path::PathBuf> = HashMap::new();
-            // Map group IDs to their child replays (weak refs) for multi-selection
-            let mut group_id_to_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>> = HashMap::new();
-            // Map group IDs to their child node IDs (for expanding directory selection)
-            let mut group_id_to_child_ids: HashMap<egui::Id, Vec<egui::Id>> = HashMap::new();
-            let mut group_id_to_paths: HashMap<egui::Id, Vec<std::path::PathBuf>> = HashMap::new();
-
-            // Pre-populate the maps before building the tree
-            for (ship_name, replays) in &groups {
-                let group_id = egui::Id::new(("ship_group", ship_name));
-                let mut group_replays = Vec::new();
-                let mut child_ids = Vec::new();
-                let mut group_paths = Vec::new();
-                for (path, replay) in replays {
-                    let id = egui::Id::new(path);
-                    id_to_replay.insert(id, replay.clone());
-                    id_to_path.insert(id, path.clone());
-                    group_replays.push(Arc::downgrade(replay));
-                    child_ids.push(id);
-                    group_paths.push(path.clone());
-                }
-                group_id_to_replays.insert(group_id, group_replays);
-                group_id_to_child_ids.insert(group_id, child_ids);
-                group_id_to_paths.insert(group_id, group_paths);
-            }
-
-            // Clone maps for use in context menu closures (using weak refs)
-            let id_to_replay_weak: HashMap<egui::Id, Weak<RwLock<Replay>>> =
-                id_to_replay.iter().map(|(k, v)| (*k, Arc::downgrade(v))).collect();
-            let group_id_to_replays_for_menu = group_id_to_replays.clone();
-
-            // For fallback context menu (multi-selection)
-            let id_to_replay_weak_fallback = id_to_replay_weak.clone();
-            let id_to_path_fallback = id_to_path.clone();
-            let group_id_to_paths_fallback = group_id_to_paths.clone();
-            let group_id_to_replays_fallback = group_id_to_replays.clone();
-            let group_id_to_child_ids_fallback = group_id_to_child_ids.clone();
-
-            let tree = egui_ltreeview::TreeView::new(ui.make_persistent_id("replay_ship_tree"))
-                .allow_multi_selection(true)
-                .fallback_context_menu(move |ui, selected_ids| {
-                    // Collect all replays and paths from selected nodes (both leaf and group nodes).
-                    // When a group and its children are both selected (e.g. shift-click range),
-                    // skip leaf nodes already covered by a selected group to avoid double-counting.
-                    let mut covered_by_group: std::collections::HashSet<egui::Id> = std::collections::HashSet::new();
-                    let mut selected_replays: Vec<Weak<RwLock<Replay>>> = Vec::new();
-                    let mut selected_paths: Vec<std::path::PathBuf> = Vec::new();
-                    for id in selected_ids {
-                        // Check if it's a group node
-                        if let Some(group_replays) = group_id_to_replays_fallback.get(id) {
-                            selected_replays.extend(group_replays.iter().cloned());
-                            if let Some(child_ids) = group_id_to_child_ids_fallback.get(id) {
-                                covered_by_group.extend(child_ids.iter().copied());
-                            }
-                        }
-                        if let Some(paths) = group_id_to_paths_fallback.get(id) {
-                            selected_paths.extend(paths.iter().cloned());
-                        }
-                        // Check if it's a leaf node not already covered by a selected group
-                        if !covered_by_group.contains(id) {
-                            if let Some(replay_weak) = id_to_replay_weak_fallback.get(id) {
-                                selected_replays.push(replay_weak.clone());
-                            }
-                            if let Some(path) = id_to_path_fallback.get(id) {
-                                selected_paths.push(path.clone());
-                            }
-                        }
-                    }
-
-                    if !selected_paths.is_empty() {
-                        let copy_label = if selected_paths.len() == 1 {
-                            "Copy Replay".to_string()
-                        } else {
-                            format!("Copy {} Replays", selected_paths.len())
-                        };
-                        if ui.button(copy_label).clicked() {
-                            copy_files_to_clipboard(&selected_paths);
-                            ui.close_kind(UiKind::Menu);
-                        }
-                    }
-
-                    if !selected_replays.is_empty() {
-                        let count = selected_replays.len();
-                        let label = if count == 1 {
-                            "Set as Session Stats (1 replay)".to_string()
-                        } else {
-                            format!("Set as Session Stats ({} replays)", count)
-                        };
-                        if ui.button(label).clicked() {
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(
-                                    egui::Id::new("pending_confirmation_request"),
-                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                        replays: selected_replays,
-                                    }),
-                                );
-                            });
-                            ui.close_kind(UiKind::Menu);
-                        }
-                    }
-                });
-            let (_response, actions) = tree.show(ui, |builder| {
-                for (ship_name, replays) in &groups {
-                    // Calculate win/loss stats for this ship
-                    let mut wins = 0;
-                    let mut losses = 0;
-                    for (_, replay) in replays {
-                        match replay.read().battle_result() {
-                            Some(BattleResult::Win(_)) => wins += 1,
-                            Some(BattleResult::Loss(_)) => losses += 1,
-                            _ => {}
-                        }
-                    }
-                    let total_with_result = wins + losses;
-                    let win_rate = if total_with_result > 0 {
-                        format!(" - {}W/{}L ({:.0}%)", wins, losses, (wins as f64 / total_with_result as f64) * 100.0)
-                    } else {
-                        String::new()
-                    };
-
-                    let group_id = egui::Id::new(("ship_group", ship_name));
-                    let group_replays = group_id_to_replays_for_menu.get(&group_id).cloned().unwrap_or_default();
-                    let group_paths = group_id_to_paths.get(&group_id).cloned().unwrap_or_default();
-                    let group_replay_count = group_replays.len();
-                    let dir_node = egui_ltreeview::NodeBuilder::dir(group_id)
-                        .label(format!("{} ({}){}", ship_name, replays.len(), win_rate))
-                        .context_menu(move |ui| {
-                            let copy_label = if group_replay_count == 1 {
-                                "Copy Replay".to_string()
-                            } else {
-                                format!("Copy {} Replays", group_replay_count)
-                            };
-                            if ui.button(copy_label).clicked() {
-                                copy_files_to_clipboard(&group_paths);
-                                ui.close_kind(UiKind::Menu);
-                            }
-                            let label = if group_replay_count == 1 {
-                                "Set as Session Stats (1 replay)".to_string()
-                            } else {
-                                format!("Set as Session Stats ({} replays)", group_replay_count)
-                            };
-                            if ui.button(label).clicked() {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        egui::Id::new("pending_confirmation_request"),
-                                        Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                            replays: group_replays.clone(),
-                                        }),
-                                    );
-                                });
-                                ui.close_kind(UiKind::Menu);
-                            }
-                        });
-                    let is_open = builder.node(dir_node);
-                    if is_open {
-                        for (path, _replay) in replays {
-                            let id = egui::Id::new(path);
-                            let path_clone = path.clone();
-                            let wows_dir = self.tab_state.settings.wows_dir.clone();
-                            let replay_weak = id_to_replay_weak.get(&id).cloned();
-
-                            let replay_guard = id_to_replay.get(&id).unwrap().read();
-                            let map_name = replay_guard.map_name(&metadata_provider);
-                            let game_time = replay_guard.game_time().to_string();
-                            let battle_result = replay_guard.battle_result();
-                            drop(replay_guard);
-
-                            let label = format!("{} - {}", map_name, game_time);
-                            let label_text = match battle_result {
-                                Some(BattleResult::Win(_)) => RichText::new(label).color(Color32::LIGHT_GREEN),
-                                Some(BattleResult::Loss(_)) => RichText::new(label).color(Color32::LIGHT_RED),
-                                Some(BattleResult::Draw) => RichText::new(label).color(Color32::LIGHT_YELLOW),
-                                None => RichText::new(label),
-                            };
-
-                            let replay_weak2 = replay_weak.clone();
-                            let replay_weak_new_tab = replay_weak.clone();
-                            let node =
-                                egui_ltreeview::NodeBuilder::leaf(id).label(label_text).context_menu(move |ui| {
-                                    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
-                                        if let Some(r) = replay_weak_new_tab.as_ref().and_then(|w| w.upgrade()) {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("open_replay_new_tab"),
-                                                    Arc::downgrade(&r),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    ui.separator();
-                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
-                                        ui.ctx().copy_text(path_clone.to_string_lossy().into_owned());
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
-                                        copy_files_to_clipboard(std::slice::from_ref(&path_clone));
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
-                                        util::open_file_explorer(&path_clone);
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    if !wows_dir.is_empty() {
-                                        let alt_held = ui.input(|i| i.modifiers.alt);
-                                        let label = if alt_held {
-                                            icon_str!(icons::KEYBOARD, "Show Replay Controls")
-                                        } else {
-                                            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
-                                        };
-                                        if ui.button(label).clicked() {
-                                            if alt_held {
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(
-                                                        egui::Id::new("open_replay_controls_window"),
-                                                        true,
-                                                    );
-                                                });
-                                            } else {
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(
-                                                        egui::Id::new("pending_confirmation_request"),
-                                                        Some(crate::tab_state::ConfirmableAction::OpenInGame {
-                                                            replay_path: path_clone.to_path_buf(),
-                                                        }),
-                                                    );
-                                                });
-                                            }
-                                            ui.close_kind(UiKind::Menu);
-                                        }
-                                    }
-                                    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
-                                        if let Some(replay_weak) = replay_weak2.as_ref() {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("context_menu_render_replay"),
-                                                    replay_weak.clone(),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                    ui.separator();
-                                    if ui.button("Set as Session Stats (1 replay)").clicked() {
-                                        if let Some(replay_weak) = replay_weak.as_ref() {
-                                            ui.ctx().data_mut(|data| {
-                                                data.insert_temp(
-                                                    egui::Id::new("pending_confirmation_request"),
-                                                    Some(crate::tab_state::ConfirmableAction::SetAsSessionStats {
-                                                        replays: vec![replay_weak.clone()],
-                                                    }),
-                                                );
-                                            });
-                                        }
-                                        ui.close_kind(UiKind::Menu);
-                                    }
-                                });
-                            builder.node(node);
-                        }
-                    }
-                    builder.close_dir();
-                }
-            });
-
-            self.handle_context_menu_render(ui);
-
-            // Handle actions from tree
-            let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
-            let mut replay_to_open_new: Option<Arc<RwLock<Replay>>> = None;
-            for action in actions {
-                match action {
-                    egui_ltreeview::Action::SetSelected(selected_ids) => {
-                        // Expand directory selections to include all children
-                        let mut expanded_selection: Vec<egui::Id> = Vec::new();
-                        let mut needs_expansion = false;
-                        for id in &selected_ids {
-                            expanded_selection.push(*id);
-                            if let Some(child_ids) = group_id_to_child_ids.get(id) {
-                                for child_id in child_ids {
-                                    if !selected_ids.contains(child_id) {
-                                        needs_expansion = true;
-                                        expanded_selection.push(*child_id);
-                                    }
-                                }
-                            }
-                        }
-                        if needs_expansion {
-                            let tree_id = ui.make_persistent_id("replay_ship_tree");
-                            ui.ctx().data_mut(|data| {
-                                let state =
-                                    data.get_temp_mut_or_default::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id);
-                                state.set_selected(expanded_selection);
-                            });
-                        }
-                    }
-                    egui_ltreeview::Action::Activate(activate) => {
-                        // Double-click/enter — open in focused tab
-                        for id in activate.selected {
-                            if let Some(replay) = id_to_replay.get(&id) {
-                                replay_to_open = Some(replay.clone());
-                                break;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            // Check for "Open in New Tab" from context menu
-            if let Some(replay) = ui
-                .ctx()
-                .data_mut(|data| data.remove_temp::<Weak<RwLock<Replay>>>(egui::Id::new("open_replay_new_tab")))
-                .and_then(|w| w.upgrade())
-            {
-                replay_to_open_new = Some(replay);
-            }
-
-            // Handle actions
-            if let Some(replay) = replay_to_open_new {
-                self.tab_state.open_replay_in_new_tab(replay.clone());
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.load_replay(replay, ReplaySource::FileListing)
-                    );
-                }
-            } else if let Some(replay) = replay_to_open {
-                self.tab_state.open_replay_in_focused_tab(replay.clone());
-                if let Some(deps) = self.tab_state.replay_dependencies() {
-                    update_background_task!(
-                        self.tab_state.background_tasks,
-                        deps.load_replay(replay, ReplaySource::FileListing)
-                    );
-                }
             }
         }
     }
