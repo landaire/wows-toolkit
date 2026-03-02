@@ -10,6 +10,7 @@ use tracing::Level;
 use tracing::debug;
 use tracing::span;
 use tracing::trace;
+use tracing::warn;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 pub use wowsunpack::data::ship_config::ShipConfig;
@@ -819,7 +820,10 @@ where
         // Update vehicle damage from damage events
         for (aggressor, damage_events) in &self.damage_dealt {
             if let Some(aggressor_entity) = self.entities_by_id.get_mut(aggressor) {
-                let vehicle = aggressor_entity.vehicle_ref().expect("aggressor has no vehicle?");
+                let Some(vehicle) = aggressor_entity.vehicle_ref() else {
+                    warn!("aggressor is not a vehicle: {:?}", aggressor_entity.kind());
+                    continue;
+                };
 
                 let mut vehicle = vehicle.borrow_mut();
                 vehicle.damage += damage_events.iter().fold(0.0, |mut accum, event| {
@@ -2290,6 +2294,13 @@ impl VehicleEntity {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EntityKind {
+    Vehicle,
+    Building,
+    SmokeScreen,
+}
+
 #[derive(Debug)]
 pub enum Entity {
     Vehicle(Rc<RefCell<VehicleEntity>>),
@@ -2316,6 +2327,14 @@ impl Entity {
         match self {
             Entity::SmokeScreen(s) => Some(s),
             _ => None,
+        }
+    }
+
+    pub fn kind(&self) -> EntityKind {
+        match self {
+            Entity::Vehicle(_ref_cell) => EntityKind::Vehicle,
+            Entity::Building(_ref_cell) => EntityKind::Building,
+            Entity::SmokeScreen(_ref_cell) => EntityKind::SmokeScreen,
         }
     }
 }
