@@ -1,4 +1,3 @@
-use egui::ComboBox;
 use egui::Image;
 use egui::ImageSource;
 use egui::RichText;
@@ -606,92 +605,84 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
     // ── Toolbar: settings popover + copy button ──
     ui.horizontal(|ui| {
-        // Settings button with popover
-        let settings_btn = ui.button(icon_str!(icons::GEAR_FINE, "Settings"));
-        egui::Popup::from_toggle_button_response(&settings_btn)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| {
-                let cfg = tab_state.chart_config(chart_id);
+        // Settings menu button with nested popup support
+        ui.menu_button(icon_str!(icons::GEAR_FINE, "Settings"), |ui| {
+            let cfg = tab_state.chart_config(chart_id);
 
-                ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    ui.set_min_width(280.0);
+            ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                ui.set_min_width(280.0);
 
-                    // ── Chart Type ──
-                    ui.strong("Chart Type");
-                    ui.indent(("chart_type_indent", chart_id), |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Stat:");
-                            ComboBox::from_id_salt(("chart_stat_select", chart_id))
-                                .selected_text(cfg.selected_stat.name())
-                                .show_ui(ui, |ui| {
-                                    for stat in ChartableStat::all() {
-                                        let is_selected = cfg.selected_stat == *stat;
-                                        if ui.selectable_label(is_selected, stat.name()).clicked() {
-                                            cfg.selected_stat = *stat;
-                                            cfg.reset_plot = true;
-                                        }
-                                    }
-                                });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Mode:");
-                            ui.add_enabled_ui(!cfg.combined, |ui| {
-                                if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
-                                    cfg.reset_plot = true;
-                                }
-                                if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
-                                    cfg.reset_plot = true;
-                                }
-                            });
-                        });
+                // ── Chart Type ──
+                ui.strong("Chart Type");
+                ui.indent(("chart_type_indent", chart_id), |ui| {
+                    ui.label("Stat:");
+                    ui.horizontal_wrapped(|ui| {
+                        for stat in ChartableStat::all() {
+                            if ui.selectable_label(cfg.selected_stat == *stat, stat.name()).clicked() {
+                                cfg.selected_stat = *stat;
+                                cfg.reset_plot = true;
+                            }
+                        }
                     });
-
-                    ui.separator();
-
-                    // ── Options ──
-                    ui.strong("Options");
-                    ui.indent(("options_indent", chart_id), |ui| {
-                        if ui.checkbox(&mut cfg.combined, "Combined").changed() {
-                            cfg.reset_plot = true;
-                            if cfg.combined {
-                                cfg.mode = ChartMode::Line;
+                    ui.horizontal(|ui| {
+                        ui.label("Mode:");
+                        ui.add_enabled_ui(!cfg.combined, |ui| {
+                            if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
+                                cfg.reset_plot = true;
                             }
-                        }
-                        if cfg.mode == ChartMode::Line {
-                            ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, "Rolling Avg"));
-                        }
-                        ui.checkbox(&mut cfg.show_labels, "Labels");
-                    });
-
-                    ui.separator();
-
-                    // ── Ships ──
-                    ui.strong("Ships");
-                    ui.indent(("ships_indent", chart_id), |ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button("All").clicked() {
-                                cfg.selected_ships = ship_names.clone();
-                                cfg.selected_ships_manually_changed = true;
-                            }
-                            if ui.button("None").clicked() {
-                                cfg.selected_ships.clear();
-                                cfg.selected_ships_manually_changed = true;
+                            if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
+                                cfg.reset_plot = true;
                             }
                         });
-                        for ship_name in &ship_names {
-                            let mut is_selected = cfg.selected_ships.contains(ship_name);
-                            if ui.checkbox(&mut is_selected, ship_name).changed() {
-                                if is_selected {
-                                    cfg.selected_ships.push(ship_name.clone());
-                                } else {
-                                    cfg.selected_ships.retain(|s| s != ship_name);
-                                }
-                                cfg.selected_ships_manually_changed = true;
-                            }
-                        }
                     });
                 });
+
+                ui.separator();
+
+                // ── Options ──
+                ui.strong("Options");
+                ui.indent(("options_indent", chart_id), |ui| {
+                    if ui.checkbox(&mut cfg.combined, "Combined").changed() {
+                        cfg.reset_plot = true;
+                        if cfg.combined {
+                            cfg.mode = ChartMode::Line;
+                        }
+                    }
+                    if cfg.mode == ChartMode::Line {
+                        ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, "Rolling Avg"));
+                    }
+                    ui.checkbox(&mut cfg.show_labels, "Labels");
+                });
+
+                ui.separator();
+
+                // ── Ships ──
+                ui.strong("Ships");
+                ui.indent(("ships_indent", chart_id), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("All").clicked() {
+                            cfg.selected_ships = ship_names.clone();
+                            cfg.selected_ships_manually_changed = true;
+                        }
+                        if ui.button("None").clicked() {
+                            cfg.selected_ships.clear();
+                            cfg.selected_ships_manually_changed = true;
+                        }
+                    });
+                    for ship_name in &ship_names {
+                        let mut is_selected = cfg.selected_ships.contains(ship_name);
+                        if ui.checkbox(&mut is_selected, ship_name).changed() {
+                            if is_selected {
+                                cfg.selected_ships.push(ship_name.clone());
+                            } else {
+                                cfg.selected_ships.retain(|s| s != ship_name);
+                            }
+                            cfg.selected_ships_manually_changed = true;
+                        }
+                    }
+                });
             });
+        });
 
         // Copy as Image button (stays outside popover)
         let has_plot = tab_state.chart_config(chart_id).plot_rect.is_some();
