@@ -2,6 +2,69 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.55] - 2026-03-02
+
+### 🚀 Features
+
+- Add utility function for parsing game version from its data + update tests
+
+### ⚙️ Miscellaneous Tasks
+
+- Use master instead of nightly
+
+### Armor_viewer
+
+- Add option to simulate past ricochets
+
+### Live_armor_viewer
+
+- Fix shell origin / ship rotation
+
+### Nix
+
+- Fix building on darwin?
+- Update targets
+
+### Player_tracker
+
+- Don't limit tracking to only ranked/randoms
+
+### Replays
+
+- File listing should auto-size + move game chat to separate window
+- Allow multiple replays to be loaded in different tabs
+- Fix issue when parsing some operation replays
+
+### Repo
+
+- Add a bunch of tests
+
+### Resource_unpacker
+
+- Massively improve UX/UI
+- Support viewing binary files from assets.bin as JSON
+- Perf improvements
+
+### Site
+
+- Change UI a bit
+- Include asterisk for linux/macos
+- Add session stats
+
+### Stats
+
+- Stats are no longer in a floating window and are instead a new tab
+- Allow multiple charts tabs
+- Add support for combined stat charts
+
+### Toolkit
+
+- Fix crash when no replays directory exists in game dir
+
+### Wows_replays
+
+- Fix packet 0x26 parsing
+
 ## [0.1.54] - 2026-02-26
 
 ### 🐛 Bug Fixes
