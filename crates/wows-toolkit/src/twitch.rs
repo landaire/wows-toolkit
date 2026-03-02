@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::str::FromStr;
 
 use jiff::Timestamp;
+use jiff::Unit;
 use serde::Deserialize;
 use serde::Serialize;
 use twitch_api::HelixClient;
@@ -135,8 +136,9 @@ impl TwitchState {
                     .cloned()
                     .filter(|timestamp| {
                         let delta = *timestamp - match_timestamp;
+                        let minutes = delta.total(Unit::Minute).unwrap_or(0.0);
 
-                        delta.get_minutes() < 20 && delta.get_minutes() > -2
+                        minutes < 20.0 && minutes > -2.0
                     })
                     .collect();
 
@@ -147,6 +149,197 @@ impl TwitchState {
         }
 
         if results.is_empty() { None } else { Some(results) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a TwitchState with the given viewer entries.
+    fn state_with_viewers(viewers: Vec<(&str, Vec<Timestamp>)>) -> TwitchState {
+        let mut state = TwitchState::default();
+        for (name, timestamps) in viewers {
+            state.participants.insert(name.to_string(), timestamps.into_iter().collect());
+        }
+        state
+    }
+
+    /// Helper: create a timestamp offset by `minutes` from a base.
+    fn ts_plus_minutes(base: Timestamp, minutes: i64) -> Timestamp {
+        base.checked_add(jiff::SignedDuration::from_mins(minutes)).unwrap()
+    }
+
+    #[test]
+    fn exact_name_match_within_window() {
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 5);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        // "Player1" has levenshtein distance 0 from "Player1" and len > 5
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+        let map = result.unwrap();
+        assert!(map.contains_key("Player1"));
+        assert_eq!(map["Player1"].len(), 1);
+    }
+
+    #[test]
+    fn levenshtein_match_within_threshold() {
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 3);
+        // "PlayerX" vs "Player1" = distance 1 (≤ 3), both len > 5
+        let state = state_with_viewers(vec![("PlayerX", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn levenshtein_too_far_no_match() {
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 3);
+        // "ABCDEFGH" vs "Player1" = distance well above 3
+        let state = state_with_viewers(vec![("ABCDEFGH", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn short_name_ignored_for_levenshtein() {
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 3);
+        // name.len() <= 5, so levenshtein branch is skipped
+        let state = state_with_viewers(vec![("ABCDE", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("ABCDE", match_ts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_before_window_filtered_out() {
+        let match_ts = Timestamp::now();
+        // 3 minutes before match start (> -2 threshold)
+        let viewer_ts = ts_plus_minutes(match_ts, -3);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_after_window_filtered_out() {
+        let match_ts = Timestamp::now();
+        // 25 minutes after match start (> 20 threshold)
+        let viewer_ts = ts_plus_minutes(match_ts, 25);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_just_inside_lower_bound() {
+        let match_ts = Timestamp::now();
+        // -1 minute: within the -2..+20 window
+        let viewer_ts = ts_plus_minutes(match_ts, -1);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn timestamp_at_boundary_19_minutes() {
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 19);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn multiple_timestamps_partial_filter() {
+        let match_ts = Timestamp::now();
+        let ts_in = ts_plus_minutes(match_ts, 5);
+        let ts_out = ts_plus_minutes(match_ts, 30);
+        let state = state_with_viewers(vec![("Player1", vec![ts_in, ts_out])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+        let map = result.unwrap();
+        // Only the in-window timestamp should remain
+        assert_eq!(map["Player1"].len(), 1);
+        assert_eq!(map["Player1"][0], ts_in);
+    }
+
+    #[test]
+    fn multiple_viewers_mixed_results() {
+        let match_ts = Timestamp::now();
+        let ts_in = ts_plus_minutes(match_ts, 5);
+        let ts_out = ts_plus_minutes(match_ts, 30);
+        let state = state_with_viewers(vec![
+            ("Player1", vec![ts_in]),  // name match + in window
+            ("ZZZZZZZ", vec![ts_in]),  // no name match
+            ("Playe_1", vec![ts_out]), // name match but out of window
+        ]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some());
+        let map = result.unwrap();
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("Player1"));
+    }
+
+    #[test]
+    fn no_participants_returns_none() {
+        let state = TwitchState::default();
+        let result = state.player_is_potential_stream_sniper("Player1", Timestamp::now());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn minutes_calculation_is_correct() {
+        // This is the core bug regression test: verify that time deltas
+        // are computed as total minutes, not just the minutes component.
+        let match_ts = Timestamp::now();
+        let viewer_ts = ts_plus_minutes(match_ts, 10);
+        let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
+
+        let result = state.player_is_potential_stream_sniper("Player1", match_ts);
+        assert!(result.is_some(), "10 minutes should be within the -2..+20 window");
+
+        // Verify the delta computes correctly (the original bug: get_minutes() returned 0)
+        let delta = viewer_ts - match_ts;
+        let total_mins = delta.total(Unit::Minute).unwrap();
+        assert!(
+            (total_mins - 10.0).abs() < 0.01,
+            "expected ~10.0 minutes, got {total_mins}"
+        );
+    }
+
+    #[test]
+    fn token_parse_roundtrip() {
+        let input = "username=testuser;user_id=12345;client_id=abc123;oauth_token=tok456";
+        let token: Token = input.parse().unwrap();
+        assert_eq!(token.username(), "testuser");
+        assert_eq!(token.user_id(), 12345);
+        assert_eq!(token.client_id(), "abc123");
+        assert_eq!(token.oauth_token(), "tok456");
+    }
+
+    #[test]
+    fn token_parse_missing_field() {
+        let input = "username=testuser;user_id=12345;client_id=abc123";
+        assert!(input.parse::<Token>().is_err());
+    }
+
+    #[test]
+    fn token_parse_unknown_field() {
+        let input = "username=testuser;user_id=12345;client_id=abc123;oauth_token=tok456;extra=bad";
+        assert!(input.parse::<Token>().is_err());
     }
 }
 
