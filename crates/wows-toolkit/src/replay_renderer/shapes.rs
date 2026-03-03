@@ -489,6 +489,21 @@ pub(super) fn render_selection_highlight(ann: &Annotation, transform: &MapTransf
         painter.add(Shape::LineSegment { points: [c, c + to_prev], stroke: highlight_stroke });
     }
 
+    // Draw center crosshair for shapes that have a geometric center
+    let center_minimap = match ann {
+        Annotation::Circle { center, .. } => Some(*center),
+        Annotation::Rectangle { center, .. } => Some(*center),
+        Annotation::Triangle { center, .. } => Some(*center),
+        _ => None,
+    };
+    if let Some(center) = center_minimap {
+        let c = minimap_vec2_to_screen(center, transform);
+        let arm = 5.0;
+        let thin_stroke = Stroke::new(1.0, Color32::from_rgb(255, 255, 100));
+        painter.add(Shape::LineSegment { points: [c - Vec2::X * arm, c + Vec2::X * arm], stroke: thin_stroke });
+        painter.add(Shape::LineSegment { points: [c - Vec2::Y * arm, c + Vec2::Y * arm], stroke: thin_stroke });
+    }
+
     // Draw rotation handle for rotatable annotations
     let has_rotation =
         matches!(ann, Annotation::Ship { .. } | Annotation::Rectangle { .. } | Annotation::Triangle { .. });
