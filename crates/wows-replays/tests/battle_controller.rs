@@ -247,70 +247,107 @@ fn s189_submarine_pipeline() {
 }
 
 // =============================================================================
-// Cross-version: all fixture replays with available game data
+// v13.2 Annapolis (PvP, Tierra del Fuego)
 // =============================================================================
 
-/// For every fixture replay whose game data is available, verify the
-/// BattleController pipeline doesn't panic and produces basic state.
 #[test]
-#[cfg_attr(not(has_game_data), ignore)]
-fn all_available_replays_produce_state() {
-    let dir = fixtures_dir();
-    let available_builds = wows_data_mgr::available_builds();
+#[cfg_attr(not(all(has_game_data, has_build_8151735)), ignore)]
+fn annapolis_pipeline() {
+    let (replay, controller) = run_replay("20240402_192304_PASC111-Annapolis_22_tierra_del_fuego.wowsreplay");
 
-    let mut tested = 0;
-    for entry in std::fs::read_dir(&dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) != Some("wowsreplay") {
-            continue;
-        }
+    assert_eq!(controller.metadata_players().len(), replay.meta.vehicles.len());
 
-        let replay = ReplayFile::from_file(&path).unwrap();
-        let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+    let players = controller.player_entities();
+    assert!(!players.is_empty());
 
-        if !available_builds.contains(&version.build) {
-            continue;
-        }
+    let has_player = players.values().any(|p| p.initial_state().username() == "ChineseTechAbuser");
+    assert!(has_player, "recording player should be present");
 
-        let game_dir = match wows_data_mgr::game_dir_for_build(version.build) {
-            Some(d) => d,
-            None => continue,
-        };
+    assert!(controller.battle_end_clock().is_some(), "battle should have ended");
+    assert!(!controller.minimap_positions().is_empty());
+}
 
-        let resources = match game_data::load_game_resources(&game_dir, &version) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
+// =============================================================================
+// v13.10 Colbert (PvP, Path Warrior)
+// =============================================================================
 
-        let game_params = match GameMetadataProvider::from_vfs(&resources.vfs) {
-            Ok(gp) => gp,
-            Err(_) => continue,
-        };
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_9129736)), ignore)]
+fn colbert_pipeline() {
+    let (replay, controller) = run_replay("20241112_172819_PFSC510-Colbert_44_Path_warrior.wowsreplay");
 
-        let game_constants = GameConstants::from_vfs(&resources.vfs);
+    assert_eq!(controller.metadata_players().len(), replay.meta.vehicles.len());
 
-        let game_params: &'static GameMetadataProvider = Box::leak(Box::new(game_params));
-        let game_constants: &'static GameConstants = Box::leak(Box::new(game_constants));
-        let replay: &'static ReplayFile = Box::leak(Box::new(replay));
+    let players = controller.player_entities();
+    assert!(!players.is_empty());
 
-        let mut controller = BattleController::new(&replay.meta, game_params, Some(game_constants));
+    let has_player = players.values().any(|p| p.initial_state().username() == "John_The_Ruthless");
+    assert!(has_player, "recording player should be present");
 
-        let mut parser = Parser::new(&resources.specs);
-        let mut remaining = &replay.packet_data[..];
-        while !remaining.is_empty() {
-            let packet = parser
-                .parse_packet(&mut remaining)
-                .unwrap_or_else(|e| panic!("packet parse error in {}: {e:?}", path.display()));
-            controller.process(&packet);
-        }
-        controller.finish();
+    assert!(controller.battle_end_clock().is_some(), "battle should have ended");
+    assert!(!controller.minimap_positions().is_empty());
+}
 
-        // Basic sanity: every replay should produce metadata players and at least some positions
-        assert!(!controller.metadata_players().is_empty(), "no metadata players for {}", path.display());
-        assert!(!controller.player_entities().is_empty(), "no player entities for {}", path.display());
+// =============================================================================
+// v14.2 Oland (PvP, NE North)
+// =============================================================================
 
-        tested += 1;
-    }
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_9643943)), ignore)]
+fn oland_pipeline() {
+    let (replay, controller) = run_replay("20250117_004534_PWSD108-Oland_15_NE_north.wowsreplay");
 
-    assert!(tested > 0, "no replays were tested — check available game data");
+    assert_eq!(controller.metadata_players().len(), replay.meta.vehicles.len());
+
+    let players = controller.player_entities();
+    assert!(!players.is_empty());
+
+    let has_player = players.values().any(|p| p.initial_state().username() == "awesome101_21x");
+    assert!(has_player, "recording player should be present");
+
+    assert!(controller.battle_end_clock().is_some(), "battle should have ended");
+    assert!(!controller.minimap_positions().is_empty());
+}
+
+// =============================================================================
+// v14.9 Ocean CV (Event, Naval Mission)
+// =============================================================================
+
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_10695045)), ignore)]
+fn ocean_cv_event_pipeline() {
+    let (_replay, controller) = run_replay("20251001_145225_PBSA710-Ocean_28_naval_mission.wowsreplay");
+
+    let meta_players = controller.metadata_players();
+    assert!(!meta_players.is_empty());
+
+    let players = controller.player_entities();
+    assert!(!players.is_empty());
+
+    let has_player = players.values().any(|p| p.initial_state().username() == "seaznutz");
+    assert!(has_player, "recording player should be present");
+
+    assert!(controller.battle_end_clock().is_some(), "battle should have ended");
+    assert!(!controller.minimap_positions().is_empty());
+}
+
+// =============================================================================
+// v15.0 Forrest Sherman (PvP, Angel Wings)
+// =============================================================================
+
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_11791718)), ignore)]
+fn forrest_sherman_pipeline() {
+    let (replay, controller) = run_replay("20260127_185500_PASD610-Forrest-Sherman_56_AngelWings.wowsreplay");
+
+    assert_eq!(controller.metadata_players().len(), replay.meta.vehicles.len());
+
+    let players = controller.player_entities();
+    assert!(!players.is_empty());
+
+    let has_player = players.values().any(|p| p.initial_state().username() == "QUIDPROQUOWINKWINK");
+    assert!(has_player, "recording player should be present");
+
+    // This replay was quit before the battle ended, so no battle_end_clock.
+    assert!(!controller.minimap_positions().is_empty());
 }

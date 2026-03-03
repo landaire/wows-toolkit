@@ -106,9 +106,14 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
 /// Build numbers referenced by tests that may not be locally available.
 /// Declared here so check-cfg doesn't warn about unknown cfgs.
 const KNOWN_TEST_BUILDS: &[u32] = &[
-    6965290,  // v12.3.1 (S-189 submarine replay)
-    9531281,  // v14.1.0 (Hull DD replay)
-    11965230, // v15.1.0 (Vermont, Marceau, Narai replays)
+    6965290,  // v12.3 (S-189 submarine replay)
+    8151735,  // v13.2 (Annapolis replay)
+    9129736,  // v13.10 (Colbert replay)
+    9531281,  // v14.1 (Hull DD replay)
+    9643943,  // v14.2 (Oland replay)
+    10695045, // v14.9 (Ocean CV event replay)
+    11791718, // v15.0 (Forrest Sherman replay)
+    11965230, // v15.1 (Vermont, Marceau, Narai replays)
 ];
 
 fn main() {
