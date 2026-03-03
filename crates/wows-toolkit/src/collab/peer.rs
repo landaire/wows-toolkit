@@ -73,7 +73,7 @@ pub struct HostParams {
 
 /// Parameters for joining a session.
 pub struct JoinParams {
-    /// Base64url-encoded EndpointAddr JSON.
+    /// Session token (`toolkit-<base64>`).
     pub token: String,
     pub display_name: String,
     pub toolkit_version: String,
@@ -283,19 +283,10 @@ async fn host_main(
 
     endpoint.online().await;
 
-    // Generate the session token.
-    let my_addr = endpoint.addr();
-    let my_addr_json = match serde_json::to_string(&my_addr) {
-        Ok(j) => j,
-        Err(e) => {
-            let msg = format!("Failed to serialize endpoint address: {e}");
-            error!("{msg}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
-            set_status(&ui_state, SessionStatus::Error(msg));
-            return;
-        }
-    };
-    let token = data_encoding::BASE64URL_NOPAD.encode(my_addr_json.as_bytes());
+    // Generate the session token: toolkit-<base64(zlib(node_id))>.
+    // Both host and client use iroh's default relay, so the relay URL
+    // is implicit and doesn't need to be in the token.
+    let token = encode_token(&endpoint.addr().id);
 
     let my_user_id = 0u64;
     let my_color = CURSOR_COLORS[0];
@@ -865,29 +856,11 @@ async fn join_main(
     display_toggle_rx: mpsc::Receiver<(DisplayOptionField, bool)>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
-    // Decode token.
-    let addr_json = match data_encoding::BASE64URL_NOPAD.decode(params.token.as_bytes()) {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(s) => s,
-            Err(e) => {
-                let msg = format!("Invalid session token (not UTF-8): {e}");
-                let _ = event_tx.send(SessionEvent::Error(msg.clone()));
-                set_status(&ui_state, SessionStatus::Error(msg));
-                return;
-            }
-        },
+    // Decode the session token to extract the host's node ID.
+    let host_node_id = match decode_token(&params.token) {
+        Ok(id) => id,
         Err(e) => {
-            let msg = format!("Invalid session token (not base64): {e}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
-            set_status(&ui_state, SessionStatus::Error(msg));
-            return;
-        }
-    };
-
-    let addr: iroh::EndpointAddr = match serde_json::from_str(&addr_json) {
-        Ok(a) => a,
-        Err(e) => {
-            let msg = format!("Invalid session token (bad address): {e}");
+            let msg = format!("Invalid session token: {e}");
             let _ = event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
@@ -903,6 +876,17 @@ async fn join_main(
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
+    };
+
+    // Reconstruct the host's EndpointAddr using the node ID from the token
+    // and relay URLs from our own endpoint (both sides use the same defaults).
+    let addr = {
+        let my_addr = endpoint.addr();
+        let mut a = iroh::EndpointAddr::new(host_node_id);
+        for url in my_addr.relay_urls() {
+            a = a.with_relay_url(url.clone());
+        }
+        a
     };
 
     let conn = match tokio::time::timeout(std::time::Duration::from_secs(15), endpoint.connect(addr, COLLAB_ALPN)).await
@@ -1532,6 +1516,39 @@ fn handle_incoming_message(
     }
 }
 
+// ─── Token encoding ─────────────────────────────────────────────────────────
+
+const TOKEN_PREFIX: &str = "toolkit-";
+
+/// Encode a node ID into a session token: `toolkit-<base64(zlib(node_id_base32))>`.
+pub fn encode_token(node_id: &iroh::PublicKey) -> String {
+    let raw = node_id.to_string();
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(raw.as_bytes()).expect("zlib write");
+    let compressed = encoder.finish().expect("zlib finish");
+    let b64 = data_encoding::BASE64URL_NOPAD.encode(&compressed);
+    format!("{TOKEN_PREFIX}{b64}")
+}
+
+/// Decode a session token back to a node ID.
+pub fn decode_token(token: &str) -> Result<iroh::PublicKey, String> {
+    let token = token.trim();
+    let b64 = token
+        .strip_prefix(TOKEN_PREFIX)
+        .ok_or_else(|| format!("Token must start with \"{TOKEN_PREFIX}\""))?;
+    let compressed = data_encoding::BASE64URL_NOPAD
+        .decode(b64.as_bytes())
+        .map_err(|e| format!("Invalid base64: {e}"))?;
+    let mut decoder = ZlibDecoder::new(&compressed[..]);
+    let mut raw = String::new();
+    decoder
+        .read_to_string(&mut raw)
+        .map_err(|e| format!("Decompression failed: {e}"))?;
+    raw.trim()
+        .parse::<iroh::PublicKey>()
+        .map_err(|e| format!("Invalid node ID: {e}"))
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Broadcast a peer message to all connected peers in the mesh.
@@ -1602,3 +1619,4 @@ fn set_status(state: &Arc<Mutex<SessionState>>, status: SessionStatus) {
         s.status = status;
     }
 }
+

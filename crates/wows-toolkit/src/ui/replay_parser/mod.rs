@@ -3578,12 +3578,22 @@ impl ToolkitTabViewer<'_> {
                     // ── Join a session ──
                     ui.label(RichText::new("Join a Session").strong());
                     ui.add_space(2.0);
-                    ui.label("Session token:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.tab_state.join_session_token)
-                            .hint_text("Paste token...")
-                            .desired_width(220.0),
-                    );
+
+                    let has_token = !self.tab_state.join_session_token.trim().is_empty();
+                    if has_token {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{} Token pasted", icons::CHECK));
+                            if ui.small_button("Clear").clicked() {
+                                self.tab_state.join_session_token.clear();
+                            }
+                        });
+                    } else if ui.button(icon_str!(icons::CLIPBOARD, "Paste session token")).clicked()
+                        && let Ok(mut clipboard) = arboard::Clipboard::new()
+                        && let Ok(text) = clipboard.get_text()
+                    {
+                        self.tab_state.join_session_token = text;
+                    }
+
                     ui.add_space(2.0);
                     ui.label("Display name:");
                     ui.add(
@@ -3592,7 +3602,7 @@ impl ToolkitTabViewer<'_> {
                             .desired_width(160.0),
                     );
                     ui.add_space(4.0);
-                    let can_join = !self.tab_state.join_session_token.trim().is_empty()
+                    let can_join = has_token
                         && !self.tab_state.settings.collab_display_name.trim().is_empty();
                     if ui.add_enabled(can_join, egui::Button::new("Join")).clicked() {
                         if self.tab_state.settings.suppress_p2p_ip_warning {
