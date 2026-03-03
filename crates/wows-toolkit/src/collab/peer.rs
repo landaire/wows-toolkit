@@ -92,8 +92,12 @@ pub struct FrameBroadcast {
 
 /// Annotation events from the local UI.
 pub enum LocalAnnotationEvent {
-    Add(Annotation),
-    Undo,
+    /// Upsert an annotation by unique ID.
+    Set { id: u64, annotation: Annotation, owner: u64 },
+    /// Remove a specific annotation by ID.
+    Remove { id: u64 },
+    /// Remove all annotations.
+    Clear,
 }
 
 /// Per-ship range overrides: vec of (entity_id, filter) pairs.
@@ -463,8 +467,17 @@ async fn host_main(
                             let msg = PeerMessage::RenderOptions(params.initial_render_options.clone());
                             broadcast_to_mesh(&mesh, &msg);
                         }
-                        SessionCommand::SyncAnnotations { annotations, owners } => {
-                            let msg = PeerMessage::AnnotationSync { annotations, owners };
+                        SessionCommand::SyncAnnotations { annotations, owners, ids } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                    annotations: annotations.clone(),
+                                    owners: owners.clone(),
+                                    ids: ids.clone(),
+                                });
+                                s.annotation_sync_version += 1;
+                            }
+                            let msg = PeerMessage::AnnotationSync { annotations, owners, ids };
                             broadcast_to_mesh(&mesh, &msg);
                         }
                         SessionCommand::PromoteToCoHost { user_id } => {
@@ -540,27 +553,43 @@ async fn host_main(
                             broadcast_to_mesh(&mesh, &PeerMessage::CursorPosition(pos));
                         }
                         LocalEvent::Annotation(evt) => {
-                            match &evt {
-                                LocalAnnotationEvent::Add(ann) => {
+                            let msg = match &evt {
+                                LocalAnnotationEvent::Set { id, annotation, owner } => {
                                     let mut s = ui_state.lock();
-                                    let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
-                                    anns.push(ann.clone());
-                                    owners.push(my_user_id);
+                                    let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                                    if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
+                                        sync.annotations[pos] = annotation.clone();
+                                        sync.owners[pos] = *owner;
+                                    } else {
+                                        sync.annotations.push(annotation.clone());
+                                        sync.owners.push(*owner);
+                                        sync.ids.push(*id);
+                                    }
                                     s.annotation_sync_version += 1;
+                                    PeerMessage::SetAnnotation { id: *id, annotation: annotation.clone(), owner: *owner }
                                 }
-                                LocalAnnotationEvent::Undo => {
+                                LocalAnnotationEvent::Remove { id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
-                                        && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
-                                            anns.remove(pos);
-                                            owners.remove(pos);
-                                            s.annotation_sync_version += 1;
-                                        }
+                                    if let Some(sync) = s.current_annotation_sync.as_mut()
+                                        && let Some(pos) = sync.ids.iter().position(|&eid| eid == *id)
+                                    {
+                                        sync.annotations.remove(pos);
+                                        sync.owners.remove(pos);
+                                        sync.ids.remove(pos);
+                                        s.annotation_sync_version += 1;
+                                    }
+                                    PeerMessage::RemoveAnnotation { id: *id }
                                 }
-                            }
-                            let msg = match evt {
-                                LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
-                                LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
+                                LocalAnnotationEvent::Clear => {
+                                    let mut s = ui_state.lock();
+                                    if let Some(sync) = s.current_annotation_sync.as_mut() {
+                                        sync.annotations.clear();
+                                        sync.owners.clear();
+                                        sync.ids.clear();
+                                        s.annotation_sync_version += 1;
+                                    }
+                                    PeerMessage::ClearAnnotations
+                                }
                             };
                             broadcast_to_mesh(&mesh, &msg);
                         }
@@ -715,11 +744,15 @@ async fn host_accept_peer(
     // Send current annotations if any.
     let ann_msg = {
         let s = ui_state.lock();
-        s.current_annotation_sync.as_ref().and_then(|(anns, owners)| {
-            if anns.is_empty() {
+        s.current_annotation_sync.as_ref().and_then(|sync| {
+            if sync.annotations.is_empty() {
                 None
             } else {
-                Some(PeerMessage::AnnotationSync { annotations: anns.clone(), owners: owners.clone() })
+                Some(PeerMessage::AnnotationSync {
+                    annotations: sync.annotations.clone(),
+                    owners: sync.owners.clone(),
+                    ids: sync.ids.clone(),
+                })
             }
         })
     };
@@ -1153,8 +1186,17 @@ async fn join_main(
                             // Co-host could send render options — but we don't
                             // track initial options on the join side.
                         }
-                        SessionCommand::SyncAnnotations { annotations, owners } => {
-                            let msg = PeerMessage::AnnotationSync { annotations, owners };
+                        SessionCommand::SyncAnnotations { annotations, owners, ids } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                    annotations: annotations.clone(),
+                                    owners: owners.clone(),
+                                    ids: ids.clone(),
+                                });
+                                s.annotation_sync_version += 1;
+                            }
+                            let msg = PeerMessage::AnnotationSync { annotations, owners, ids };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
                         SessionCommand::PromoteToCoHost { .. } => {
@@ -1185,27 +1227,43 @@ async fn join_main(
                             let _ = write_peer_message(&mut send, &PeerMessage::CursorPosition(pos)).await;
                         }
                         LocalEvent::Annotation(evt) => {
-                            match &evt {
-                                LocalAnnotationEvent::Add(ann) => {
+                            let msg = match &evt {
+                                LocalAnnotationEvent::Set { id, annotation, owner } => {
                                     let mut s = ui_state.lock();
-                                    let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
-                                    anns.push(ann.clone());
-                                    owners.push(my_user_id);
+                                    let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                                    if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
+                                        sync.annotations[pos] = annotation.clone();
+                                        sync.owners[pos] = *owner;
+                                    } else {
+                                        sync.annotations.push(annotation.clone());
+                                        sync.owners.push(*owner);
+                                        sync.ids.push(*id);
+                                    }
                                     s.annotation_sync_version += 1;
+                                    PeerMessage::SetAnnotation { id: *id, annotation: annotation.clone(), owner: *owner }
                                 }
-                                LocalAnnotationEvent::Undo => {
+                                LocalAnnotationEvent::Remove { id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
-                                        && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
-                                            anns.remove(pos);
-                                            owners.remove(pos);
-                                            s.annotation_sync_version += 1;
-                                        }
+                                    if let Some(sync) = s.current_annotation_sync.as_mut()
+                                        && let Some(pos) = sync.ids.iter().position(|&eid| eid == *id)
+                                    {
+                                        sync.annotations.remove(pos);
+                                        sync.owners.remove(pos);
+                                        sync.ids.remove(pos);
+                                        s.annotation_sync_version += 1;
+                                    }
+                                    PeerMessage::RemoveAnnotation { id: *id }
                                 }
-                            }
-                            let msg = match evt {
-                                LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
-                                LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
+                                LocalAnnotationEvent::Clear => {
+                                    let mut s = ui_state.lock();
+                                    if let Some(sync) = s.current_annotation_sync.as_mut() {
+                                        sync.annotations.clear();
+                                        sync.owners.clear();
+                                        sync.ids.clear();
+                                        s.annotation_sync_version += 1;
+                                    }
+                                    PeerMessage::ClearAnnotations
+                                }
                             };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
@@ -1302,44 +1360,65 @@ fn handle_incoming_message(
         }
 
         // ── Annotation gated ────────────────────────────────────────────
-        PeerMessage::AddAnnotation(ref ann) => {
+        PeerMessage::SetAnnotation { id, ref annotation, owner } => {
             if permissions.annotations_locked && !sender_is_authority {
-                debug!("Dropping AddAnnotation from {sender_id} (locked)");
+                debug!("Dropping SetAnnotation from {sender_id} (locked)");
                 return;
             }
-            if let Err(e) = validate_annotation(ann) {
+            if let Err(e) = validate_annotation(annotation) {
                 warn!("Invalid annotation from {sender_id}: {e}");
                 return;
             }
-            // Store in session state so the renderer picks it up.
             {
                 let mut s = ui_state.lock();
-                let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
-                anns.push(ann.clone());
-                owners.push(sender_id);
+                let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                if let Some(pos) = sync.ids.iter().position(|&eid| eid == id) {
+                    sync.annotations[pos] = annotation.clone();
+                    sync.owners[pos] = owner;
+                } else {
+                    sync.annotations.push(annotation.clone());
+                    sync.owners.push(owner);
+                    sync.ids.push(id);
+                }
                 s.annotation_sync_version += 1;
             }
-            // Relay to other peers (host-mediated).
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::UndoAnnotation => {
+        PeerMessage::RemoveAnnotation { id } => {
             if permissions.annotations_locked && !sender_is_authority {
-                debug!("Dropping UndoAnnotation from {sender_id} (locked)");
+                debug!("Dropping RemoveAnnotation from {sender_id} (locked)");
                 return;
             }
-            // Remove sender's most recent annotation from session state.
             {
                 let mut s = ui_state.lock();
-                if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
-                    && let Some(pos) = owners.iter().rposition(|&uid| uid == sender_id)
+                if let Some(sync) = s.current_annotation_sync.as_mut()
+                    && let Some(pos) = sync.ids.iter().position(|&eid| eid == id)
                 {
-                    anns.remove(pos);
-                    owners.remove(pos);
+                    sync.annotations.remove(pos);
+                    sync.owners.remove(pos);
+                    sync.ids.remove(pos);
                     s.annotation_sync_version += 1;
                 }
             }
-            relay_if_host(sender_id, &PeerMessage::UndoAnnotation, mesh);
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::ClearAnnotations => {
+            if permissions.annotations_locked && !sender_is_authority {
+                debug!("Dropping ClearAnnotations from {sender_id} (locked)");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                if let Some(sync) = s.current_annotation_sync.as_mut() {
+                    sync.annotations.clear();
+                    sync.owners.clear();
+                    sync.ids.clear();
+                    s.annotation_sync_version += 1;
+                }
+            }
+            relay_if_host(sender_id, &msg, mesh);
         }
 
         // ── Settings gated ──────────────────────────────────────────────
@@ -1426,7 +1505,7 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::AnnotationSync { ref annotations, ref owners } => {
+        PeerMessage::AnnotationSync { ref annotations, ref owners, ref ids } => {
             if !sender_is_authority {
                 debug!("Dropping AnnotationSync from non-authority {sender_id}");
                 return;
@@ -1434,7 +1513,11 @@ fn handle_incoming_message(
             {
                 let mut s = ui_state.lock();
                 s.annotation_sync_version += 1;
-                s.current_annotation_sync = Some((annotations.clone(), owners.clone()));
+                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                    annotations: annotations.clone(),
+                    owners: owners.clone(),
+                    ids: ids.clone(),
+                });
             }
             relay_if_host(sender_id, &msg, mesh);
         }

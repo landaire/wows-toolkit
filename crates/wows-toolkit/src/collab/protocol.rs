@@ -121,13 +121,17 @@ pub enum PeerMessage {
     /// Cursor position on the minimap. None = cursor left the map area.
     CursorPosition(Option<[f32; 2]>),
 
-    /// Add a new annotation.
+    /// Upsert an annotation (add new or update existing) by unique ID.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    AddAnnotation(Annotation),
+    SetAnnotation { id: u64, annotation: Annotation, owner: u64 },
 
-    /// Undo the sender's most recent annotation.
+    /// Remove a specific annotation by ID.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    UndoAnnotation,
+    RemoveAnnotation { id: u64 },
+
+    /// Remove all annotations.
+    /// Receiver drops if `annotations_locked` and sender is not host/co-host.
+    ClearAnnotations,
 
     /// Toggle a display option.
     /// Receiver drops if `settings_locked` and sender is not host/co-host.
@@ -160,6 +164,8 @@ pub enum PeerMessage {
         annotations: Vec<Annotation>,
         /// Parallel vec: which user_id created each annotation.
         owners: Vec<u64>,
+        /// Parallel vec: unique ID for each annotation.
+        ids: Vec<u64>,
     },
 
     /// Playback state. Receiver drops if sender is not host/co-host.

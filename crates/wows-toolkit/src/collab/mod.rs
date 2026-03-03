@@ -67,6 +67,16 @@ pub struct PeerPing {
     pub time: Instant,
 }
 
+/// Authoritative annotation state maintained by the session.
+///
+/// Uses parallel vecs for annotations, their unique IDs, and owner user_ids.
+#[derive(Debug, Clone, Default)]
+pub struct AnnotationSyncState {
+    pub annotations: Vec<types::Annotation>,
+    pub owners: Vec<u64>,
+    pub ids: Vec<u64>,
+}
+
 /// Shared session state visible to the UI thread.
 ///
 /// Stored behind `Arc<Mutex<>>` and read each frame by the renderer UI.
@@ -104,7 +114,7 @@ pub struct SessionState {
     /// Monotonically increasing version for annotation sync updates.
     pub annotation_sync_version: u64,
     /// Current annotation sync from the authority peer.
-    pub current_annotation_sync: Option<(Vec<types::Annotation>, Vec<u64>)>,
+    pub current_annotation_sync: Option<AnnotationSyncState>,
     /// Monotonically increasing version for per-ship range override updates.
     pub range_override_version: u64,
     /// Current per-ship range overrides from peers.
@@ -223,7 +233,7 @@ pub enum SessionCommand {
     /// Reset all peer display overrides (host/co-host only).
     ResetClientOverrides,
     /// Broadcast current annotation state (host/co-host only).
-    SyncAnnotations { annotations: Vec<types::Annotation>, owners: Vec<u64> },
+    SyncAnnotations { annotations: Vec<types::Annotation>, owners: Vec<u64>, ids: Vec<u64> },
     /// Promote a peer to co-host (host only).
     PromoteToCoHost { user_id: u64 },
     /// Declare self as frame source (host/co-host only).

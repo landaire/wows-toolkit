@@ -184,10 +184,20 @@ enum PaintTool {
     DrawingTriangle { filled: bool, center: Option<Vec2> },
 }
 
+/// Snapshot of annotation state for undo/redo.
+#[derive(Clone)]
+struct AnnotationSnapshot {
+    annotations: Vec<Annotation>,
+    ids: Vec<u64>,
+    owners: Vec<u64>,
+}
+
 /// Persistent annotation layer state.
 struct AnnotationState {
     annotations: Vec<Annotation>,
-    undo_stack: Vec<Vec<Annotation>>,
+    /// Unique ID for each annotation (parallel to `annotations`).
+    annotation_ids: Vec<u64>,
+    undo_stack: Vec<AnnotationSnapshot>,
     active_tool: PaintTool,
     paint_color: Color32,
     stroke_width: f32,
@@ -212,6 +222,7 @@ impl Default for AnnotationState {
     fn default() -> Self {
         Self {
             annotations: Vec::new(),
+            annotation_ids: Vec::new(),
             undo_stack: Vec::new(),
             active_tool: PaintTool::None,
             paint_color: Color32::YELLOW,
@@ -232,7 +243,11 @@ impl Default for AnnotationState {
 impl AnnotationState {
     /// Save current annotations as an undo snapshot.
     fn save_undo(&mut self) {
-        self.undo_stack.push(self.annotations.clone());
+        self.undo_stack.push(AnnotationSnapshot {
+            annotations: self.annotations.clone(),
+            ids: self.annotation_ids.clone(),
+            owners: self.annotation_owners.clone(),
+        });
         // Cap stack size
         if self.undo_stack.len() > 50 {
             self.undo_stack.remove(0);
@@ -242,7 +257,9 @@ impl AnnotationState {
     /// Pop the last undo snapshot, restoring annotations.
     fn undo(&mut self) {
         if let Some(prev) = self.undo_stack.pop() {
-            self.annotations = prev;
+            self.annotations = prev.annotations;
+            self.annotation_ids = prev.ids;
+            self.annotation_owners = prev.owners;
             self.selected_index = None;
         }
     }
@@ -336,6 +353,49 @@ fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annotatio
             width: *width,
             filled: *filled,
         },
+    }
+}
+
+/// Send a `SetAnnotation` event for the annotation at `idx` via the collab channel.
+fn send_annotation_update(shared_state: &SharedRendererState, ann: &AnnotationState, idx: usize) {
+    if let Some(ref tx) = shared_state.collab_local_tx {
+        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
+            crate::collab::peer::LocalAnnotationEvent::Set {
+                id: ann.annotation_ids[idx],
+                annotation: local_annotation_to_collab(&ann.annotations[idx]),
+                owner: ann.annotation_owners.get(idx).copied().unwrap_or(0),
+            },
+        ));
+    }
+}
+
+/// Send a `RemoveAnnotation` event for the given annotation ID via the collab channel.
+fn send_annotation_remove(shared_state: &SharedRendererState, id: u64) {
+    if let Some(ref tx) = shared_state.collab_local_tx {
+        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
+            crate::collab::peer::LocalAnnotationEvent::Remove { id },
+        ));
+    }
+}
+
+/// Send a `ClearAnnotations` event via the collab channel.
+fn send_annotation_clear(shared_state: &SharedRendererState) {
+    if let Some(ref tx) = shared_state.collab_local_tx {
+        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
+            crate::collab::peer::LocalAnnotationEvent::Clear,
+        ));
+    }
+}
+
+/// Send a full annotation sync (used after undo to broadcast the complete state).
+fn send_annotation_full_sync(shared_state: &SharedRendererState, ann: &AnnotationState) {
+    if let Some(ref tx) = shared_state.collab_command_tx {
+        let collab_anns: Vec<_> = ann.annotations.iter().map(local_annotation_to_collab).collect();
+        let _ = tx.send(crate::collab::SessionCommand::SyncAnnotations {
+            annotations: collab_anns,
+            owners: ann.annotation_owners.clone(),
+            ids: ann.annotation_ids.clone(),
+        });
     }
 }
 
@@ -1257,10 +1317,11 @@ impl ReplayRendererViewer {
                                 state.applied_render_options_version = s.render_options_version;
                             }
                             if s.annotation_sync_version > state.applied_annotation_sync_version {
-                                if let Some((ref collab_anns, ref owners)) = s.current_annotation_sync {
+                                if let Some(ref sync) = s.current_annotation_sync {
                                     let mut ann = annotation_arc.lock();
-                                    ann.annotations = collab_anns.iter().cloned().map(collab_annotation_to_local).collect();
-                                    ann.annotation_owners = owners.clone();
+                                    ann.annotations = sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
+                                    ann.annotation_owners = sync.owners.clone();
+                                    ann.annotation_ids = sync.ids.clone();
                                 }
                                 state.applied_annotation_sync_version = s.annotation_sync_version;
                             }
@@ -1990,8 +2051,12 @@ impl ReplayRendererViewer {
                             && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
                         {
                             ann.save_undo();
+                            let id = ann.annotation_ids[sel];
                             ann.annotations.remove(sel);
+                            ann.annotation_ids.remove(sel);
+                            ann.annotation_owners.remove(sel);
                             ann.selected_index = None;
+                            send_annotation_remove(&shared_state.lock(), id);
                         }
 
                         // [ and ] to adjust stroke width when a tool is active
@@ -2053,9 +2118,12 @@ impl ReplayRendererViewer {
                                     }
                                 }
 
-                                // Stop rotation drag
-                                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                                // Stop rotation drag — sync final rotation to collab
+                                if ann.dragging_rotation && response.drag_stopped_by(egui::PointerButton::Primary) {
                                     ann.dragging_rotation = false;
+                                    if let Some(sel) = ann.selected_index {
+                                        send_annotation_update(&shared_state.lock(), &ann, sel);
+                                    }
                                 }
 
                                 // Click to select/deselect annotations
@@ -2122,6 +2190,14 @@ impl ReplayRendererViewer {
                                         Annotation::Rectangle { center, .. } => *center += minimap_delta,
                                         Annotation::Triangle { center, .. } => *center += minimap_delta,
                                     }
+                                }
+                                // Sync moved annotation on drag release
+                                if !ann.dragging_rotation
+                                    && response.drag_stopped_by(egui::PointerButton::Primary)
+                                    && let Some(sel) = ann.selected_index
+                                    && sel < ann.annotations.len()
+                                {
+                                    send_annotation_update(&shared_state.lock(), &ann, sel);
                                 }
                             }
 
@@ -2275,22 +2351,27 @@ impl ReplayRendererViewer {
                             ann.save_undo();
                         }
                         if let Some(a) = new_annotation {
-                            if let Some(ref tx) = shared_state.lock().collab_local_tx {
-                                let collab_ann = local_annotation_to_collab(&a);
-                                let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Add(collab_ann)));
-                            }
+                            let id: u64 = rand::random();
+                            let my_user_id = shared_state.lock().collab_session_state.as_ref()
+                                .map(|ss| ss.lock().my_user_id).unwrap_or(0);
                             ann.annotations.push(a);
+                            ann.annotation_ids.push(id);
+                            ann.annotation_owners.push(my_user_id);
+                            let state = shared_state.lock();
+                            send_annotation_update(&state, &ann, ann.annotations.len() - 1);
                         }
                         if let Some(idx) = erase_idx {
+                            let id = ann.annotation_ids[idx];
                             ann.annotations.remove(idx);
+                            ann.annotation_ids.remove(idx);
+                            ann.annotation_owners.remove(idx);
+                            send_annotation_remove(&shared_state.lock(), id);
                         }
 
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
-                            if let Some(ref tx) = shared_state.lock().collab_local_tx {
-                                let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Undo));
-                            }
                             ann.undo();
+                            send_annotation_full_sync(&shared_state.lock(), &ann);
                         }
 
                         if response.clicked() {
@@ -2752,7 +2833,10 @@ impl ReplayRendererViewer {
                                             {
                                                 ann.save_undo();
                                                 ann.annotations.clear();
+                                                ann.annotation_ids.clear();
+                                                ann.annotation_owners.clear();
                                                 ann.show_context_menu = false;
+                                                send_annotation_clear(&shared_state.lock());
                                             }
                                         }
                                     });
@@ -2847,6 +2931,7 @@ impl ReplayRendererViewer {
                                                         Annotation::Triangle { radius, .. } => *radius = size,
                                                         _ => {}
                                                     }
+                                                    send_annotation_update(&shared_state.lock(), &ann, sel_idx);
                                                 }
                                             });
                                         }
@@ -2864,11 +2949,15 @@ impl ReplayRendererViewer {
                                                     Annotation::Triangle { color, .. } => color,
                                                     _ => unreachable!(),
                                                 };
+                                                let old_color = *color_ref;
                                                 egui::color_picker::color_edit_button_srgba(
                                                     ui,
                                                     color_ref,
                                                     egui::color_picker::Alpha::Opaque,
                                                 );
+                                                if *color_ref != old_color {
+                                                    send_annotation_update(&shared_state.lock(), &ann, sel_idx);
+                                                }
                                             });
                                         }
 
@@ -2886,7 +2975,11 @@ impl ReplayRendererViewer {
                                                 Annotation::Triangle { filled, .. } => filled,
                                                 _ => unreachable!(),
                                             };
+                                            let old_filled = *filled_ref;
                                             ui.checkbox(filled_ref, egui::RichText::new("Filled").small());
+                                            if *filled_ref != old_filled {
+                                                send_annotation_update(&shared_state.lock(), &ann, sel_idx);
+                                            }
                                         }
 
                                         // Team toggle (for ships)
@@ -2903,6 +2996,7 @@ impl ReplayRendererViewer {
                                                     .min_size(egui::vec2(60.0, 0.0));
                                             if ui.add(btn).clicked() {
                                                 *friendly = !*friendly;
+                                                send_annotation_update(&shared_state.lock(), &ann, sel_idx);
                                             }
                                         }
 
@@ -2916,8 +3010,12 @@ impl ReplayRendererViewer {
                                             .clicked()
                                         {
                                             ann.save_undo();
+                                            let id = ann.annotation_ids[sel_idx];
                                             ann.annotations.remove(sel_idx);
+                                            ann.annotation_ids.remove(sel_idx);
+                                            ann.annotation_owners.remove(sel_idx);
                                             ann.selected_index = None;
+                                            send_annotation_remove(&shared_state.lock(), id);
                                         }
                                     });
                                 });

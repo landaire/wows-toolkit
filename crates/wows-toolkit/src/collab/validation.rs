@@ -171,11 +171,13 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
             }
         }
 
-        PeerMessage::AddAnnotation(ann) => {
-            validate_annotation(ann)?;
+        PeerMessage::SetAnnotation { annotation, .. } => {
+            validate_annotation(annotation)?;
         }
 
-        PeerMessage::UndoAnnotation => {}
+        PeerMessage::RemoveAnnotation { .. } => {}
+
+        PeerMessage::ClearAnnotations => {}
 
         PeerMessage::ToggleDisplayOption { .. } => {
             // DisplayOptionField is exhaustive — rkyv rejects unknown variants.
@@ -185,7 +187,7 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
 
         PeerMessage::RenderOptions(_) => {}
 
-        PeerMessage::AnnotationSync { annotations, owners } => {
+        PeerMessage::AnnotationSync { annotations, owners, ids } => {
             if annotations.len() > MAX_ANNOTATIONS {
                 return Err(ValidationError(format!(
                     "too many annotations: {} > {MAX_ANNOTATIONS}",
@@ -197,6 +199,13 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
                     "annotations/owners length mismatch: {} vs {}",
                     annotations.len(),
                     owners.len()
+                )));
+            }
+            if annotations.len() != ids.len() {
+                return Err(ValidationError(format!(
+                    "annotations/ids length mismatch: {} vs {}",
+                    annotations.len(),
+                    ids.len()
                 )));
             }
             for ann in annotations {
