@@ -354,7 +354,7 @@ pub struct TabState {
 
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
     #[serde(skip)]
-    pub replay_controls_cache: Option<Vec<crate::replay_renderer::CommandGroup>>,
+    pub replay_controls_cache: Option<Vec<crate::controls::CommandGroup>>,
 
     // ─── Collaborative session ─────────────────────────────────────────────
     /// Session token text input for joining.

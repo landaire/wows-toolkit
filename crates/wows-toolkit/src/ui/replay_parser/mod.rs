@@ -3602,8 +3602,7 @@ impl ToolkitTabViewer<'_> {
                             .desired_width(160.0),
                     );
                     ui.add_space(4.0);
-                    let can_join = has_token
-                        && !self.tab_state.settings.collab_display_name.trim().is_empty();
+                    let can_join = has_token && !self.tab_state.settings.collab_display_name.trim().is_empty();
                     if ui.add_enabled(can_join, egui::Button::new("Join")).clicked() {
                         if self.tab_state.settings.suppress_p2p_ip_warning {
                             self.tab_state.pending_join = true;
@@ -3880,7 +3879,7 @@ impl ToolkitTabViewer<'_> {
                     if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
                         use std::io::Read;
                         if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
-                            let groups = crate::replay_renderer::parse_commands_scheme(&buf);
+                            let groups = crate::controls::parse_commands_scheme(&buf);
                             if !groups.is_empty() {
                                 return Some(groups);
                             }

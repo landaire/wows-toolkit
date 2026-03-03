@@ -1533,20 +1533,13 @@ pub fn encode_token(node_id: &iroh::PublicKey) -> String {
 /// Decode a session token back to a node ID.
 pub fn decode_token(token: &str) -> Result<iroh::PublicKey, String> {
     let token = token.trim();
-    let b64 = token
-        .strip_prefix(TOKEN_PREFIX)
-        .ok_or_else(|| format!("Token must start with \"{TOKEN_PREFIX}\""))?;
-    let compressed = data_encoding::BASE64URL_NOPAD
-        .decode(b64.as_bytes())
-        .map_err(|e| format!("Invalid base64: {e}"))?;
+    let b64 = token.strip_prefix(TOKEN_PREFIX).ok_or_else(|| format!("Token must start with \"{TOKEN_PREFIX}\""))?;
+    let compressed =
+        data_encoding::BASE64URL_NOPAD.decode(b64.as_bytes()).map_err(|e| format!("Invalid base64: {e}"))?;
     let mut decoder = ZlibDecoder::new(&compressed[..]);
     let mut raw = String::new();
-    decoder
-        .read_to_string(&mut raw)
-        .map_err(|e| format!("Decompression failed: {e}"))?;
-    raw.trim()
-        .parse::<iroh::PublicKey>()
-        .map_err(|e| format!("Invalid node ID: {e}"))
+    decoder.read_to_string(&mut raw).map_err(|e| format!("Decompression failed: {e}"))?;
+    raw.trim().parse::<iroh::PublicKey>().map_err(|e| format!("Invalid node ID: {e}"))
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1619,4 +1612,3 @@ fn set_status(state: &Arc<Mutex<SessionState>>, status: SessionStatus) {
         s.status = status;
     }
 }
-

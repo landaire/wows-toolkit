@@ -5,6 +5,7 @@ mod armor_viewer;
 mod build_tracker;
 pub mod collab;
 mod consts;
+pub(crate) mod controls;
 mod error;
 mod game_params;
 #[cfg(feature = "mod_manager")]

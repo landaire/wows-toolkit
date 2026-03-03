@@ -491,205 +491,7 @@ impl WowsToolkitApp {
                             }
                         }
 
-                        match result {
-                            Ok(data) => match data {
-                                BackgroundTaskCompletion::NoReceiver => {}
-                                BackgroundTaskCompletion::DataLoaded {
-                                    new_dir,
-                                    wows_data,
-                                    replays,
-                                    available_builds,
-                                } => {
-                                    let replays_dir = wows_data.replays_dir.clone();
-                                    let build_number = wows_data.build_number;
-
-                                    // Detect if the WoWs directory changed
-                                    let dir_changed =
-                                        self.tab_state.settings.wows_dir != new_dir.to_str().unwrap_or_default();
-
-                                    // Clear all stale game state when directory changes
-                                    if dir_changed {
-                                        self.tab_state.reset_game_state();
-                                    }
-
-                                    if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
-                                        *old_wows_data.write() = wows_data;
-                                    } else {
-                                        let wows_data = Arc::new(parking_lot::RwLock::new(wows_data));
-                                        self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
-
-                                        #[cfg(feature = "mod_manager")]
-                                        crate::mod_manager::start_mod_manager_thread(
-                                            Arc::clone(&self.runtime),
-                                            wows_data,
-                                            self.tab_state.mod_action_receiver.take().unwrap(),
-                                            self.tab_state.background_task_sender.clone(),
-                                        );
-                                    }
-
-                                    // Initialize or update the version data map.
-                                    // Always create a new map when the directory changed
-                                    // (reset_game_state sets wows_data_map to None).
-                                    let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
-                                    if let Some(map) = &self.tab_state.wows_data_map {
-                                        map.insert(build_number, Arc::clone(wows_data_ref));
-                                    } else {
-                                        let mut map = crate::wows_data::WoWsDataMap::new(
-                                            PathBuf::from(&new_dir),
-                                            self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
-                                        );
-                                        if let Some(tx) = self.tab_state.network_job_tx.clone() {
-                                            map.set_network_job_tx(tx);
-                                        }
-                                        map.insert(build_number, Arc::clone(wows_data_ref));
-                                        self.tab_state.wows_data_map = Some(map);
-                                    }
-
-                                    // If the initial build used fallback constants, request the correct version
-                                    if !wows_data_ref.read().replay_constants_exact_match {
-                                        self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants {
-                                            build: build_number,
-                                        });
-                                    }
-
-                                    self.tab_state.available_builds = available_builds;
-                                    self.tab_state.selected_browser_build = build_number;
-
-                                    self.tab_state.update_wows_dir(&new_dir, &replays_dir);
-                                    let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
-                                    self.tab_state.replay_files = replays;
-                                    self.tab_state.browser_state.reset_filters();
-
-                                    self.tab_state.toasts.lock().success("Successfully loaded game data");
-
-                                    if no_replays {
-                                        self.tab_state.toasts.lock().warning(
-                                            "No replays detected \u{2014} is your WoWs directory properly configured?",
-                                        );
-                                    }
-
-                                    self.check_constants_version_mismatch();
-                                }
-                                BackgroundTaskCompletion::BuildDataLoaded { build } => {
-                                    self.tab_state.selected_browser_build = build;
-                                    self.tab_state.browser_state.reset_filters();
-                                    self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
-                                }
-                                BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
-                                    use crate::task::ReplaySource;
-
-                                    let track_session_stats = matches!(
-                                        source,
-                                        ReplaySource::FileListing
-                                            | ReplaySource::AutoLoad
-                                            | ReplaySource::Reload
-                                            | ReplaySource::SessionStatsOnly
-                                    );
-                                    let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
-                                    let open_tab = matches!(
-                                        source,
-                                        ReplaySource::ManualOpen | ReplaySource::AutoLoad | ReplaySource::Reload
-                                    );
-
-                                    if track_session_stats {
-                                        let replay_guard = replay.read();
-                                        if let Some(stat) = crate::session_stats::PerGameStat::from_replay(
-                                            &replay_guard,
-                                            &replay_guard.resource_loader,
-                                        ) {
-                                            self.tab_state.settings.session_stats.add_game(stat);
-                                        }
-                                        drop(replay_guard);
-                                    }
-                                    if update_ui {
-                                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
-                                        self.tab_state
-                                            .settings
-                                            .player_tracker
-                                            .write()
-                                            .update_from_replay(&replay.read());
-                                        if open_tab {
-                                            self.tab_state.open_replay_in_focused_tab(replay);
-                                        }
-                                        self.tab_state.toasts.lock().success("Successfully loaded replay");
-                                        self.try_update_constants();
-                                    }
-                                }
-                                BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
-                                    let current_process =
-                                        std::env::current_exe().expect("current process has no path?");
-                                    let mut current_process_new_path = current_process.as_os_str().to_owned();
-                                    current_process_new_path.push(".old");
-                                    let current_process_new_path = PathBuf::from(current_process_new_path);
-                                    let rename_process = move || {
-                                        std::fs::rename(current_process.clone(), &current_process_new_path)
-                                            .context("failed to rename current process")?;
-                                        std::fs::rename(new_exe, &current_process)
-                                            .context("failed to rename new process")?;
-
-                                        std::process::Command::new(current_process)
-                                            .arg(current_process_new_path)
-                                            .spawn()
-                                            .context("failed to execute updated process")
-                                    };
-
-                                    match rename_process() {
-                                        Ok(_) => {
-                                            std::process::exit(0);
-                                        }
-                                        Err(e) => {
-                                            error!("Update rename failed: {e:?}");
-                                            self.show_err_window(e.into());
-                                        }
-                                    }
-                                }
-                                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
-                                    // Switch to "All Time" so historical data is visible
-                                    self.tab_state.settings.player_tracker.write().filter_time_period =
-                                        crate::ui::player_tracker::TimePeriod::AllTime;
-                                }
-                                BackgroundTaskCompletion::ConstantsLoaded(constants) => {
-                                    *self.tab_state.game_constants.write() = constants;
-                                    self.check_constants_version_mismatch();
-                                }
-                                BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
-                                    self.tab_state.personal_rating_data.write().load(pr_data);
-                                }
-                                #[cfg(feature = "mod_manager")]
-                                BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
-                                    crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
-                                        self.tab_state.mod_manager_info.update_index("test".to_string(), index);
-                                    }
-                                    crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
-                                        self.tab_state
-                                            .toasts
-                                            .lock()
-                                            .success(format!("Successfully installed mod: {}", mod_info.meta.name()));
-                                    }
-                                    crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
-                                        self.tab_state
-                                            .toasts
-                                            .lock()
-                                            .success(format!("Successfully uninstalled mod: {}", mod_info.meta.name()));
-                                    }
-                                    crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {}
-                                },
-                            },
-                            Err(e)
-                                if e.downcast_current_context::<ToolkitError>()
-                                    .is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
-                            Err(e) => {
-                                error!("Background task error: {e:?}");
-
-                                if e.downcast_current_context::<ToolkitError>()
-                                    .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
-                                {
-                                    self.tab_state.settings_needs_attention = true;
-                                }
-
-                                self.tab_state.toasts.lock().error(format!("{e}"));
-                            }
-                        }
+                        self.handle_task_completion(result);
                         true
                     } else {
                         false
@@ -831,6 +633,414 @@ impl WowsToolkitApp {
                 }
             }
         }
+    }
+
+    /// Handle a completed background task result.
+    fn handle_task_completion(&mut self, result: Result<BackgroundTaskCompletion, Report>) {
+        match result {
+            Ok(data) => match data {
+                BackgroundTaskCompletion::NoReceiver => {}
+                BackgroundTaskCompletion::DataLoaded { new_dir, wows_data, replays, available_builds } => {
+                    let replays_dir = wows_data.replays_dir.clone();
+                    let build_number = wows_data.build_number;
+
+                    // Detect if the WoWs directory changed
+                    let dir_changed = self.tab_state.settings.wows_dir != new_dir.to_str().unwrap_or_default();
+
+                    // Clear all stale game state when directory changes
+                    if dir_changed {
+                        self.tab_state.reset_game_state();
+                    }
+
+                    if let Some(old_wows_data) = &self.tab_state.world_of_warships_data {
+                        *old_wows_data.write() = wows_data;
+                    } else {
+                        let wows_data = Arc::new(parking_lot::RwLock::new(wows_data));
+                        self.tab_state.world_of_warships_data = Some(Arc::clone(&wows_data));
+
+                        #[cfg(feature = "mod_manager")]
+                        crate::mod_manager::start_mod_manager_thread(
+                            Arc::clone(&self.runtime),
+                            wows_data,
+                            self.tab_state.mod_action_receiver.take().unwrap(),
+                            self.tab_state.background_task_sender.clone(),
+                        );
+                    }
+
+                    // Initialize or update the version data map.
+                    // Always create a new map when the directory changed
+                    // (reset_game_state sets wows_data_map to None).
+                    let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
+                    if let Some(map) = &self.tab_state.wows_data_map {
+                        map.insert(build_number, Arc::clone(wows_data_ref));
+                    } else {
+                        let mut map = crate::wows_data::WoWsDataMap::new(
+                            PathBuf::from(&new_dir),
+                            self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
+                        );
+                        if let Some(tx) = self.tab_state.network_job_tx.clone() {
+                            map.set_network_job_tx(tx);
+                        }
+                        map.insert(build_number, Arc::clone(wows_data_ref));
+                        self.tab_state.wows_data_map = Some(map);
+                    }
+
+                    // If the initial build used fallback constants, request the correct version
+                    if !wows_data_ref.read().replay_constants_exact_match {
+                        self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build: build_number });
+                    }
+
+                    self.tab_state.available_builds = available_builds;
+                    self.tab_state.selected_browser_build = build_number;
+
+                    self.tab_state.update_wows_dir(&new_dir, &replays_dir);
+                    let no_replays = replays.as_ref().is_none_or(|r| r.is_empty());
+                    self.tab_state.replay_files = replays;
+                    self.tab_state.browser_state.reset_filters();
+
+                    self.tab_state.toasts.lock().success("Successfully loaded game data");
+
+                    if no_replays {
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .warning("No replays detected \u{2014} is your WoWs directory properly configured?");
+                    }
+
+                    self.check_constants_version_mismatch();
+                }
+                BackgroundTaskCompletion::BuildDataLoaded { build } => {
+                    self.tab_state.selected_browser_build = build;
+                    self.tab_state.browser_state.reset_filters();
+                    self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
+                }
+                BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
+                    use crate::task::ReplaySource;
+
+                    let track_session_stats = matches!(
+                        source,
+                        ReplaySource::FileListing
+                            | ReplaySource::AutoLoad
+                            | ReplaySource::Reload
+                            | ReplaySource::SessionStatsOnly
+                    );
+                    let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
+                    let open_tab =
+                        matches!(source, ReplaySource::ManualOpen | ReplaySource::AutoLoad | ReplaySource::Reload);
+
+                    if track_session_stats {
+                        let replay_guard = replay.read();
+                        if let Some(stat) =
+                            crate::session_stats::PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
+                        {
+                            self.tab_state.settings.session_stats.add_game(stat);
+                        }
+                        drop(replay_guard);
+                    }
+                    if update_ui {
+                        self.tab_state.replay_parser_tab.lock().game_chat.clear();
+                        self.tab_state.settings.player_tracker.write().update_from_replay(&replay.read());
+                        if open_tab {
+                            self.tab_state.open_replay_in_focused_tab(replay);
+                        }
+                        self.tab_state.toasts.lock().success("Successfully loaded replay");
+                        self.try_update_constants();
+                    }
+                }
+                BackgroundTaskCompletion::UpdateDownloaded(new_exe) => {
+                    let current_process = std::env::current_exe().expect("current process has no path?");
+                    let mut current_process_new_path = current_process.as_os_str().to_owned();
+                    current_process_new_path.push(".old");
+                    let current_process_new_path = PathBuf::from(current_process_new_path);
+                    let rename_process = move || {
+                        std::fs::rename(current_process.clone(), &current_process_new_path)
+                            .context("failed to rename current process")?;
+                        std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
+
+                        std::process::Command::new(current_process)
+                            .arg(current_process_new_path)
+                            .spawn()
+                            .context("failed to execute updated process")
+                    };
+
+                    match rename_process() {
+                        Ok(_) => {
+                            std::process::exit(0);
+                        }
+                        Err(e) => {
+                            error!("Update rename failed: {e:?}");
+                            self.show_err_window(e.into());
+                        }
+                    }
+                }
+                BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
+                    // Switch to "All Time" so historical data is visible
+                    self.tab_state.settings.player_tracker.write().filter_time_period =
+                        crate::ui::player_tracker::TimePeriod::AllTime;
+                }
+                BackgroundTaskCompletion::ConstantsLoaded(constants) => {
+                    *self.tab_state.game_constants.write() = constants;
+                    self.check_constants_version_mismatch();
+                }
+                BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
+                    self.tab_state.personal_rating_data.write().load(pr_data);
+                }
+                #[cfg(feature = "mod_manager")]
+                BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
+                    crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
+                        self.tab_state.mod_manager_info.update_index("test".to_string(), index);
+                    }
+                    crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .success(format!("Successfully installed mod: {}", mod_info.meta.name()));
+                    }
+                    crate::mod_manager::ModTaskCompletion::ModUninstalled(mod_info) => {
+                        self.tab_state
+                            .toasts
+                            .lock()
+                            .success(format!("Successfully uninstalled mod: {}", mod_info.meta.name()));
+                    }
+                    crate::mod_manager::ModTaskCompletion::ModDownloaded(_) => {}
+                },
+            },
+            Err(e)
+                if e.downcast_current_context::<ToolkitError>()
+                    .is_some_and(|e| matches!(e, ToolkitError::BackgroundTaskCompleted)) => {}
+            Err(e) => {
+                error!("Background task error: {e:?}");
+
+                if e.downcast_current_context::<ToolkitError>()
+                    .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
+                {
+                    self.tab_state.settings_needs_attention = true;
+                }
+
+                self.tab_state.toasts.lock().error(format!("{e}"));
+            }
+        }
+    }
+
+    /// Draw replay renderer viewports, auto-wire collab sessions, and clean up closed renderers.
+    fn sync_replay_renderers(&mut self, ctx: &egui::Context) {
+        let mut replay_renderers = self.tab_state.replay_renderers.lock();
+        let mut remove_renderers = Vec::new();
+        for (idx, renderer) in replay_renderers.iter().enumerate() {
+            renderer.draw(ctx);
+            if !renderer.open.load(Ordering::Relaxed) {
+                remove_renderers.push(idx);
+            }
+            // Check if renderer wants to save default options
+            if let Some(saved) = renderer.pending_defaults_save.lock().take() {
+                self.tab_state.settings.renderer_options = saved;
+            }
+            // Sync GPU warning suppress flag back to settings
+            let suppress = renderer.suppress_gpu_warning.load(Ordering::Relaxed);
+            if suppress != self.tab_state.settings.suppress_gpu_encoder_warning {
+                self.tab_state.settings.suppress_gpu_encoder_warning = suppress;
+            }
+
+            // Auto-wire renderer to host session if active.
+            if let Some(ref host_handle) = self.tab_state.host_session {
+                let mut state = renderer.shared_state().lock();
+                // Assign replay_id if not yet assigned.
+                if state.collab_replay_id.is_none() {
+                    let id = self.tab_state.next_replay_id;
+                    self.tab_state.next_replay_id += 1;
+                    state.collab_replay_id = Some(id);
+                    state.session_frame_tx = Some(host_handle.frame_tx.clone());
+                    state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                    state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
+                    state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
+                    state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
+                    state.collab_command_tx = Some(host_handle.command_tx.clone());
+                    // Send the current frame (if any) so clients get it immediately.
+                    if let Some(ref frame) = state.frame {
+                        tracing::debug!("Auto-wire: first frame already available, broadcasting (replay_id={id})");
+                        let _ = host_handle.frame_tx.try_send(crate::collab::peer::FrameBroadcast {
+                            replay_id: id,
+                            clock: frame.clock.0,
+                            frame_index: frame.frame_index as u32,
+                            total_frames: frame.total_frames as u32,
+                            game_duration: frame.game_duration,
+                            commands: frame.commands.clone(),
+                        });
+                    }
+                }
+                // ReplayOpened is normally sent by the background thread once
+                // assets load. But if assets loaded before auto-wire set
+                // collab_command_tx, the background thread missed its chance.
+                // Handle that race here.
+                if !state.session_announced
+                    && state.assets.is_some()
+                    && let Some(replay_id) = state.collab_replay_id
+                {
+                    let map_png = state
+                        .assets
+                        .as_ref()
+                        .and_then(|a| {
+                            a.map_image.as_ref().map(|img| {
+                                let (ref data, w, h) = **img;
+                                let mut buf = Vec::new();
+                                if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                    let mut cursor = std::io::Cursor::new(&mut buf);
+                                    let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
+                                }
+                                buf
+                            })
+                        })
+                        .unwrap_or_default();
+                    let game_version = state.game_version.clone().unwrap_or_default();
+                    let replay_name = state.collab_replay_name.clone().unwrap_or_else(|| {
+                        renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string()
+                    });
+                    let _ = host_handle.command_tx.send(crate::collab::SessionCommand::ReplayOpened {
+                        replay_id,
+                        replay_name,
+                        map_image_png: map_png,
+                        game_version,
+                    });
+                    state.session_announced = true;
+                }
+            }
+        }
+
+        // Send ReplayClosed for renderers being removed while a host session is active.
+        if self.tab_state.host_session.is_some() {
+            for &idx in &remove_renderers {
+                let state = replay_renderers[idx].shared_state().lock();
+                if let Some(replay_id) = state.collab_replay_id
+                    && let Some(ref handle) = self.tab_state.host_session
+                {
+                    let _ = handle.command_tx.send(crate::collab::SessionCommand::ReplayClosed { replay_id });
+                }
+            }
+        }
+
+        *replay_renderers = replay_renderers
+            .drain(..)
+            .enumerate()
+            .filter_map(|(idx, r)| if !remove_renderers.contains(&idx) { Some(r) } else { None })
+            .collect();
+    }
+
+    /// Poll pending armor viewer requests from replay renderers and spawn viewers.
+    fn poll_armor_viewer_requests(&mut self) {
+        // Poll ship assets loading (so it works without the Armor Viewer tab open)
+        if let crate::armor_viewer::state::ShipAssetsState::Loading(ref rx) = self.tab_state.armor_viewer.ship_assets
+            && let Ok(result) = rx.try_recv()
+        {
+            match result {
+                Ok(assets) => {
+                    // Build ship catalog if not already built (same logic as build_armor_viewer_tab)
+                    if self.tab_state.armor_viewer.ship_catalog.is_none()
+                        && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                    {
+                        let wd = wows_data.read();
+                        if let Some(metadata) = wd.game_metadata.as_ref() {
+                            let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
+                            for nation_group in &catalog.nations {
+                                if !self.tab_state.armor_viewer.nation_flag_textures.contains_key(&nation_group.nation)
+                                    && let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
+                                {
+                                    self.tab_state
+                                        .armor_viewer
+                                        .nation_flag_textures
+                                        .insert(nation_group.nation.clone(), asset);
+                                }
+                            }
+                            self.tab_state.armor_viewer.ship_catalog = Some(std::sync::Arc::new(catalog));
+                        }
+                    }
+                    self.tab_state.armor_viewer.ship_assets =
+                        crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load ship assets: {e}");
+                    self.tab_state.armor_viewer.ship_assets = crate::armor_viewer::state::ShipAssetsState::Failed(e);
+                }
+            }
+        }
+
+        let replay_renderers = self.tab_state.replay_renderers.lock();
+        for renderer in replay_renderers.iter() {
+            let mut state = renderer.shared_state().lock();
+            let requests: Vec<crate::replay_renderer::ArmorViewerRequest> =
+                state.pending_armor_viewers.drain(..).collect();
+            drop(state);
+
+            for request in requests {
+                // Ensure ship assets and GPU pipeline are available
+                let ship_assets = match &self.tab_state.armor_viewer.ship_assets {
+                    crate::armor_viewer::state::ShipAssetsState::Loaded(assets) => Some(assets.clone()),
+                    _ => None,
+                };
+                let gpu_pipeline = self.tab_state.armor_viewer.gpu_pipeline.clone();
+                let render_state = self.tab_state.wgpu_render_state.clone();
+
+                if let (Some(ship_assets), Some(gpu_pipeline), Some(render_state)) =
+                    (ship_assets, gpu_pipeline, render_state)
+                {
+                    // Find the target player info from the bridge
+                    let bridge = request.bridge.lock();
+                    let target_player = bridge.players.iter().find(|p| p.entity_id == request.target_entity_id);
+                    if let Some(player) = target_player {
+                        let viewer = crate::realtime_armor_viewer::RealtimeArmorViewer::new(
+                            player,
+                            request.bridge.clone(),
+                            ship_assets,
+                            gpu_pipeline,
+                            render_state,
+                            Some(request.command_tx.clone()),
+                        );
+                        drop(bridge);
+                        self.realtime_armor_viewers.push(Arc::new(egui::mutex::Mutex::new(viewer)));
+                    } else {
+                        // Bridge players not populated yet — re-queue for next frame
+                        drop(bridge);
+                        let mut state = renderer.shared_state().lock();
+                        state.pending_armor_viewers.push(request);
+                    }
+                } else {
+                    // Assets not ready — trigger loading if needed
+                    if matches!(
+                        &self.tab_state.armor_viewer.ship_assets,
+                        crate::armor_viewer::state::ShipAssetsState::NotLoaded
+                    ) && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                    {
+                        let wd = wows_data.read();
+                        let vfs = wd.vfs.clone();
+                        let game_metadata = wd.game_metadata.clone();
+                        drop(wd);
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
+                                let metadata =
+                                    game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
+                                let assets =
+                                    wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, metadata)
+                                        .map_err(|e| format!("{e:?}"))?;
+                                Ok(Arc::new(assets))
+                            })();
+                            let _ = tx.send(result);
+                        });
+                        self.tab_state.armor_viewer.ship_assets =
+                            crate::armor_viewer::state::ShipAssetsState::Loading(rx);
+                    }
+                    if self.tab_state.armor_viewer.gpu_pipeline.is_none()
+                        && let Some(ref rs) = self.tab_state.wgpu_render_state
+                    {
+                        self.tab_state.armor_viewer.gpu_pipeline =
+                            Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device, &rs.queue)));
+                    }
+                    // Re-queue the request for next frame
+                    let mut state = renderer.shared_state().lock();
+                    state.pending_armor_viewers.push(request);
+                }
+            }
+        }
+        drop(replay_renderers);
     }
 
     fn ui_file_drag_and_drop(&mut self, ctx: &Context) {
@@ -1079,233 +1289,9 @@ impl WowsToolkitApp {
             .collect();
         drop(file_viewer);
 
-        // Draw replay renderer viewports
-        {
-            let mut replay_renderers = self.tab_state.replay_renderers.lock();
-            let mut remove_renderers = Vec::new();
-            for (idx, renderer) in replay_renderers.iter().enumerate() {
-                renderer.draw(ctx);
-                if !renderer.open.load(Ordering::Relaxed) {
-                    remove_renderers.push(idx);
-                }
-                // Check if renderer wants to save default options
-                if let Some(saved) = renderer.pending_defaults_save.lock().take() {
-                    self.tab_state.settings.renderer_options = saved;
-                }
-                // Sync GPU warning suppress flag back to settings
-                let suppress = renderer.suppress_gpu_warning.load(Ordering::Relaxed);
-                if suppress != self.tab_state.settings.suppress_gpu_encoder_warning {
-                    self.tab_state.settings.suppress_gpu_encoder_warning = suppress;
-                }
+        self.sync_replay_renderers(ctx);
 
-                // Auto-wire renderer to host session if active.
-                if let Some(ref host_handle) = self.tab_state.host_session {
-                    let mut state = renderer.shared_state().lock();
-                    // Assign replay_id if not yet assigned.
-                    if state.collab_replay_id.is_none() {
-                        let id = self.tab_state.next_replay_id;
-                        self.tab_state.next_replay_id += 1;
-                        state.collab_replay_id = Some(id);
-                        state.session_frame_tx = Some(host_handle.frame_tx.clone());
-                        state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
-                        state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
-                        state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
-                        state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
-                        state.collab_command_tx = Some(host_handle.command_tx.clone());
-                        // Send the current frame (if any) so clients get it immediately.
-                        if let Some(ref frame) = state.frame {
-                            tracing::debug!("Auto-wire: first frame already available, broadcasting (replay_id={id})");
-                            let _ = host_handle.frame_tx.try_send(crate::collab::peer::FrameBroadcast {
-                                replay_id: id,
-                                clock: frame.clock.0,
-                                frame_index: frame.frame_index as u32,
-                                total_frames: frame.total_frames as u32,
-                                game_duration: frame.game_duration,
-                                commands: frame.commands.clone(),
-                            });
-                        }
-                    }
-                    // ReplayOpened is normally sent by the background thread once
-                    // assets load. But if assets loaded before auto-wire set
-                    // collab_command_tx, the background thread missed its chance.
-                    // Handle that race here.
-                    if !state.session_announced
-                        && state.assets.is_some()
-                        && let Some(replay_id) = state.collab_replay_id
-                    {
-                        let map_png = state
-                            .assets
-                            .as_ref()
-                            .and_then(|a| {
-                                a.map_image.as_ref().map(|img| {
-                                    let (ref data, w, h) = **img;
-                                    let mut buf = Vec::new();
-                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
-                                        let mut cursor = std::io::Cursor::new(&mut buf);
-                                        let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
-                                    }
-                                    buf
-                                })
-                            })
-                            .unwrap_or_default();
-                        let game_version = state.game_version.clone().unwrap_or_default();
-                        let replay_name = state.collab_replay_name.clone().unwrap_or_else(|| {
-                            renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string()
-                        });
-                        let _ = host_handle.command_tx.send(crate::collab::SessionCommand::ReplayOpened {
-                            replay_id,
-                            replay_name,
-                            map_image_png: map_png,
-                            game_version,
-                        });
-                        state.session_announced = true;
-                    }
-                }
-            }
-
-            // Send ReplayClosed for renderers being removed while a host session is active.
-            if self.tab_state.host_session.is_some() {
-                for &idx in &remove_renderers {
-                    let state = replay_renderers[idx].shared_state().lock();
-                    if let Some(replay_id) = state.collab_replay_id
-                        && let Some(ref handle) = self.tab_state.host_session
-                    {
-                        let _ = handle.command_tx.send(crate::collab::SessionCommand::ReplayClosed { replay_id });
-                    }
-                }
-            }
-
-            *replay_renderers = replay_renderers
-                .drain(..)
-                .enumerate()
-                .filter_map(|(idx, r)| if !remove_renderers.contains(&idx) { Some(r) } else { None })
-                .collect();
-        }
-
-        // Poll pending armor viewer requests from replay renderers and spawn viewers
-        {
-            // Poll ship assets loading (so it works without the Armor Viewer tab open)
-            if let crate::armor_viewer::state::ShipAssetsState::Loading(ref rx) =
-                self.tab_state.armor_viewer.ship_assets
-                && let Ok(result) = rx.try_recv()
-            {
-                match result {
-                    Ok(assets) => {
-                        // Build ship catalog if not already built (same logic as build_armor_viewer_tab)
-                        if self.tab_state.armor_viewer.ship_catalog.is_none()
-                            && let Some(ref wows_data) = self.tab_state.world_of_warships_data
-                        {
-                            let wd = wows_data.read();
-                            if let Some(metadata) = wd.game_metadata.as_ref() {
-                                let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
-                                for nation_group in &catalog.nations {
-                                    if !self
-                                        .tab_state
-                                        .armor_viewer
-                                        .nation_flag_textures
-                                        .contains_key(&nation_group.nation)
-                                        && let Some(asset) =
-                                            crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
-                                    {
-                                        self.tab_state
-                                            .armor_viewer
-                                            .nation_flag_textures
-                                            .insert(nation_group.nation.clone(), asset);
-                                    }
-                                }
-                                self.tab_state.armor_viewer.ship_catalog = Some(std::sync::Arc::new(catalog));
-                            }
-                        }
-                        self.tab_state.armor_viewer.ship_assets =
-                            crate::armor_viewer::state::ShipAssetsState::Loaded(assets);
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to load ship assets: {e}");
-                        self.tab_state.armor_viewer.ship_assets =
-                            crate::armor_viewer::state::ShipAssetsState::Failed(e);
-                    }
-                }
-            }
-
-            let replay_renderers = self.tab_state.replay_renderers.lock();
-            for renderer in replay_renderers.iter() {
-                let mut state = renderer.shared_state().lock();
-                let requests: Vec<crate::replay_renderer::ArmorViewerRequest> =
-                    state.pending_armor_viewers.drain(..).collect();
-                drop(state);
-
-                for request in requests {
-                    // Ensure ship assets and GPU pipeline are available
-                    let ship_assets = match &self.tab_state.armor_viewer.ship_assets {
-                        crate::armor_viewer::state::ShipAssetsState::Loaded(assets) => Some(assets.clone()),
-                        _ => None,
-                    };
-                    let gpu_pipeline = self.tab_state.armor_viewer.gpu_pipeline.clone();
-                    let render_state = self.tab_state.wgpu_render_state.clone();
-
-                    if let (Some(ship_assets), Some(gpu_pipeline), Some(render_state)) =
-                        (ship_assets, gpu_pipeline, render_state)
-                    {
-                        // Find the target player info from the bridge
-                        let bridge = request.bridge.lock();
-                        let target_player = bridge.players.iter().find(|p| p.entity_id == request.target_entity_id);
-                        if let Some(player) = target_player {
-                            let viewer = crate::realtime_armor_viewer::RealtimeArmorViewer::new(
-                                player,
-                                request.bridge.clone(),
-                                ship_assets,
-                                gpu_pipeline,
-                                render_state,
-                                Some(request.command_tx.clone()),
-                            );
-                            drop(bridge);
-                            self.realtime_armor_viewers.push(Arc::new(egui::mutex::Mutex::new(viewer)));
-                        } else {
-                            // Bridge players not populated yet — re-queue for next frame
-                            drop(bridge);
-                            let mut state = renderer.shared_state().lock();
-                            state.pending_armor_viewers.push(request);
-                        }
-                    } else {
-                        // Assets not ready — trigger loading if needed
-                        if matches!(
-                            &self.tab_state.armor_viewer.ship_assets,
-                            crate::armor_viewer::state::ShipAssetsState::NotLoaded
-                        ) && let Some(ref wows_data) = self.tab_state.world_of_warships_data
-                        {
-                            let wd = wows_data.read();
-                            let vfs = wd.vfs.clone();
-                            let game_metadata = wd.game_metadata.clone();
-                            drop(wd);
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            std::thread::spawn(move || {
-                                let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
-                                    let metadata =
-                                        game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
-                                    let assets =
-                                        wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, metadata)
-                                            .map_err(|e| format!("{e:?}"))?;
-                                    Ok(Arc::new(assets))
-                                })();
-                                let _ = tx.send(result);
-                            });
-                            self.tab_state.armor_viewer.ship_assets =
-                                crate::armor_viewer::state::ShipAssetsState::Loading(rx);
-                        }
-                        if self.tab_state.armor_viewer.gpu_pipeline.is_none()
-                            && let Some(ref rs) = self.tab_state.wgpu_render_state
-                        {
-                            self.tab_state.armor_viewer.gpu_pipeline =
-                                Some(Arc::new(crate::viewport_3d::GpuPipeline::new(&rs.device, &rs.queue)));
-                        }
-                        // Re-queue the request for next frame
-                        let mut state = renderer.shared_state().lock();
-                        state.pending_armor_viewers.push(request);
-                    }
-                }
-            }
-            drop(replay_renderers);
-        }
+        self.poll_armor_viewer_requests();
 
         self.ui_file_drag_and_drop(ctx);
 
