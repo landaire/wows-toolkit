@@ -3512,18 +3512,11 @@ impl ToolkitTabViewer<'_> {
                             }
                             if user.role != crate::collab::PeerRole::Host
                                 && user.role != crate::collab::PeerRole::CoHost
+                                && ui.small_button(icons::CROWN).on_hover_text("Promote to co-host").clicked()
+                                && let Some(ref handle) = self.tab_state.host_session
                             {
-                                if ui
-                                    .small_button(icons::CROWN)
-                                    .on_hover_text("Promote to co-host")
-                                    .clicked()
-                                    && let Some(ref handle) = self.tab_state.host_session
-                                {
-                                    let _ = handle
-                                        .command_tx
-                                        .send(SessionCommand::PromoteToCoHost { user_id: user.id });
-                                    self.tab_state.toasts.lock().info(format!("Promoted {} to co-host", user.name));
-                                }
+                                let _ = handle.command_tx.send(SessionCommand::PromoteToCoHost { user_id: user.id });
+                                self.tab_state.toasts.lock().info(format!("Promoted {} to co-host", user.name));
                             }
                         });
                     }
@@ -3594,8 +3587,10 @@ impl ToolkitTabViewer<'_> {
                                         .on_hover_text("Host");
                                 }
                                 crate::collab::PeerRole::CoHost => {
-                                    ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(136, 84, 208)))
-                                        .on_hover_text("Co-host");
+                                    ui.label(
+                                        RichText::new(icons::CROWN).small().color(Color32::from_rgb(136, 84, 208)),
+                                    )
+                                    .on_hover_text("Co-host");
                                 }
                                 _ => {}
                             }
@@ -3606,7 +3601,9 @@ impl ToolkitTabViewer<'_> {
 
                     // Display name (shared for host + join)
                     if self.tab_state.show_display_name_error {
-                        ui.label(RichText::new("Please enter a display name").color(Color32::from_rgb(220, 50, 50)).small());
+                        ui.label(
+                            RichText::new("Please enter a display name").color(Color32::from_rgb(220, 50, 50)).small(),
+                        );
                     }
                     ui.label("Display name:");
                     let name_response = ui.add(
@@ -3660,7 +3657,8 @@ impl ToolkitTabViewer<'_> {
                             });
 
                             let session_state = Arc::clone(&self.tab_state.session_state);
-                            let handle = crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
+                            let handle =
+                                crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
 
                             self.tab_state.host_session = Some(handle);
                         }

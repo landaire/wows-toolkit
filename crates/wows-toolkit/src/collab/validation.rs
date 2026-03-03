@@ -297,3 +297,559 @@ pub fn validate_frame_commands_count(count: usize) -> Result<(), ValidationError
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── Helper builders ─────────────────────────────────────────────────
+
+    fn valid_circle() -> Annotation {
+        Annotation::Circle { center: [100.0, 200.0], radius: 50.0, color: [255, 0, 0, 255], width: 3.0, filled: false }
+    }
+
+    fn valid_line() -> Annotation {
+        Annotation::Line { start: [0.0, 0.0], end: [100.0, 100.0], color: [0, 255, 0, 255], width: 2.0 }
+    }
+
+    fn valid_rect() -> Annotation {
+        Annotation::Rectangle {
+            center: [400.0, 400.0],
+            half_size: [50.0, 30.0],
+            rotation: 0.5,
+            color: [0, 0, 255, 255],
+            width: 2.0,
+            filled: true,
+        }
+    }
+
+    fn valid_triangle() -> Annotation {
+        Annotation::Triangle {
+            center: [300.0, 300.0],
+            radius: 40.0,
+            rotation: 1.0,
+            color: [255, 255, 0, 255],
+            width: 4.0,
+            filled: false,
+        }
+    }
+
+    fn valid_ship() -> Annotation {
+        Annotation::Ship { pos: [380.0, 380.0], yaw: 1.57, species: "Destroyer".into(), friendly: true }
+    }
+
+    fn valid_freehand() -> Annotation {
+        Annotation::FreehandStroke {
+            points: vec![[10.0, 10.0], [20.0, 20.0], [30.0, 15.0]],
+            color: [128, 128, 128, 255],
+            width: 5.0,
+        }
+    }
+
+    // ─── Annotation: valid cases ─────────────────────────────────────────
+
+    #[test]
+    fn valid_annotations_pass() {
+        assert!(validate_annotation(&valid_circle()).is_ok());
+        assert!(validate_annotation(&valid_line()).is_ok());
+        assert!(validate_annotation(&valid_rect()).is_ok());
+        assert!(validate_annotation(&valid_triangle()).is_ok());
+        assert!(validate_annotation(&valid_ship()).is_ok());
+        assert!(validate_annotation(&valid_freehand()).is_ok());
+    }
+
+    #[test]
+    fn annotation_at_coord_boundaries() {
+        let at_min = Annotation::Circle {
+            center: [COORD_MIN, COORD_MIN],
+            radius: 1.0,
+            color: [0; 4],
+            width: 1.0,
+            filled: false,
+        };
+        let at_max = Annotation::Circle {
+            center: [COORD_MAX, COORD_MAX],
+            radius: MAX_RADIUS,
+            color: [0; 4],
+            width: MAX_STROKE_WIDTH,
+            filled: false,
+        };
+        assert!(validate_annotation(&at_min).is_ok());
+        assert!(validate_annotation(&at_max).is_ok());
+    }
+
+    // ─── Annotation: invalid coordinates ─────────────────────────────────
+
+    #[test]
+    fn annotation_nan_position_rejected() {
+        let ann =
+            Annotation::Circle { center: [f32::NAN, 100.0], radius: 10.0, color: [0; 4], width: 2.0, filled: false };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_infinity_position_rejected() {
+        let ann = Annotation::Line { start: [f32::INFINITY, 0.0], end: [0.0, 0.0], color: [0; 4], width: 2.0 };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_coord_too_low_rejected() {
+        let ann = Annotation::Circle {
+            center: [COORD_MIN - 1.0, 0.0],
+            radius: 10.0,
+            color: [0; 4],
+            width: 2.0,
+            filled: false,
+        };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_coord_too_high_rejected() {
+        let ann = Annotation::Circle {
+            center: [0.0, COORD_MAX + 1.0],
+            radius: 10.0,
+            color: [0; 4],
+            width: 2.0,
+            filled: false,
+        };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── Annotation: invalid width ───────────────────────────────────────
+
+    #[test]
+    fn annotation_zero_width_rejected() {
+        let ann = Annotation::Line { start: [0.0, 0.0], end: [10.0, 10.0], color: [0; 4], width: 0.0 };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_negative_width_rejected() {
+        let ann =
+            Annotation::Circle { center: [100.0, 100.0], radius: 10.0, color: [0; 4], width: -1.0, filled: false };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_width_exceeds_max_rejected() {
+        let ann =
+            Annotation::Line { start: [0.0, 0.0], end: [10.0, 10.0], color: [0; 4], width: MAX_STROKE_WIDTH + 0.01 };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── Annotation: invalid radius ──────────────────────────────────────
+
+    #[test]
+    fn annotation_zero_radius_rejected() {
+        let ann = Annotation::Circle { center: [100.0, 100.0], radius: 0.0, color: [0; 4], width: 2.0, filled: false };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn annotation_radius_exceeds_max_rejected() {
+        let ann = Annotation::Triangle {
+            center: [100.0, 100.0],
+            radius: MAX_RADIUS + 1.0,
+            rotation: 0.0,
+            color: [0; 4],
+            width: 2.0,
+            filled: false,
+        };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── Annotation: freehand specifics ──────────────────────────────────
+
+    #[test]
+    fn freehand_too_many_points_rejected() {
+        let points: Vec<[f32; 2]> = (0..MAX_FREEHAND_POINTS + 1).map(|i| [i as f32, 0.0]).collect();
+        let ann = Annotation::FreehandStroke { points, color: [0; 4], width: 2.0 };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn freehand_at_max_points_accepted() {
+        let points: Vec<[f32; 2]> = (0..MAX_FREEHAND_POINTS).map(|i| [(i % 2000) as f32, 0.0]).collect();
+        let ann = Annotation::FreehandStroke { points, color: [0; 4], width: 2.0 };
+        assert!(validate_annotation(&ann).is_ok());
+    }
+
+    #[test]
+    fn freehand_invalid_point_position_rejected() {
+        let ann = Annotation::FreehandStroke { points: vec![[0.0, 0.0], [f32::NAN, 0.0]], color: [0; 4], width: 2.0 };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── Annotation: ship specifics ──────────────────────────────────────
+
+    #[test]
+    fn ship_nan_yaw_rejected() {
+        let ann = Annotation::Ship { pos: [100.0, 100.0], yaw: f32::NAN, species: "BB".into(), friendly: true };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    #[test]
+    fn ship_species_too_long_rejected() {
+        let ann =
+            Annotation::Ship { pos: [100.0, 100.0], yaw: 0.0, species: "x".repeat(MAX_STRING_LEN + 1), friendly: true };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── Annotation: rectangle specifics ─────────────────────────────────
+
+    #[test]
+    fn rectangle_nan_rotation_rejected() {
+        let ann = Annotation::Rectangle {
+            center: [100.0, 100.0],
+            half_size: [50.0, 30.0],
+            rotation: f32::NAN,
+            color: [0; 4],
+            width: 2.0,
+            filled: false,
+        };
+        assert!(validate_annotation(&ann).is_err());
+    }
+
+    // ─── PeerMessage: valid cases ────────────────────────────────────────
+
+    #[test]
+    fn valid_join_message() {
+        let msg = PeerMessage::Join { toolkit_version: "1.0.0".into(), name: "Alice".into() };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_cursor_position_some() {
+        let msg = PeerMessage::CursorPosition(Some([380.0, 380.0]));
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_cursor_position_none() {
+        let msg = PeerMessage::CursorPosition(None);
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_set_annotation() {
+        let msg = PeerMessage::SetAnnotation { id: 42, annotation: valid_circle(), owner: 1 };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_remove_annotation() {
+        let msg = PeerMessage::RemoveAnnotation { id: 42 };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_clear_annotations() {
+        assert!(validate_peer_message(&PeerMessage::ClearAnnotations).is_ok());
+    }
+
+    #[test]
+    fn valid_annotation_sync() {
+        let msg = PeerMessage::AnnotationSync {
+            annotations: vec![valid_circle(), valid_line()],
+            owners: vec![0, 1],
+            ids: vec![100, 101],
+        };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_playback_state() {
+        let msg = PeerMessage::PlaybackState { playing: true, speed: 2.0 };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_ping() {
+        let msg = PeerMessage::Ping { pos: [380.0, 380.0] };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_frame() {
+        let msg = PeerMessage::Frame {
+            replay_id: 1,
+            clock: 60.0,
+            frame_index: 5,
+            total_frames: 100,
+            game_duration: 1200.0,
+            compressed_commands: vec![0u8; 1024],
+        };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_replay_opened() {
+        let msg = PeerMessage::ReplayOpened {
+            replay_id: 1,
+            replay_name: "my_replay.wowsreplay".into(),
+            map_image_png: vec![0u8; 100],
+            game_version: "13.5.0".into(),
+        };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn valid_ship_trail_overrides() {
+        let msg = PeerMessage::ShipTrailOverrides { hidden: vec!["Player1".into(), "Player2".into()] };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    // ─── PeerMessage: invalid cases ──────────────────────────────────────
+
+    #[test]
+    fn join_empty_name_rejected() {
+        let msg = PeerMessage::Join { toolkit_version: "1.0".into(), name: String::new() };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn join_name_too_long_rejected() {
+        let msg = PeerMessage::Join { toolkit_version: "1.0".into(), name: "x".repeat(MAX_DISPLAY_NAME_LEN + 1) };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn join_name_at_max_accepted() {
+        let msg = PeerMessage::Join { toolkit_version: "1.0".into(), name: "x".repeat(MAX_DISPLAY_NAME_LEN) };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn join_version_too_long_rejected() {
+        let msg = PeerMessage::Join { toolkit_version: "x".repeat(101), name: "Alice".into() };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn cursor_out_of_range_rejected() {
+        let msg = PeerMessage::CursorPosition(Some([COORD_MAX + 1.0, 0.0]));
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn set_annotation_with_invalid_annotation_rejected() {
+        let msg = PeerMessage::SetAnnotation {
+            id: 1,
+            annotation: Annotation::Circle {
+                center: [f32::NAN, 0.0],
+                radius: 10.0,
+                color: [0; 4],
+                width: 2.0,
+                filled: false,
+            },
+            owner: 0,
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn annotation_sync_too_many_annotations_rejected() {
+        let anns: Vec<Annotation> = (0..MAX_ANNOTATIONS + 1)
+            .map(|i| Annotation::Circle {
+                center: [(i % 2000) as f32, 0.0],
+                radius: 10.0,
+                color: [0; 4],
+                width: 2.0,
+                filled: false,
+            })
+            .collect();
+        let count = anns.len();
+        let msg =
+            PeerMessage::AnnotationSync { annotations: anns, owners: vec![0; count], ids: (0..count as u64).collect() };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn annotation_sync_owners_length_mismatch_rejected() {
+        let msg = PeerMessage::AnnotationSync {
+            annotations: vec![valid_circle()],
+            owners: vec![0, 1], // 2 owners for 1 annotation
+            ids: vec![1],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn annotation_sync_ids_length_mismatch_rejected() {
+        let msg = PeerMessage::AnnotationSync {
+            annotations: vec![valid_circle()],
+            owners: vec![0],
+            ids: vec![1, 2], // 2 IDs for 1 annotation
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn annotation_sync_empty_is_valid() {
+        let msg = PeerMessage::AnnotationSync { annotations: vec![], owners: vec![], ids: vec![] };
+        assert!(validate_peer_message(&msg).is_ok());
+    }
+
+    #[test]
+    fn annotation_sync_invalid_annotation_rejected() {
+        let msg = PeerMessage::AnnotationSync {
+            annotations: vec![
+                valid_circle(),
+                Annotation::Circle { center: [f32::NAN, 0.0], radius: 10.0, color: [0; 4], width: 2.0, filled: false },
+            ],
+            owners: vec![0, 0],
+            ids: vec![1, 2],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn playback_speed_nan_rejected() {
+        let msg = PeerMessage::PlaybackState { playing: true, speed: f32::NAN };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn frame_index_exceeds_total_rejected() {
+        let msg = PeerMessage::Frame {
+            replay_id: 1,
+            clock: 0.0,
+            frame_index: 101,
+            total_frames: 100,
+            game_duration: 1200.0,
+            compressed_commands: vec![],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn frame_clock_nan_rejected() {
+        let msg = PeerMessage::Frame {
+            replay_id: 1,
+            clock: f32::NAN,
+            frame_index: 0,
+            total_frames: 100,
+            game_duration: 1200.0,
+            compressed_commands: vec![],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn frame_compressed_commands_too_large_rejected() {
+        let msg = PeerMessage::Frame {
+            replay_id: 1,
+            clock: 0.0,
+            frame_index: 0,
+            total_frames: 100,
+            game_duration: 1200.0,
+            compressed_commands: vec![0u8; MAX_FRAME_SIZE + 1],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn user_joined_name_too_long_rejected() {
+        let msg = PeerMessage::UserJoined { user_id: 1, name: "x".repeat(MAX_DISPLAY_NAME_LEN + 1), color: [0; 3] };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn replay_opened_name_too_long_rejected() {
+        let msg = PeerMessage::ReplayOpened {
+            replay_id: 1,
+            replay_name: "x".repeat(MAX_STRING_LEN + 1),
+            map_image_png: vec![],
+            game_version: "13.5".into(),
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn replay_opened_map_too_large_rejected() {
+        let msg = PeerMessage::ReplayOpened {
+            replay_id: 1,
+            replay_name: "test.wowsreplay".into(),
+            map_image_png: vec![0u8; MAX_MAP_IMAGE_SIZE + 1],
+            game_version: "13.5".into(),
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn ship_trail_overrides_too_many_rejected() {
+        let msg =
+            PeerMessage::ShipTrailOverrides { hidden: (0..MAX_PEERS * 24 + 1).map(|i| format!("P{i}")).collect() };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn ship_trail_overrides_name_too_long_rejected() {
+        let msg = PeerMessage::ShipTrailOverrides { hidden: vec!["x".repeat(MAX_DISPLAY_NAME_LEN + 1)] };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn ping_out_of_range_rejected() {
+        let msg = PeerMessage::Ping { pos: [0.0, COORD_MAX + 1.0] };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn rejected_reason_too_long_rejected() {
+        let msg = PeerMessage::Rejected { reason: "x".repeat(501) };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    #[test]
+    fn session_info_too_many_peers_rejected() {
+        let peers: Vec<PeerInfo> = (0..MAX_PEERS + 1)
+            .map(|i| PeerInfo {
+                user_id: i as u64,
+                name: format!("Peer{i}"),
+                color: [0; 3],
+                endpoint_addr_json: "{}".into(),
+            })
+            .collect();
+        let msg = PeerMessage::SessionInfo {
+            toolkit_version: "1.0".into(),
+            peers,
+            assigned_identity: PeerIdentity { user_id: 99, name: "Me".into(), color: [0; 3] },
+            frame_source_id: 0,
+            open_replays: vec![],
+        };
+        assert!(validate_peer_message(&msg).is_err());
+    }
+
+    // ─── ReplayInfo validation ───────────────────────────────────────────
+
+    #[test]
+    fn valid_replay_info_passes() {
+        let info = ReplayInfo {
+            replay_id: 1,
+            replay_name: "test.wowsreplay".into(),
+            map_image_png: vec![0u8; 100],
+            game_version: "13.5.0".into(),
+        };
+        assert!(validate_replay_info(&info).is_ok());
+    }
+
+    // ─── Frame commands count ────────────────────────────────────────────
+
+    #[test]
+    fn frame_commands_at_max_accepted() {
+        assert!(validate_frame_commands_count(MAX_COMMANDS_PER_FRAME).is_ok());
+    }
+
+    #[test]
+    fn frame_commands_over_max_rejected() {
+        assert!(validate_frame_commands_count(MAX_COMMANDS_PER_FRAME + 1).is_err());
+    }
+
+    #[test]
+    fn frame_commands_zero_accepted() {
+        assert!(validate_frame_commands_count(0).is_ok());
+    }
+}

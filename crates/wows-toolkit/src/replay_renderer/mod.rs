@@ -359,31 +359,28 @@ fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annotatio
 /// Send a `SetAnnotation` event for the annotation at `idx` via the collab channel.
 fn send_annotation_update(shared_state: &SharedRendererState, ann: &AnnotationState, idx: usize) {
     if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
-            crate::collab::peer::LocalAnnotationEvent::Set {
-                id: ann.annotation_ids[idx],
-                annotation: local_annotation_to_collab(&ann.annotations[idx]),
-                owner: ann.annotation_owners.get(idx).copied().unwrap_or(0),
-            },
-        ));
+        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Set {
+            id: ann.annotation_ids[idx],
+            annotation: local_annotation_to_collab(&ann.annotations[idx]),
+            owner: ann.annotation_owners.get(idx).copied().unwrap_or(0),
+        }));
     }
 }
 
 /// Send a `RemoveAnnotation` event for the given annotation ID via the collab channel.
 fn send_annotation_remove(shared_state: &SharedRendererState, id: u64) {
     if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
-            crate::collab::peer::LocalAnnotationEvent::Remove { id },
-        ));
+        let _ =
+            tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Remove {
+                id,
+            }));
     }
 }
 
 /// Send a `ClearAnnotations` event via the collab channel.
 fn send_annotation_clear(shared_state: &SharedRendererState) {
     if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(
-            crate::collab::peer::LocalAnnotationEvent::Clear,
-        ));
+        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Clear));
     }
 }
 

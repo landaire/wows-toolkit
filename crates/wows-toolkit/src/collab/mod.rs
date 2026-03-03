@@ -248,3 +248,151 @@ pub enum SessionCommand {
 pub fn shared_session_state() -> Arc<Mutex<SessionState>> {
     Arc::new(Mutex::new(SessionState::default()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── PeerRole ────────────────────────────────────────────────────────
+
+    #[test]
+    fn peer_role_is_host() {
+        assert!(PeerRole::Host.is_host());
+        assert!(!PeerRole::Host.is_co_host());
+        assert!(!PeerRole::Host.is_peer());
+    }
+
+    #[test]
+    fn peer_role_is_co_host() {
+        assert!(!PeerRole::CoHost.is_host());
+        assert!(PeerRole::CoHost.is_co_host());
+        assert!(!PeerRole::CoHost.is_peer());
+    }
+
+    #[test]
+    fn peer_role_is_peer() {
+        assert!(!PeerRole::Peer.is_host());
+        assert!(!PeerRole::Peer.is_co_host());
+        assert!(PeerRole::Peer.is_peer());
+    }
+
+    #[test]
+    fn peer_role_equality() {
+        assert_eq!(PeerRole::Host, PeerRole::Host);
+        assert_ne!(PeerRole::Host, PeerRole::CoHost);
+        assert_ne!(PeerRole::Host, PeerRole::Peer);
+        assert_ne!(PeerRole::CoHost, PeerRole::Peer);
+    }
+
+    // ─── Permissions ─────────────────────────────────────────────────────
+
+    #[test]
+    fn permissions_default_unlocked() {
+        let perms = Permissions::default();
+        assert!(!perms.annotations_locked);
+        assert!(!perms.settings_locked);
+    }
+
+    // ─── AnnotationSyncState ─────────────────────────────────────────────
+
+    #[test]
+    fn annotation_sync_state_default_empty() {
+        let state = AnnotationSyncState::default();
+        assert!(state.annotations.is_empty());
+        assert!(state.owners.is_empty());
+        assert!(state.ids.is_empty());
+    }
+
+    #[test]
+    fn annotation_sync_state_clone_is_independent() {
+        let mut state = AnnotationSyncState::default();
+        state.annotations.push(types::Annotation::Circle {
+            center: [100.0, 200.0],
+            radius: 50.0,
+            color: [255, 0, 0, 255],
+            width: 3.0,
+            filled: false,
+        });
+        state.owners.push(0);
+        state.ids.push(42);
+
+        let cloned = state.clone();
+        state.annotations.clear();
+        assert!(state.annotations.is_empty());
+        assert_eq!(cloned.annotations.len(), 1);
+    }
+
+    // ─── SessionState ────────────────────────────────────────────────────
+
+    #[test]
+    fn session_state_defaults() {
+        let state = SessionState::default();
+        assert_eq!(state.role, PeerRole::Host);
+        assert_eq!(state.my_user_id, 0);
+        assert_eq!(state.host_user_id, 0);
+        assert_eq!(state.frame_source_id, 0);
+        assert!(state.connected_users.is_empty());
+        assert!(!state.permissions.annotations_locked);
+        assert!(!state.permissions.settings_locked);
+        assert!(state.cursors.is_empty());
+        assert!(state.token.is_none());
+        assert_eq!(state.status, SessionStatus::Idle);
+        assert!(state.open_replays.is_empty());
+        assert_eq!(state.render_options_version, 0);
+        assert!(state.current_render_options.is_none());
+        assert_eq!(state.annotation_sync_version, 0);
+        assert!(state.current_annotation_sync.is_none());
+        assert_eq!(state.range_override_version, 0);
+        assert!(state.current_range_overrides.is_none());
+        assert_eq!(state.trail_override_version, 0);
+        assert!(state.current_trail_hidden.is_none());
+        assert!(state.pings.is_empty());
+    }
+
+    #[test]
+    fn session_status_equality() {
+        assert_eq!(SessionStatus::Idle, SessionStatus::Idle);
+        assert_eq!(SessionStatus::Active, SessionStatus::Active);
+        assert_eq!(SessionStatus::Starting, SessionStatus::Starting);
+        assert_eq!(SessionStatus::Connecting, SessionStatus::Connecting);
+        assert_ne!(SessionStatus::Idle, SessionStatus::Active);
+        assert_eq!(SessionStatus::Error("test".into()), SessionStatus::Error("test".into()));
+        assert_ne!(SessionStatus::Error("a".into()), SessionStatus::Error("b".into()));
+    }
+
+    #[test]
+    fn shared_session_state_is_arc_mutex() {
+        let state = shared_session_state();
+        // Should be accessible from multiple references.
+        let state2 = Arc::clone(&state);
+        state.lock().my_user_id = 42;
+        assert_eq!(state2.lock().my_user_id, 42);
+    }
+
+    // ─── ConnectedUser ───────────────────────────────────────────────────
+
+    #[test]
+    fn connected_user_clone() {
+        let user = ConnectedUser { id: 1, name: "Alice".into(), color: [255, 0, 0], role: PeerRole::Host };
+        let cloned = user.clone();
+        assert_eq!(cloned.id, 1);
+        assert_eq!(cloned.name, "Alice");
+        assert_eq!(cloned.color, [255, 0, 0]);
+        assert_eq!(cloned.role, PeerRole::Host);
+    }
+
+    // ─── OpenReplay ──────────────────────────────────────────────────────
+
+    #[test]
+    fn open_replay_clone() {
+        let replay = OpenReplay {
+            replay_id: 1,
+            replay_name: "test.wowsreplay".into(),
+            map_image_png: vec![0u8; 100],
+            game_version: "13.5.0".into(),
+        };
+        let cloned = replay.clone();
+        assert_eq!(cloned.replay_id, 1);
+        assert_eq!(cloned.replay_name, "test.wowsreplay");
+    }
+}

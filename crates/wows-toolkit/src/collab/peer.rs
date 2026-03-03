@@ -164,24 +164,9 @@ pub fn start_peer_session(
     }
     let state_clone = Arc::clone(&state);
 
-    runtime.spawn(peer_task(
-        mode,
-        event_tx,
-        command_rx,
-        frame_broadcast_rx,
-        inbound_frame_tx,
-        local_rx,
-        state_clone,
-    ));
+    runtime.spawn(peer_task(mode, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, state_clone));
 
-    PeerSessionHandle {
-        event_rx,
-        command_tx,
-        frame_tx,
-        frame_rx,
-        local_tx,
-        state,
-    }
+    PeerSessionHandle { event_rx, command_tx, frame_tx, frame_rx, local_tx, state }
 }
 
 // ─── Internal types ─────────────────────────────────────────────────────────
@@ -243,28 +228,10 @@ async fn peer_task(
 ) {
     match mode {
         PeerMode::Host(params) => {
-            host_main(
-                params,
-                event_tx,
-                command_rx,
-                frame_broadcast_rx,
-                inbound_frame_tx,
-                local_rx,
-                ui_state,
-            )
-            .await;
+            host_main(params, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, ui_state).await;
         }
         PeerMode::Join(params) => {
-            join_main(
-                params,
-                event_tx,
-                command_rx,
-                frame_broadcast_rx,
-                inbound_frame_tx,
-                local_rx,
-                ui_state,
-            )
-            .await;
+            join_main(params, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, ui_state).await;
         }
     }
 }
@@ -1467,12 +1434,7 @@ fn handle_incoming_message(
             let color = mesh.lock().peers.get(&sender_id).map(|p| p.color).unwrap_or([200, 200, 200]);
             {
                 let mut s = ui_state.lock();
-                s.pings.push(crate::collab::PeerPing {
-                    user_id: sender_id,
-                    color,
-                    pos,
-                    time: Instant::now(),
-                });
+                s.pings.push(crate::collab::PeerPing { user_id: sender_id, color, pos, time: Instant::now() });
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1781,4 +1743,838 @@ fn compress_frame(frame: &FrameBroadcast) -> Option<Vec<u8>> {
 
 fn set_status(state: &Arc<Mutex<SessionState>>, status: SessionStatus) {
     state.lock().status = status;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── Token encode/decode ─────────────────────────────────────────────
+
+    #[test]
+    fn token_encode_decode_roundtrip() {
+        let key = SecretKey::generate(&mut rand::rng());
+        let public = key.public();
+        let token = encode_token(&public);
+        let decoded = decode_token(&token).unwrap();
+        assert_eq!(public, decoded);
+    }
+
+    #[test]
+    fn token_has_prefix() {
+        let key = SecretKey::generate(&mut rand::rng());
+        let token = encode_token(&key.public());
+        assert!(token.starts_with(TOKEN_PREFIX));
+    }
+
+    #[test]
+    fn decode_token_rejects_missing_prefix() {
+        let err = decode_token("not-a-toolkit-token").unwrap_err();
+        assert!(err.contains("toolkit-"), "Error should mention prefix: {err}");
+    }
+
+    #[test]
+    fn decode_token_rejects_invalid_base64() {
+        let err = decode_token("toolkit-!!!invalid!!!").unwrap_err();
+        assert!(err.contains("base64") || err.contains("Base64"), "Error should mention base64: {err}");
+    }
+
+    #[test]
+    fn decode_token_rejects_empty_payload() {
+        let err = decode_token("toolkit-").unwrap_err();
+        assert!(err.is_empty() || !err.is_empty()); // Just shouldn't panic
+    }
+
+    #[test]
+    fn decode_token_trims_whitespace() {
+        let key = SecretKey::generate(&mut rand::rng());
+        let token = encode_token(&key.public());
+        let padded = format!("  {token}  \n");
+        let decoded = decode_token(&padded).unwrap();
+        assert_eq!(key.public(), decoded);
+    }
+
+    #[test]
+    fn different_keys_produce_different_tokens() {
+        let key1 = SecretKey::generate(&mut rand::rng());
+        let key2 = SecretKey::generate(&mut rand::rng());
+        let token1 = encode_token(&key1.public());
+        let token2 = encode_token(&key2.public());
+        assert_ne!(token1, token2);
+    }
+
+    // ─── MeshState ───────────────────────────────────────────────────────
+
+    fn make_mesh_peer(user_id: u64, role: PeerRole) -> MeshPeer {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        MeshPeer { user_id, name: format!("Peer{user_id}"), color: [0; 3], role, msg_tx: tx }
+    }
+
+    fn make_mesh_state(my_user_id: u64, my_role: PeerRole, peers: Vec<(u64, PeerRole)>) -> MeshState {
+        let mut peer_map = HashMap::new();
+        for (uid, role) in peers {
+            peer_map.insert(uid, make_mesh_peer(uid, role));
+        }
+        MeshState {
+            peers: peer_map,
+            my_user_id,
+            my_name: format!("Self{my_user_id}"),
+            my_color: [255, 0, 0],
+            my_role,
+            host_user_id: 0,
+            frame_source_id: 0,
+            permissions: Permissions::default(),
+        }
+    }
+
+    #[test]
+    fn mesh_role_of_self() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![]);
+        assert_eq!(mesh.role_of(0), PeerRole::Host);
+    }
+
+    #[test]
+    fn mesh_role_of_known_peer() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![(1, PeerRole::CoHost), (2, PeerRole::Peer)]);
+        assert_eq!(mesh.role_of(1), PeerRole::CoHost);
+        assert_eq!(mesh.role_of(2), PeerRole::Peer);
+    }
+
+    #[test]
+    fn mesh_role_of_unknown_peer_defaults_to_peer() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![]);
+        assert_eq!(mesh.role_of(999), PeerRole::Peer);
+    }
+
+    #[test]
+    fn mesh_is_authority_host() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![]);
+        assert!(mesh.is_authority(0));
+    }
+
+    #[test]
+    fn mesh_is_authority_cohost() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![(1, PeerRole::CoHost)]);
+        assert!(mesh.is_authority(1));
+    }
+
+    #[test]
+    fn mesh_is_not_authority_peer() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![(2, PeerRole::Peer)]);
+        assert!(!mesh.is_authority(2));
+    }
+
+    #[test]
+    fn mesh_is_not_authority_unknown() {
+        let mesh = make_mesh_state(0, PeerRole::Host, vec![]);
+        assert!(!mesh.is_authority(999));
+    }
+
+    // ─── handle_incoming_message test harness ────────────────────────────
+
+    /// Test harness for `handle_incoming_message`.
+    ///
+    /// Sets up mesh state, UI state, and channels, then dispatches a message
+    /// and returns the resulting state for assertions.
+    struct MessageTestHarness {
+        mesh: Arc<Mutex<MeshState>>,
+        ui_state: Arc<Mutex<SessionState>>,
+        event_rx: mpsc::Receiver<SessionEvent>,
+        frame_rx: mpsc::Receiver<PlaybackFrame>,
+        event_tx: mpsc::Sender<SessionEvent>,
+        frame_tx: mpsc::Sender<PlaybackFrame>,
+    }
+
+    impl MessageTestHarness {
+        /// Create a harness where we are a client (Peer role) receiving from the host.
+        fn as_client() -> Self {
+            Self::new(1, PeerRole::Peer, vec![(0, PeerRole::Host)], 0)
+        }
+
+        fn new(my_id: u64, my_role: PeerRole, peers: Vec<(u64, PeerRole)>, host_id: u64) -> Self {
+            let mesh = Arc::new(Mutex::new({
+                let mut m = make_mesh_state(my_id, my_role, peers);
+                m.host_user_id = host_id;
+                m
+            }));
+            let ui_state = Arc::new(Mutex::new(SessionState::default()));
+            let (event_tx, event_rx) = mpsc::channel();
+            let (frame_tx, frame_rx) = mpsc::channel();
+            Self { mesh, ui_state, event_rx, frame_rx, event_tx, frame_tx }
+        }
+
+        fn with_permissions(self, annotations_locked: bool, settings_locked: bool) -> Self {
+            self.mesh.lock().permissions = Permissions { annotations_locked, settings_locked };
+            self.ui_state.lock().permissions = Permissions { annotations_locked, settings_locked };
+            self
+        }
+
+        fn with_frame_source(self, user_id: u64) -> Self {
+            self.mesh.lock().frame_source_id = user_id;
+            self
+        }
+
+        fn dispatch(&self, sender_id: u64, msg: PeerMessage) {
+            handle_incoming_message(sender_id, msg, &self.mesh, &self.ui_state, &self.event_tx, &self.frame_tx);
+        }
+
+        fn ui(&self) -> parking_lot::MutexGuard<'_, SessionState> {
+            self.ui_state.lock()
+        }
+    }
+
+    // ─── Permission enforcement: annotations ─────────────────────────────
+
+    fn test_annotation() -> Annotation {
+        Annotation::Circle { center: [100.0, 200.0], radius: 50.0, color: [255, 0, 0, 255], width: 3.0, filled: false }
+    }
+
+    #[test]
+    fn set_annotation_accepted_when_unlocked() {
+        let h = MessageTestHarness::as_client();
+        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 2 };
+        h.dispatch(2, msg); // from a peer
+        let s = h.ui();
+        assert_eq!(s.annotation_sync_version, 1);
+        let sync = s.current_annotation_sync.as_ref().unwrap();
+        assert_eq!(sync.ids, vec![1]);
+    }
+
+    #[test]
+    fn set_annotation_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(true, false);
+        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 2 };
+        // Sender 2 is not authority (not in our peer list as co-host), so should be dropped.
+        // But wait — in our client harness, peers are [(0, Host)]. Sender 2 is unknown → defaults to Peer role.
+        h.dispatch(2, msg);
+        assert_eq!(h.ui().annotation_sync_version, 0);
+    }
+
+    #[test]
+    fn set_annotation_accepted_when_locked_from_authority() {
+        let h = MessageTestHarness::as_client().with_permissions(true, false);
+        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 };
+        h.dispatch(0, msg); // from the host (authority)
+        assert_eq!(h.ui().annotation_sync_version, 1);
+    }
+
+    #[test]
+    fn set_annotation_upserts_by_id() {
+        let h = MessageTestHarness::as_client();
+        let ann1 = Annotation::Circle {
+            center: [100.0, 200.0],
+            radius: 50.0,
+            color: [255, 0, 0, 255],
+            width: 3.0,
+            filled: false,
+        };
+        let ann2 = Annotation::Circle {
+            center: [300.0, 400.0],
+            radius: 25.0,
+            color: [0, 255, 0, 255],
+            width: 5.0,
+            filled: true,
+        };
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 42, annotation: ann1, owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 42, annotation: ann2, owner: 0 });
+
+        let s = h.ui();
+        let sync = s.current_annotation_sync.as_ref().unwrap();
+        assert_eq!(sync.ids.len(), 1, "Should upsert, not append");
+        assert_eq!(sync.ids[0], 42);
+        // Should be updated to the second annotation (center 300, 400).
+        match &sync.annotations[0] {
+            Annotation::Circle { center, .. } => {
+                assert!((center[0] - 300.0).abs() < f32::EPSILON);
+            }
+            _ => panic!("Expected Circle"),
+        }
+    }
+
+    #[test]
+    fn remove_annotation_accepted_when_unlocked() {
+        let h = MessageTestHarness::as_client();
+        // First add one.
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        assert_eq!(h.ui().annotation_sync_version, 1);
+
+        // Then remove it.
+        h.dispatch(0, PeerMessage::RemoveAnnotation { id: 1 });
+        let s = h.ui();
+        assert_eq!(s.annotation_sync_version, 2);
+        let sync = s.current_annotation_sync.as_ref().unwrap();
+        assert!(sync.ids.is_empty());
+    }
+
+    #[test]
+    fn remove_annotation_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(true, false);
+        // Add via authority.
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        // Try to remove from unknown peer.
+        h.dispatch(99, PeerMessage::RemoveAnnotation { id: 1 });
+        // Should still have the annotation.
+        let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
+        assert_eq!(sync.ids.len(), 1);
+    }
+
+    #[test]
+    fn clear_annotations_accepted_when_unlocked() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+
+        h.dispatch(99, PeerMessage::ClearAnnotations); // from anyone, unlocked
+        let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
+        assert!(sync.ids.is_empty());
+    }
+
+    #[test]
+    fn clear_annotations_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(true, false);
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+
+        h.dispatch(99, PeerMessage::ClearAnnotations);
+        let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
+        assert_eq!(sync.ids.len(), 1, "Clear should have been dropped");
+    }
+
+    #[test]
+    fn clear_annotations_accepted_when_locked_from_authority() {
+        let h = MessageTestHarness::as_client().with_permissions(true, false);
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+
+        h.dispatch(0, PeerMessage::ClearAnnotations); // host is authority
+        let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
+        assert!(sync.ids.is_empty());
+    }
+
+    // ─── Permission enforcement: settings ────────────────────────────────
+
+    #[test]
+    fn toggle_display_accepted_when_unlocked() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::ToggleDisplayOption { field: DisplayOptionField::ShowHpBars, value: true });
+        let s = h.ui();
+        assert_eq!(s.render_options_version, 1);
+        assert!(s.current_render_options.as_ref().unwrap().show_hp_bars);
+    }
+
+    #[test]
+    fn toggle_display_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(false, true);
+        h.dispatch(99, PeerMessage::ToggleDisplayOption { field: DisplayOptionField::ShowHpBars, value: true });
+        assert_eq!(h.ui().render_options_version, 0);
+    }
+
+    #[test]
+    fn toggle_display_accepted_when_locked_from_authority() {
+        let h = MessageTestHarness::as_client().with_permissions(false, true);
+        h.dispatch(0, PeerMessage::ToggleDisplayOption { field: DisplayOptionField::ShowTracers, value: true });
+        assert_eq!(h.ui().render_options_version, 1);
+        assert!(h.ui().current_render_options.as_ref().unwrap().show_tracers);
+    }
+
+    #[test]
+    fn ship_range_overrides_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(false, true);
+        h.dispatch(99, PeerMessage::ShipRangeOverrides { overrides: vec![] });
+        assert_eq!(h.ui().range_override_version, 0);
+    }
+
+    #[test]
+    fn ship_trail_overrides_dropped_when_locked_from_peer() {
+        let h = MessageTestHarness::as_client().with_permissions(false, true);
+        h.dispatch(99, PeerMessage::ShipTrailOverrides { hidden: vec!["P1".into()] });
+        assert_eq!(h.ui().trail_override_version, 0);
+    }
+
+    #[test]
+    fn ship_trail_overrides_accepted_when_unlocked() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::ShipTrailOverrides { hidden: vec!["P1".into()] });
+        assert_eq!(h.ui().trail_override_version, 1);
+        assert_eq!(h.ui().current_trail_hidden.as_ref().unwrap(), &["P1"]);
+    }
+
+    // ─── Permission enforcement: authority-only ──────────────────────────
+
+    #[test]
+    fn permissions_accepted_from_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::Permissions { annotations_locked: true, settings_locked: true });
+        let s = h.ui();
+        assert!(s.permissions.annotations_locked);
+        assert!(s.permissions.settings_locked);
+    }
+
+    #[test]
+    fn permissions_dropped_from_non_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::Permissions { annotations_locked: true, settings_locked: true });
+        let s = h.ui();
+        assert!(!s.permissions.annotations_locked);
+        assert!(!s.permissions.settings_locked);
+    }
+
+    #[test]
+    fn render_options_accepted_from_authority() {
+        let h = MessageTestHarness::as_client();
+        let mut opts = CollabRenderOptions::default();
+        opts.show_chat = true;
+        h.dispatch(0, PeerMessage::RenderOptions(opts));
+        assert_eq!(h.ui().render_options_version, 1);
+        assert!(h.ui().current_render_options.as_ref().unwrap().show_chat);
+    }
+
+    #[test]
+    fn render_options_dropped_from_non_authority() {
+        let h = MessageTestHarness::as_client();
+        let mut opts = CollabRenderOptions::default();
+        opts.show_chat = true;
+        h.dispatch(99, PeerMessage::RenderOptions(opts));
+        assert_eq!(h.ui().render_options_version, 0);
+    }
+
+    #[test]
+    fn annotation_sync_accepted_from_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            0,
+            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![0], ids: vec![42] },
+        );
+        let s = h.ui();
+        assert_eq!(s.annotation_sync_version, 1);
+        let sync = s.current_annotation_sync.as_ref().unwrap();
+        assert_eq!(sync.ids, vec![42]);
+    }
+
+    #[test]
+    fn annotation_sync_dropped_from_non_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            99,
+            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![0], ids: vec![42] },
+        );
+        assert_eq!(h.ui().annotation_sync_version, 0);
+        assert!(h.ui().current_annotation_sync.is_none());
+    }
+
+    #[test]
+    fn playback_state_dropped_from_non_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::PlaybackState { playing: true, speed: 1.0 });
+        // No state change expected — playback state isn't stored in UI state currently,
+        // but the message should be silently dropped (no panic).
+    }
+
+    // ─── Permission enforcement: host-only ───────────────────────────────
+
+    #[test]
+    fn user_joined_accepted_from_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0, 200, 83] });
+        let s = h.ui();
+        assert_eq!(s.connected_users.len(), 1);
+        assert_eq!(s.connected_users[0].name, "Eve");
+        assert_eq!(s.connected_users[0].id, 5);
+    }
+
+    #[test]
+    fn user_joined_dropped_from_non_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
+        assert!(h.ui().connected_users.is_empty());
+    }
+
+    #[test]
+    fn user_left_accepted_from_host() {
+        let h = MessageTestHarness::as_client();
+        // Add a user first.
+        h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
+        assert_eq!(h.ui().connected_users.len(), 1);
+        // Remove them.
+        h.dispatch(0, PeerMessage::UserLeft { user_id: 5 });
+        assert!(h.ui().connected_users.is_empty());
+    }
+
+    #[test]
+    fn user_left_dropped_from_non_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
+        h.dispatch(99, PeerMessage::UserLeft { user_id: 5 }); // from non-host
+        assert_eq!(h.ui().connected_users.len(), 1, "Should not have been removed");
+    }
+
+    #[test]
+    fn user_left_also_removes_cursor() {
+        let h = MessageTestHarness::as_client();
+        // Simulate cursor from peer 5.
+        h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
+        h.dispatch(5, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        assert!(!h.ui().cursors.is_empty());
+
+        h.dispatch(0, PeerMessage::UserLeft { user_id: 5 });
+        assert!(h.ui().cursors.iter().all(|c| c.user_id != 5));
+    }
+
+    // ─── Co-host promotion ───────────────────────────────────────────────
+
+    #[test]
+    fn promote_accepted_from_host() {
+        // We are client (user_id=1, Peer role), host is user_id=0.
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::PromoteToCoHost { user_id: 1 });
+
+        // Our role should be updated.
+        let mesh = h.mesh.lock();
+        assert_eq!(mesh.my_role, PeerRole::CoHost);
+        drop(mesh);
+
+        let s = h.ui();
+        assert_eq!(s.role, PeerRole::CoHost);
+
+        // Event should be emitted.
+        let event = h.event_rx.try_recv().unwrap();
+        match event {
+            SessionEvent::PeerPromoted { user_id } => assert_eq!(user_id, 1),
+            _ => panic!("Expected PeerPromoted event"),
+        }
+    }
+
+    #[test]
+    fn promote_dropped_from_non_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::PromoteToCoHost { user_id: 1 });
+        // Role should not change.
+        assert!(h.mesh.lock().my_role.is_peer());
+    }
+
+    #[test]
+    fn promote_other_peer_updates_mesh() {
+        // We are client (user_id=1), host promotes user 2.
+        let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::Peer)], 0);
+        h.dispatch(0, PeerMessage::PromoteToCoHost { user_id: 2 });
+
+        let mesh = h.mesh.lock();
+        assert_eq!(mesh.peers.get(&2).unwrap().role, PeerRole::CoHost);
+        assert!(mesh.my_role.is_peer()); // Our role unchanged.
+    }
+
+    // ─── Frame source ────────────────────────────────────────────────────
+
+    #[test]
+    fn frame_source_changed_accepted_from_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::FrameSourceChanged { source_user_id: 2 });
+        assert_eq!(h.mesh.lock().frame_source_id, 2);
+        assert_eq!(h.ui().frame_source_id, 2);
+    }
+
+    #[test]
+    fn frame_source_changed_dropped_from_non_authority() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::FrameSourceChanged { source_user_id: 99 });
+        assert_eq!(h.mesh.lock().frame_source_id, 0, "Frame source should not change");
+    }
+
+    #[test]
+    fn frame_dropped_from_wrong_source() {
+        let h = MessageTestHarness::as_client().with_frame_source(0);
+        // Create a minimal compressed frame.
+        let commands: Vec<DrawCommand> = vec![];
+        let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&commands).unwrap();
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&rkyv_bytes).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        // Send from user 99 (not the frame source).
+        h.dispatch(
+            99,
+            PeerMessage::Frame {
+                replay_id: 1,
+                clock: 0.0,
+                frame_index: 0,
+                total_frames: 10,
+                game_duration: 600.0,
+                compressed_commands: compressed,
+            },
+        );
+        // Frame should not arrive.
+        assert!(h.frame_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn frame_accepted_from_correct_source() {
+        let h = MessageTestHarness::as_client().with_frame_source(0);
+        let commands: Vec<DrawCommand> = vec![];
+        let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&commands).unwrap();
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&rkyv_bytes).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        h.dispatch(
+            0,
+            PeerMessage::Frame {
+                replay_id: 1,
+                clock: 30.0,
+                frame_index: 5,
+                total_frames: 100,
+                game_duration: 1200.0,
+                compressed_commands: compressed,
+            },
+        );
+        let frame = h.frame_rx.try_recv().unwrap();
+        assert_eq!(frame.replay_id, 1);
+        assert_eq!(frame.frame_index, 5);
+    }
+
+    // ─── Replay lifecycle ────────────────────────────────────────────────
+
+    #[test]
+    fn replay_opened_accepted_from_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            0,
+            PeerMessage::ReplayOpened {
+                replay_id: 1,
+                replay_name: "test.wowsreplay".into(),
+                map_image_png: vec![0u8; 10],
+                game_version: "13.5".into(),
+            },
+        );
+        let s = h.ui();
+        assert_eq!(s.open_replays.len(), 1);
+        assert_eq!(s.open_replays[0].replay_id, 1);
+    }
+
+    #[test]
+    fn replay_opened_dropped_from_non_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            99,
+            PeerMessage::ReplayOpened {
+                replay_id: 1,
+                replay_name: "test.wowsreplay".into(),
+                map_image_png: vec![],
+                game_version: "13.5".into(),
+            },
+        );
+        assert!(h.ui().open_replays.is_empty());
+    }
+
+    #[test]
+    fn replay_closed_removes_replay_and_clears_annotations() {
+        let h = MessageTestHarness::as_client();
+        // Open a replay.
+        h.dispatch(
+            0,
+            PeerMessage::ReplayOpened {
+                replay_id: 1,
+                replay_name: "test.wowsreplay".into(),
+                map_image_png: vec![],
+                game_version: "13.5".into(),
+            },
+        );
+        // Add some annotation state.
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+
+        // Close the replay.
+        h.dispatch(0, PeerMessage::ReplayClosed { replay_id: 1 });
+        let s = h.ui();
+        assert!(s.open_replays.is_empty());
+        assert!(s.current_annotation_sync.is_none(), "Annotations should be cleared on replay close");
+    }
+
+    #[test]
+    fn replay_closed_dropped_from_non_host() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            0,
+            PeerMessage::ReplayOpened {
+                replay_id: 1,
+                replay_name: "test.wowsreplay".into(),
+                map_image_png: vec![],
+                game_version: "13.5".into(),
+            },
+        );
+        h.dispatch(99, PeerMessage::ReplayClosed { replay_id: 1 });
+        assert_eq!(h.ui().open_replays.len(), 1, "Should not have been closed");
+    }
+
+    // ─── Cursor handling ─────────────────────────────────────────────────
+
+    #[test]
+    fn cursor_position_creates_entry() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        let s = h.ui();
+        assert_eq!(s.cursors.len(), 1);
+        assert_eq!(s.cursors[0].user_id, 0);
+        assert_eq!(s.cursors[0].pos, Some([100.0, 200.0]));
+    }
+
+    #[test]
+    fn cursor_position_updates_existing() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        h.dispatch(0, PeerMessage::CursorPosition(Some([300.0, 400.0])));
+        let s = h.ui();
+        assert_eq!(s.cursors.len(), 1);
+        assert_eq!(s.cursors[0].pos, Some([300.0, 400.0]));
+    }
+
+    #[test]
+    fn cursor_none_clears_position() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        h.dispatch(0, PeerMessage::CursorPosition(None));
+        let s = h.ui();
+        assert_eq!(s.cursors.len(), 1);
+        assert_eq!(s.cursors[0].pos, None);
+    }
+
+    // ─── Ping handling ───────────────────────────────────────────────────
+
+    #[test]
+    fn ping_adds_entry_when_settings_unlocked() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::Ping { pos: [100.0, 200.0] });
+        let s = h.ui();
+        assert_eq!(s.pings.len(), 1);
+        assert_eq!(s.pings[0].user_id, 0);
+        assert_eq!(s.pings[0].pos, [100.0, 200.0]);
+    }
+
+    #[test]
+    fn ping_always_accepted() {
+        // Pings are NOT settings-gated — they are always accepted.
+        let h = MessageTestHarness::as_client().with_permissions(false, true);
+        h.dispatch(99, PeerMessage::Ping { pos: [100.0, 200.0] });
+        assert_eq!(h.ui().pings.len(), 1);
+    }
+
+    // ─── Handshake messages ignored post-handshake ───────────────────────
+
+    #[test]
+    fn join_ignored_post_handshake() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(99, PeerMessage::Join { toolkit_version: "1.0".into(), name: "Hacker".into() });
+        // Should not crash or change state.
+        assert!(h.ui().connected_users.is_empty());
+    }
+
+    #[test]
+    fn session_info_ignored_post_handshake() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(
+            99,
+            PeerMessage::SessionInfo {
+                toolkit_version: "1.0".into(),
+                peers: vec![],
+                assigned_identity: PeerIdentity { user_id: 99, name: "X".into(), color: [0; 3] },
+                frame_source_id: 99,
+                open_replays: vec![],
+            },
+        );
+        // Should be silently ignored.
+    }
+
+    // ─── Co-host as authority ────────────────────────────────────────────
+
+    #[test]
+    fn cohost_can_send_authority_messages() {
+        // We are client, host is 0, co-host is 2.
+        let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::CoHost)], 0);
+        // Co-host sends Permissions — should be accepted.
+        h.dispatch(2, PeerMessage::Permissions { annotations_locked: true, settings_locked: false });
+        assert!(h.ui().permissions.annotations_locked);
+    }
+
+    #[test]
+    fn cohost_can_send_render_options() {
+        let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::CoHost)], 0);
+        let mut opts = CollabRenderOptions::default();
+        opts.show_advantage = true;
+        h.dispatch(2, PeerMessage::RenderOptions(opts));
+        assert_eq!(h.ui().render_options_version, 1);
+        assert!(h.ui().current_render_options.as_ref().unwrap().show_advantage);
+    }
+
+    #[test]
+    fn cohost_cannot_promote() {
+        // PromoteToCoHost is host-only (not just authority).
+        let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::CoHost)], 0);
+        h.dispatch(2, PeerMessage::PromoteToCoHost { user_id: 1 });
+        assert!(h.mesh.lock().my_role.is_peer(), "Co-host should not be able to promote");
+    }
+
+    #[test]
+    fn cohost_cannot_send_user_joined() {
+        let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::CoHost)], 0);
+        h.dispatch(2, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
+        assert!(h.ui().connected_users.is_empty());
+    }
+
+    // ─── Version bumping ─────────────────────────────────────────────────
+
+    #[test]
+    fn version_bumps_on_annotation_mutations() {
+        let h = MessageTestHarness::as_client();
+        assert_eq!(h.ui().annotation_sync_version, 0);
+
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        assert_eq!(h.ui().annotation_sync_version, 1);
+
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+        assert_eq!(h.ui().annotation_sync_version, 2);
+
+        h.dispatch(0, PeerMessage::RemoveAnnotation { id: 1 });
+        assert_eq!(h.ui().annotation_sync_version, 3);
+
+        h.dispatch(0, PeerMessage::ClearAnnotations);
+        assert_eq!(h.ui().annotation_sync_version, 4);
+    }
+
+    #[test]
+    fn version_bumps_on_render_options_and_toggles() {
+        let h = MessageTestHarness::as_client();
+        assert_eq!(h.ui().render_options_version, 0);
+
+        h.dispatch(0, PeerMessage::RenderOptions(CollabRenderOptions::default()));
+        assert_eq!(h.ui().render_options_version, 1);
+
+        h.dispatch(0, PeerMessage::ToggleDisplayOption { field: DisplayOptionField::ShowHpBars, value: true });
+        assert_eq!(h.ui().render_options_version, 2);
+    }
+
+    #[test]
+    fn annotation_sync_replaces_entire_state() {
+        let h = MessageTestHarness::as_client();
+        // Add two annotations individually.
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+        assert_eq!(h.ui().current_annotation_sync.as_ref().unwrap().ids.len(), 2);
+
+        // Full sync replaces everything.
+        h.dispatch(
+            0,
+            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![5], ids: vec![99] },
+        );
+        let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
+        assert_eq!(sync.ids, vec![99]);
+        assert_eq!(sync.owners, vec![5]);
+        assert_eq!(sync.annotations.len(), 1);
+    }
+
+    // ─── Permissions update mesh state too ────────────────────────────────
+
+    #[test]
+    fn permissions_message_updates_mesh_state() {
+        let h = MessageTestHarness::as_client();
+        h.dispatch(0, PeerMessage::Permissions { annotations_locked: true, settings_locked: true });
+        let m = h.mesh.lock();
+        assert!(m.permissions.annotations_locked);
+        assert!(m.permissions.settings_locked);
+    }
 }
