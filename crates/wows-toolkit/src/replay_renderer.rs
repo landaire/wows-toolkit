@@ -58,6 +58,8 @@ use egui_taffy::taffy;
 use egui_taffy::taffy::prelude::auto;
 use egui_taffy::taffy::prelude::length;
 
+use crate::collab::SessionStatus;
+use crate::collab::peer::FrameBroadcast;
 use crate::icons;
 use crate::settings::SavedRenderOptions;
 use crate::wows_data::SharedWoWsData;
@@ -459,6 +461,8 @@ struct AnnotationState {
     ship_range_overrides: HashMap<EntityId, ShipConfigFilter>,
     /// Initial self range filter from saved settings, applied once self entity ID is known.
     pending_self_range_filter: Option<ShipConfigFilter>,
+    /// Owner user_ids for each annotation (parallel to `annotations`), received from collab sync.
+    annotation_owners: Vec<u64>,
 }
 
 impl Default for AnnotationState {
@@ -477,6 +481,7 @@ impl Default for AnnotationState {
             context_menu_ship: None,
             ship_range_overrides: HashMap::new(),
             pending_self_range_filter: None,
+            annotation_owners: Vec::new(),
         }
     }
 }
@@ -497,6 +502,97 @@ impl AnnotationState {
             self.annotations = prev;
             self.selected_index = None;
         }
+    }
+}
+
+// ─── Collab annotation conversion ────────────────────────────────────────────
+
+/// Convert a collab wire annotation (primitive arrays) to the local annotation (egui types).
+fn collab_annotation_to_local(ca: crate::collab::types::Annotation) -> Annotation {
+    use crate::collab::types as ct;
+    match ca {
+        ct::Annotation::Ship { pos, yaw, species, friendly } => {
+            Annotation::Ship { pos: Vec2::new(pos[0], pos[1]), yaw, species, friendly }
+        }
+        ct::Annotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
+            points: points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect(),
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+        },
+        ct::Annotation::Line { start, end, color, width } => Annotation::Line {
+            start: Vec2::new(start[0], start[1]),
+            end: Vec2::new(end[0], end[1]),
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+        },
+        ct::Annotation::Circle { center, radius, color, width, filled } => Annotation::Circle {
+            center: Vec2::new(center[0], center[1]),
+            radius,
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+            filled,
+        },
+        ct::Annotation::Rectangle { center, half_size, rotation, color, width, filled } => Annotation::Rectangle {
+            center: Vec2::new(center[0], center[1]),
+            half_size: Vec2::new(half_size[0], half_size[1]),
+            rotation,
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+            filled,
+        },
+        ct::Annotation::Triangle { center, radius, rotation, color, width, filled } => Annotation::Triangle {
+            center: Vec2::new(center[0], center[1]),
+            radius,
+            rotation,
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+            filled,
+        },
+    }
+}
+
+/// Convert a local annotation (egui types) to collab wire annotation (primitive arrays).
+#[allow(dead_code)]
+fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annotation {
+    use crate::collab::types as ct;
+    match a {
+        Annotation::Ship { pos, yaw, species, friendly } => {
+            ct::Annotation::Ship { pos: [pos.x, pos.y], yaw: *yaw, species: species.clone(), friendly: *friendly }
+        }
+        Annotation::FreehandStroke { points, color, width } => ct::Annotation::FreehandStroke {
+            points: points.iter().map(|p| [p.x, p.y]).collect(),
+            color: color.to_array(),
+            width: *width,
+        },
+        Annotation::Line { start, end, color, width } => ct::Annotation::Line {
+            start: [start.x, start.y],
+            end: [end.x, end.y],
+            color: color.to_array(),
+            width: *width,
+        },
+        Annotation::Circle { center, radius, color, width, filled } => ct::Annotation::Circle {
+            center: [center.x, center.y],
+            radius: *radius,
+            color: color.to_array(),
+            width: *width,
+            filled: *filled,
+        },
+        Annotation::Rectangle { center, half_size, rotation, color, width, filled } => ct::Annotation::Rectangle {
+            center: [center.x, center.y],
+            half_size: [half_size.x, half_size.y],
+            rotation: *rotation,
+            color: color.to_array(),
+            width: *width,
+            filled: *filled,
+        },
+        Annotation::Triangle { center, radius, rotation, color, width, filled } => ct::Annotation::Triangle {
+            center: [center.x, center.y],
+            radius: *radius,
+            rotation: *rotation,
+            color: color.to_array(),
+            width: *width,
+            filled: *filled,
+        },
     }
 }
 
@@ -720,6 +816,7 @@ pub enum PlaybackCommand {
 
 /// A single frame's rendering data, shared from background to UI thread.
 pub struct PlaybackFrame {
+    pub replay_id: u64,
     pub commands: Vec<DrawCommand>,
     pub clock: GameClock,
     pub frame_index: usize,
@@ -878,6 +975,26 @@ pub struct SharedRendererState {
     pub shot_timelines: Option<HashMap<EntityId, Arc<ShipShotTimeline>>>,
     /// Parsed replay/spectator keybinding groups from `commands.scheme.xml`.
     pub replay_controls: Option<Vec<CommandGroup>>,
+    /// When a collab session is active, frames are cloned and sent here for broadcast.
+    pub session_frame_tx: Option<std::sync::mpsc::SyncSender<FrameBroadcast>>,
+    /// Game client version string from replay metadata (e.g. "0,13,7,0").
+    pub game_version: Option<String>,
+    /// Assigned collab replay ID when wired to a session.
+    pub collab_replay_id: Option<u64>,
+    /// True once a ReplayOpened command has been sent for this renderer.
+    pub session_announced: bool,
+    /// Version of render options last applied from the collab session.
+    pub applied_render_options_version: u64,
+    /// Version of annotation sync last applied from the collab session.
+    pub applied_annotation_sync_version: u64,
+    /// Reference to the collab session state (set by app.rs when wired to a session).
+    pub collab_session_state: Option<Arc<std::sync::Mutex<crate::collab::SessionState>>>,
+    /// Channel to send cursor position updates to the collab session.
+    pub collab_cursor_tx: Option<std::sync::mpsc::Sender<Option<[f32; 2]>>>,
+    /// Channel to send annotation events to the collab session.
+    pub collab_annotation_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalAnnotationEvent>>,
+    /// Channel to send display option toggles to the collab session.
+    pub collab_display_toggle_tx: Option<std::sync::mpsc::Sender<(crate::collab::protocol::DisplayOptionField, bool)>>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -912,7 +1029,8 @@ pub struct ReplayRendererViewer {
     /// Progress of the current video export, updated by the background thread.
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     /// Data needed for video export (cloned from launch params).
-    video_export_data: Arc<VideoExportData>,
+    /// `None` for client viewers that don't have their own replay data.
+    video_export_data: Option<Arc<VideoExportData>>,
     /// Zoom and pan state for the viewport. Persists across frames.
     zoom_pan: Arc<Mutex<ViewportZoomPan>>,
     /// Overlay controls visibility state.
@@ -980,6 +1098,16 @@ pub fn launch_replay_renderer(
         pending_armor_viewers: Vec::new(),
         shot_timelines: None,
         replay_controls: None,
+        session_frame_tx: None,
+        game_version: None,
+        collab_replay_id: None,
+        session_announced: false,
+        applied_render_options_version: 0,
+        applied_annotation_sync_version: 0,
+        collab_session_state: None,
+        collab_cursor_tx: None,
+        collab_annotation_tx: None,
+        collab_display_toggle_tx: None,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -1004,7 +1132,7 @@ pub fn launch_replay_renderer(
         toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
         video_exporting: Arc::new(AtomicBool::new(false)),
         video_export_progress: Arc::new(Mutex::new(None)),
-        video_export_data,
+        video_export_data: Some(video_export_data),
         zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
         overlay_state: Arc::new(Mutex::new(OverlayState::default())),
         annotation_state: Arc::new(Mutex::new({
@@ -1037,6 +1165,120 @@ pub fn launch_replay_renderer(
     });
 
     viewer
+}
+
+/// Create a lightweight client viewer for a collaborative session.
+///
+/// The client doesn't have its own replay data — it receives rendered frames
+/// from the host. The map image is decoded from the PNG sent in SessionInfo.
+/// Ship icons, fonts, and other assets are loaded from the local game data.
+pub fn launch_client_renderer(
+    replay_name: String,
+    map_image_png: Vec<u8>,
+    game_version: String,
+    saved_options: &SavedRenderOptions,
+    suppress_gpu_warning: Arc<AtomicBool>,
+    wows_data: Option<&SharedWoWsData>,
+    asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+) -> ReplayRendererViewer {
+    let initial_options = render_options_from_saved(saved_options);
+    let (_command_tx, _command_rx) = mpsc::channel();
+
+    // Decode PNG to RGBA
+    let map_image = image::load_from_memory(&map_image_png).ok().map(|img| {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        Arc::new((rgba.into_raw(), w, h) as RgbaAsset)
+    });
+
+    // Load icons and fonts from VFS via the shared asset cache.
+    let (ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, game_fonts) =
+        if let Some(vfs) = wows_data.map(|d| d.read().vfs.clone()) {
+            let mut cache = asset_cache.lock();
+            let si = cache.get_or_load_ship_icons(&vfs);
+            let pi = cache.get_or_load_plane_icons(&vfs);
+            let ci = cache.get_or_load_consumable_icons(&vfs);
+            let di = cache.get_or_load_death_cause_icons(&vfs);
+            let pwi = cache.get_or_load_powerup_icons(&vfs);
+            let gf = cache.get_or_load_game_fonts(&vfs);
+            (si, pi, ci, di, pwi, Some(gf))
+        } else {
+            (
+                Arc::new(HashMap::new()),
+                Arc::new(HashMap::new()),
+                Arc::new(HashMap::new()),
+                Arc::new(HashMap::new()),
+                Arc::new(HashMap::new()),
+                None,
+            )
+        };
+
+    let shared_state = Arc::new(Mutex::new(SharedRendererState {
+        status: RendererStatus::Loading,
+        frame: None,
+        assets: Some(ReplayRendererAssets {
+            map_image,
+            ship_icons,
+            plane_icons,
+            consumable_icons,
+            death_cause_icons,
+            powerup_icons,
+        }),
+        playing: false,
+        speed: 1.0,
+        options: initial_options,
+        show_dead_ships: saved_options.show_dead_ships,
+        viewport_ctx: None,
+        timeline_events: None,
+        battle_start: GameClock(0.0),
+        actual_game_duration: None,
+        self_player_name: None,
+        self_entity_id: None,
+        game_fonts,
+        game_fonts_registered: false,
+        armor_bridges: Vec::new(),
+        pending_armor_viewers: Vec::new(),
+        shot_timelines: None,
+        replay_controls: None,
+        session_frame_tx: None,
+        game_version: Some(game_version),
+        collab_replay_id: None,
+        session_announced: false,
+        applied_render_options_version: 0,
+        applied_annotation_sync_version: 0,
+        collab_session_state: None,
+        collab_cursor_tx: None,
+        collab_annotation_tx: None,
+        collab_display_toggle_tx: None,
+    }));
+
+    let title = Arc::new(format!("Collab Viewer - {replay_name}"));
+
+    ReplayRendererViewer {
+        title,
+        open: Arc::new(AtomicBool::new(true)),
+        shared_state: Arc::clone(&shared_state),
+        command_tx: _command_tx,
+        textures: Arc::new(Mutex::new(None)),
+        pending_defaults_save: Arc::new(Mutex::new(None)),
+        toasts: Arc::new(parking_lot::Mutex::new(egui_notify::Toasts::default())),
+        video_exporting: Arc::new(AtomicBool::new(false)),
+        video_export_progress: Arc::new(Mutex::new(None)),
+        video_export_data: None,
+        zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
+        overlay_state: Arc::new(Mutex::new(OverlayState::default())),
+        annotation_state: Arc::new(Mutex::new({
+            let mut ann = AnnotationState::default();
+            let filter = saved_options.self_range_filter();
+            if filter.any_enabled() {
+                ann.pending_self_range_filter = Some(filter);
+            }
+            ann
+        })),
+        suppress_gpu_warning,
+        gpu_encoder_warning: Arc::new(Mutex::new(None)),
+        prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
+    }
 }
 
 // ─── Background Thread ──────────────────────────────────────────────────────
@@ -1155,10 +1397,27 @@ fn playback_thread(
                         let commands = renderer.draw_frame(&controller);
                         frame_snapshots.push(FrameSnapshot { packet_offset: offset_before, clock: prev_clock });
 
-                        // Store the first frame immediately
+                        // Store the first frame immediately (and broadcast if session is active).
                         if frame_snapshots.len() == 1 {
-                            let mut state = shared_state.lock();
-                            state.frame = Some(PlaybackFrame {
+                            let mut s = shared_state.lock();
+                            if let Some(ref tx) = s.session_frame_tx {
+                                let replay_id = s.collab_replay_id.unwrap_or(0);
+                                tracing::debug!(
+                                    "First frame: broadcasting via session_frame_tx (replay_id={replay_id})"
+                                );
+                                let _ = tx.try_send(FrameBroadcast {
+                                    replay_id,
+                                    clock: prev_clock.0,
+                                    frame_index: 0,
+                                    total_frames: estimated_frames as u32,
+                                    game_duration,
+                                    commands: commands.clone(),
+                                });
+                            } else {
+                                tracing::debug!("First frame: session_frame_tx not wired yet, stored locally only");
+                            }
+                            s.frame = Some(PlaybackFrame {
+                                replay_id: 0,
                                 commands,
                                 clock: prev_clock,
                                 frame_index: 0,
@@ -1233,8 +1492,12 @@ fn playback_thread(
         state.shot_timelines = Some(timeline_map);
     }
 
-    // Mark as ready
-    shared_state.lock().status = RendererStatus::Ready;
+    // Mark as ready and store game version for collab sessions
+    {
+        let mut state = shared_state.lock();
+        state.status = RendererStatus::Ready;
+        state.game_version = Some(replay_file.meta.clientVersionFromExe.clone());
+    }
 
     // 5. Playback loop — respond to UI commands
     //
@@ -1662,6 +1925,29 @@ fn playback_thread(
         }
     };
 
+    // Set a new playback frame on shared state and broadcast to collab session if active.
+    let set_frame = |state: &Arc<Mutex<SharedRendererState>>,
+                     commands: Vec<DrawCommand>,
+                     clock: GameClock,
+                     frame_index: usize,
+                     total_frames: usize,
+                     game_duration: f32| {
+        let mut s = state.lock();
+        // Clone commands for collab broadcast before moving into the frame.
+        if let Some(ref tx) = s.session_frame_tx {
+            let replay_id = s.collab_replay_id.unwrap_or(0);
+            let _ = tx.try_send(FrameBroadcast {
+                replay_id,
+                clock: clock.0,
+                frame_index: frame_index as u32,
+                total_frames: total_frames as u32,
+                game_duration,
+                commands: commands.clone(),
+            });
+        }
+        s.frame = Some(PlaybackFrame { replay_id: 0, commands, clock, frame_index, total_frames, game_duration });
+    };
+
     /// Rebuild live_replay/live_controller/live_renderer/live_parser from
     /// scratch, parsing up to `$target_clock`.  Only needed for backward
     /// seeks — forward playback uses incremental parsing instead.
@@ -1728,13 +2014,14 @@ fn playback_thread(
                 rebuild_live_state!(target_clock);
                 live_renderer.options = shared_state.lock().options.clone();
                 let commands = live_renderer.draw_frame(&live_controller);
-                shared_state.lock().frame = Some(PlaybackFrame {
+                set_frame(
+                    &shared_state,
                     commands,
-                    clock: target_clock,
-                    frame_index: current_frame,
-                    total_frames: actual_total_frames,
-                    game_duration: actual_game_duration,
-                });
+                    target_clock,
+                    current_frame,
+                    actual_total_frames,
+                    actual_game_duration,
+                );
                 request_repaint(&shared_state);
             }
         }
@@ -1785,13 +2072,14 @@ fn playback_thread(
 
                     live_renderer.options = shared_state.lock().options.clone();
                     let commands = live_renderer.draw_frame(&live_controller);
-                    shared_state.lock().frame = Some(PlaybackFrame {
+                    set_frame(
+                        &shared_state,
                         commands,
-                        clock: target_clock,
-                        frame_index: current_frame,
-                        total_frames: actual_total_frames,
-                        game_duration: actual_game_duration,
-                    });
+                        target_clock,
+                        current_frame,
+                        actual_total_frames,
+                        actual_game_duration,
+                    );
                     request_repaint(&shared_state);
                 }
                 PlaybackCommand::SetSpeed(s) => {
@@ -1845,13 +2133,14 @@ fn playback_thread(
 
                 live_renderer.options = shared_state.lock().options.clone();
                 let commands = live_renderer.draw_frame(&live_controller);
-                shared_state.lock().frame = Some(PlaybackFrame {
+                set_frame(
+                    &shared_state,
                     commands,
-                    clock: target_clock,
-                    frame_index: current_frame,
-                    total_frames: actual_total_frames,
-                    game_duration: actual_game_duration,
-                });
+                    target_clock,
+                    current_frame,
+                    actual_total_frames,
+                    actual_game_duration,
+                );
                 request_repaint(&shared_state);
             }
         }
@@ -1873,16 +2162,9 @@ fn playback_thread(
             {
                 live_renderer.options = new_opts;
                 let commands = live_renderer.draw_frame(&live_controller);
-                shared_state.lock().frame = Some(PlaybackFrame {
-                    commands,
-                    clock: frame_snapshots
-                        .get(current_frame)
-                        .map(|s| s.clock)
-                        .unwrap_or(GameClock(actual_game_duration)),
-                    frame_index: current_frame,
-                    total_frames: actual_total_frames,
-                    game_duration: actual_game_duration,
-                });
+                let clock =
+                    frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
+                set_frame(&shared_state, commands, clock, current_frame, actual_total_frames, actual_game_duration);
                 request_repaint(&shared_state);
             }
         }
@@ -4817,6 +5099,61 @@ impl ReplayRendererViewer {
                 let mut repaint = false;
 
                 let mut state = shared_state.lock();
+
+                // Register game fonts with egui on the first frame.
+                // set_fonts() doesn't take effect until the next frame, so we
+                // track whether we just registered to avoid using them too early.
+                let mut fonts_just_registered = false;
+                if !state.game_fonts_registered {
+                    let mut font_defs = egui::FontDefinitions::default();
+                    egui_phosphor::add_to_fonts(&mut font_defs, egui_phosphor::Variant::Regular);
+
+                    if let Some(ref fonts) = state.game_fonts {
+                        font_defs.font_data.insert(
+                            "game_font_primary".to_owned(),
+                            egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
+                        );
+                        let mut family_fonts = vec!["game_font_primary".to_owned()];
+                        let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
+                        for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
+                            let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
+                            font_defs.font_data.insert(
+                                name.clone(),
+                                egui::FontData::from_owned(bytes.clone()).into(),
+                            );
+                            family_fonts.push(name);
+                        }
+                        font_defs.families.insert(
+                            egui::FontFamily::Name("GameFont".into()),
+                            family_fonts,
+                        );
+                    } else {
+                        let proportional = font_defs
+                            .families
+                            .get(&egui::FontFamily::Proportional)
+                            .cloned()
+                            .unwrap_or_default();
+                        font_defs.families.insert(
+                            egui::FontFamily::Name("GameFont".into()),
+                            proportional,
+                        );
+                    }
+
+                    ctx.set_fonts(font_defs);
+                    state.game_fonts_registered = true;
+                    fonts_just_registered = true;
+                }
+
+                // For client renderers: transition Loading→Ready once fonts are
+                // effective (registered on a prior frame) and a frame has arrived.
+                if matches!(state.status, RendererStatus::Loading)
+                    && state.frame.is_some()
+                    && !fonts_just_registered
+                {
+                    tracing::debug!("Renderer: Loading→Ready (fonts effective, frame available)");
+                    state.status = RendererStatus::Ready;
+                }
+
                 let status_is_loading = matches!(state.status, RendererStatus::Loading);
                 let status_error = match &state.status {
                     RendererStatus::Error(e) => Some(e.clone()),
@@ -4850,57 +5187,55 @@ impl ReplayRendererViewer {
                     None
                 };
 
-                // Register game fonts with egui.
-                // If real game fonts aren't available yet, register a placeholder that
-                // maps "GameFont" to the default proportional fonts so that any UI code
-                // referencing game_font() won't panic.
-                if !state.game_fonts_registered {
-                    let mut font_defs = egui::FontDefinitions::default();
-                    egui_phosphor::add_to_fonts(&mut font_defs, egui_phosphor::Variant::Regular);
-
-                    if let Some(ref fonts) = state.game_fonts {
-                        // Primary game font (no scale tweak — egui handles sizing via FontId)
-                        font_defs.font_data.insert(
-                            "game_font_primary".to_owned(),
-                            egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
-                        );
-
-                        let mut family_fonts = vec!["game_font_primary".to_owned()];
-
-                        // CJK fallback fonts
-                        let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
-                        for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
-                            let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
-                            font_defs.font_data.insert(
-                                name.clone(),
-                                egui::FontData::from_owned(bytes.clone()).into(),
-                            );
-                            family_fonts.push(name);
-                        }
-
-                        font_defs.families.insert(
-                            egui::FontFamily::Name("GameFont".into()),
-                            family_fonts,
-                        );
-                        state.game_fonts_registered = true;
-                    } else {
-                        // Placeholder: map "GameFont" to the default proportional fonts
-                        // so game_font() calls don't panic before real fonts load.
-                        let proportional = font_defs
-                            .families
-                            .get(&egui::FontFamily::Proportional)
-                            .cloned()
-                            .unwrap_or_default();
-                        font_defs.families.insert(
-                            egui::FontFamily::Name("GameFont".into()),
-                            proportional,
-                        );
-                    }
-
-                    ctx.set_fonts(font_defs);
-                }
-
                 drop(state);
+
+                // Apply pending render options / annotation sync from collab session (version-based).
+                // Session lifecycle events (Started, Ended, etc.) are polled by app.rs.
+                {
+                    let mut state = shared_state.lock();
+                    if let Some(ref session_state_arc) = state.collab_session_state.clone()
+                        && let Ok(s) = session_state_arc.lock() {
+                            if s.render_options_version > state.applied_render_options_version {
+                                if let Some(ref opts) = s.current_render_options {
+                                    state.options.show_hp_bars = opts.show_hp_bars;
+                                    state.options.show_tracers = opts.show_tracers;
+                                    state.options.show_torpedoes = opts.show_torpedoes;
+                                    state.options.show_planes = opts.show_planes;
+                                    state.options.show_smoke = opts.show_smoke;
+                                    state.options.show_score = opts.show_score;
+                                    state.options.show_timer = opts.show_timer;
+                                    state.options.show_kill_feed = opts.show_kill_feed;
+                                    state.options.show_player_names = opts.show_player_names;
+                                    state.options.show_ship_names = opts.show_ship_names;
+                                    state.options.show_capture_points = opts.show_capture_points;
+                                    state.options.show_buildings = opts.show_buildings;
+                                    state.options.show_turret_direction = opts.show_turret_direction;
+                                    state.options.show_consumables = opts.show_consumables;
+                                    state.options.show_armament = opts.show_armament;
+                                    state.options.show_trails = opts.show_trails;
+                                    state.options.show_dead_trails = opts.show_dead_trails;
+                                    state.options.show_speed_trails = opts.show_speed_trails;
+                                    state.options.show_ship_config = opts.show_ship_config;
+                                    state.options.show_dead_ship_names = opts.show_dead_ship_names;
+                                    state.options.show_battle_result = opts.show_battle_result;
+                                    state.options.show_buffs = opts.show_buffs;
+                                    state.options.show_chat = opts.show_chat;
+                                    state.options.show_advantage = opts.show_advantage;
+                                    state.options.show_score_timer = opts.show_score_timer;
+                                    state.show_dead_ships = opts.show_dead_ships;
+                                }
+                                state.applied_render_options_version = s.render_options_version;
+                            }
+                            if s.annotation_sync_version > state.applied_annotation_sync_version {
+                                if let Some((ref collab_anns, ref owners)) = s.current_annotation_sync {
+                                    let mut ann = annotation_arc.lock();
+                                    ann.annotations = collab_anns.iter().cloned().map(collab_annotation_to_local).collect();
+                                    ann.annotation_owners = owners.clone();
+                                }
+                                state.applied_annotation_sync_version = s.annotation_sync_version;
+                            }
+                        }
+                }
 
                 // Apply pending self range filter once self entity ID is known
                 if let Some(self_eid) = self_entity_id {
@@ -5413,7 +5748,79 @@ impl ReplayRendererViewer {
                                 );
                             }
                         }
+
+                        // ─── Render remote cursors (collab session) ──────────
+                        let collab_ss = shared_state.lock().collab_session_state.clone();
+                        if let Some(ref ss_arc) = collab_ss
+                        && let Ok(s) = ss_arc.lock() {
+                            let now = std::time::Instant::now();
+                            for cursor in &s.cursors {
+                                // Skip our own cursor.
+                                if cursor.user_id == s.my_user_id {
+                                    continue;
+                                }
+                                if let Some(pos) = cursor.pos {
+                                    let age = now.duration_since(cursor.last_update).as_secs_f32();
+                                    if age > 5.0 {
+                                        continue; // fully faded
+                                    }
+                                    let alpha = if age > 3.0 {
+                                        ((5.0 - age) / 2.0 * 255.0) as u8
+                                    } else {
+                                        255
+                                    };
+                                    let [r, g, b] = cursor.color;
+                                    let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
+
+                                    let screen_pos = transform.minimap_to_screen(&MinimapPos { x: pos[0] as i32, y: pos[1] as i32 });
+
+                                    // Draw cursor arrow (small triangle pointing up-left)
+                                    let size = 10.0;
+                                    let points = vec![
+                                        screen_pos,
+                                        screen_pos + Vec2::new(0.0, size * 1.5),
+                                        screen_pos + Vec2::new(size * 0.6, size * 1.1),
+                                    ];
+                                    map_painter.add(egui::Shape::convex_polygon(
+                                        points,
+                                        color,
+                                        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 0, 0, alpha)),
+                                    ));
+
+                                    // Draw name label
+                                    let label_pos = screen_pos + Vec2::new(size * 0.8, size * 0.5);
+                                    let galley = map_painter.layout_no_wrap(
+                                        cursor.name.clone(),
+                                        egui::FontId::proportional(11.0),
+                                        color,
+                                    );
+                                    // Background for readability
+                                    let label_rect = egui::Rect::from_min_size(
+                                        label_pos - Vec2::new(2.0, 1.0),
+                                        galley.size() + Vec2::new(4.0, 2.0),
+                                    );
+                                    map_painter.rect_filled(
+                                        label_rect,
+                                        2.0,
+                                        Color32::from_rgba_unmultiplied(0, 0, 0, alpha / 2),
+                                    );
+                                    map_painter.galley(label_pos, galley, Color32::PLACEHOLDER);
+                                }
+                            }
+                        }
                     }
+
+                    // ─── Send local cursor to collab session ────────────────
+                    {
+                        let cursor_pos = response.hover_pos().map(|p| {
+                            let mp = transform.screen_to_minimap(p);
+                            [mp.x, mp.y]
+                        });
+                        if let Some(ref tx) = shared_state.lock().collab_cursor_tx {
+                            let _ = tx.send(cursor_pos);
+                        }
+                    }
+
                     drop(tex_guard);
 
                     // ─── Active tool indicator ───────────────────────────────────
@@ -5767,6 +6174,10 @@ impl ReplayRendererViewer {
                             ann.save_undo();
                         }
                         if let Some(a) = new_annotation {
+                            if let Some(ref tx) = shared_state.lock().collab_annotation_tx {
+                                let collab_ann = local_annotation_to_collab(&a);
+                                let _ = tx.send(crate::collab::peer::LocalAnnotationEvent::Add(collab_ann));
+                            }
                             ann.annotations.push(a);
                         }
                         if let Some(idx) = erase_idx {
@@ -5775,6 +6186,9 @@ impl ReplayRendererViewer {
 
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
+                            if let Some(ref tx) = shared_state.lock().collab_annotation_tx {
+                                let _ = tx.send(crate::collab::peer::LocalAnnotationEvent::Undo);
+                            }
                             ann.undo();
                         }
 
@@ -6691,7 +7105,14 @@ impl ReplayRendererViewer {
                                             timeline_btn_opt = Some(btn);
 
 
-                                            // Save as Video button
+                                            // Save as Video / Clipboard buttons — hidden for client
+                                            // viewers and while a collab session is active.
+                                            let session_is_active = shared_state.lock().collab_session_state.as_ref()
+                                                .and_then(|ss| ss.lock().ok())
+                                                .map(|s| matches!(s.status, SessionStatus::Active | SessionStatus::Starting))
+                                                .unwrap_or(false);
+                                            if !session_is_active
+                                            && let Some(ref video_export_data) = video_export_data {
                                             {
                                                 let is_exporting = video_exporting.load(Ordering::Relaxed);
                                                 let has_warning = gpu_encoder_warning.lock().is_some();
@@ -6726,7 +7147,7 @@ impl ReplayRendererViewer {
                                                             actual_game_duration,
                                                         };
                                                         if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                            execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
+                                                            execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                         } else {
                                                             *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
                                                                 pending_action: action,
@@ -6761,7 +7182,7 @@ impl ReplayRendererViewer {
                                                     let prefer_cpu = prefer_cpu_encoder.load(Ordering::Relaxed) || !status.gpu_available;
                                                     let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, actual_game_duration };
                                                     if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
-                                                        execute_video_export(action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
+                                                        execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                     } else {
                                                         *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
                                                             pending_action: action,
@@ -6770,6 +7191,8 @@ impl ReplayRendererViewer {
                                                     }
                                                 }
                                             }
+                                            } // end if video_export_data
+                                             // end if !session_is_active
 
                                             tui.tui()
                                                 .style(fixed_style.clone())
@@ -6807,6 +7230,7 @@ impl ReplayRendererViewer {
                                                     zp.pan = Vec2::ZERO;
                                                 }
                                             }
+
                                         });
 
                                     let settings_btn = settings_btn_opt.unwrap();
@@ -7099,6 +7523,7 @@ impl ReplayRendererViewer {
                                                 ui.label("Parsing events...");
                                             }
                                         });
+
                                 });
                             });
                     }
@@ -7141,9 +7566,10 @@ impl ReplayRendererViewer {
                                 if w.dont_show_again {
                                     suppress_gpu_warning.store(true, Ordering::Relaxed);
                                 }
-                                if proceed {
-                                    execute_video_export(w.pending_action, &video_export_data, &toasts, &video_exporting, &video_export_progress);
-                                }
+                                if proceed
+                                    && let Some(ref video_export_data) = video_export_data {
+                                        execute_video_export(w.pending_action, video_export_data, &toasts, &video_exporting, &video_export_progress);
+                                    }
                             }
                         }
                     }
@@ -7157,7 +7583,9 @@ impl ReplayRendererViewer {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
                     ctx.request_repaint();
-                } else if playing || repaint {
+                } else if playing || repaint
+                    || shared_state.lock().collab_session_state.is_some()
+                {
                     // Repaint both this viewport AND the parent so sibling
                     // viewports (e.g. armor viewer) also update in realtime.
                     ctx.request_repaint();

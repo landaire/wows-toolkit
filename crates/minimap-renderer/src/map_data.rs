@@ -14,6 +14,7 @@ pub struct MapInfo {
 /// (0,0) is top-left, positive X = right, positive Y = down.
 /// Does NOT include HUD offset — that's applied at draw time.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct MinimapPos {
     pub x: i32,
     pub y: i32,

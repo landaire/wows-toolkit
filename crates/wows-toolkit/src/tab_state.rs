@@ -217,6 +217,10 @@ pub struct TabState {
     #[serde(skip)]
     pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay_renderer::RendererAssetCache>>,
 
+    /// Shared tokio runtime for collab sessions and async tasks.
+    #[serde(skip)]
+    pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
+
     #[serde(skip)]
     pub file_watcher: Option<RecommendedWatcher>,
 
@@ -351,6 +355,46 @@ pub struct TabState {
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
     #[serde(skip)]
     pub replay_controls_cache: Option<Vec<crate::replay_renderer::CommandGroup>>,
+
+    // ─── Collaborative session ─────────────────────────────────────────────
+    /// Session token text input for joining.
+    #[serde(skip)]
+    pub join_session_token: String,
+
+    /// Whether the IP disclosure warning dialog is showing.
+    #[serde(skip)]
+    pub show_ip_warning: bool,
+
+    /// Set by the session popover to trigger `do_join_session()` in the app update loop.
+    #[serde(skip)]
+    pub pending_join: bool,
+
+    /// Active client session handle (when joined as a peer).
+    #[serde(skip)]
+    pub client_session: Option<crate::collab::peer::PeerSessionHandle>,
+
+    /// Active host session handle.
+    #[serde(skip)]
+    pub host_session: Option<crate::collab::peer::PeerSessionHandle>,
+
+    /// Shared session state for both host and client sessions.
+    #[serde(skip)]
+    pub session_state: std::sync::Arc<std::sync::Mutex<crate::collab::SessionState>>,
+
+    /// Whether the session token is visible (unmasked) in the popover.
+    #[serde(skip)]
+    pub session_token_visible: bool,
+
+    /// Counter for assigning unique replay IDs to host renderers.
+    #[serde(skip)]
+    pub next_replay_id: u64,
+
+    /// Rolling timestamps of ReplayOpened events for spam protection (client-side).
+    #[serde(skip)]
+    pub replay_open_timestamps: std::collections::VecDeque<std::time::Instant>,
+    /// Most recent frame received before its renderer was created; retried each poll.
+    #[serde(skip)]
+    pub pending_collab_frame: Option<crate::replay_renderer::PlaybackFrame>,
 }
 
 impl Default for TabState {
@@ -412,6 +456,17 @@ impl Default for TabState {
             armor_viewer_defaults: Default::default(),
             show_replay_controls: false,
             replay_controls_cache: None,
+            tokio_runtime: None,
+            join_session_token: String::new(),
+            show_ip_warning: false,
+            pending_join: false,
+            client_session: None,
+            host_session: None,
+            session_state: std::sync::Arc::new(std::sync::Mutex::new(crate::collab::SessionState::default())),
+            session_token_visible: false,
+            next_replay_id: 1,
+            replay_open_timestamps: std::collections::VecDeque::new(),
+            pending_collab_frame: None,
         }
     }
 }

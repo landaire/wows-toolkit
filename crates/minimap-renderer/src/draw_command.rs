@@ -11,6 +11,7 @@ use crate::map_data::MinimapPos;
 
 /// How a ship should be rendered based on its visibility state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum ShipVisibility {
     /// Ship is directly visible (Position packets). Solid fill.
     Visible,
@@ -22,6 +23,7 @@ pub enum ShipVisibility {
 
 /// Kind of ship configuration circle for filtering and grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum ShipConfigCircleKind {
     Detection,
     MainBattery,
@@ -33,6 +35,7 @@ pub enum ShipConfigCircleKind {
 
 /// Per-range-type visibility filter for ship configuration circles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ShipConfigFilter {
     pub detection: bool,
     pub main_battery: bool,
@@ -120,6 +123,7 @@ impl std::fmt::Debug for ShipConfigVisibility {
 /// Allows render backends (egui, ImageTarget) to select the correct font
 /// without needing access to `GameFonts` directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum FontHint {
     /// Use the primary UI font (Warhelios Bold).
     #[default]
@@ -130,6 +134,7 @@ pub enum FontHint {
 
 /// A single chat message entry for the chat overlay.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct ChatEntry {
     /// Clan tag (e.g. "CLAN"), empty if none
     pub clan_tag: String,
@@ -155,6 +160,7 @@ pub struct ChatEntry {
 
 /// A single entry in the kill feed.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct KillFeedEntry {
     /// Killer's player name
     pub killer_name: String,
@@ -184,7 +190,8 @@ pub struct KillFeedEntry {
 ///
 /// All visual properties (colors, opacity, etc.) are fully resolved by the renderer,
 /// so backends don't need to duplicate game logic.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub enum DrawCommand {
     /// Artillery tracer line segment
     ShotTracer { from: MinimapPos, to: MinimapPos, color: [u8; 3] },
@@ -266,6 +273,7 @@ pub enum DrawCommand {
         /// Color of the invading team (shown as progress arc)
         invader_color: Option<[u8; 3]>,
         /// Pre-selected flag icon for base-type capture points (drawn instead of text label)
+        #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
         flag_icon: Option<RgbaImage>,
     },
     /// Turret direction indicator line from ship center

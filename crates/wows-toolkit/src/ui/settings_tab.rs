@@ -186,6 +186,18 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
             });
+            ui.label("Session Settings");
+            ui.group(|ui| {
+                ui.label("Display Name (used in collaborative replay sessions)");
+                ui.text_edit_singleline(&mut self.tab_state.settings.collab_display_name);
+                ui.checkbox(
+                    &mut self.tab_state.settings.suppress_p2p_ip_warning,
+                    "Don't show P2P IP address warning",
+                ).on_hover_text(
+                    "Collaborative sessions use peer-to-peer networking. \
+                     Other users in the session may be able to see your IP address.",
+                );
+            });
             ui.label("Twitch Settings");
             ui.group(|ui| {
                 if ui

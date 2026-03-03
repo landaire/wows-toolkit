@@ -32,6 +32,7 @@ image = { version = "0.25", default-features = false }
 image_dds = { version = "0.7", default-features = false }
 itertools = "0.14"
 pickled = { version = "2.0.0-alpha3" }
+iroh = "0.96"
 rkyv = "0.8.15"
 rootcause = "0.12"
 roxmltree = "0.21"

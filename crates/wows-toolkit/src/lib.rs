@@ -3,6 +3,7 @@
 mod app;
 mod armor_viewer;
 mod build_tracker;
+pub mod collab;
 mod consts;
 mod error;
 mod game_params;

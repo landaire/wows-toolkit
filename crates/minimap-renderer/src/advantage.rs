@@ -121,6 +121,7 @@ pub struct ScoringParams {
 ///
 /// After team perspective normalization (swap), team0 = friendly, team1 = enemy.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct AdvantageBreakdown {
     /// Points from score trajectory: current gap, cap income, time-to-win projection.
     /// Max 10 points to the winning team.

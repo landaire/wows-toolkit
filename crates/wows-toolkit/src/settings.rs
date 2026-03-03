@@ -290,6 +290,12 @@ pub struct Settings {
     /// Enable file logging (takes effect on next app restart).
     #[serde(default = "default_bool::<true>")]
     pub enable_logging: bool,
+    /// Display name for collaborative replay sessions.
+    #[serde(default)]
+    pub collab_display_name: String,
+    /// If true, suppress the P2P IP disclosure warning when creating/joining sessions.
+    #[serde(default)]
+    pub suppress_p2p_ip_warning: bool,
 }
 
 impl Default for Settings {
@@ -318,6 +324,8 @@ impl Default for Settings {
             session_stats: SessionStats::default(),
             suppress_gpu_encoder_warning: false,
             enable_logging: true,
+            collab_display_name: String::new(),
+            suppress_p2p_ip_warning: false,
         }
     }
 }

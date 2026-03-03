@@ -360,6 +360,9 @@ impl WowsToolkitApp {
         // Capture wgpu render state for 3D viewport rendering
         state.tab_state.wgpu_render_state = cc.wgpu_render_state.clone();
 
+        // Share the tokio runtime with tab_state for collab sessions
+        state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
+
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
         task::begin_startup_tasks(&mut state, rx);
@@ -1046,6 +1049,13 @@ impl WowsToolkitApp {
         });
 
         self.show_confirmation_dialog(ctx);
+        self.show_ip_warning_dialog(ctx);
+        if self.tab_state.pending_join {
+            self.tab_state.pending_join = false;
+            self.do_join_session();
+        }
+        self.poll_host_session_events(ctx);
+        self.poll_client_session_events(ctx);
 
         // Pop open something to view the clicked file from the unpacker tab
         let mut file_viewer = self.tab_state.file_viewer.lock();
@@ -1081,6 +1091,78 @@ impl WowsToolkitApp {
                 let suppress = renderer.suppress_gpu_warning.load(Ordering::Relaxed);
                 if suppress != self.tab_state.settings.suppress_gpu_encoder_warning {
                     self.tab_state.settings.suppress_gpu_encoder_warning = suppress;
+                }
+
+                // Auto-wire renderer to host session if active.
+                if let Some(ref host_handle) = self.tab_state.host_session {
+                    let mut state = renderer.shared_state().lock();
+                    // Assign replay_id if not yet assigned.
+                    if state.collab_replay_id.is_none() {
+                        let id = self.tab_state.next_replay_id;
+                        self.tab_state.next_replay_id += 1;
+                        state.collab_replay_id = Some(id);
+                        state.session_frame_tx = Some(host_handle.frame_tx.clone());
+                        state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                        state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
+                        state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
+                        state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
+                        // Send the current frame (if any) so clients get it immediately.
+                        if let Some(ref frame) = state.frame {
+                            tracing::debug!("Auto-wire: first frame already available, broadcasting (replay_id={id})");
+                            let _ = host_handle.frame_tx.try_send(crate::collab::peer::FrameBroadcast {
+                                replay_id: id,
+                                clock: frame.clock.0,
+                                frame_index: frame.frame_index as u32,
+                                total_frames: frame.total_frames as u32,
+                                game_duration: frame.game_duration,
+                                commands: frame.commands.clone(),
+                            });
+                        }
+                    }
+                    // Send ReplayOpened once the renderer has assets (map loaded).
+                    if !state.session_announced
+                        && state.assets.is_some()
+                        && let Some(replay_id) = state.collab_replay_id
+                    {
+                        let map_png = state
+                            .assets
+                            .as_ref()
+                            .and_then(|a| {
+                                a.map_image.as_ref().map(|img| {
+                                    let (ref data, w, h) = **img;
+                                    let mut buf = Vec::new();
+                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                        let mut cursor = std::io::Cursor::new(&mut buf);
+                                        let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
+                                    }
+                                    buf
+                                })
+                            })
+                            .unwrap_or_default();
+                        let game_version = state.game_version.clone().unwrap_or_default();
+                        // Use the renderer's title (strip "Replay Renderer - " prefix).
+                        let replay_name =
+                            renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string();
+                        let _ = host_handle.command_tx.send(crate::collab::SessionCommand::ReplayOpened {
+                            replay_id,
+                            replay_name,
+                            map_image_png: map_png,
+                            game_version,
+                        });
+                        state.session_announced = true;
+                    }
+                }
+            }
+
+            // Send ReplayClosed for renderers being removed while a host session is active.
+            if self.tab_state.host_session.is_some() {
+                for &idx in &remove_renderers {
+                    let state = replay_renderers[idx].shared_state().lock();
+                    if let Some(replay_id) = state.collab_replay_id
+                        && let Some(ref handle) = self.tab_state.host_session
+                    {
+                        let _ = handle.command_tx.send(crate::collab::SessionCommand::ReplayClosed { replay_id });
+                    }
                 }
             }
 
@@ -1226,11 +1308,11 @@ impl WowsToolkitApp {
 
         self.tab_state.toasts.lock().show(ctx);
 
-        // When any replay renderer is playing, repaint continuously so all
-        // deferred viewports (replay renderer + armor viewer) stay in sync
-        // regardless of which window currently has focus.
+        // When any replay renderer is playing or a client session is active,
+        // repaint continuously so all deferred viewports stay in sync.
         let any_playing = self.tab_state.replay_renderers.lock().iter().any(|r| r.shared_state().lock().playing);
-        if any_playing || !self.realtime_armor_viewers.is_empty() {
+        let client_active = self.tab_state.client_session.is_some();
+        if any_playing || client_active || !self.realtime_armor_viewers.is_empty() {
             ctx.request_repaint();
         } else {
             ctx.request_repaint_after_secs(1.0);
@@ -1517,6 +1599,267 @@ impl WowsToolkitApp {
                 self.tab_state.replays_for_session_reset = Some(replays);
             }
         }
+    }
+
+    fn show_ip_warning_dialog(&mut self, ctx: &egui::Context) {
+        if !self.tab_state.show_ip_warning {
+            return;
+        }
+
+        let mut proceed = false;
+        let mut cancel = false;
+
+        egui::Window::new("Network Warning")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    "Joining a collaborative session uses peer-to-peer networking. \
+                     Other users in the session may be able to see your IP address.",
+                );
+                ui.add_space(8.0);
+                ui.checkbox(&mut self.tab_state.settings.suppress_p2p_ip_warning, "Don't show this again");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Continue").clicked() {
+                        proceed = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if proceed {
+            self.tab_state.show_ip_warning = false;
+            self.do_join_session();
+        }
+        if cancel {
+            self.tab_state.show_ip_warning = false;
+        }
+    }
+
+    fn do_join_session(&mut self) {
+        let params = crate::collab::peer::JoinParams {
+            token: self.tab_state.join_session_token.trim().to_string(),
+            display_name: self.tab_state.settings.collab_display_name.trim().to_string(),
+            toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+
+        let state = Arc::clone(&self.tab_state.session_state);
+        let handle = crate::collab::peer::start_peer_session(
+            Arc::clone(&self.runtime),
+            crate::collab::peer::PeerMode::Join(params),
+            state,
+        );
+
+        self.tab_state.client_session = Some(handle);
+        self.tab_state.join_session_token.clear();
+    }
+
+    fn poll_host_session_events(&mut self, _ctx: &egui::Context) {
+        let Some(ref session) = self.tab_state.host_session else {
+            return;
+        };
+
+        let mut session_ended = false;
+        while let Ok(event) = session.event_rx.try_recv() {
+            match event {
+                crate::collab::SessionEvent::Started => {
+                    self.tab_state.toasts.lock().info("Session started");
+                }
+                crate::collab::SessionEvent::UserJoined(user) => {
+                    self.tab_state.toasts.lock().info(format!("{} joined", user.name));
+                }
+                crate::collab::SessionEvent::UserLeft { .. } => {}
+                crate::collab::SessionEvent::Ended => {
+                    self.tab_state.toasts.lock().info("Session ended");
+                    session_ended = true;
+                }
+                crate::collab::SessionEvent::Error(msg) => {
+                    self.tab_state.toasts.lock().error(format!("Session error: {msg}"));
+                    session_ended = true;
+                }
+                _ => {}
+            }
+        }
+
+        if session_ended {
+            // Unwire all renderers.
+            for r in self.tab_state.replay_renderers.lock().iter() {
+                let mut s = r.shared_state().lock();
+                s.session_frame_tx = None;
+                s.collab_replay_id = None;
+                s.session_announced = false;
+                s.collab_session_state = None;
+                s.collab_cursor_tx = None;
+                s.collab_annotation_tx = None;
+                s.collab_display_toggle_tx = None;
+            }
+            self.tab_state.host_session = None;
+            if let Ok(mut s) = self.tab_state.session_state.lock() {
+                s.status = crate::collab::SessionStatus::Idle;
+                s.connected_users.clear();
+                s.cursors.clear();
+                s.token = None;
+                s.open_replays.clear();
+            }
+        }
+    }
+
+    fn poll_client_session_events(&mut self, ctx: &egui::Context) {
+        let Some(ref session) = self.tab_state.client_session else {
+            return;
+        };
+
+        // Poll events
+        while let Ok(event) = session.event_rx.try_recv() {
+            match event {
+                crate::collab::SessionEvent::Started => {
+                    self.tab_state.toasts.lock().info("Connected to session");
+                }
+                crate::collab::SessionEvent::SessionInfoReceived { open_replays } => {
+                    tracing::debug!("SessionInfoReceived: {} open replay(s)", open_replays.len());
+                    // Launch client viewer windows for each open replay (up to 2).
+                    let saved_options = &self.tab_state.settings.renderer_options;
+                    let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                    for replay in open_replays.into_iter().take(2) {
+                        self.tab_state.toasts.lock().info(format!("Joined session: {}", &replay.replay_name));
+                        let viewer = crate::replay_renderer::launch_client_renderer(
+                            replay.replay_name,
+                            replay.map_image_png,
+                            replay.game_version,
+                            saved_options,
+                            Arc::clone(&suppress),
+                            self.tab_state.world_of_warships_data.as_ref(),
+                            &self.tab_state.renderer_asset_cache,
+                        );
+                        if let Some(ref client_handle) = self.tab_state.client_session {
+                            let mut state = viewer.shared_state().lock();
+                            state.collab_replay_id = Some(replay.replay_id);
+                            state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                            state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
+                            state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
+                            state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
+                        }
+                        self.tab_state.replay_renderers.lock().push(viewer);
+                    }
+                }
+                crate::collab::SessionEvent::ReplayOpened { replay_id, replay_name, map_image_png, game_version } => {
+                    // Spam protection: track timestamps of ReplayOpened events.
+                    let now = std::time::Instant::now();
+                    self.tab_state.replay_open_timestamps.push_back(now);
+                    while self
+                        .tab_state
+                        .replay_open_timestamps
+                        .front()
+                        .is_some_and(|t| now.duration_since(*t).as_secs() >= 10)
+                    {
+                        self.tab_state.replay_open_timestamps.pop_front();
+                    }
+                    if self.tab_state.replay_open_timestamps.len() >= 5 {
+                        self.tab_state.toasts.lock().error("Disconnected: host is opening replays too fast");
+                        if let Some(ref handle) = self.tab_state.client_session {
+                            let _ = handle.command_tx.send(crate::collab::SessionCommand::Stop);
+                        }
+                        self.tab_state.client_session = None;
+                        self.tab_state.replay_open_timestamps.clear();
+                        return;
+                    }
+
+                    // Cap at 2 client viewer windows — close oldest if needed.
+                    let mut renderers = self.tab_state.replay_renderers.lock();
+                    let client_count =
+                        renderers.iter().filter(|r| r.shared_state().lock().collab_replay_id.is_some()).count();
+                    if client_count >= 2 {
+                        // Close the oldest client viewer.
+                        if let Some(pos) =
+                            renderers.iter().position(|r| r.shared_state().lock().collab_replay_id.is_some())
+                        {
+                            renderers[pos].open.store(false, Ordering::Relaxed);
+                            renderers.remove(pos);
+                        }
+                    }
+                    drop(renderers);
+
+                    let saved_options = &self.tab_state.settings.renderer_options;
+                    let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                    self.tab_state.toasts.lock().info(format!("Host opened replay: {replay_name}"));
+                    let viewer = crate::replay_renderer::launch_client_renderer(
+                        replay_name,
+                        map_image_png,
+                        game_version,
+                        saved_options,
+                        suppress,
+                        self.tab_state.world_of_warships_data.as_ref(),
+                        &self.tab_state.renderer_asset_cache,
+                    );
+                    // Wire the client viewer to the session.
+                    if let Some(ref client_handle) = self.tab_state.client_session {
+                        let mut state = viewer.shared_state().lock();
+                        state.collab_replay_id = Some(replay_id);
+                        state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                        state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
+                        state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
+                        state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
+                    }
+                    self.tab_state.replay_renderers.lock().push(viewer);
+                }
+                crate::collab::SessionEvent::ReplayClosed { replay_id } => {
+                    // Close the matching client viewer.
+                    let mut renderers = self.tab_state.replay_renderers.lock();
+                    if let Some(pos) =
+                        renderers.iter().position(|r| r.shared_state().lock().collab_replay_id == Some(replay_id))
+                    {
+                        renderers[pos].open.store(false, Ordering::Relaxed);
+                        renderers.remove(pos);
+                    }
+                    self.tab_state.toasts.lock().info("Host closed a replay");
+                }
+                crate::collab::SessionEvent::Error(msg) => {
+                    self.tab_state.toasts.lock().error(format!("Session: {msg}"));
+                    self.tab_state.client_session = None;
+                    return;
+                }
+                crate::collab::SessionEvent::Rejected(reason) => {
+                    self.tab_state.toasts.lock().error(format!("Session rejected: {reason}"));
+                    self.tab_state.client_session = None;
+                    return;
+                }
+                crate::collab::SessionEvent::Ended => {
+                    self.tab_state.toasts.lock().info("Session ended");
+                    self.tab_state.client_session = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Poll frames from client session and forward to matching client renderer.
+        // Keep only the most recent frame; if the renderer doesn't exist yet, hold
+        // it until the next poll cycle (the biased select in host_accept_peer should
+        // prevent this, but this is a safety net).
+        if let Some(ref session) = self.tab_state.client_session {
+            while let Ok(frame) = session.frame_rx.try_recv() {
+                self.tab_state.pending_collab_frame = Some(frame);
+            }
+        }
+        if self.tab_state.pending_collab_frame.is_some() {
+            let replay_id = self.tab_state.pending_collab_frame.as_ref().unwrap().replay_id;
+            let renderers = self.tab_state.replay_renderers.lock();
+            if let Some(r) = renderers.iter().find(|r| r.shared_state().lock().collab_replay_id == Some(replay_id)) {
+                let frame = self.tab_state.pending_collab_frame.take().unwrap();
+                let mut state = r.shared_state().lock();
+                // Don't set status = Ready here. The viewport callback handles the
+                // Loading→Ready transition after fonts are registered with egui,
+                // which requires at least one paint cycle.
+                state.frame = Some(frame);
+            }
+        }
+
+        // Request repaint while session is active to keep polling events
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 

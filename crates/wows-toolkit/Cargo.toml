@@ -46,7 +46,7 @@ wowsunpack = { workspace = true, features = [
     "vfs",
 ] }
 bytemuck = { workspace = true }
-wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "arc"] }
+wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "arc", "rkyv"] }
 rfd = "0.17"
 humansize = "2.1.3"
 thiserror = { workspace = true }
@@ -85,6 +85,8 @@ csv = "1.4.0"
 jiff = { workspace = true, features = ["serde"] }
 rootcause = { workspace = true }
 arboard = "3.6.1"
+iroh = { workspace = true }
+rand = "0.9"
 rkyv = { workspace = true }
 const_format = "0.2.35"
 tempfile = "3.26.0"
@@ -92,6 +94,7 @@ unidecode = "0.3.0"
 roxmltree = { workspace = true }
 nalgebra = "0.34.1"
 regex = "1.12"
+rustls = { version = "0.23.37", default-features = false, features = ["ring", "std", "tls12", "prefer-post-quantum", "logging"] }
 
 [build-dependencies]
 winresource = "0.1.30"

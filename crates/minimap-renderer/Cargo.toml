@@ -20,7 +20,8 @@ required-features = ["bin"]
 
 [features]
 default = ["bin", "vulkan", "videotoolbox", "arc"]
-bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:rkyv", "wowsunpack/rkyv"]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "rkyv"]
+rkyv = ["dep:rkyv", "wowsunpack/rkyv"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
 vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs"]
 # VideoToolbox encoder (macOS only)

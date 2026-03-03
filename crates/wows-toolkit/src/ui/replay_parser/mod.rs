@@ -34,6 +34,12 @@ use std::sync::mpsc::Sender;
 use rootcause::Report;
 use wowsunpack::game_params::types::ParamData;
 
+use crate::collab::Permissions;
+use crate::collab::SessionCommand;
+use crate::collab::SessionStatus;
+use crate::collab::peer::HostParams;
+use crate::collab::peer::PeerMode;
+use crate::collab::protocol::CollabRenderOptions;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
@@ -3361,7 +3367,243 @@ impl ToolkitTabViewer<'_> {
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
                 });
+
+            ui.separator();
+
+            // ── Collab session popover ──
+            self.show_session_popover(ui);
         });
+    }
+
+    /// Session popover: host, join, and active session controls.
+    fn show_session_popover(&mut self, ui: &mut egui::Ui) {
+        // Determine active states from tab_state directly.
+        let host_status = if self.tab_state.host_session.is_some() {
+            self.tab_state.session_state.lock().ok().map(|s| s.status.clone())
+        } else {
+            None
+        };
+        let host_active = matches!(host_status, Some(SessionStatus::Active) | Some(SessionStatus::Starting));
+        let client_active = self.tab_state.client_session.is_some();
+        let any_active = host_active || client_active;
+
+        // Session button (turns red when active).
+        let label = if any_active {
+            RichText::new(icon_str!(icons::BROADCAST, "Session")).color(Color32::WHITE)
+        } else {
+            RichText::new(icon_str!(icons::BROADCAST, "Session"))
+        };
+        let mut button = egui::Button::new(label);
+        if any_active {
+            button = button.fill(Color32::from_rgb(220, 50, 50));
+        }
+        let btn = ui.add(button);
+
+        egui::Popup::from_toggle_button_response(&btn).close_behavior(PopupCloseBehavior::CloseOnClickOutside).show(
+            |ui| {
+                ui.set_min_width(260.0);
+
+                if host_active && matches!(host_status, Some(SessionStatus::Starting)) {
+                    // ── Host session is starting ──
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Starting session\u{2026}");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Cancel").clicked() {
+                                if let Some(ref handle) = self.tab_state.host_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                for r in self.tab_state.replay_renderers.lock().iter() {
+                                    let mut s = r.shared_state().lock();
+                                    s.session_frame_tx = None;
+                                    s.collab_replay_id = None;
+                                    s.session_announced = false;
+                                    s.collab_session_state = None;
+                                }
+                                self.tab_state.host_session = None;
+                                if let Ok(mut s) = self.tab_state.session_state.lock() {
+                                    s.status = SessionStatus::Idle;
+                                    s.connected_users.clear();
+                                    s.cursors.clear();
+                                    s.token = None;
+                                    s.open_replays.clear();
+                                }
+                            }
+                        });
+                    });
+                } else if host_active {
+                    // ── Active host session controls ──
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Session Active").strong().color(Color32::from_rgb(220, 50, 50)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Stop").clicked() {
+                                if let Some(ref handle) = self.tab_state.host_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                for r in self.tab_state.replay_renderers.lock().iter() {
+                                    let mut s = r.shared_state().lock();
+                                    s.session_frame_tx = None;
+                                    s.collab_replay_id = None;
+                                    s.session_announced = false;
+                                    s.collab_session_state = None;
+                                }
+                                self.tab_state.host_session = None;
+                                if let Ok(mut s) = self.tab_state.session_state.lock() {
+                                    s.status = SessionStatus::Idle;
+                                    s.connected_users.clear();
+                                    s.cursors.clear();
+                                    s.token = None;
+                                    s.open_replays.clear();
+                                }
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    // Token display
+                    let token =
+                        self.tab_state.session_state.lock().ok().and_then(|s| s.token.clone()).unwrap_or_default();
+                    if !token.is_empty() {
+                        ui.label("Session Token:");
+                        let visible = self.tab_state.session_token_visible;
+                        ui.horizontal(|ui| {
+                            let mut display_token = token.clone();
+                            let te = egui::TextEdit::singleline(&mut display_token)
+                                .password(!visible)
+                                .interactive(false)
+                                .desired_width(160.0);
+                            ui.add(te);
+
+                            let eye_icon = if visible { icons::EYE } else { icons::EYE_SLASH };
+                            if ui.button(eye_icon).on_hover_text("Toggle token visibility").clicked() {
+                                self.tab_state.session_token_visible = !visible;
+                            }
+
+                            if ui.button(icons::COPY).on_hover_text("Copy token").clicked() {
+                                ui.ctx().copy_text(token.clone());
+                                self.tab_state.toasts.lock().info("Token copied to clipboard");
+                            }
+                        });
+                        ui.add_space(4.0);
+                    }
+
+                    // Connected users count
+                    let user_count =
+                        self.tab_state.session_state.lock().ok().map(|s| s.connected_users.len()).unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.label(icons::USERS);
+                        ui.label(format!("{} connected", user_count));
+                    });
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // Permission controls
+                    ui.label(RichText::new("Permissions").small().strong());
+                    let (mut lock_ann, mut lock_settings) = self
+                        .tab_state
+                        .session_state
+                        .lock()
+                        .ok()
+                        .map(|s| (s.permissions.annotations_locked, s.permissions.settings_locked))
+                        .unwrap_or((false, false));
+
+                    let mut perms_changed = false;
+                    perms_changed |= ui.checkbox(&mut lock_ann, "Lock Annotations").changed();
+                    perms_changed |= ui.checkbox(&mut lock_settings, "Lock Settings").changed();
+
+                    if perms_changed {
+                        let perms = Permissions { annotations_locked: lock_ann, settings_locked: lock_settings };
+                        if let Ok(mut s) = self.tab_state.session_state.lock() {
+                            s.permissions = perms.clone();
+                        }
+                        if let Some(ref handle) = self.tab_state.host_session {
+                            let _ = handle.command_tx.send(SessionCommand::SetPermissions(perms));
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    if ui
+                        .button("Reset Client Overrides")
+                        .on_hover_text("Reset all client display setting changes")
+                        .clicked()
+                        && let Some(ref handle) = self.tab_state.host_session
+                    {
+                        let _ = handle.command_tx.send(SessionCommand::ResetClientOverrides);
+                    }
+                } else if client_active {
+                    // ── Active client session ──
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Connected to Session").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Leave").clicked() {
+                                if let Some(ref handle) = self.tab_state.client_session {
+                                    let _ = handle.command_tx.send(SessionCommand::Stop);
+                                }
+                                self.tab_state.client_session = None;
+                            }
+                        });
+                    });
+                } else {
+                    // ── No active session ──
+                    ui.label(RichText::new("Host a Session").strong());
+                    if ui.button("Start Session").clicked() {
+                        let params = HostParams {
+                            toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
+                            display_name: self.tab_state.settings.collab_display_name.clone(),
+                            initial_render_options: CollabRenderOptions::from_saved(
+                                &crate::settings::SavedRenderOptions::default(),
+                            ),
+                        };
+
+                        let rt = self.tab_state.tokio_runtime.clone().unwrap_or_else(|| {
+                            Arc::new(
+                                tokio::runtime::Builder::new_multi_thread()
+                                    .enable_all()
+                                    .build()
+                                    .expect("Failed to create tokio runtime"),
+                            )
+                        });
+
+                        let session_state = Arc::clone(&self.tab_state.session_state);
+                        let handle = crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
+
+                        self.tab_state.host_session = Some(handle);
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // ── Join a session ──
+                    ui.label(RichText::new("Join a Session").strong());
+                    ui.add_space(2.0);
+                    ui.label("Session token:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.tab_state.join_session_token)
+                            .hint_text("Paste token...")
+                            .desired_width(220.0),
+                    );
+                    ui.add_space(2.0);
+                    ui.label("Display name:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.tab_state.settings.collab_display_name)
+                            .hint_text("Your name...")
+                            .desired_width(160.0),
+                    );
+                    ui.add_space(4.0);
+                    let can_join = !self.tab_state.join_session_token.trim().is_empty()
+                        && !self.tab_state.settings.collab_display_name.trim().is_empty();
+                    if ui.add_enabled(can_join, egui::Button::new("Join")).clicked() {
+                        if self.tab_state.settings.suppress_p2p_ip_warning {
+                            self.tab_state.pending_join = true;
+                        } else {
+                            self.tab_state.show_ip_warning = true;
+                        }
+                    }
+                }
+            },
+        );
     }
 
     /// Builds the replay parser tab
