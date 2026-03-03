@@ -96,6 +96,23 @@ pub enum LocalAnnotationEvent {
     Undo,
 }
 
+/// Per-ship range overrides: vec of (entity_id, filter) pairs.
+pub type RangeOverrideUpdate =
+    Vec<(wows_replays::types::EntityId, wows_minimap_renderer::draw_command::ShipConfigFilter)>;
+
+/// Per-ship trail overrides: set of player names whose trails are hidden.
+pub type TrailOverrideUpdate = Vec<String>;
+
+/// Unified channel for all UI → peer task messages.
+pub enum LocalEvent {
+    CursorPosition(Option<[f32; 2]>),
+    Annotation(LocalAnnotationEvent),
+    DisplayToggle(DisplayOptionField, bool),
+    RangeOverrides(RangeOverrideUpdate),
+    TrailOverrides(TrailOverrideUpdate),
+    Ping([f32; 2]),
+}
+
 /// Handle returned from `start_peer_session` for UI interaction.
 pub struct PeerSessionHandle {
     /// Receive session events.
@@ -106,26 +123,11 @@ pub struct PeerSessionHandle {
     pub frame_tx: mpsc::SyncSender<FrameBroadcast>,
     /// Receive playback frames from the current frame source (join mode).
     pub frame_rx: mpsc::Receiver<PlaybackFrame>,
-    /// Send cursor position updates.
-    pub cursor_tx: mpsc::Sender<Option<[f32; 2]>>,
-    /// Send annotation events.
-    pub annotation_tx: mpsc::Sender<LocalAnnotationEvent>,
-    /// Send display option toggles.
-    pub display_toggle_tx: mpsc::Sender<(DisplayOptionField, bool)>,
-    /// Send per-ship range override updates.
-    pub range_override_tx: mpsc::Sender<RangeOverrideUpdate>,
-    /// Send per-ship trail visibility updates (set of hidden player names).
-    pub trail_override_tx: mpsc::Sender<TrailOverrideUpdate>,
+    /// Send local UI events (cursors, annotations, pings, etc.) to the peer task.
+    pub local_tx: mpsc::Sender<LocalEvent>,
     /// Shared session state.
     pub state: Arc<Mutex<SessionState>>,
 }
-
-/// Per-ship range overrides: vec of (entity_id, filter) pairs.
-pub type RangeOverrideUpdate =
-    Vec<(wows_replays::types::EntityId, wows_minimap_renderer::draw_command::ShipConfigFilter)>;
-
-/// Per-ship trail overrides: set of player names whose trails are hidden.
-pub type TrailOverrideUpdate = Vec<String>;
 
 /// Start a peer session (host or join). Returns a handle for UI interaction.
 ///
@@ -140,11 +142,7 @@ pub fn start_peer_session(
     let (command_tx, command_rx) = mpsc::channel();
     let (frame_tx, frame_broadcast_rx) = mpsc::sync_channel(2);
     let (inbound_frame_tx, frame_rx) = mpsc::channel();
-    let (cursor_tx, cursor_rx) = mpsc::channel();
-    let (annotation_tx, annotation_rx) = mpsc::channel();
-    let (display_toggle_tx, display_toggle_rx) = mpsc::channel();
-    let (range_override_tx, range_override_rx) = mpsc::channel();
-    let (trail_override_tx, trail_override_rx) = mpsc::channel();
+    let (local_tx, local_rx) = mpsc::channel();
 
     // Reset the provided state for this new session.
     let is_host = matches!(&mode, PeerMode::Host(_));
@@ -168,11 +166,7 @@ pub fn start_peer_session(
         command_rx,
         frame_broadcast_rx,
         inbound_frame_tx,
-        cursor_rx,
-        annotation_rx,
-        display_toggle_rx,
-        range_override_rx,
-        trail_override_rx,
+        local_rx,
         state_clone,
     ));
 
@@ -181,11 +175,7 @@ pub fn start_peer_session(
         command_tx,
         frame_tx,
         frame_rx,
-        cursor_tx,
-        annotation_tx,
-        display_toggle_tx,
-        range_override_tx,
-        trail_override_tx,
+        local_tx,
         state,
     }
 }
@@ -244,11 +234,7 @@ async fn peer_task(
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
-    cursor_rx: mpsc::Receiver<Option<[f32; 2]>>,
-    annotation_rx: mpsc::Receiver<LocalAnnotationEvent>,
-    display_toggle_rx: mpsc::Receiver<(DisplayOptionField, bool)>,
-    range_override_rx: mpsc::Receiver<RangeOverrideUpdate>,
-    trail_override_rx: mpsc::Receiver<TrailOverrideUpdate>,
+    local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
     match mode {
@@ -259,11 +245,7 @@ async fn peer_task(
                 command_rx,
                 frame_broadcast_rx,
                 inbound_frame_tx,
-                cursor_rx,
-                annotation_rx,
-                display_toggle_rx,
-                range_override_rx,
-                trail_override_rx,
+                local_rx,
                 ui_state,
             )
             .await;
@@ -275,11 +257,7 @@ async fn peer_task(
                 command_rx,
                 frame_broadcast_rx,
                 inbound_frame_tx,
-                cursor_rx,
-                annotation_rx,
-                display_toggle_rx,
-                range_override_rx,
-                trail_override_rx,
+                local_rx,
                 ui_state,
             )
             .await;
@@ -296,11 +274,7 @@ async fn host_main(
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
-    cursor_rx: mpsc::Receiver<Option<[f32; 2]>>,
-    annotation_rx: mpsc::Receiver<LocalAnnotationEvent>,
-    display_toggle_rx: mpsc::Receiver<(DisplayOptionField, bool)>,
-    range_override_rx: mpsc::Receiver<RangeOverrideUpdate>,
-    trail_override_rx: mpsc::Receiver<TrailOverrideUpdate>,
+    local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
     // Create iroh endpoint.
@@ -552,63 +526,57 @@ async fn host_main(
                     }
                 }
 
-                // Local cursor.
-                while let Ok(pos) = cursor_rx.try_recv() {
-                    {
-                        let mut s = ui_state.lock();
-                        if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
-                            c.pos = pos;
-                            c.last_update = Instant::now();
-                        }
-                    }
-                    let msg = PeerMessage::CursorPosition(pos);
-                    broadcast_to_mesh(&mesh, &msg);
-                }
-
-                // Local annotations.
-                while let Ok(evt) = annotation_rx.try_recv() {
-                    match &evt {
-                        LocalAnnotationEvent::Add(ann) => {
-                            { let mut s = ui_state.lock();
-                                let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
-                                anns.push(ann.clone());
-                                owners.push(my_user_id);
-                                s.annotation_sync_version += 1;
+                // Drain local UI events.
+                while let Ok(evt) = local_rx.try_recv() {
+                    match evt {
+                        LocalEvent::CursorPosition(pos) => {
+                            {
+                                let mut s = ui_state.lock();
+                                if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
+                                    c.pos = pos;
+                                    c.last_update = Instant::now();
+                                }
                             }
+                            broadcast_to_mesh(&mesh, &PeerMessage::CursorPosition(pos));
                         }
-                        LocalAnnotationEvent::Undo => {
-                            let mut s = ui_state.lock();
-                            if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
-                                && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
-                                    anns.remove(pos);
-                                    owners.remove(pos);
+                        LocalEvent::Annotation(evt) => {
+                            match &evt {
+                                LocalAnnotationEvent::Add(ann) => {
+                                    let mut s = ui_state.lock();
+                                    let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
+                                    anns.push(ann.clone());
+                                    owners.push(my_user_id);
                                     s.annotation_sync_version += 1;
                                 }
+                                LocalAnnotationEvent::Undo => {
+                                    let mut s = ui_state.lock();
+                                    if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
+                                        && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
+                                            anns.remove(pos);
+                                            owners.remove(pos);
+                                            s.annotation_sync_version += 1;
+                                        }
+                                }
+                            }
+                            let msg = match evt {
+                                LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
+                                LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
+                            };
+                            broadcast_to_mesh(&mesh, &msg);
+                        }
+                        LocalEvent::DisplayToggle(field, value) => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::ToggleDisplayOption { field, value });
+                        }
+                        LocalEvent::RangeOverrides(overrides) => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::ShipRangeOverrides { overrides });
+                        }
+                        LocalEvent::TrailOverrides(hidden) => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::ShipTrailOverrides { hidden });
+                        }
+                        LocalEvent::Ping(pos) => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::Ping { pos });
                         }
                     }
-                    let msg = match evt {
-                        LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
-                        LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
-                    };
-                    broadcast_to_mesh(&mesh, &msg);
-                }
-
-                // Local display toggles.
-                while let Ok((field, value)) = display_toggle_rx.try_recv() {
-                    let msg = PeerMessage::ToggleDisplayOption { field, value };
-                    broadcast_to_mesh(&mesh, &msg);
-                }
-
-                // Per-ship range overrides.
-                while let Ok(overrides) = range_override_rx.try_recv() {
-                    let msg = PeerMessage::ShipRangeOverrides { overrides };
-                    broadcast_to_mesh(&mesh, &msg);
-                }
-
-                // Trail overrides.
-                while let Ok(hidden) = trail_override_rx.try_recv() {
-                    let msg = PeerMessage::ShipTrailOverrides { hidden };
-                    broadcast_to_mesh(&mesh, &msg);
                 }
 
                 tokio::time::sleep(std::time::Duration::from_millis(16)).await;
@@ -905,11 +873,7 @@ async fn join_main(
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
-    cursor_rx: mpsc::Receiver<Option<[f32; 2]>>,
-    annotation_rx: mpsc::Receiver<LocalAnnotationEvent>,
-    display_toggle_rx: mpsc::Receiver<(DisplayOptionField, bool)>,
-    range_override_rx: mpsc::Receiver<RangeOverrideUpdate>,
-    trail_override_rx: mpsc::Receiver<TrailOverrideUpdate>,
+    local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
     // Decode the session token to extract the host's node ID.
@@ -1207,63 +1171,57 @@ async fn join_main(
                     }
                 }
 
-                // Cursor.
-                while let Ok(pos) = cursor_rx.try_recv() {
-                    {
-                        let mut s = ui_state.lock();
-                        if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
-                            c.pos = pos;
-                            c.last_update = Instant::now();
-                        }
-                    }
-                    let msg = PeerMessage::CursorPosition(pos);
-                    let _ = write_peer_message(&mut send, &msg).await;
-                }
-
-                // Annotations.
-                while let Ok(evt) = annotation_rx.try_recv() {
-                    match &evt {
-                        LocalAnnotationEvent::Add(ann) => {
-                            { let mut s = ui_state.lock();
-                                let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
-                                anns.push(ann.clone());
-                                owners.push(my_user_id);
-                                s.annotation_sync_version += 1;
+                // Drain local UI events.
+                while let Ok(evt) = local_rx.try_recv() {
+                    match evt {
+                        LocalEvent::CursorPosition(pos) => {
+                            {
+                                let mut s = ui_state.lock();
+                                if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == my_user_id) {
+                                    c.pos = pos;
+                                    c.last_update = Instant::now();
+                                }
                             }
+                            let _ = write_peer_message(&mut send, &PeerMessage::CursorPosition(pos)).await;
                         }
-                        LocalAnnotationEvent::Undo => {
-                            let mut s = ui_state.lock();
-                            if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
-                                && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
-                                    anns.remove(pos);
-                                    owners.remove(pos);
+                        LocalEvent::Annotation(evt) => {
+                            match &evt {
+                                LocalAnnotationEvent::Add(ann) => {
+                                    let mut s = ui_state.lock();
+                                    let (anns, owners) = s.current_annotation_sync.get_or_insert_with(|| (Vec::new(), Vec::new()));
+                                    anns.push(ann.clone());
+                                    owners.push(my_user_id);
                                     s.annotation_sync_version += 1;
                                 }
+                                LocalAnnotationEvent::Undo => {
+                                    let mut s = ui_state.lock();
+                                    if let Some((anns, owners)) = s.current_annotation_sync.as_mut()
+                                        && let Some(pos) = owners.iter().rposition(|&uid| uid == my_user_id) {
+                                            anns.remove(pos);
+                                            owners.remove(pos);
+                                            s.annotation_sync_version += 1;
+                                        }
+                                }
+                            }
+                            let msg = match evt {
+                                LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
+                                LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
+                            };
+                            let _ = write_peer_message(&mut send, &msg).await;
+                        }
+                        LocalEvent::DisplayToggle(field, value) => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::ToggleDisplayOption { field, value }).await;
+                        }
+                        LocalEvent::RangeOverrides(overrides) => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::ShipRangeOverrides { overrides }).await;
+                        }
+                        LocalEvent::TrailOverrides(hidden) => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::ShipTrailOverrides { hidden }).await;
+                        }
+                        LocalEvent::Ping(pos) => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::Ping { pos }).await;
                         }
                     }
-                    let msg = match evt {
-                        LocalAnnotationEvent::Add(ann) => PeerMessage::AddAnnotation(ann),
-                        LocalAnnotationEvent::Undo => PeerMessage::UndoAnnotation,
-                    };
-                    let _ = write_peer_message(&mut send, &msg).await;
-                }
-
-                // Display toggles.
-                while let Ok((field, value)) = display_toggle_rx.try_recv() {
-                    let msg = PeerMessage::ToggleDisplayOption { field, value };
-                    let _ = write_peer_message(&mut send, &msg).await;
-                }
-
-                // Per-ship range overrides.
-                while let Ok(overrides) = range_override_rx.try_recv() {
-                    let msg = PeerMessage::ShipRangeOverrides { overrides };
-                    let _ = write_peer_message(&mut send, &msg).await;
-                }
-
-                // Trail overrides.
-                while let Ok(hidden) = trail_override_rx.try_recv() {
-                    let msg = PeerMessage::ShipTrailOverrides { hidden };
-                    let _ = write_peer_message(&mut send, &msg).await;
                 }
 
                 // If we're the frame source, broadcast compressed frames.
@@ -1422,6 +1380,20 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.current_trail_hidden = Some(hidden.clone());
                 s.trail_override_version += 1;
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::Ping { pos } => {
+            let color = mesh.lock().peers.get(&sender_id).map(|p| p.color).unwrap_or([200, 200, 200]);
+            {
+                let mut s = ui_state.lock();
+                s.pings.push(crate::collab::PeerPing {
+                    user_id: sender_id,
+                    color,
+                    pos,
+                    time: Instant::now(),
+                });
             }
             relay_if_host(sender_id, &msg, mesh);
         }

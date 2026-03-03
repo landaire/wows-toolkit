@@ -58,6 +58,15 @@ pub struct OpenReplay {
     pub game_version: String,
 }
 
+/// A map ping from a peer, rendered as an expanding ripple effect.
+#[derive(Debug, Clone)]
+pub struct PeerPing {
+    pub user_id: u64,
+    pub color: [u8; 3],
+    pub pos: [f32; 2],
+    pub time: Instant,
+}
+
 /// Shared session state visible to the UI thread.
 ///
 /// Stored behind `Arc<Mutex<>>` and read each frame by the renderer UI.
@@ -105,6 +114,8 @@ pub struct SessionState {
     pub trail_override_version: u64,
     /// Current set of player names whose trails are hidden.
     pub current_trail_hidden: Option<Vec<String>>,
+    /// Active map pings from peers (rendered as ripple effects).
+    pub pings: Vec<PeerPing>,
 }
 
 impl Default for SessionState {
@@ -128,6 +139,7 @@ impl Default for SessionState {
             current_range_overrides: None,
             trail_override_version: 0,
             current_trail_hidden: None,
+            pings: Vec::new(),
         }
     }
 }

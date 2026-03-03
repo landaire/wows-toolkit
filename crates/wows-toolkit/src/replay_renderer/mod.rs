@@ -510,9 +510,9 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
 /// Send the current per-ship trail hidden set through the collab channel (if connected).
 fn broadcast_trail_overrides(trail_hidden: &HashSet<String>, shared_state: &Arc<Mutex<SharedRendererState>>) {
     let state = shared_state.lock();
-    if let Some(ref tx) = state.collab_trail_override_tx {
+    if let Some(ref tx) = state.collab_local_tx {
         let data: Vec<_> = trail_hidden.iter().cloned().collect();
-        let _ = tx.send(data);
+        let _ = tx.send(crate::collab::peer::LocalEvent::TrailOverrides(data));
     }
 }
 
@@ -522,9 +522,9 @@ fn broadcast_range_overrides(
     shared_state: &Arc<Mutex<SharedRendererState>>,
 ) {
     let state = shared_state.lock();
-    if let Some(ref tx) = state.collab_range_override_tx {
+    if let Some(ref tx) = state.collab_local_tx {
         let data: Vec<_> = overrides.iter().map(|(k, v)| (*k, *v)).collect();
-        let _ = tx.send(data);
+        let _ = tx.send(crate::collab::peer::LocalEvent::RangeOverrides(data));
     }
 }
 
@@ -757,21 +757,15 @@ pub struct SharedRendererState {
     pub applied_trail_override_version: u64,
     /// Reference to the collab session state (set by app.rs when wired to a session).
     pub collab_session_state: Option<Arc<Mutex<crate::collab::SessionState>>>,
-    /// Channel to send cursor position updates to the collab session.
-    pub collab_cursor_tx: Option<std::sync::mpsc::Sender<Option<[f32; 2]>>>,
-    /// Channel to send annotation events to the collab session.
-    pub collab_annotation_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalAnnotationEvent>>,
-    /// Channel to send display option toggles to the collab session.
-    pub collab_display_toggle_tx: Option<std::sync::mpsc::Sender<(crate::collab::protocol::DisplayOptionField, bool)>>,
-    /// Channel to send per-ship range override updates to the collab session.
-    pub collab_range_override_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::RangeOverrideUpdate>>,
-    /// Channel to send per-ship trail visibility updates to the collab session.
-    pub collab_trail_override_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::TrailOverrideUpdate>>,
+    /// Channel to send local UI events (cursors, annotations, pings, etc.) to the collab peer task.
+    pub collab_local_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalEvent>>,
     /// Channel to send session commands (e.g. ReplayOpened) directly from the
     /// background thread, avoiding cross-window repaint issues.
     pub collab_command_tx: Option<std::sync::mpsc::Sender<crate::collab::SessionCommand>>,
     /// Replay name for collab announcements (set once at creation).
     pub collab_replay_name: Option<String>,
+    /// Map space size in BigWorld units (from MapInfo), used for px→km conversion.
+    pub map_space_size: Option<f32>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -884,13 +878,10 @@ pub fn launch_replay_renderer(
         applied_range_override_version: 0,
         applied_trail_override_version: 0,
         collab_session_state: None,
-        collab_cursor_tx: None,
-        collab_annotation_tx: None,
-        collab_display_toggle_tx: None,
-        collab_range_override_tx: None,
-        collab_trail_override_tx: None,
+        collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: Some(replay_name.clone()),
+        map_space_size: None,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -1032,13 +1023,10 @@ pub fn launch_client_renderer(
         applied_range_override_version: 0,
         applied_trail_override_version: 0,
         collab_session_state: None,
-        collab_cursor_tx: None,
-        collab_annotation_tx: None,
-        collab_display_toggle_tx: None,
-        collab_range_override_tx: None,
-        collab_trail_override_tx: None,
+        collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: None,
+        map_space_size: None,
     }));
 
     let title = Arc::new(format!("Collab Viewer - {replay_name}"));
@@ -1877,6 +1865,33 @@ impl ReplayRendererViewer {
                                     map_painter.galley(label_pos, galley, Color32::PLACEHOLDER);
                                 }
                             }
+
+                            // ─── Render map pings (ripple effects) ──────────────
+                            let mut has_active_pings = false;
+                            for ping in &s.pings {
+                                let age = now.duration_since(ping.time).as_secs_f32();
+                                if age > 1.0 {
+                                    continue;
+                                }
+                                has_active_pings = true;
+                                let max_r = transform.scale_distance(40.0);
+                                let r = age * max_r;
+                                let alpha = ((1.0 - age) * 200.0) as u8;
+                                let [pr, pg, pb] = ping.color;
+                                let ping_color = Color32::from_rgba_unmultiplied(pr, pg, pb, alpha);
+                                let screen_pos = transform.minimap_to_screen(&MinimapPos { x: ping.pos[0] as i32, y: ping.pos[1] as i32 });
+                                map_painter.add(egui::Shape::circle_stroke(screen_pos, r, egui::Stroke::new(2.0, ping_color)));
+                                map_painter.add(egui::Shape::circle_stroke(screen_pos, r * 0.6, egui::Stroke::new(1.5, ping_color)));
+                            }
+                            if has_active_pings {
+                                repaint = true;
+                            }
+                            drop(s);
+                            // Clean up expired pings
+                            if has_active_pings {
+                                let mut s = ss_arc.lock();
+                                s.pings.retain(|p| now.duration_since(p.time).as_secs_f32() < 1.0);
+                            }
                         }
                     }
 
@@ -1886,8 +1901,8 @@ impl ReplayRendererViewer {
                             let mp = transform.screen_to_minimap(p);
                             [mp.x, mp.y]
                         });
-                        if let Some(ref tx) = shared_state.lock().collab_cursor_tx {
-                            let _ = tx.send(cursor_pos);
+                        if let Some(ref tx) = shared_state.lock().collab_local_tx {
+                            let _ = tx.send(crate::collab::peer::LocalEvent::CursorPosition(cursor_pos));
                         }
                     }
 
@@ -2061,6 +2076,23 @@ impl ReplayRendererViewer {
                                         ann.selected_index = closest_idx;
                                     } else {
                                         ann.selected_index = None;
+                                        // Click on empty space → send map ping
+                                        let state = shared_state.lock();
+                                        if let Some(ref tx) = state.collab_local_tx {
+                                            let _ = tx.send(crate::collab::peer::LocalEvent::Ping([click_pos.x, click_pos.y]));
+                                        }
+                                        // Also push a local ping so the sender sees their own ripple
+                                        if let Some(ref ss_arc) = state.collab_session_state {
+                                            let mut ss = ss_arc.lock();
+                                            let my_id = ss.my_user_id;
+                                            let color = ss.cursors.iter().find(|c| c.user_id == my_id).map(|c| c.color).unwrap_or([255, 255, 0]);
+                                            ss.pings.push(crate::collab::PeerPing {
+                                                user_id: my_id,
+                                                color,
+                                                pos: [click_pos.x, click_pos.y],
+                                                time: std::time::Instant::now(),
+                                            });
+                                        }
                                     }
                                 }
                                 // Drag to move selected annotation (only if not rotating)
@@ -2163,7 +2195,7 @@ impl ReplayRendererViewer {
                             }
 
                             PaintTool::DrawingCircle { filled, center } => {
-                                // Drag to draw: press sets one edge, release sets opposite
+                                // Drag to draw: click = center, drag outward = radius
                                 if response.drag_started_by(egui::PointerButton::Primary)
                                     && let Some(pos) = cursor_minimap
                                 {
@@ -2173,11 +2205,10 @@ impl ReplayRendererViewer {
                                     && let Some(origin) = *center
                                 {
                                     if let Some(pos) = cursor_minimap {
-                                        let mid = (origin + pos) / 2.0;
-                                        let radius = (pos - origin).length() / 2.0;
+                                        let radius = (pos - origin).length();
                                         if radius > 1.0 {
                                             new_annotation = Some(Annotation::Circle {
-                                                center: mid,
+                                                center: origin,
                                                 radius,
                                                 color: paint_color,
                                                 width: stroke_width,
@@ -2244,9 +2275,9 @@ impl ReplayRendererViewer {
                             ann.save_undo();
                         }
                         if let Some(a) = new_annotation {
-                            if let Some(ref tx) = shared_state.lock().collab_annotation_tx {
+                            if let Some(ref tx) = shared_state.lock().collab_local_tx {
                                 let collab_ann = local_annotation_to_collab(&a);
-                                let _ = tx.send(crate::collab::peer::LocalAnnotationEvent::Add(collab_ann));
+                                let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Add(collab_ann)));
                             }
                             ann.annotations.push(a);
                         }
@@ -2256,8 +2287,8 @@ impl ReplayRendererViewer {
 
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
-                            if let Some(ref tx) = shared_state.lock().collab_annotation_tx {
-                                let _ = tx.send(crate::collab::peer::LocalAnnotationEvent::Undo);
+                            if let Some(ref tx) = shared_state.lock().collab_local_tx {
+                                let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Undo));
                             }
                             ann.undo();
                         }
@@ -2783,6 +2814,9 @@ impl ReplayRendererViewer {
                                         if has_size {
                                             ui.horizontal(|ui| {
                                                 ui.label(egui::RichText::new("Size").small());
+                                                let is_circle = matches!(&ann.annotations[sel_idx], Annotation::Circle { .. });
+                                                let map_space = shared_state.lock().map_space_size;
+                                                let use_km = is_circle && map_space.is_some();
                                                 let mut size = match &ann.annotations[sel_idx] {
                                                     Annotation::Circle { radius, .. } => *radius,
                                                     Annotation::Rectangle { half_size, .. } => {
@@ -2792,7 +2826,17 @@ impl ReplayRendererViewer {
                                                     _ => 0.0,
                                                 };
                                                 let old = size;
-                                                ui.add(egui::DragValue::new(&mut size).speed(1.0).range(5.0..=500.0));
+                                                if use_km {
+                                                    let space_size = map_space.unwrap();
+                                                    let mut km = size / 768.0 * space_size * 30.0 / 1000.0;
+                                                    let old_km = km;
+                                                    ui.add(egui::DragValue::new(&mut km).speed(0.1).range(0.1..=20.0).fixed_decimals(1).suffix(" km"));
+                                                    if km != old_km {
+                                                        size = km * 1000.0 / 30.0 / space_size * 768.0;
+                                                    }
+                                                } else {
+                                                    ui.add(egui::DragValue::new(&mut size).speed(1.0).range(5.0..=500.0));
+                                                }
                                                 if size != old && size > 0.0 {
                                                     match &mut ann.annotations[sel_idx] {
                                                         Annotation::Circle { radius, .. } => *radius = size,
@@ -3431,12 +3475,12 @@ impl ReplayRendererViewer {
                                             if changed {
                                                 let mut state = shared_state.lock();
                                                 // Broadcast diffs to collab peers if connected.
-                                                if let Some(ref tx) = state.collab_display_toggle_tx {
+                                                if let Some(ref tx) = state.collab_local_tx {
                                                     use crate::collab::protocol::CollabRenderOptions;
                                                     let old = CollabRenderOptions::from_render_options(&state.options, state.show_dead_ships);
                                                     let new = CollabRenderOptions::from_render_options(&opts, show_dead);
                                                     for (field, value) in old.diff(&new) {
-                                                        let _ = tx.send((field, value));
+                                                        let _ = tx.send(crate::collab::peer::LocalEvent::DisplayToggle(field, value));
                                                     }
                                                 }
                                                 state.options = opts.clone();

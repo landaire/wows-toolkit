@@ -88,6 +88,8 @@ pub(super) fn playback_thread(
             powerup_icons,
         });
 
+        shared_state.lock().map_space_size = map_info.as_ref().map(|m| m.space_size as f32);
+
         (map_info, game_fonts, map_image_for_announce)
     };
 

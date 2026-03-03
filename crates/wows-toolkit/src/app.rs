@@ -851,11 +851,7 @@ impl WowsToolkitApp {
                     state.collab_replay_id = Some(id);
                     state.session_frame_tx = Some(host_handle.frame_tx.clone());
                     state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
-                    state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
-                    state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
-                    state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
-                    state.collab_range_override_tx = Some(host_handle.range_override_tx.clone());
-                    state.collab_trail_override_tx = Some(host_handle.trail_override_tx.clone());
+                    state.collab_local_tx = Some(host_handle.local_tx.clone());
                     state.collab_command_tx = Some(host_handle.command_tx.clone());
                     // Send the current frame (if any) so clients get it immediately.
                     if let Some(ref frame) = state.frame {
@@ -1684,11 +1680,7 @@ impl WowsToolkitApp {
                 s.collab_replay_id = None;
                 s.session_announced = false;
                 s.collab_session_state = None;
-                s.collab_cursor_tx = None;
-                s.collab_annotation_tx = None;
-                s.collab_display_toggle_tx = None;
-                s.collab_range_override_tx = None;
-                s.collab_trail_override_tx = None;
+                s.collab_local_tx = None;
             }
             self.tab_state.host_session = None;
             {
@@ -1733,11 +1725,7 @@ impl WowsToolkitApp {
                             let mut state = viewer.shared_state().lock();
                             state.collab_replay_id = Some(replay.replay_id);
                             state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
-                            state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
-                            state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
-                            state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
-                            state.collab_range_override_tx = Some(client_handle.range_override_tx.clone());
-                            state.collab_trail_override_tx = Some(client_handle.trail_override_tx.clone());
+                            state.collab_local_tx = Some(client_handle.local_tx.clone());
                         }
                         self.tab_state.replay_renderers.lock().push(viewer);
                     }
@@ -1796,11 +1784,7 @@ impl WowsToolkitApp {
                         let mut state = viewer.shared_state().lock();
                         state.collab_replay_id = Some(replay_id);
                         state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
-                        state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
-                        state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
-                        state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
-                        state.collab_range_override_tx = Some(client_handle.range_override_tx.clone());
-                        state.collab_trail_override_tx = Some(client_handle.trail_override_tx.clone());
+                        state.collab_local_tx = Some(client_handle.local_tx.clone());
                     }
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }

@@ -397,10 +397,9 @@ pub(super) fn render_tool_preview(
             let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
             painter.add(Shape::circle_stroke(cursor_screen, r, Stroke::new(1.0, color)));
             if let Some(org) = origin {
-                // Circle from drag origin to cursor (origin and cursor are opposite edges)
-                let mid = (*org + minimap_pos) / 2.0;
-                let radius = (minimap_pos - *org).length() / 2.0;
-                let c = minimap_vec2_to_screen(mid, transform);
+                // Circle centered on drag origin, radius = distance to cursor
+                let radius = (minimap_pos - *org).length();
+                let c = minimap_vec2_to_screen(*org, transform);
                 let r = transform.scale_distance(radius);
                 let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
                 if *filled {

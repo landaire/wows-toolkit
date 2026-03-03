@@ -252,6 +252,10 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
                 check_string_len(name, MAX_DISPLAY_NAME_LEN, "ShipTrailOverrides.hidden")?;
             }
         }
+
+        PeerMessage::Ping { pos } => {
+            check_position(pos, "Ping.pos")?;
+        }
     }
     Ok(())
 }

@@ -145,6 +145,9 @@ pub enum PeerMessage {
     /// Contains the set of player names whose trails are hidden.
     ShipTrailOverrides { hidden: Vec<String> },
 
+    /// Map ping — produces a ripple effect at the given position.
+    Ping { pos: [f32; 2] },
+
     // ── Authority messages (host/co-host → all peers) ──────────────────
     /// Permission state change. Receiver drops if sender is not host/co-host.
     Permissions { annotations_locked: bool, settings_locked: bool },
