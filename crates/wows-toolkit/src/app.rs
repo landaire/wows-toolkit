@@ -900,6 +900,11 @@ impl WowsToolkitApp {
         if mitigate_wgpu_mem_leak(ctx) {
             return;
         }
+        // Draw realtime armor viewer windows
+        self.realtime_armor_viewers.retain(|v| v.lock().open.load(Ordering::Relaxed));
+        for viewer in &self.realtime_armor_viewers {
+            crate::realtime_armor_viewer::draw_realtime_armor_viewer(viewer, ctx);
+        }
 
         if ctx
             .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D)))
@@ -1106,6 +1111,7 @@ impl WowsToolkitApp {
                         state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
                         state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
                         state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
+                        state.collab_command_tx = Some(host_handle.command_tx.clone());
                         // Send the current frame (if any) so clients get it immediately.
                         if let Some(ref frame) = state.frame {
                             tracing::debug!("Auto-wire: first frame already available, broadcasting (replay_id={id})");
@@ -1119,7 +1125,10 @@ impl WowsToolkitApp {
                             });
                         }
                     }
-                    // Send ReplayOpened once the renderer has assets (map loaded).
+                    // ReplayOpened is normally sent by the background thread once
+                    // assets load. But if assets loaded before auto-wire set
+                    // collab_command_tx, the background thread missed its chance.
+                    // Handle that race here.
                     if !state.session_announced
                         && state.assets.is_some()
                         && let Some(replay_id) = state.collab_replay_id
@@ -1140,9 +1149,9 @@ impl WowsToolkitApp {
                             })
                             .unwrap_or_default();
                         let game_version = state.game_version.clone().unwrap_or_default();
-                        // Use the renderer's title (strip "Replay Renderer - " prefix).
-                        let replay_name =
-                            renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string();
+                        let replay_name = state.collab_replay_name.clone().unwrap_or_else(|| {
+                            renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string()
+                        });
                         let _ = host_handle.command_tx.send(crate::collab::SessionCommand::ReplayOpened {
                             replay_id,
                             replay_name,
@@ -1296,12 +1305,6 @@ impl WowsToolkitApp {
                 }
             }
             drop(replay_renderers);
-        }
-
-        // Draw realtime armor viewer windows
-        self.realtime_armor_viewers.retain(|v| v.lock().open.load(Ordering::Relaxed));
-        for viewer in &self.realtime_armor_viewers {
-            crate::realtime_armor_viewer::draw_realtime_armor_viewer(viewer, ctx);
         }
 
         self.ui_file_drag_and_drop(ctx);

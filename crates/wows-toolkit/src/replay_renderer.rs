@@ -995,6 +995,11 @@ pub struct SharedRendererState {
     pub collab_annotation_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalAnnotationEvent>>,
     /// Channel to send display option toggles to the collab session.
     pub collab_display_toggle_tx: Option<std::sync::mpsc::Sender<(crate::collab::protocol::DisplayOptionField, bool)>>,
+    /// Channel to send session commands (e.g. ReplayOpened) directly from the
+    /// background thread, avoiding cross-window repaint issues.
+    pub collab_command_tx: Option<std::sync::mpsc::Sender<crate::collab::SessionCommand>>,
+    /// Replay name for collab announcements (set once at creation).
+    pub collab_replay_name: Option<String>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -1108,6 +1113,8 @@ pub fn launch_replay_renderer(
         collab_cursor_tx: None,
         collab_annotation_tx: None,
         collab_display_toggle_tx: None,
+        collab_command_tx: None,
+        collab_replay_name: Some(replay_name.clone()),
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -1250,6 +1257,8 @@ pub fn launch_client_renderer(
         collab_cursor_tx: None,
         collab_annotation_tx: None,
         collab_display_toggle_tx: None,
+        collab_command_tx: None,
+        collab_replay_name: None,
     }));
 
     let title = Arc::new(format!("Collab Viewer - {replay_name}"));
@@ -1309,7 +1318,7 @@ fn playback_thread(
     };
 
     // 2. Load visual assets (cached across renderer instances)
-    let (map_info, game_fonts) = {
+    let (map_info, game_fonts, map_image_for_announce) = {
         let mut cache = asset_cache.lock();
         let ship_icons = cache.get_or_load_ship_icons(&vfs);
         let plane_icons = cache.get_or_load_plane_icons(&vfs);
@@ -1319,6 +1328,7 @@ fn playback_thread(
         let game_fonts = cache.get_or_load_game_fonts(&vfs);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs);
 
+        let map_image_for_announce = map_image.clone();
         shared_state.lock().assets = Some(ReplayRendererAssets {
             map_image,
             ship_icons,
@@ -1328,8 +1338,40 @@ fn playback_thread(
             powerup_icons,
         });
 
-        (map_info, game_fonts)
+        (map_info, game_fonts, map_image_for_announce)
     };
+
+    // Announce ReplayOpened to collab peers directly from the background thread.
+    // This avoids depending on the parent window repainting (cross-window
+    // request_repaint is unreliable on Windows).
+    {
+        let mut state = shared_state.lock();
+        if !state.session_announced
+            && let (Some(replay_id), Some(ref tx)) = (state.collab_replay_id, state.collab_command_tx.clone())
+        {
+            let map_png = map_image_for_announce
+                .as_ref()
+                .map(|img: &Arc<(Vec<u8>, u32, u32)>| {
+                    let (ref data, w, h) = **img;
+                    let mut buf = Vec::new();
+                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                        let mut cursor = std::io::Cursor::new(&mut buf);
+                        let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
+                    }
+                    buf
+                })
+                .unwrap_or_default();
+            let game_version = state.game_version.clone().unwrap_or_default();
+            let replay_name = state.collab_replay_name.clone().unwrap_or_default();
+            let _ = tx.send(crate::collab::SessionCommand::ReplayOpened {
+                replay_id,
+                replay_name,
+                map_image_png: map_png,
+                game_version,
+            });
+            state.session_announced = true;
+        }
+    }
 
     // Store game fonts in shared state so the UI thread can register them with egui
     shared_state.lock().game_fonts = Some(game_fonts.clone());
@@ -1497,6 +1539,10 @@ fn playback_thread(
         let mut state = shared_state.lock();
         state.status = RendererStatus::Ready;
         state.game_version = Some(replay_file.meta.clientVersionFromExe.clone());
+        // Wake the UI so the viewport transitions out of the loading spinner.
+        if let Some(ref ctx) = state.viewport_ctx {
+            ctx.request_repaint();
+        }
     }
 
     // 5. Playback loop — respond to UI commands
@@ -7582,6 +7628,11 @@ impl ReplayRendererViewer {
                 if ctx.input(|i| i.viewport().close_requested()) {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
+                    ctx.request_repaint();
+                } else if status_is_loading {
+                    // Keep the viewport alive while loading so it notices the
+                    // Loading→Ready transition. Only repaint this viewport —
+                    // do NOT wake the parent, which causes event-loop starvation.
                     ctx.request_repaint();
                 } else if playing || repaint
                     || shared_state.lock().collab_session_state.is_some()

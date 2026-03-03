@@ -12,7 +12,7 @@ use std::sync::mpsc;
 
 use egui::mutex::Mutex;
 
-use tracing::warn;
+use tracing::trace;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::game_params::types::AmmoType;
@@ -900,6 +900,10 @@ impl RealtimeArmorViewer {
             self.needs_repaint = true;
         }
 
+        if self.pane.loading {
+            self.needs_repaint = true;
+        }
+
         // Poll ship load and hull LOD reload
         if crate::armor_viewer::common::poll_pane_load_receivers(
             &mut self.pane,
@@ -951,7 +955,7 @@ impl RealtimeArmorViewer {
         }
 
         if self.needs_repaint {
-            warn!("needs repaint");
+            trace!("needs repaint");
         }
     }
 
@@ -1172,17 +1176,6 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
     let window_open = open.clone();
     let parent_ctx = ctx.clone();
 
-    // Tick state (process new salvos, load ship, etc.)
-    // Must happen on the main context so it runs even when the viewport isn't focused.
-    {
-        let mut v = viewer.lock();
-        v.tick();
-
-        if v.needs_repaint {
-            ctx.request_repaint_of(viewport_id);
-        }
-    }
-
     ctx.show_viewport_deferred(
         viewport_id,
         egui::ViewportBuilder::default()
@@ -1202,9 +1195,22 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
 
             {
                 let mut viewer = viewer_clone.lock();
+
+                // Tick inside the viewport so load-completion is detected here
+                // (cross-window request_repaint doesn't reliably wake deferred
+                // viewports, so we can't depend on the parent's tick alone).
+                viewer.tick();
+
                 egui::CentralPanel::default().show(ctx, |ui| {
                     viewer.draw_content(ui);
                 });
+
+                // Keep the viewport alive while loading so tick() can poll
+                // the load receiver. Only repaint this viewport — do NOT wake
+                // the parent, which causes event-loop starvation on Windows.
+                if viewer.pane.loading {
+                    ctx.request_repaint();
+                }
 
                 // Repaint both this viewport AND the parent so sibling viewports
                 // (e.g. replay renderer) also update while this window has focus.
