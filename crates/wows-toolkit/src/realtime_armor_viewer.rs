@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
-use egui::mutex::Mutex;
+use parking_lot::Mutex;
 
 use tracing::trace;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;

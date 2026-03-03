@@ -7,13 +7,13 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use egui::mutex::Mutex;
 use notify::EventKind;
 use notify::RecommendedWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
 use notify::event::ModifyKind;
 use notify::event::RenameMode;
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use serde::Deserialize;
 use serde::Serialize;
@@ -379,7 +379,7 @@ pub struct TabState {
 
     /// Shared session state for both host and client sessions.
     #[serde(skip)]
-    pub session_state: std::sync::Arc<std::sync::Mutex<crate::collab::SessionState>>,
+    pub session_state: Arc<Mutex<crate::collab::SessionState>>,
 
     /// Whether the session token is visible (unmasked) in the popover.
     #[serde(skip)]
@@ -462,7 +462,7 @@ impl Default for TabState {
             pending_join: false,
             client_session: None,
             host_session: None,
-            session_state: std::sync::Arc::new(std::sync::Mutex::new(crate::collab::SessionState::default())),
+            session_state: Arc::new(Mutex::new(crate::collab::SessionState::default())),
             session_token_visible: false,
             next_replay_id: 1,
             replay_open_timestamps: std::collections::VecDeque::new(),

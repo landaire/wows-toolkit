@@ -1807,7 +1807,7 @@ impl UiReport {
                                         serde_json::to_string_pretty(player).expect("failed to serialize player");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("metadata.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile {
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
                                             ext: ".json".to_owned(),
                                             contents: pretty_meta,
                                         })),
@@ -2852,7 +2852,7 @@ impl ToolkitTabViewer<'_> {
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
                     let viewer = plaintext_viewer::PlaintextFileViewer {
                         title: Arc::new("metadata.json".to_owned()),
-                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
+                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
                         open: Arc::new(AtomicBool::new(true)),
                     };
                     self.tab_state.file_viewer.lock().push(viewer);
@@ -2867,7 +2867,7 @@ impl ToolkitTabViewer<'_> {
                                     let pretty = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize battle results");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("results_raw.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
                                         open: Arc::new(AtomicBool::new(true)),
                                     };
                                     self.tab_state.file_viewer.lock().push(viewer);
@@ -2879,7 +2879,7 @@ impl ToolkitTabViewer<'_> {
                                     let pretty = serde_json::to_string_pretty(resolved).expect("failed to serialize resolved results");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("results_mapped.json".to_owned()),
-                                        file_info: Arc::new(egui::mutex::Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
                                         open: Arc::new(AtomicBool::new(true)),
                                     };
                                     self.tab_state.file_viewer.lock().push(viewer);
@@ -3379,7 +3379,7 @@ impl ToolkitTabViewer<'_> {
     fn show_session_popover(&mut self, ui: &mut egui::Ui) {
         // Determine active states from tab_state directly.
         let host_status = if self.tab_state.host_session.is_some() {
-            self.tab_state.session_state.lock().ok().map(|s| s.status.clone())
+            Some(self.tab_state.session_state.lock().status.clone())
         } else {
             None
         };
@@ -3421,7 +3421,8 @@ impl ToolkitTabViewer<'_> {
                                     s.collab_session_state = None;
                                 }
                                 self.tab_state.host_session = None;
-                                if let Ok(mut s) = self.tab_state.session_state.lock() {
+                                {
+                                    let mut s = self.tab_state.session_state.lock();
                                     s.status = SessionStatus::Idle;
                                     s.connected_users.clear();
                                     s.cursors.clear();
@@ -3448,7 +3449,8 @@ impl ToolkitTabViewer<'_> {
                                     s.collab_session_state = None;
                                 }
                                 self.tab_state.host_session = None;
-                                if let Ok(mut s) = self.tab_state.session_state.lock() {
+                                {
+                                    let mut s = self.tab_state.session_state.lock();
                                     s.status = SessionStatus::Idle;
                                     s.connected_users.clear();
                                     s.cursors.clear();
@@ -3461,8 +3463,7 @@ impl ToolkitTabViewer<'_> {
                     ui.separator();
 
                     // Token display
-                    let token =
-                        self.tab_state.session_state.lock().ok().and_then(|s| s.token.clone()).unwrap_or_default();
+                    let token = self.tab_state.session_state.lock().token.clone().unwrap_or_default();
                     if !token.is_empty() {
                         ui.label("Session Token:");
                         let visible = self.tab_state.session_token_visible;
@@ -3488,8 +3489,7 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     // Connected users count
-                    let user_count =
-                        self.tab_state.session_state.lock().ok().map(|s| s.connected_users.len()).unwrap_or(0);
+                    let user_count = self.tab_state.session_state.lock().connected_users.len();
                     ui.horizontal(|ui| {
                         ui.label(icons::USERS);
                         ui.label(format!("{} connected", user_count));
@@ -3500,13 +3500,10 @@ impl ToolkitTabViewer<'_> {
 
                     // Permission controls
                     ui.label(RichText::new("Permissions").small().strong());
-                    let (mut lock_ann, mut lock_settings) = self
-                        .tab_state
-                        .session_state
-                        .lock()
-                        .ok()
-                        .map(|s| (s.permissions.annotations_locked, s.permissions.settings_locked))
-                        .unwrap_or((false, false));
+                    let (mut lock_ann, mut lock_settings) = {
+                        let s = self.tab_state.session_state.lock();
+                        (s.permissions.annotations_locked, s.permissions.settings_locked)
+                    };
 
                     let mut perms_changed = false;
                     perms_changed |= ui.checkbox(&mut lock_ann, "Lock Annotations").changed();
@@ -3514,9 +3511,7 @@ impl ToolkitTabViewer<'_> {
 
                     if perms_changed {
                         let perms = Permissions { annotations_locked: lock_ann, settings_locked: lock_settings };
-                        if let Ok(mut s) = self.tab_state.session_state.lock() {
-                            s.permissions = perms.clone();
-                        }
+                        self.tab_state.session_state.lock().permissions = perms.clone();
                         if let Some(ref handle) = self.tab_state.host_session {
                             let _ = handle.command_tx.send(SessionCommand::SetPermissions(perms));
                         }

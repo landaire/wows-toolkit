@@ -133,6 +133,18 @@ pub enum PeerMessage {
     /// Receiver drops if `settings_locked` and sender is not host/co-host.
     ToggleDisplayOption { field: DisplayOptionField, value: bool },
 
+    /// Per-ship range override update.
+    /// Receiver drops if `settings_locked` and sender is not host/co-host.
+    /// Entries with no ranges enabled should be omitted (= hidden).
+    ShipRangeOverrides {
+        overrides: Vec<(wows_replays::types::EntityId, wows_minimap_renderer::draw_command::ShipConfigFilter)>,
+    },
+
+    /// Per-ship trail visibility override.
+    /// Receiver drops if `settings_locked` and sender is not host/co-host.
+    /// Contains the set of player names whose trails are hidden.
+    ShipTrailOverrides { hidden: Vec<String> },
+
     // ── Authority messages (host/co-host → all peers) ──────────────────
     /// Permission state change. Receiver drops if sender is not host/co-host.
     Permissions { annotations_locked: bool, settings_locked: bool },
@@ -240,7 +252,7 @@ pub enum DisplayOptionField {
 /// Serializable subset of render options for network sync.
 ///
 /// Excludes `prefer_cpu_encoder` (local-only setting).
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct CollabRenderOptions {
     pub show_hp_bars: bool,
     pub show_tracers: bool,
@@ -313,6 +325,90 @@ impl CollabRenderOptions {
             show_self_radar_range: s.show_self_radar_range,
             show_self_hydro_range: s.show_self_hydro_range,
         }
+    }
+
+    /// Build from a `RenderOptions` and the separate `show_dead_ships` flag.
+    pub fn from_render_options(opts: &wows_minimap_renderer::renderer::RenderOptions, show_dead_ships: bool) -> Self {
+        Self {
+            show_hp_bars: opts.show_hp_bars,
+            show_tracers: opts.show_tracers,
+            show_torpedoes: opts.show_torpedoes,
+            show_planes: opts.show_planes,
+            show_smoke: opts.show_smoke,
+            show_score: opts.show_score,
+            show_timer: opts.show_timer,
+            show_kill_feed: opts.show_kill_feed,
+            show_player_names: opts.show_player_names,
+            show_ship_names: opts.show_ship_names,
+            show_capture_points: opts.show_capture_points,
+            show_buildings: opts.show_buildings,
+            show_turret_direction: opts.show_turret_direction,
+            show_consumables: opts.show_consumables,
+            show_dead_ships,
+            show_dead_ship_names: opts.show_dead_ship_names,
+            show_armament: opts.show_armament,
+            show_trails: opts.show_trails,
+            show_dead_trails: opts.show_dead_trails,
+            show_speed_trails: opts.show_speed_trails,
+            show_battle_result: opts.show_battle_result,
+            show_buffs: opts.show_buffs,
+            show_ship_config: opts.show_ship_config,
+            show_chat: opts.show_chat,
+            show_advantage: opts.show_advantage,
+            show_score_timer: opts.show_score_timer,
+            // Self-range fields are not part of RenderOptions; default to false.
+            show_self_detection_range: false,
+            show_self_main_battery_range: false,
+            show_self_secondary_range: false,
+            show_self_torpedo_range: false,
+            show_self_radar_range: false,
+            show_self_hydro_range: false,
+        }
+    }
+
+    /// Return the list of `(field, value)` pairs that differ between `self` and `other`.
+    pub fn diff(&self, other: &Self) -> Vec<(DisplayOptionField, bool)> {
+        let mut out = Vec::new();
+        macro_rules! cmp {
+            ($field:ident, $variant:ident) => {
+                if self.$field != other.$field {
+                    out.push((DisplayOptionField::$variant, other.$field));
+                }
+            };
+        }
+        cmp!(show_hp_bars, ShowHpBars);
+        cmp!(show_tracers, ShowTracers);
+        cmp!(show_torpedoes, ShowTorpedoes);
+        cmp!(show_planes, ShowPlanes);
+        cmp!(show_smoke, ShowSmoke);
+        cmp!(show_score, ShowScore);
+        cmp!(show_timer, ShowTimer);
+        cmp!(show_kill_feed, ShowKillFeed);
+        cmp!(show_player_names, ShowPlayerNames);
+        cmp!(show_ship_names, ShowShipNames);
+        cmp!(show_capture_points, ShowCapturePoints);
+        cmp!(show_buildings, ShowBuildings);
+        cmp!(show_turret_direction, ShowTurretDirection);
+        cmp!(show_consumables, ShowConsumables);
+        cmp!(show_dead_ships, ShowDeadShips);
+        cmp!(show_dead_ship_names, ShowDeadShipNames);
+        cmp!(show_armament, ShowArmament);
+        cmp!(show_trails, ShowTrails);
+        cmp!(show_dead_trails, ShowDeadTrails);
+        cmp!(show_speed_trails, ShowSpeedTrails);
+        cmp!(show_battle_result, ShowBattleResult);
+        cmp!(show_buffs, ShowBuffs);
+        cmp!(show_ship_config, ShowShipConfig);
+        cmp!(show_chat, ShowChat);
+        cmp!(show_advantage, ShowAdvantage);
+        cmp!(show_score_timer, ShowScoreTimer);
+        cmp!(show_self_detection_range, ShowSelfDetection);
+        cmp!(show_self_main_battery_range, ShowSelfMainBattery);
+        cmp!(show_self_secondary_range, ShowSelfSecondary);
+        cmp!(show_self_torpedo_range, ShowSelfTorpedo);
+        cmp!(show_self_radar_range, ShowSelfRadar);
+        cmp!(show_self_hydro_range, ShowSelfHydro);
+        out
     }
 
     /// Apply a display option toggle by field.

@@ -19,8 +19,9 @@ pub mod types;
 pub mod validation;
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Instant;
+
+use parking_lot::Mutex;
 
 /// Peer's role in the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +96,15 @@ pub struct SessionState {
     pub annotation_sync_version: u64,
     /// Current annotation sync from the authority peer.
     pub current_annotation_sync: Option<(Vec<types::Annotation>, Vec<u64>)>,
+    /// Monotonically increasing version for per-ship range override updates.
+    pub range_override_version: u64,
+    /// Current per-ship range overrides from peers.
+    pub current_range_overrides:
+        Option<Vec<(wows_replays::types::EntityId, wows_minimap_renderer::draw_command::ShipConfigFilter)>>,
+    /// Monotonically increasing version for per-ship trail override updates.
+    pub trail_override_version: u64,
+    /// Current set of player names whose trails are hidden.
+    pub current_trail_hidden: Option<Vec<String>>,
 }
 
 impl Default for SessionState {
@@ -114,6 +124,10 @@ impl Default for SessionState {
             current_render_options: None,
             annotation_sync_version: 0,
             current_annotation_sync: None,
+            range_override_version: 0,
+            current_range_overrides: None,
+            trail_override_version: 0,
+            current_trail_hidden: None,
         }
     }
 }

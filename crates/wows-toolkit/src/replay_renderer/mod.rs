@@ -15,7 +15,7 @@ use egui::Shape;
 use egui::Stroke;
 use egui::TextureHandle;
 use egui::Vec2;
-use egui::mutex::Mutex;
+use parking_lot::Mutex;
 
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
@@ -507,6 +507,27 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
     }
 }
 
+/// Send the current per-ship trail hidden set through the collab channel (if connected).
+fn broadcast_trail_overrides(trail_hidden: &HashSet<String>, shared_state: &Arc<Mutex<SharedRendererState>>) {
+    let state = shared_state.lock();
+    if let Some(ref tx) = state.collab_trail_override_tx {
+        let data: Vec<_> = trail_hidden.iter().cloned().collect();
+        let _ = tx.send(data);
+    }
+}
+
+/// Send the current per-ship range overrides through the collab channel (if connected).
+fn broadcast_range_overrides(
+    overrides: &HashMap<EntityId, ShipConfigFilter>,
+    shared_state: &Arc<Mutex<SharedRendererState>>,
+) {
+    let state = shared_state.lock();
+    if let Some(ref tx) = state.collab_range_override_tx {
+        let data: Vec<_> = overrides.iter().map(|(k, v)| (*k, *v)).collect();
+        let _ = tx.send(data);
+    }
+}
+
 fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
     SavedRenderOptions {
         show_hp_bars: opts.show_hp_bars,
@@ -730,14 +751,22 @@ pub struct SharedRendererState {
     pub applied_render_options_version: u64,
     /// Version of annotation sync last applied from the collab session.
     pub applied_annotation_sync_version: u64,
+    /// Version of per-ship range overrides last applied from the collab session.
+    pub applied_range_override_version: u64,
+    /// Version of per-ship trail overrides last applied from the collab session.
+    pub applied_trail_override_version: u64,
     /// Reference to the collab session state (set by app.rs when wired to a session).
-    pub collab_session_state: Option<Arc<std::sync::Mutex<crate::collab::SessionState>>>,
+    pub collab_session_state: Option<Arc<Mutex<crate::collab::SessionState>>>,
     /// Channel to send cursor position updates to the collab session.
     pub collab_cursor_tx: Option<std::sync::mpsc::Sender<Option<[f32; 2]>>>,
     /// Channel to send annotation events to the collab session.
     pub collab_annotation_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalAnnotationEvent>>,
     /// Channel to send display option toggles to the collab session.
     pub collab_display_toggle_tx: Option<std::sync::mpsc::Sender<(crate::collab::protocol::DisplayOptionField, bool)>>,
+    /// Channel to send per-ship range override updates to the collab session.
+    pub collab_range_override_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::RangeOverrideUpdate>>,
+    /// Channel to send per-ship trail visibility updates to the collab session.
+    pub collab_trail_override_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::TrailOverrideUpdate>>,
     /// Channel to send session commands (e.g. ReplayOpened) directly from the
     /// background thread, avoiding cross-window repaint issues.
     pub collab_command_tx: Option<std::sync::mpsc::Sender<crate::collab::SessionCommand>>,
@@ -852,10 +881,14 @@ pub fn launch_replay_renderer(
         session_announced: false,
         applied_render_options_version: 0,
         applied_annotation_sync_version: 0,
+        applied_range_override_version: 0,
+        applied_trail_override_version: 0,
         collab_session_state: None,
         collab_cursor_tx: None,
         collab_annotation_tx: None,
         collab_display_toggle_tx: None,
+        collab_range_override_tx: None,
+        collab_trail_override_tx: None,
         collab_command_tx: None,
         collab_replay_name: Some(replay_name.clone()),
     }));
@@ -996,10 +1029,14 @@ pub fn launch_client_renderer(
         session_announced: false,
         applied_render_options_version: 0,
         applied_annotation_sync_version: 0,
+        applied_range_override_version: 0,
+        applied_trail_override_version: 0,
         collab_session_state: None,
         collab_cursor_tx: None,
         collab_annotation_tx: None,
         collab_display_toggle_tx: None,
+        collab_range_override_tx: None,
+        collab_trail_override_tx: None,
         collab_command_tx: None,
         collab_replay_name: None,
     }));
@@ -1198,8 +1235,8 @@ impl ReplayRendererViewer {
                 // Session lifecycle events (Started, Ended, etc.) are polled by app.rs.
                 {
                     let mut state = shared_state.lock();
-                    if let Some(ref session_state_arc) = state.collab_session_state.clone()
-                        && let Ok(s) = session_state_arc.lock() {
+                    if let Some(ref session_state_arc) = state.collab_session_state.clone() {
+                        let s = session_state_arc.lock();
                             if s.render_options_version > state.applied_render_options_version {
                                 if let Some(ref opts) = s.current_render_options {
                                     state.options.show_hp_bars = opts.show_hp_bars;
@@ -1238,6 +1275,34 @@ impl ReplayRendererViewer {
                                     ann.annotation_owners = owners.clone();
                                 }
                                 state.applied_annotation_sync_version = s.annotation_sync_version;
+                            }
+                            if s.range_override_version > state.applied_range_override_version {
+                                if let Some(ref overrides) = s.current_range_overrides {
+                                    let mut ann = annotation_arc.lock();
+                                    ann.ship_range_overrides.clear();
+                                    for &(eid, filter) in overrides {
+                                        ann.ship_range_overrides.insert(eid, filter);
+                                    }
+                                    // Enable show_ship_config if any overrides are present
+                                    if !ann.ship_range_overrides.is_empty() && !state.options.show_ship_config {
+                                        state.options.show_ship_config = true;
+                                    }
+                                }
+                                state.applied_range_override_version = s.range_override_version;
+                            }
+                            if s.trail_override_version > state.applied_trail_override_version {
+                                if let Some(ref hidden) = s.current_trail_hidden {
+                                    let mut ann = annotation_arc.lock();
+                                    ann.trail_hidden_ships.clear();
+                                    for name in hidden {
+                                        ann.trail_hidden_ships.insert(name.clone());
+                                    }
+                                    // Enable show_trails if there are still some visible trails
+                                    if !ann.trail_hidden_ships.is_empty() && !state.options.show_trails {
+                                        state.options.show_trails = true;
+                                    }
+                                }
+                                state.applied_trail_override_version = s.trail_override_version;
                             }
                         }
                 }
@@ -1756,8 +1821,8 @@ impl ReplayRendererViewer {
 
                         // ─── Render remote cursors (collab session) ──────────
                         let collab_ss = shared_state.lock().collab_session_state.clone();
-                        if let Some(ref ss_arc) = collab_ss
-                        && let Ok(s) = ss_arc.lock() {
+                        if let Some(ref ss_arc) = collab_ss {
+                            let s = ss_arc.lock();
                             let now = std::time::Instant::now();
                             for cursor in &s.cursors {
                                 // Skip our own cursor.
@@ -2508,7 +2573,7 @@ impl ReplayRendererViewer {
                                                         }
                                                     }
                                                 }
-
+                                                broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
                                                 repaint = true;
                                             }
 
@@ -2531,6 +2596,7 @@ impl ReplayRendererViewer {
                                                     drop(state);
                                                     shared_state.lock().options.show_trails = true;
                                                 }
+                                                broadcast_trail_overrides(&ann.trail_hidden_ships, &shared_state);
                                                 ann.show_context_menu = false;
                                                 repaint = true;
                                             }
@@ -2574,6 +2640,7 @@ impl ReplayRendererViewer {
                                                         state.options.show_ship_config = false;
                                                     }
                                                 }
+                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
                                                 repaint = true;
                                             }
 
@@ -2588,6 +2655,7 @@ impl ReplayRendererViewer {
                                                 for k in keys {
                                                     ann.ship_range_overrides.remove(&k);
                                                 }
+                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
                                                 ann.show_context_menu = false;
                                                 repaint = true;
                                             }
@@ -2607,6 +2675,7 @@ impl ReplayRendererViewer {
                                                     drop(state);
                                                     shared_state.lock().options.show_ship_config = true;
                                                 }
+                                                broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
                                                 ann.show_context_menu = false;
                                                 repaint = true;
                                             }
@@ -3113,8 +3182,7 @@ impl ReplayRendererViewer {
                                             // Save as Video / Clipboard buttons — hidden for client
                                             // viewers and while a collab session is active.
                                             let session_is_active = shared_state.lock().collab_session_state.as_ref()
-                                                .and_then(|ss| ss.lock().ok())
-                                                .map(|s| matches!(s.status, SessionStatus::Active | SessionStatus::Starting))
+                                                .map(|ss| matches!(ss.lock().status, SessionStatus::Active | SessionStatus::Starting))
                                                 .unwrap_or(false);
                                             if !session_is_active
                                             && let Some(ref video_export_data) = video_export_data {
@@ -3295,6 +3363,7 @@ impl ReplayRendererViewer {
                                                             opts.show_ship_config = false;
                                                             changed = true;
                                                         }
+                                                        broadcast_range_overrides(&ann.ship_range_overrides, &shared_state);
 
                                                         repaint = true;
                                                     }
@@ -3361,6 +3430,15 @@ impl ReplayRendererViewer {
 
                                             if changed {
                                                 let mut state = shared_state.lock();
+                                                // Broadcast diffs to collab peers if connected.
+                                                if let Some(ref tx) = state.collab_display_toggle_tx {
+                                                    use crate::collab::protocol::CollabRenderOptions;
+                                                    let old = CollabRenderOptions::from_render_options(&state.options, state.show_dead_ships);
+                                                    let new = CollabRenderOptions::from_render_options(&opts, show_dead);
+                                                    for (field, value) in old.diff(&new) {
+                                                        let _ = tx.send((field, value));
+                                                    }
+                                                }
                                                 state.options = opts.clone();
                                                 state.show_dead_ships = show_dead;
                                             }

@@ -190,7 +190,7 @@ pub struct WowsToolkitApp {
 
     /// Active realtime armor viewer windows spawned from replay renderers.
     #[serde(skip)]
-    realtime_armor_viewers: Vec<Arc<egui::mutex::Mutex<crate::realtime_armor_viewer::RealtimeArmorViewer>>>,
+    realtime_armor_viewers: Vec<Arc<parking_lot::Mutex<crate::realtime_armor_viewer::RealtimeArmorViewer>>>,
 }
 
 impl Default for WowsToolkitApp {
@@ -854,6 +854,8 @@ impl WowsToolkitApp {
                     state.collab_cursor_tx = Some(host_handle.cursor_tx.clone());
                     state.collab_annotation_tx = Some(host_handle.annotation_tx.clone());
                     state.collab_display_toggle_tx = Some(host_handle.display_toggle_tx.clone());
+                    state.collab_range_override_tx = Some(host_handle.range_override_tx.clone());
+                    state.collab_trail_override_tx = Some(host_handle.trail_override_tx.clone());
                     state.collab_command_tx = Some(host_handle.command_tx.clone());
                     // Send the current frame (if any) so clients get it immediately.
                     if let Some(ref frame) = state.frame {
@@ -995,7 +997,7 @@ impl WowsToolkitApp {
                             Some(request.command_tx.clone()),
                         );
                         drop(bridge);
-                        self.realtime_armor_viewers.push(Arc::new(egui::mutex::Mutex::new(viewer)));
+                        self.realtime_armor_viewers.push(Arc::new(parking_lot::Mutex::new(viewer)));
                     } else {
                         // Bridge players not populated yet — re-queue for next frame
                         drop(bridge);
@@ -1685,9 +1687,12 @@ impl WowsToolkitApp {
                 s.collab_cursor_tx = None;
                 s.collab_annotation_tx = None;
                 s.collab_display_toggle_tx = None;
+                s.collab_range_override_tx = None;
+                s.collab_trail_override_tx = None;
             }
             self.tab_state.host_session = None;
-            if let Ok(mut s) = self.tab_state.session_state.lock() {
+            {
+                let mut s = self.tab_state.session_state.lock();
                 s.status = crate::collab::SessionStatus::Idle;
                 s.connected_users.clear();
                 s.cursors.clear();
@@ -1731,6 +1736,8 @@ impl WowsToolkitApp {
                             state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
                             state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
                             state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
+                            state.collab_range_override_tx = Some(client_handle.range_override_tx.clone());
+                            state.collab_trail_override_tx = Some(client_handle.trail_override_tx.clone());
                         }
                         self.tab_state.replay_renderers.lock().push(viewer);
                     }
@@ -1792,6 +1799,8 @@ impl WowsToolkitApp {
                         state.collab_cursor_tx = Some(client_handle.cursor_tx.clone());
                         state.collab_annotation_tx = Some(client_handle.annotation_tx.clone());
                         state.collab_display_toggle_tx = Some(client_handle.display_toggle_tx.clone());
+                        state.collab_range_override_tx = Some(client_handle.range_override_tx.clone());
+                        state.collab_trail_override_tx = Some(client_handle.trail_override_tx.clone());
                     }
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }

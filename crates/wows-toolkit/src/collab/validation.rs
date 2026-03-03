@@ -237,6 +237,21 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
         }
 
         PeerMessage::ReplayClosed { .. } => {}
+
+        PeerMessage::ShipRangeOverrides { .. } => {}
+
+        PeerMessage::ShipTrailOverrides { hidden } => {
+            if hidden.len() > MAX_PEERS * 24 {
+                return Err(ValidationError(format!(
+                    "ShipTrailOverrides too many entries: {} > {}",
+                    hidden.len(),
+                    MAX_PEERS * 24
+                )));
+            }
+            for name in hidden {
+                check_string_len(name, MAX_DISPLAY_NAME_LEN, "ShipTrailOverrides.hidden")?;
+            }
+        }
     }
     Ok(())
 }

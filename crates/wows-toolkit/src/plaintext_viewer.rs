@@ -7,7 +7,7 @@ use egui::ImageSource;
 use egui::TextBuffer;
 use egui::TextEdit;
 use egui::ViewportBuilder;
-use egui::mutex::Mutex;
+use parking_lot::Mutex;
 
 pub enum FileType {
     PlainTextFile { ext: String, contents: String },

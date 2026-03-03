@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use egui::mutex::Mutex;
+use parking_lot::Mutex;
 use rootcause::report;
 use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::renderer::MinimapRenderer;

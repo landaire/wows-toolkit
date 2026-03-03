@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
-use egui::mutex::Mutex;
+use parking_lot::Mutex;
 
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
