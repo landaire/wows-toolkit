@@ -3488,12 +3488,45 @@ impl ToolkitTabViewer<'_> {
                         ui.add_space(4.0);
                     }
 
-                    // Connected users count
-                    let user_count = self.tab_state.session_state.lock().connected_users.len();
+                    // Connected users list
+                    let connected_users = self.tab_state.session_state.lock().connected_users.clone();
+                    // Exclude self from "connected" count — the host is always connected
+                    let my_id = self.tab_state.session_state.lock().my_user_id;
+                    let peer_count = connected_users.iter().filter(|u| u.id != my_id).count();
                     ui.horizontal(|ui| {
                         ui.label(icons::USERS);
-                        ui.label(format!("{} connected", user_count));
+                        ui.label(format!("{} connected", peer_count));
                     });
+                    // Show each connected user with color dot, name, and role
+                    for user in &connected_users {
+                        if user.id == my_id {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            let color = Color32::from_rgb(user.color[0], user.color[1], user.color[2]);
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(rect.center(), 4.0, color);
+                            ui.label(&user.name);
+                            if user.role == crate::collab::PeerRole::CoHost {
+                                ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(255, 195, 0)));
+                            }
+                            if user.role != crate::collab::PeerRole::Host
+                                && user.role != crate::collab::PeerRole::CoHost
+                            {
+                                if ui
+                                    .small_button(icons::CROWN)
+                                    .on_hover_text("Promote to co-host")
+                                    .clicked()
+                                    && let Some(ref handle) = self.tab_state.host_session
+                                {
+                                    let _ = handle
+                                        .command_tx
+                                        .send(SessionCommand::PromoteToCoHost { user_id: user.id });
+                                    self.tab_state.toasts.lock().info(format!("Promoted {} to co-host", user.name));
+                                }
+                            }
+                        });
+                    }
 
                     ui.add_space(4.0);
                     ui.separator();
@@ -3539,31 +3572,98 @@ impl ToolkitTabViewer<'_> {
                             }
                         });
                     });
+                    ui.separator();
+
+                    // Show connected users
+                    let connected_users = self.tab_state.session_state.lock().connected_users.clone();
+                    let my_id = self.tab_state.session_state.lock().my_user_id;
+                    for user in &connected_users {
+                        ui.horizontal(|ui| {
+                            let color = Color32::from_rgb(user.color[0], user.color[1], user.color[2]);
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(rect.center(), 4.0, color);
+                            if user.id == my_id {
+                                ui.label(RichText::new(&user.name).italics());
+                                ui.label(RichText::new("(you)").small().weak());
+                            } else {
+                                ui.label(&user.name);
+                            }
+                            match user.role {
+                                crate::collab::PeerRole::Host => {
+                                    ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(255, 195, 0)))
+                                        .on_hover_text("Host");
+                                }
+                                crate::collab::PeerRole::CoHost => {
+                                    ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(136, 84, 208)))
+                                        .on_hover_text("Co-host");
+                                }
+                                _ => {}
+                            }
+                        });
+                    }
                 } else {
                     // ── No active session ──
+
+                    // Display name (shared for host + join)
+                    if self.tab_state.show_display_name_error {
+                        ui.label(RichText::new("Please enter a display name").color(Color32::from_rgb(220, 50, 50)).small());
+                    }
+                    ui.label("Display name:");
+                    let name_response = ui.add(
+                        egui::TextEdit::singleline(&mut self.tab_state.settings.collab_display_name)
+                            .hint_text("Your name...")
+                            .desired_width(160.0)
+                            .text_color(if self.tab_state.show_display_name_error {
+                                Color32::from_rgb(220, 50, 50)
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    );
+                    if self.tab_state.show_display_name_error {
+                        ui.painter().rect_stroke(
+                            name_response.rect,
+                            name_response.rect.height() * 0.15,
+                            egui::Stroke::new(1.5, Color32::from_rgb(220, 50, 50)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    // Clear error when user edits the field
+                    if name_response.changed() {
+                        self.tab_state.show_display_name_error = false;
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
                     ui.label(RichText::new("Host a Session").strong());
                     if ui.button("Start Session").clicked() {
-                        let params = HostParams {
-                            toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
-                            display_name: self.tab_state.settings.collab_display_name.clone(),
-                            initial_render_options: CollabRenderOptions::from_saved(
-                                &crate::settings::SavedRenderOptions::default(),
-                            ),
-                        };
+                        if self.tab_state.settings.collab_display_name.trim().is_empty() {
+                            self.tab_state.show_display_name_error = true;
+                            self.tab_state.toasts.lock().error("Enter a display name first");
+                        } else {
+                            let params = HostParams {
+                                toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
+                                display_name: self.tab_state.settings.collab_display_name.clone(),
+                                initial_render_options: CollabRenderOptions::from_saved(
+                                    &crate::settings::SavedRenderOptions::default(),
+                                ),
+                            };
 
-                        let rt = self.tab_state.tokio_runtime.clone().unwrap_or_else(|| {
-                            Arc::new(
-                                tokio::runtime::Builder::new_multi_thread()
-                                    .enable_all()
-                                    .build()
-                                    .expect("Failed to create tokio runtime"),
-                            )
-                        });
+                            let rt = self.tab_state.tokio_runtime.clone().unwrap_or_else(|| {
+                                Arc::new(
+                                    tokio::runtime::Builder::new_multi_thread()
+                                        .enable_all()
+                                        .build()
+                                        .expect("Failed to create tokio runtime"),
+                                )
+                            });
 
-                        let session_state = Arc::clone(&self.tab_state.session_state);
-                        let handle = crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
+                            let session_state = Arc::clone(&self.tab_state.session_state);
+                            let handle = crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
 
-                        self.tab_state.host_session = Some(handle);
+                            self.tab_state.host_session = Some(handle);
+                        }
                     }
 
                     ui.add_space(4.0);
@@ -3574,35 +3674,26 @@ impl ToolkitTabViewer<'_> {
                     ui.label(RichText::new("Join a Session").strong());
                     ui.add_space(2.0);
 
-                    let has_token = !self.tab_state.join_session_token.trim().is_empty();
-                    if has_token {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{} Token pasted", icons::CHECK));
-                            if ui.small_button("Clear").clicked() {
-                                self.tab_state.join_session_token.clear();
-                            }
-                        });
-                    } else if ui.button(icon_str!(icons::CLIPBOARD, "Paste session token")).clicked()
+                    // Paste token → validate → auto-join
+                    if ui.button(icon_str!(icons::CLIPBOARD, "Paste token & join")).clicked()
                         && let Ok(mut clipboard) = arboard::Clipboard::new()
                         && let Ok(text) = clipboard.get_text()
                     {
-                        self.tab_state.join_session_token = text;
-                    }
-
-                    ui.add_space(2.0);
-                    ui.label("Display name:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.tab_state.settings.collab_display_name)
-                            .hint_text("Your name...")
-                            .desired_width(160.0),
-                    );
-                    ui.add_space(4.0);
-                    let can_join = has_token && !self.tab_state.settings.collab_display_name.trim().is_empty();
-                    if ui.add_enabled(can_join, egui::Button::new("Join")).clicked() {
-                        if self.tab_state.settings.suppress_p2p_ip_warning {
-                            self.tab_state.pending_join = true;
+                        let trimmed = text.trim().to_string();
+                        if trimmed.is_empty() {
+                            self.tab_state.toasts.lock().error("Clipboard is empty");
+                        } else if self.tab_state.settings.collab_display_name.trim().is_empty() {
+                            self.tab_state.show_display_name_error = true;
+                            self.tab_state.toasts.lock().error("Enter a display name first");
+                        } else if let Err(e) = crate::collab::peer::decode_token(&trimmed) {
+                            self.tab_state.toasts.lock().error(format!("Invalid token: {e}"));
                         } else {
-                            self.tab_state.show_ip_warning = true;
+                            self.tab_state.join_session_token = trimmed;
+                            if self.tab_state.settings.suppress_p2p_ip_warning {
+                                self.tab_state.pending_join = true;
+                            } else {
+                                self.tab_state.show_ip_warning = true;
+                            }
                         }
                     }
                 }

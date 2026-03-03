@@ -385,6 +385,10 @@ pub struct TabState {
     #[serde(skip)]
     pub session_token_visible: bool,
 
+    /// Show red error on the display name field (cleared on next edit).
+    #[serde(skip)]
+    pub show_display_name_error: bool,
+
     /// Counter for assigning unique replay IDs to host renderers.
     #[serde(skip)]
     pub next_replay_id: u64,
@@ -464,6 +468,7 @@ impl Default for TabState {
             host_session: None,
             session_state: Arc::new(Mutex::new(crate::collab::SessionState::default())),
             session_token_visible: false,
+            show_display_name_error: false,
             next_replay_id: 1,
             replay_open_timestamps: std::collections::VecDeque::new(),
             pending_collab_frame: None,
