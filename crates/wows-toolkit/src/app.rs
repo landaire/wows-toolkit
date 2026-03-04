@@ -1253,6 +1253,13 @@ impl WowsToolkitApp {
         if mitigate_wgpu_mem_leak(ctx) {
             return;
         }
+        // Register main window context so the peer task can wake us.
+        {
+            let mut s = self.tab_state.session_state.lock();
+            if s.egui_ctx.is_none() {
+                s.egui_ctx = Some(ctx.clone());
+            }
+        }
         // Draw realtime armor viewer windows
         self.realtime_armor_viewers.retain(|v| v.lock().open.load(Ordering::Relaxed));
         for viewer in &self.realtime_armor_viewers {
@@ -1845,7 +1852,7 @@ impl WowsToolkitApp {
         }
 
         if session_ended {
-            // Unwire all renderers.
+            // Unwire all renderers and reset their applied sync versions.
             for r in self.tab_state.replay_renderers.lock().iter() {
                 let mut s = r.shared_state().lock();
                 s.session_frame_tx = None;
@@ -1853,23 +1860,46 @@ impl WowsToolkitApp {
                 s.session_announced = false;
                 s.collab_session_state = None;
                 s.collab_local_tx = None;
+                s.applied_render_options_version = 0;
+                s.applied_annotation_sync_version = 0;
+                s.applied_range_override_version = 0;
+                s.applied_trail_override_version = 0;
             }
-            // Unwire all tactics boards.
+            // Unwire all tactics boards and reset their applied sync versions.
             for b in self.tab_state.tactics_boards.lock().iter_mut() {
                 b.collab_local_tx = None;
                 b.collab_session_state = None;
                 b.collab_command_tx = None;
+                b.state_arc().lock().reset_applied_sync_versions();
             }
             self.tab_state.host_session = None;
-            {
-                let mut s = self.tab_state.session_state.lock();
-                s.status = crate::collab::SessionStatus::Idle;
-                s.connected_users.clear();
-                s.cursors.clear();
-                s.token = None;
-                s.open_replays.clear();
-            }
+            self.tab_state.session_state.lock().clear_session_data();
         }
+    }
+
+    fn cleanup_client_session(&mut self) {
+        // Unwire renderers and reset applied sync versions.
+        for r in self.tab_state.replay_renderers.lock().iter() {
+            let mut s = r.shared_state().lock();
+            s.session_frame_tx = None;
+            s.collab_replay_id = None;
+            s.session_announced = false;
+            s.collab_session_state = None;
+            s.collab_local_tx = None;
+            s.applied_render_options_version = 0;
+            s.applied_annotation_sync_version = 0;
+            s.applied_range_override_version = 0;
+            s.applied_trail_override_version = 0;
+        }
+        // Unwire tactics boards and reset applied sync versions.
+        for b in self.tab_state.tactics_boards.lock().iter_mut() {
+            b.collab_local_tx = None;
+            b.collab_session_state = None;
+            b.collab_command_tx = None;
+            b.state_arc().lock().reset_applied_sync_versions();
+        }
+        self.tab_state.client_session = None;
+        self.tab_state.session_state.lock().clear_session_data();
     }
 
     fn poll_client_session_events(&mut self, ctx: &egui::Context) {
@@ -1979,12 +2009,7 @@ impl WowsToolkitApp {
                 }
                 crate::collab::SessionEvent::Error(msg) => {
                     self.tab_state.toasts.lock().error(format!("Session: {msg}"));
-                    for b in self.tab_state.tactics_boards.lock().iter_mut() {
-                        b.collab_local_tx = None;
-                        b.collab_session_state = None;
-                        b.collab_command_tx = None;
-                    }
-                    self.tab_state.client_session = None;
+                    self.cleanup_client_session();
                     return;
                 }
                 crate::collab::SessionEvent::Rejected(reason) => {
@@ -1994,12 +2019,7 @@ impl WowsToolkitApp {
                 }
                 crate::collab::SessionEvent::Ended => {
                     self.tab_state.toasts.lock().info("Session ended");
-                    for b in self.tab_state.tactics_boards.lock().iter_mut() {
-                        b.collab_local_tx = None;
-                        b.collab_session_state = None;
-                        b.collab_command_tx = None;
-                    }
-                    self.tab_state.client_session = None;
+                    self.cleanup_client_session();
                     return;
                 }
                 _ => {}

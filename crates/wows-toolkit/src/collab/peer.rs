@@ -667,14 +667,7 @@ async fn host_main(
     // Cleanup.
     endpoint.close().await;
     let _ = event_tx.send(SessionEvent::Ended);
-    {
-        let mut s = ui_state.lock();
-        s.status = SessionStatus::Idle;
-        s.token = None;
-        s.connected_users.clear();
-        s.cursors.clear();
-        s.open_replays.clear();
-    }
+    ui_state.lock().clear_session_data();
     info!("Collab host session ended");
 }
 
@@ -907,6 +900,13 @@ async fn host_accept_peer(
         info!("No last frame available for peer {user_id}");
     }
 
+    // Heartbeat state.
+    let mut last_received = tokio::time::Instant::now();
+    let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+    heartbeat_interval.tick().await; // consume immediate first tick
+    let heartbeat_bytes = frame_peer_message(&PeerMessage::Heartbeat).expect("heartbeat serialization cannot fail");
+    let mut timed_out = false;
+
     // Message loop for this peer.
     loop {
         tokio::select! {
@@ -917,10 +917,15 @@ async fn host_accept_peer(
             msg_result = host_read_rx.recv() => {
                 match msg_result {
                     Some(Ok(msg)) => {
+                        if matches!(&msg, PeerMessage::Heartbeat) {
+                            last_received = tokio::time::Instant::now();
+                            continue;
+                        }
                         if let Err(e) = validate_peer_message(&msg) {
                             warn!("Peer {user_id} sent invalid message: {e}");
                             continue;
                         }
+                        last_received = tokio::time::Instant::now();
                         let _ = peer_msg_tx.send((user_id, msg)).await;
                     }
                     Some(Err(e)) => {
@@ -956,6 +961,18 @@ async fn host_accept_peer(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
+
+            // Heartbeat: send keepalive and check for timeout.
+            _ = heartbeat_interval.tick() => {
+                if last_received.elapsed() > std::time::Duration::from_secs(HEARTBEAT_TIMEOUT_SECS) {
+                    warn!("Peer {user_id} heartbeat timeout");
+                    timed_out = true;
+                    break;
+                }
+                if send.write_all(&heartbeat_bytes).await.is_err() {
+                    break;
+                }
+            }
         }
     }
 
@@ -971,6 +988,10 @@ async fn host_accept_peer(
     let leave_msg = PeerMessage::UserLeft { user_id };
     broadcast_to_mesh(&mesh, &leave_msg);
     let _ = event_tx.send(SessionEvent::UserLeft { user_id });
+    if timed_out {
+        let _ = event_tx
+            .send(SessionEvent::Error(format!("{client_name} timed out (no heartbeat for {HEARTBEAT_TIMEOUT_SECS}s)")));
+    }
     info!("Peer {user_id} ({client_name}) left session");
 }
 
@@ -1206,6 +1227,11 @@ async fn join_main(
         }
     });
 
+    // Heartbeat state.
+    let mut last_received = tokio::time::Instant::now();
+    let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+    heartbeat_interval.tick().await; // consume immediate first tick
+
     // Main loop.
     let session_info_received = true;
     loop {
@@ -1214,6 +1240,10 @@ async fn join_main(
             msg_result = client_read_rx.recv() => {
                 match msg_result {
                     Some(Ok(msg)) => {
+                        if matches!(&msg, PeerMessage::Heartbeat) {
+                            last_received = tokio::time::Instant::now();
+                            continue;
+                        }
                         if matches!(&msg, PeerMessage::SessionInfo { .. }) && session_info_received {
                             warn!("Ignoring duplicate SessionInfo from host");
                             continue;
@@ -1222,6 +1252,7 @@ async fn join_main(
                             warn!("Invalid message from host: {e}");
                             continue;
                         }
+                        last_received = tokio::time::Instant::now();
                         handle_incoming_message(
                             host_user_id,
                             msg,
@@ -1239,6 +1270,20 @@ async fn join_main(
                         info!("Host closed connection");
                         break;
                     }
+                }
+            }
+
+            // Heartbeat: send keepalive and check for timeout.
+            _ = heartbeat_interval.tick() => {
+                if last_received.elapsed() > std::time::Duration::from_secs(HEARTBEAT_TIMEOUT_SECS) {
+                    warn!("Host heartbeat timeout");
+                    let _ = event_tx.send(SessionEvent::Error(
+                        format!("Connection to host lost (no response for {HEARTBEAT_TIMEOUT_SECS}s)")
+                    ));
+                    break;
+                }
+                if write_peer_message(&mut send, &PeerMessage::Heartbeat).await.is_err() {
+                    break;
                 }
             }
 
@@ -1431,12 +1476,7 @@ async fn join_main(
 
     // Cleanup.
     let _ = event_tx.send(SessionEvent::Ended);
-    {
-        let mut s = ui_state.lock();
-        s.status = SessionStatus::Idle;
-        s.connected_users.clear();
-        s.cursors.clear();
-    }
+    ui_state.lock().clear_session_data();
     info!("Left collab session");
 }
 
@@ -1904,6 +1944,20 @@ fn handle_incoming_message(
         | PeerMessage::Rejected { .. }
         | PeerMessage::PeerAnnounce { .. } => {
             debug!("Ignoring handshake message from {sender_id} post-handshake");
+        }
+
+        // ── Heartbeat (handled at connection level, should not reach here) ──
+        PeerMessage::Heartbeat => {
+            error!("Heartbeat reached handle_incoming_message from {sender_id} — should be intercepted earlier");
+        }
+    }
+
+    // Wake the main window and any registered deferred viewports (e.g. tactics boards).
+    let s = ui_state.lock();
+    if let Some(ctx) = &s.egui_ctx {
+        ctx.request_repaint();
+        for viewport_id in &s.repaint_viewport_ids {
+            ctx.request_repaint_of(*viewport_id);
         }
     }
 }

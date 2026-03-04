@@ -404,6 +404,16 @@ pub struct TacticsBoardState {
     applied_tactics_map_version: u64,
 }
 
+impl TacticsBoardState {
+    /// Reset collab sync version counters so a new session starting at
+    /// version 0 will be picked up correctly.
+    pub fn reset_applied_sync_versions(&mut self) {
+        self.applied_annotation_sync_version = 0;
+        self.applied_cap_sync_version = 0;
+        self.applied_tactics_map_version = 0;
+    }
+}
+
 impl Default for TacticsBoardState {
     fn default() -> Self {
         Self {
@@ -524,8 +534,18 @@ impl TacticsBoardViewer {
         let collab_session_state = self.collab_session_state.clone();
         let collab_command_tx = self.collab_command_tx.clone();
 
+        let viewport_id = egui::ViewportId::from_hash_of(&*title);
+
+        // Register this viewport for repaint notifications from the peer task.
+        if let Some(ref session_state) = self.collab_session_state {
+            let mut s = session_state.lock();
+            if !s.repaint_viewport_ids.contains(&viewport_id) {
+                s.repaint_viewport_ids.push(viewport_id);
+            }
+        }
+
         ctx.show_viewport_deferred(
-            egui::ViewportId::from_hash_of(&*title),
+            viewport_id,
             egui::ViewportBuilder::default()
                 .with_title(&*title)
                 .with_inner_size([800.0, 850.0])
@@ -534,6 +554,11 @@ impl TacticsBoardViewer {
                 // Handle window close
                 if ctx.input(|i| i.viewport().close_requested()) {
                     open.store(false, Ordering::Relaxed);
+                    // Unregister viewport from repaint notifications.
+                    if let Some(ref session_state) = collab_session_state {
+                        let mut s = session_state.lock();
+                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
+                    }
                     ctx.request_repaint();
                 }
 
@@ -621,6 +646,7 @@ impl TacticsBoardViewer {
                         }
                         state.applied_tactics_map_version = s.tactics_map_version;
                     }
+                    drop(s);
                 }
 
                 // ── Bottom panel: map/mode selector + cap tools + presets ──

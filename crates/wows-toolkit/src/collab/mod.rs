@@ -150,6 +150,13 @@ pub struct SessionState {
     pub tactics_map_version: u64,
     /// Current tactics map info (map_name, map_id, map_image_png). Set when a peer opens a tactics board map.
     pub tactics_map: Option<TacticsMapInfo>,
+    /// Main window egui context, used by the peer task to wake the UI
+    /// when session state changes.
+    #[doc(hidden)]
+    pub egui_ctx: Option<egui::Context>,
+    /// Viewport IDs of deferred viewports (e.g. tactics boards) that should
+    /// be repainted when session state changes.
+    pub repaint_viewport_ids: Vec<egui::ViewportId>,
 }
 
 impl Default for SessionState {
@@ -178,7 +185,36 @@ impl Default for SessionState {
             current_cap_point_sync: None,
             tactics_map_version: 0,
             tactics_map: None,
+            egui_ctx: None,
+            repaint_viewport_ids: Vec::new(),
         }
+    }
+}
+
+impl SessionState {
+    /// Reset all session-specific sync state so stale data does not leak
+    /// into the next session.
+    pub fn clear_session_data(&mut self) {
+        self.status = SessionStatus::Idle;
+        self.token = None;
+        self.connected_users.clear();
+        self.cursors.clear();
+        self.open_replays.clear();
+        self.render_options_version = 0;
+        self.current_render_options = None;
+        self.annotation_sync_version = 0;
+        self.current_annotation_sync = None;
+        self.range_override_version = 0;
+        self.current_range_overrides = None;
+        self.trail_override_version = 0;
+        self.current_trail_hidden = None;
+        self.pings.clear();
+        self.cap_point_sync_version = 0;
+        self.current_cap_point_sync = None;
+        self.tactics_map_version = 0;
+        self.tactics_map = None;
+        self.repaint_viewport_ids.clear();
+        self.permissions = Permissions::default();
     }
 }
 
@@ -381,6 +417,7 @@ mod tests {
         assert!(state.current_cap_point_sync.is_none());
         assert_eq!(state.tactics_map_version, 0);
         assert!(state.tactics_map.is_none());
+        assert!(state.repaint_viewport_ids.is_empty());
     }
 
     #[test]

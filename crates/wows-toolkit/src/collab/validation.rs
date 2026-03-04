@@ -296,6 +296,8 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
                 validate_wire_cap_point(cp, &format!("CapPointSync[{i}]"))?;
             }
         }
+
+        PeerMessage::Heartbeat => {}
     }
     Ok(())
 }
@@ -589,6 +591,11 @@ mod tests {
     #[test]
     fn valid_clear_annotations() {
         assert!(validate_peer_message(&PeerMessage::ClearAnnotations).is_ok());
+    }
+
+    #[test]
+    fn valid_heartbeat() {
+        assert!(validate_peer_message(&PeerMessage::Heartbeat).is_ok());
     }
 
     #[test]

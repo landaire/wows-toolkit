@@ -56,6 +56,12 @@ pub const MAX_ENDPOINT_ADDR_LEN: usize = 4096;
 /// Maximum cap points in a tactics board sync message.
 pub const MAX_CAP_POINTS: usize = 50;
 
+/// Heartbeat send interval in seconds.
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
+
+/// Heartbeat timeout in seconds (3 missed heartbeats).
+pub const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
+
 // ─── Wire cap point ─────────────────────────────────────────────────────────
 
 /// A serializable capture point for tactics board collab sync.
@@ -255,6 +261,10 @@ pub enum PeerMessage {
     /// Full cap point state sync (used after undo or bulk operations).
     /// Receiver drops if sender is not host/co-host.
     CapPointSync { cap_points: Vec<WireCapPoint> },
+
+    // ── Connection keepalive ──────────────────────────────────────────
+    /// Heartbeat keepalive. Sent every 10s; NOT relayed between peers.
+    Heartbeat,
 }
 
 // ─── Display option field enum ──────────────────────────────────────────────
@@ -747,6 +757,7 @@ mod tests {
             PeerMessage::Ping { pos: [100.0, 200.0] },
             PeerMessage::RemoveAnnotation { id: 999 },
             PeerMessage::PlaybackState { playing: true, speed: 1.5 },
+            PeerMessage::Heartbeat,
         ];
         for msg in &messages {
             assert!(frame_peer_message(msg).is_ok(), "Failed to frame: {:?}", msg);

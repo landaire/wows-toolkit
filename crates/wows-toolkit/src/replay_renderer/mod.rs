@@ -858,8 +858,20 @@ impl ReplayRendererViewer {
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let parent_ctx = ctx.clone();
 
+        // Register this viewport for repaint notifications from the peer task.
+        let viewport_id = egui::ViewportId::from_hash_of(&*self.title);
+        {
+            let state = self.shared_state.lock();
+            if let Some(ref session_state) = state.collab_session_state {
+                let mut s = session_state.lock();
+                if !s.repaint_viewport_ids.contains(&viewport_id) {
+                    s.repaint_viewport_ids.push(viewport_id);
+                }
+            }
+        }
+
         ctx.show_viewport_deferred(
-            egui::ViewportId::from_hash_of(&*self.title),
+            viewport_id,
             egui::ViewportBuilder::default()
                 .with_title(&*self.title)
                 .with_inner_size([800.0, 900.0])
@@ -2727,15 +2739,20 @@ impl ReplayRendererViewer {
                 if ctx.input(|i| i.viewport().close_requested()) {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
+                    // Unregister viewport from repaint notifications.
+                    let state = shared_state.lock();
+                    if let Some(ref session_state) = state.collab_session_state {
+                        let mut s = session_state.lock();
+                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
+                    }
+                    drop(state);
                     ctx.request_repaint();
                 } else if status_is_loading {
                     // Keep the viewport alive while loading so it notices the
                     // Loading→Ready transition. Only repaint this viewport —
                     // do NOT wake the parent, which causes event-loop starvation.
                     ctx.request_repaint();
-                } else if playing || repaint
-                    || shared_state.lock().collab_session_state.is_some()
-                {
+                } else if playing || repaint {
                     // Repaint both this viewport AND the parent so sibling
                     // viewports (e.g. armor viewer) also update in realtime.
                     ctx.request_repaint();
