@@ -1570,7 +1570,7 @@ impl WowsToolkitApp {
             self.tab_state.pending_host = false;
             self.do_host_session();
         }
-        self.poll_host_session_events(ctx);
+        self.poll_host_session_events();
         self.poll_client_session_events(ctx);
 
         // Pop open something to view the clicked file from the unpacker tab
@@ -1973,7 +1973,7 @@ impl WowsToolkitApp {
         self.tab_state.host_session = Some(handle);
     }
 
-    fn poll_host_session_events(&mut self, _ctx: &egui::Context) {
+    fn poll_host_session_events(&mut self) {
         let Some(ref session) = self.tab_state.host_session else {
             return;
         };
@@ -2031,8 +2031,8 @@ impl WowsToolkitApp {
         // and unwire visible ones.
         let mut renderers = self.tab_state.replay_renderers.lock();
         renderers.retain(|r| {
-            let is_hidden_client = !r.open.load(Ordering::Relaxed)
-                && r.shared_state().lock().collab_replay_id.is_some();
+            let is_hidden_client =
+                !r.open.load(Ordering::Relaxed) && r.shared_state().lock().collab_replay_id.is_some();
             !is_hidden_client
         });
         for r in renderers.iter() {
@@ -2094,10 +2094,10 @@ impl WowsToolkitApp {
                             state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                             state.collab_local_tx = Some(client_handle.local_tx.clone());
                             state.collab_frame_rx = Some(frame_rx);
-                            self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
-                                frame_tx: Some(frame_tx),
-                                viewport_id,
-                            });
+                            self.tab_state.session_state.lock().register_viewport_sink(
+                                replay.replay_id,
+                                crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                            );
                         }
                         self.tab_state.replay_renderers.lock().push(viewer);
                     }
@@ -2160,10 +2160,10 @@ impl WowsToolkitApp {
                         state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                         state.collab_local_tx = Some(client_handle.local_tx.clone());
                         state.collab_frame_rx = Some(frame_rx);
-                        self.tab_state.session_state.lock().register_viewport_sink(replay_id, crate::collab::ViewportSink {
-                            frame_tx: Some(frame_tx),
-                            viewport_id,
-                        });
+                        self.tab_state.session_state.lock().register_viewport_sink(
+                            replay_id,
+                            crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                        );
                     }
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }

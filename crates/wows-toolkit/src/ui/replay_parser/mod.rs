@@ -3796,9 +3796,9 @@ impl ToolkitTabViewer<'_> {
                     if ui.small_button("Open").clicked() {
                         let renderers = self.tab_state.replay_renderers.lock();
                         // Check for an existing hidden viewer we can reuse.
-                        let existing = renderers.iter().find(|r| {
-                            r.shared_state().lock().collab_replay_id == Some(replay.replay_id)
-                        });
+                        let existing = renderers
+                            .iter()
+                            .find(|r| r.shared_state().lock().collab_replay_id == Some(replay.replay_id));
                         if let Some(viewer) = existing {
                             // Reuse: show the hidden viewer and re-wire its frame channel.
                             viewer.open.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -3806,10 +3806,10 @@ impl ToolkitTabViewer<'_> {
                                 let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
                                 let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
                                 viewer.shared_state().lock().collab_frame_rx = Some(frame_rx);
-                                self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
-                                    frame_tx: Some(frame_tx),
-                                    viewport_id,
-                                });
+                                self.tab_state.session_state.lock().register_viewport_sink(
+                                    replay.replay_id,
+                                    crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                                );
                             }
                         } else {
                             // No hidden viewer — create a fresh one.
@@ -3833,10 +3833,10 @@ impl ToolkitTabViewer<'_> {
                                 state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                                 state.collab_local_tx = Some(client_handle.local_tx.clone());
                                 state.collab_frame_rx = Some(frame_rx);
-                                self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
-                                    frame_tx: Some(frame_tx),
-                                    viewport_id,
-                                });
+                                self.tab_state.session_state.lock().register_viewport_sink(
+                                    replay.replay_id,
+                                    crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                                );
                             }
                             self.tab_state.replay_renderers.lock().push(viewer);
                         }
@@ -3857,11 +3857,7 @@ impl ToolkitTabViewer<'_> {
             let owner_name =
                 connected_users.iter().find(|u| u.id == *owner_uid).map(|u| u.name.as_str()).unwrap_or("unknown");
             ui.horizontal(|ui| {
-                let display_title = if title.len() > 40 {
-                    format!("{}…", &title[..39])
-                } else {
-                    title.clone()
-                };
+                let display_title = if title.len() > 40 { format!("{}…", &title[..39]) } else { title.clone() };
                 let label = format!("{} {} ({})", icons::MAP_TRIFOLD, display_title, owner_name);
                 if is_open_locally {
                     ui.label(&label);

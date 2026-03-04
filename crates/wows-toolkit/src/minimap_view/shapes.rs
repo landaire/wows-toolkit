@@ -1863,6 +1863,7 @@ pub fn draw_shortcut_overlay(ctx: &egui::Context, area_id: egui::Id) {
 /// Call this after checking `single_selected()` and computing `bounds` via
 /// [`annotation_screen_bounds`]. The function locks `annotation_arc` internally
 /// (the caller must drop any prior lock before calling).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_annotation_edit_popup(
     ctx: &egui::Context,
     area_id: egui::Id,

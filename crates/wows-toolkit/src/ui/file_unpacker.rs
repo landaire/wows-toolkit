@@ -1572,7 +1572,7 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    fn extract_files_clicked(&mut self, _ui: &mut Ui) {
+    fn extract_files_clicked(&mut self) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
         let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
         let decode_json = self.tab_state.browser_state.decode_prototypes_as_json;
@@ -1925,7 +1925,7 @@ impl ToolkitTabViewer<'_> {
                     };
                     let extract_enabled = queue_count > 0 && !self.tab_state.output_dir.is_empty();
                     if ui.add_enabled(extract_enabled, egui::Button::new(extract_label)).clicked() {
-                        self.extract_files_clicked(ui);
+                        self.extract_files_clicked();
                     }
 
                     ui.checkbox(

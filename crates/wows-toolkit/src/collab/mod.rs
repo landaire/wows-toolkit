@@ -284,10 +284,10 @@ impl SessionState {
     /// Request a repaint of a specific viewport by window ID
     /// (replay_id or board_id).
     pub fn repaint_viewport(&self, window_id: u64) {
-        if let Some(sink) = self.viewport_sinks.get(&window_id) {
-            if let Some(ctx) = &self.egui_ctx {
-                ctx.request_repaint_of(sink.viewport_id);
-            }
+        if let Some(sink) = self.viewport_sinks.get(&window_id)
+            && let Some(ctx) = &self.egui_ctx
+        {
+            ctx.request_repaint_of(sink.viewport_id);
         }
     }
 }

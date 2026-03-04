@@ -2764,11 +2764,10 @@ impl ReplayRendererViewer {
                     let _ = command_tx.send(PlaybackCommand::Stop);
                     // Unregister viewport sink.
                     let state = shared_state.lock();
-                    if let Some(ref session_state) = state.collab_session_state {
-                        if let Some(replay_id) = state.collab_replay_id {
+                    if let Some(ref session_state) = state.collab_session_state
+                        && let Some(replay_id) = state.collab_replay_id {
                             session_state.lock().viewport_sinks.remove(&replay_id);
                         }
-                    }
                     drop(state);
                     ctx.request_repaint();
                 } else if status_is_loading {

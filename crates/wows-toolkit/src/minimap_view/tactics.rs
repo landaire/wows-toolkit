@@ -583,10 +583,9 @@ impl TacticsBoardViewer {
         // Register this viewport for targeted repaints from the peer task.
         if let Some(ref session_state) = self.collab_session_state {
             let mut s = session_state.lock();
-            s.viewport_sinks.entry(self.board_id).or_insert_with(|| crate::collab::ViewportSink {
-                frame_tx: None,
-                viewport_id,
-            });
+            s.viewport_sinks
+                .entry(self.board_id)
+                .or_insert_with(|| crate::collab::ViewportSink { frame_tx: None, viewport_id });
         }
 
         ctx.show_viewport_deferred(
@@ -778,6 +777,7 @@ impl TacticsBoardViewer {
     }
 
     /// Draw the map/mode selector and cap tools in the bottom panel.
+    #[allow(clippy::too_many_arguments)]
     fn draw_map_mode_selector(
         ui: &mut egui::Ui,
         state: &mut TacticsBoardState,
@@ -924,6 +924,7 @@ impl TacticsBoardViewer {
     }
 
     /// Draw preset save/load/delete controls.
+    #[allow(clippy::too_many_arguments)]
     fn draw_preset_controls(
         ui: &mut egui::Ui,
         state: &mut TacticsBoardState,
@@ -1429,7 +1430,6 @@ impl TacticsBoardViewer {
 
             // When annotation tool is None, clicking on map can select/deselect/move annotations
             Self::handle_annotation_select_move_impl(
-                ui,
                 &response,
                 annotation_state_arc,
                 &transform,
@@ -1798,7 +1798,6 @@ impl TacticsBoardViewer {
 
     /// Handle annotation select/move/rotate when no drawing tool is active.
     fn handle_annotation_select_move_impl(
-        _ui: &egui::Ui,
         response: &egui::Response,
         annotation_state_arc: &Arc<Mutex<AnnotationState>>,
         transform: &MapTransform,

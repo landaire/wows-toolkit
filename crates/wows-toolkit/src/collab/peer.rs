@@ -2431,10 +2431,13 @@ mod tests {
         /// and return the receiver.
         fn with_frame_channel(&self, replay_id: u64) -> mpsc::Receiver<PlaybackFrame> {
             let (tx, rx) = mpsc::sync_channel(1);
-            self.ui_state.lock().register_viewport_sink(replay_id, crate::collab::ViewportSink {
-                frame_tx: Some(tx),
-                viewport_id: egui::ViewportId::from_hash_of(replay_id),
-            });
+            self.ui_state.lock().register_viewport_sink(
+                replay_id,
+                crate::collab::ViewportSink {
+                    frame_tx: Some(tx),
+                    viewport_id: egui::ViewportId::from_hash_of(replay_id),
+                },
+            );
             rx
         }
 
@@ -2843,7 +2846,17 @@ mod tests {
         let mut encoder2 = ZlibEncoder::new(Vec::new(), Compression::fast());
         encoder2.write_all(&rkyv_bytes2).unwrap();
         let compressed2 = encoder2.finish().unwrap();
-        h.dispatch(99, PeerMessage::Frame { replay_id: 1, clock: 0.0, frame_index: 0, total_frames: 10, game_duration: 600.0, compressed_commands: compressed2 });
+        h.dispatch(
+            99,
+            PeerMessage::Frame {
+                replay_id: 1,
+                clock: 0.0,
+                frame_index: 0,
+                total_frames: 10,
+                game_duration: 600.0,
+                compressed_commands: compressed2,
+            },
+        );
         assert!(rx.try_recv().is_err());
     }
 
