@@ -3772,18 +3772,75 @@ impl ToolkitTabViewer<'_> {
 
         // ── Replays ──
         let renderers = self.tab_state.replay_renderers.lock();
-        let local_replay_ids: Vec<u64> =
-            renderers.iter().filter_map(|r| r.shared_state().lock().collab_replay_id).collect();
+        // Only count visible (open) renderers as "active" — hidden ones show an Open button.
+        let visible_replay_ids: Vec<u64> = renderers
+            .iter()
+            .filter(|r| r.open.load(std::sync::atomic::Ordering::Relaxed))
+            .filter_map(|r| r.shared_state().lock().collab_replay_id)
+            .collect();
         drop(renderers);
 
         for replay in &open_replays {
-            let has_local = local_replay_ids.contains(&replay.replay_id);
+            let is_visible = visible_replay_ids.contains(&replay.replay_id);
             ui.horizontal(|ui| {
-                let label = format!("{} {}", icons::MONITOR, replay.replay_name);
-                if has_local {
+                let name = if replay.replay_name.len() > 40 {
+                    format!("{}…", &replay.replay_name[..39])
+                } else {
+                    replay.replay_name.clone()
+                };
+                let label = format!("{} {}", icons::MONITOR, name);
+                if is_visible {
                     ui.label(&label);
                 } else {
                     ui.label(RichText::new(&label).weak());
+                    if ui.small_button("Open").clicked() {
+                        let renderers = self.tab_state.replay_renderers.lock();
+                        // Check for an existing hidden viewer we can reuse.
+                        let existing = renderers.iter().find(|r| {
+                            r.shared_state().lock().collab_replay_id == Some(replay.replay_id)
+                        });
+                        if let Some(viewer) = existing {
+                            // Reuse: show the hidden viewer and re-wire its frame channel.
+                            viewer.open.store(true, std::sync::atomic::Ordering::Relaxed);
+                            if self.tab_state.client_session.is_some() {
+                                let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                                let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
+                                viewer.shared_state().lock().collab_frame_rx = Some(frame_rx);
+                                self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
+                                    frame_tx: Some(frame_tx),
+                                    viewport_id,
+                                });
+                            }
+                        } else {
+                            // No hidden viewer — create a fresh one.
+                            drop(renderers);
+                            let saved_options = &self.tab_state.settings.renderer_options;
+                            let suppress = std::sync::Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                            let viewer = crate::replay_renderer::launch_client_renderer(
+                                replay.replay_name.clone(),
+                                replay.map_image_png.clone(),
+                                replay.game_version.clone(),
+                                saved_options,
+                                suppress,
+                                self.tab_state.world_of_warships_data.as_ref(),
+                                &self.tab_state.renderer_asset_cache,
+                            );
+                            if let Some(ref client_handle) = self.tab_state.client_session {
+                                let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                                let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
+                                let mut state = viewer.shared_state().lock();
+                                state.collab_replay_id = Some(replay.replay_id);
+                                state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                                state.collab_local_tx = Some(client_handle.local_tx.clone());
+                                state.collab_frame_rx = Some(frame_rx);
+                                self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
+                                    frame_tx: Some(frame_tx),
+                                    viewport_id,
+                                });
+                            }
+                            self.tab_state.replay_renderers.lock().push(viewer);
+                        }
+                    }
                 }
             });
         }
@@ -3800,7 +3857,12 @@ impl ToolkitTabViewer<'_> {
             let owner_name =
                 connected_users.iter().find(|u| u.id == *owner_uid).map(|u| u.name.as_str()).unwrap_or("unknown");
             ui.horizontal(|ui| {
-                let label = format!("{} {} ({})", icons::MAP_TRIFOLD, title, owner_name);
+                let display_title = if title.len() > 40 {
+                    format!("{}…", &title[..39])
+                } else {
+                    title.clone()
+                };
+                let label = format!("{} {} ({})", icons::MAP_TRIFOLD, display_title, owner_name);
                 if is_open_locally {
                     ui.label(&label);
                 } else {

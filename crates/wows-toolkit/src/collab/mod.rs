@@ -110,6 +110,22 @@ pub struct TacticsBoardSessionState {
 
 /// Shared session state visible to the UI thread.
 ///
+/// A registered viewport that receives targeted repaints and optionally
+/// playback frames from the peer task.
+pub struct ViewportSink {
+    /// Channel sender for pushing frames to this viewport's renderer.
+    /// `None` for viewports that don't receive frames (e.g. tactics boards).
+    pub frame_tx: Option<std::sync::mpsc::SyncSender<crate::replay_renderer::PlaybackFrame>>,
+    /// The egui ViewportId, used to repaint just this viewport.
+    pub viewport_id: egui::ViewportId,
+}
+
+impl std::fmt::Debug for ViewportSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ViewportSink").field("viewport_id", &self.viewport_id).finish()
+    }
+}
+
 /// Stored behind `Arc<Mutex<>>` and read each frame by the renderer UI.
 /// Written by the background collab task.
 #[derive(Debug)]
@@ -161,15 +177,19 @@ pub struct SessionState {
     pub tactics_boards: HashMap<u64, TacticsBoardSessionState>,
     /// Monotonically increasing version bumped on any tactics board add/remove/update.
     pub tactics_boards_version: u64,
+    /// Per-viewport sinks, keyed by window ID (replay_id or board_id).
+    /// Each entry holds the frame channel sender and viewport ID so the
+    /// peer task can push a frame and repaint the exact viewport.
+    pub viewport_sinks: HashMap<u64, ViewportSink>,
+    /// Frames that arrived before the viewport sink was registered.
+    /// Drained when the sink is inserted via `register_viewport_sink`.
+    pending_first_frames: HashMap<u64, crate::replay_renderer::PlaybackFrame>,
     /// Window IDs the host has requested all peers to open (consumed by UI thread).
     pub force_open_window_ids: HashSet<u64>,
     /// Main window egui context, used by the peer task to wake the UI
     /// when session state changes.
     #[doc(hidden)]
     pub egui_ctx: Option<egui::Context>,
-    /// Viewport IDs of deferred viewports (e.g. tactics boards) that should
-    /// be repainted when session state changes.
-    pub repaint_viewport_ids: Vec<egui::ViewportId>,
 }
 
 impl Default for SessionState {
@@ -196,9 +216,10 @@ impl Default for SessionState {
             pings: Vec::new(),
             tactics_boards: HashMap::new(),
             tactics_boards_version: 0,
+            viewport_sinks: HashMap::new(),
+            pending_first_frames: HashMap::new(),
             force_open_window_ids: HashSet::new(),
             egui_ctx: None,
-            repaint_viewport_ids: Vec::new(),
         }
     }
 }
@@ -224,8 +245,50 @@ impl SessionState {
         self.tactics_boards.clear();
         self.tactics_boards_version = 0;
         self.force_open_window_ids.clear();
-        self.repaint_viewport_ids.clear();
+        self.viewport_sinks.clear();
+        self.pending_first_frames.clear();
         self.permissions = Permissions::default();
+    }
+
+    /// Push a playback frame to the renderer for the given window ID
+    /// (replay_id) and request a repaint of that specific viewport.
+    /// If no sink is registered yet, buffers the frame so it can be
+    /// delivered when the sink is created via `register_viewport_sink`.
+    pub fn push_frame(&mut self, window_id: u64, frame: crate::replay_renderer::PlaybackFrame) {
+        if let Some(sink) = self.viewport_sinks.get(&window_id) {
+            if let Some(ref tx) = sink.frame_tx {
+                let _ = tx.try_send(frame);
+            }
+            if let Some(ctx) = &self.egui_ctx {
+                ctx.request_repaint_of(sink.viewport_id);
+            }
+        } else {
+            // Sink not yet registered — buffer so we don't lose the first frame.
+            self.pending_first_frames.insert(window_id, frame);
+        }
+    }
+
+    /// Register a viewport sink and flush any pending first frame into it.
+    pub fn register_viewport_sink(&mut self, window_id: u64, sink: ViewportSink) {
+        if let Some(frame) = self.pending_first_frames.remove(&window_id) {
+            if let Some(ref tx) = sink.frame_tx {
+                let _ = tx.try_send(frame);
+            }
+            if let Some(ctx) = &self.egui_ctx {
+                ctx.request_repaint_of(sink.viewport_id);
+            }
+        }
+        self.viewport_sinks.insert(window_id, sink);
+    }
+
+    /// Request a repaint of a specific viewport by window ID
+    /// (replay_id or board_id).
+    pub fn repaint_viewport(&self, window_id: u64) {
+        if let Some(sink) = self.viewport_sinks.get(&window_id) {
+            if let Some(ctx) = &self.egui_ctx {
+                ctx.request_repaint_of(sink.viewport_id);
+            }
+        }
     }
 }
 
@@ -430,7 +493,7 @@ mod tests {
         assert!(state.tactics_boards.is_empty());
         assert_eq!(state.tactics_boards_version, 0);
         assert!(state.force_open_window_ids.is_empty());
-        assert!(state.repaint_viewport_ids.is_empty());
+        assert!(state.viewport_sinks.is_empty());
     }
 
     #[test]

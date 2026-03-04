@@ -317,6 +317,7 @@ pub enum PlaybackCommand {
 }
 
 /// A single frame's rendering data, shared from background to UI thread.
+#[derive(Debug)]
 pub struct PlaybackFrame {
     pub replay_id: u64,
     pub commands: Vec<DrawCommand>,
@@ -495,6 +496,8 @@ pub struct SharedRendererState {
     pub applied_trail_override_version: u64,
     /// Reference to the collab session state (set by app.rs when wired to a session).
     pub collab_session_state: Option<Arc<Mutex<crate::collab::SessionState>>>,
+    /// Receiver for playback frames from the collab peer task (bypasses ROOT event loop).
+    pub collab_frame_rx: Option<std::sync::mpsc::Receiver<PlaybackFrame>>,
     /// Channel to send local UI events (cursors, annotations, pings, etc.) to the collab peer task.
     pub collab_local_tx: Option<std::sync::mpsc::Sender<crate::collab::peer::LocalEvent>>,
     /// Channel to send session commands (e.g. ReplayOpened) directly from the
@@ -618,6 +621,7 @@ pub fn launch_replay_renderer(
         applied_range_override_version: 0,
         applied_trail_override_version: 0,
         collab_session_state: None,
+        collab_frame_rx: None,
         collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: Some(replay_name.clone()),
@@ -764,6 +768,7 @@ pub fn launch_client_renderer(
         applied_range_override_version: 0,
         applied_trail_override_version: 0,
         collab_session_state: None,
+        collab_frame_rx: None,
         collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: None,
@@ -857,18 +862,7 @@ impl ReplayRendererViewer {
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let parent_ctx = ctx.clone();
-
-        // Register this viewport for repaint notifications from the peer task.
         let viewport_id = egui::ViewportId::from_hash_of(&*self.title);
-        {
-            let state = self.shared_state.lock();
-            if let Some(ref session_state) = state.collab_session_state {
-                let mut s = session_state.lock();
-                if !s.repaint_viewport_ids.contains(&viewport_id) {
-                    s.repaint_viewport_ids.push(viewport_id);
-                }
-            }
-        }
 
         ctx.show_viewport_deferred(
             viewport_id,
@@ -884,6 +878,16 @@ impl ReplayRendererViewer {
                 let mut repaint = false;
 
                 let mut state = shared_state.lock();
+
+                // Pull latest frame from collab channel before any status checks
+                // so the Loading→Ready transition sees the first frame immediately.
+                if let Some(rx) = state.collab_frame_rx.take() {
+                    while let Ok(frame) = rx.try_recv() {
+                        state.frame = Some(frame);
+                        repaint = true;
+                    }
+                    state.collab_frame_rx = Some(rx);
+                }
 
                 // Register game fonts with egui on the first frame.
                 // set_fonts() doesn't take effect until the next frame, so we
@@ -2758,11 +2762,12 @@ impl ReplayRendererViewer {
                 if ctx.input(|i| i.viewport().close_requested()) {
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
-                    // Unregister viewport from repaint notifications.
+                    // Unregister viewport sink.
                     let state = shared_state.lock();
                     if let Some(ref session_state) = state.collab_session_state {
-                        let mut s = session_state.lock();
-                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
+                        if let Some(replay_id) = state.collab_replay_id {
+                            session_state.lock().viewport_sinks.remove(&replay_id);
+                        }
                     }
                     drop(state);
                     ctx.request_repaint();

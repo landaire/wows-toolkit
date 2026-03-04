@@ -406,10 +406,6 @@ pub struct TabState {
     /// Rolling timestamps of ReplayOpened events for spam protection (client-side).
     #[serde(skip)]
     pub replay_open_timestamps: std::collections::VecDeque<std::time::Instant>,
-    /// Most recent frame received before its renderer was created; retried each poll.
-    #[serde(skip)]
-    pub pending_collab_frame: Option<crate::replay_renderer::PlaybackFrame>,
-
     // ─── Tactics Board ────────────────────────────────────────────────────
     /// Local cache of cap layouts extracted from replays. Persisted to disk
     /// via rkyv, loaded on startup, and updated incrementally when new
@@ -489,7 +485,6 @@ impl Default for TabState {
             show_display_name_error: false,
             next_replay_id: 1,
             replay_open_timestamps: std::collections::VecDeque::new(),
-            pending_collab_frame: None,
             cap_layout_db: Default::default(),
             tactics_boards: Default::default(),
             tactics_auto_opened_board_ids: Default::default(),

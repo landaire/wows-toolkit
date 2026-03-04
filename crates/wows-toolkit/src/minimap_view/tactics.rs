@@ -580,12 +580,13 @@ impl TacticsBoardViewer {
 
         let viewport_id = egui::ViewportId::from_hash_of(("tactics_board", self.board_id));
 
-        // Register this viewport for repaint notifications from the peer task.
+        // Register this viewport for targeted repaints from the peer task.
         if let Some(ref session_state) = self.collab_session_state {
             let mut s = session_state.lock();
-            if !s.repaint_viewport_ids.contains(&viewport_id) {
-                s.repaint_viewport_ids.push(viewport_id);
-            }
+            s.viewport_sinks.entry(self.board_id).or_insert_with(|| crate::collab::ViewportSink {
+                frame_tx: None,
+                viewport_id,
+            });
         }
 
         ctx.show_viewport_deferred(
@@ -766,10 +767,9 @@ impl TacticsBoardViewer {
 
                 if ctx.input(|i| i.viewport().close_requested()) {
                     open.store(false, Ordering::Relaxed);
-                    // Unregister viewport from repaint notifications.
+                    // Unregister viewport sink.
                     if let Some(ref session_state) = collab_session_state {
-                        let mut s = session_state.lock();
-                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
+                        session_state.lock().viewport_sinks.remove(&board_id);
                     }
                     ctx.request_repaint();
                 }

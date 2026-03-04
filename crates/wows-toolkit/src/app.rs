@@ -856,10 +856,18 @@ impl WowsToolkitApp {
         let mut replay_renderers = self.tab_state.replay_renderers.lock();
         let mut remove_renderers = Vec::new();
         for (idx, renderer) in replay_renderers.iter().enumerate() {
-            renderer.draw(ctx);
             if !renderer.open.load(Ordering::Relaxed) {
+                // Keep hidden client renderers alive so they can be reopened
+                // from the session popover without showing a loading spinner.
+                let is_hidden_client = renderer.shared_state().lock().collab_replay_id.is_some()
+                    && self.tab_state.client_session.is_some();
+                if is_hidden_client {
+                    continue; // Skip draw + settings sync for hidden viewers.
+                }
                 remove_renderers.push(idx);
+                continue;
             }
+            renderer.draw(ctx);
             // Check if renderer wants to save default options
             if let Some(saved) = renderer.pending_defaults_save.lock().take() {
                 self.tab_state.settings.renderer_options = saved;
@@ -934,14 +942,16 @@ impl WowsToolkitApp {
         }
 
         // Send ReplayClosed for renderers being removed while a host session is active.
-        if self.tab_state.host_session.is_some() {
-            for &idx in &remove_renderers {
-                let state = replay_renderers[idx].shared_state().lock();
-                if let Some(replay_id) = state.collab_replay_id
-                    && let Some(ref handle) = self.tab_state.host_session
-                {
-                    let _ = handle.command_tx.send(crate::collab::SessionCommand::ReplayClosed { replay_id });
-                }
+        // Also poison session_announced + collab_command_tx so the background playback
+        // thread can't send a late ReplayOpened after the renderer is already gone.
+        for &idx in &remove_renderers {
+            let mut state = replay_renderers[idx].shared_state().lock();
+            state.session_announced = true;
+            state.collab_command_tx = None;
+            if let Some(replay_id) = state.collab_replay_id
+                && let Some(ref handle) = self.tab_state.host_session
+            {
+                let _ = handle.command_tx.send(crate::collab::SessionCommand::ReplayClosed { replay_id });
             }
         }
 
@@ -1589,11 +1599,11 @@ impl WowsToolkitApp {
 
         self.tab_state.toasts.lock().show(ctx);
 
-        // When any replay renderer is playing or a client session is active,
-        // repaint continuously so all deferred viewports stay in sync.
+        // When any replay renderer is playing locally, repaint continuously so
+        // deferred viewports stay in sync. Client sessions are event-driven:
+        // the peer task repaints registered viewports when state changes.
         let any_playing = self.tab_state.replay_renderers.lock().iter().any(|r| r.shared_state().lock().playing);
-        let client_active = self.tab_state.client_session.is_some();
-        if any_playing || client_active || !self.realtime_armor_viewers.is_empty() {
+        if any_playing || !self.realtime_armor_viewers.is_empty() {
             ctx.request_repaint();
         } else {
             ctx.request_repaint_after_secs(1.0);
@@ -2017,8 +2027,15 @@ impl WowsToolkitApp {
     }
 
     fn cleanup_client_session(&mut self) {
-        // Unwire renderers and reset applied sync versions.
-        for r in self.tab_state.replay_renderers.lock().iter() {
+        // Remove hidden client renderers (kept alive for quick reopen)
+        // and unwire visible ones.
+        let mut renderers = self.tab_state.replay_renderers.lock();
+        renderers.retain(|r| {
+            let is_hidden_client = !r.open.load(Ordering::Relaxed)
+                && r.shared_state().lock().collab_replay_id.is_some();
+            !is_hidden_client
+        });
+        for r in renderers.iter() {
             let mut s = r.shared_state().lock();
             s.session_frame_tx = None;
             s.collab_replay_id = None;
@@ -2030,6 +2047,7 @@ impl WowsToolkitApp {
             s.applied_range_override_version = 0;
             s.applied_trail_override_version = 0;
         }
+        drop(renderers);
         // Unwire tactics boards and reset applied sync versions.
         for b in self.tab_state.tactics_boards.lock().iter_mut() {
             b.collab_local_tx = None;
@@ -2069,10 +2087,17 @@ impl WowsToolkitApp {
                             &self.tab_state.renderer_asset_cache,
                         );
                         if let Some(ref client_handle) = self.tab_state.client_session {
+                            let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                            let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
                             let mut state = viewer.shared_state().lock();
                             state.collab_replay_id = Some(replay.replay_id);
                             state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                             state.collab_local_tx = Some(client_handle.local_tx.clone());
+                            state.collab_frame_rx = Some(frame_rx);
+                            self.tab_state.session_state.lock().register_viewport_sink(replay.replay_id, crate::collab::ViewportSink {
+                                frame_tx: Some(frame_tx),
+                                viewport_id,
+                            });
                         }
                         self.tab_state.replay_renderers.lock().push(viewer);
                     }
@@ -2128,10 +2153,17 @@ impl WowsToolkitApp {
                     );
                     // Wire the client viewer to the session.
                     if let Some(ref client_handle) = self.tab_state.client_session {
+                        let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
+                        let viewport_id = egui::ViewportId::from_hash_of(&*viewer.title);
                         let mut state = viewer.shared_state().lock();
                         state.collab_replay_id = Some(replay_id);
                         state.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                         state.collab_local_tx = Some(client_handle.local_tx.clone());
+                        state.collab_frame_rx = Some(frame_rx);
+                        self.tab_state.session_state.lock().register_viewport_sink(replay_id, crate::collab::ViewportSink {
+                            frame_tx: Some(frame_tx),
+                            viewport_id,
+                        });
                     }
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -2144,6 +2176,7 @@ impl WowsToolkitApp {
                         renderers[pos].open.store(false, Ordering::Relaxed);
                         renderers.remove(pos);
                     }
+                    self.tab_state.session_state.lock().viewport_sinks.remove(&replay_id);
                     self.tab_state.toasts.lock().info("Host closed a replay");
                 }
                 crate::collab::SessionEvent::Error(msg) => {
@@ -2162,28 +2195,6 @@ impl WowsToolkitApp {
                     return;
                 }
                 _ => {}
-            }
-        }
-
-        // Poll frames from client session and forward to matching client renderer.
-        // Keep only the most recent frame; if the renderer doesn't exist yet, hold
-        // it until the next poll cycle (the biased select in host_accept_peer should
-        // prevent this, but this is a safety net).
-        if let Some(ref session) = self.tab_state.client_session {
-            while let Ok(frame) = session.frame_rx.try_recv() {
-                self.tab_state.pending_collab_frame = Some(frame);
-            }
-        }
-        if self.tab_state.pending_collab_frame.is_some() {
-            let replay_id = self.tab_state.pending_collab_frame.as_ref().unwrap().replay_id;
-            let renderers = self.tab_state.replay_renderers.lock();
-            if let Some(r) = renderers.iter().find(|r| r.shared_state().lock().collab_replay_id == Some(replay_id)) {
-                let frame = self.tab_state.pending_collab_frame.take().unwrap();
-                let mut state = r.shared_state().lock();
-                // Don't set status = Ready here. The viewport callback handles the
-                // Loading→Ready transition after fonts are registered with egui,
-                // which requires at least one paint cycle.
-                state.frame = Some(frame);
             }
         }
 

@@ -152,8 +152,6 @@ pub struct PeerSessionHandle {
     pub command_tx: mpsc::Sender<SessionCommand>,
     /// Send frames for broadcast (host/co-host only). `try_send` to avoid blocking.
     pub frame_tx: mpsc::SyncSender<FrameBroadcast>,
-    /// Receive playback frames from the current frame source (join mode).
-    pub frame_rx: mpsc::Receiver<PlaybackFrame>,
     /// Send local UI events (cursors, annotations, pings, etc.) to the peer task.
     pub local_tx: mpsc::Sender<LocalEvent>,
     /// Shared session state.
@@ -172,7 +170,6 @@ pub fn start_peer_session(
     let (event_tx, event_rx) = mpsc::channel();
     let (command_tx, command_rx) = mpsc::channel();
     let (frame_tx, frame_broadcast_rx) = mpsc::sync_channel(2);
-    let (inbound_frame_tx, frame_rx) = mpsc::channel();
     let (local_tx, local_rx) = mpsc::channel();
 
     // Reset the provided state for this new session.
@@ -191,9 +188,9 @@ pub fn start_peer_session(
     }
     let state_clone = Arc::clone(&state);
 
-    runtime.spawn(peer_task(mode, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, state_clone));
+    runtime.spawn(peer_task(mode, event_tx, command_rx, frame_broadcast_rx, local_rx, state_clone));
 
-    PeerSessionHandle { event_rx, command_tx, frame_tx, frame_rx, local_tx, state }
+    PeerSessionHandle { event_rx, command_tx, frame_tx, local_tx, state }
 }
 
 // ─── Internal types ─────────────────────────────────────────────────────────
@@ -249,29 +246,26 @@ async fn peer_task(
     event_tx: mpsc::Sender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
-    inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
     local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
     match mode {
         PeerMode::Host(params) => {
-            host_main(params, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, ui_state).await;
+            host_main(params, event_tx, command_rx, frame_broadcast_rx, local_rx, ui_state).await;
         }
         PeerMode::Join(params) => {
-            join_main(params, event_tx, command_rx, frame_broadcast_rx, inbound_frame_tx, local_rx, ui_state).await;
+            join_main(params, event_tx, command_rx, frame_broadcast_rx, local_rx, ui_state).await;
         }
     }
 }
 
 // ─── Host main ──────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 async fn host_main(
     params: HostParams,
     event_tx: mpsc::Sender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
-    inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
     local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
@@ -427,7 +421,6 @@ async fn host_main(
                     &mesh,
                     &ui_state,
                     &event_tx,
-                    &inbound_frame_tx,
                 );
             }
 
@@ -512,14 +505,16 @@ async fn host_main(
                             let _ = event_tx.send(SessionEvent::FrameSourceChanged { source_user_id: my_user_id });
                         }
                         SessionCommand::ReplayOpened { replay_id, replay_name, map_image_png, game_version } => {
-                            // Store in session state.
+                            // Store in session state (deduplicate by replay_id).
                             { let mut s = ui_state.lock();
-                                s.open_replays.push(OpenReplay {
-                                    replay_id,
-                                    replay_name: replay_name.clone(),
-                                    map_image_png: map_image_png.clone(),
-                                    game_version: game_version.clone(),
-                                });
+                                if !s.open_replays.iter().any(|r| r.replay_id == replay_id) {
+                                    s.open_replays.push(OpenReplay {
+                                        replay_id,
+                                        replay_name: replay_name.clone(),
+                                        map_image_png: map_image_png.clone(),
+                                        game_version: game_version.clone(),
+                                    });
+                                }
                             }
                             // Broadcast to all peers.
                             let msg = PeerMessage::ReplayOpened {
@@ -1068,13 +1063,11 @@ async fn host_accept_peer(
 
 // ─── Join main ──────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 async fn join_main(
     params: JoinParams,
     event_tx: mpsc::Sender<SessionEvent>,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
-    inbound_frame_tx: mpsc::Sender<PlaybackFrame>,
     local_rx: mpsc::Receiver<LocalEvent>,
     ui_state: Arc<Mutex<SessionState>>,
 ) {
@@ -1330,7 +1323,6 @@ async fn join_main(
                             &mesh,
                             &ui_state,
                             &event_tx,
-                            &inbound_frame_tx,
                         );
                     }
                     Some(Err(e)) => {
@@ -1595,6 +1587,15 @@ async fn join_main(
 
 // ─── Shared message handling (client-side permission enforcement) ────────────
 
+/// Repaint all replay viewports registered in the session state.
+/// Used for replay-scoped state changes (annotations with board_id=None,
+/// render options, range/trail overrides).
+fn repaint_replay_viewports(s: &SessionState) {
+    for replay in &s.open_replays {
+        s.repaint_viewport(replay.replay_id);
+    }
+}
+
 /// Process an incoming peer message with client-side permission enforcement.
 ///
 /// Called by both host_main (for messages from connected peers) and join_main
@@ -1605,7 +1606,6 @@ fn handle_incoming_message(
     mesh: &Arc<Mutex<MeshState>>,
     ui_state: &Arc<Mutex<SessionState>>,
     event_tx: &mpsc::Sender<SessionEvent>,
-    inbound_frame_tx: &mpsc::Sender<PlaybackFrame>,
 ) {
     let m = mesh.lock();
     let sender_is_authority = m.is_authority(sender_id);
@@ -1632,6 +1632,14 @@ fn handle_incoming_message(
                     };
                     drop(m);
                     s.cursors.push(UserCursor { user_id: sender_id, name, color, pos, last_update: Instant::now() });
+                }
+            }
+            // Repaint all viewports that render cursors.
+            {
+                let s = ui_state.lock();
+                repaint_replay_viewports(&s);
+                for &bid in s.tactics_boards.keys() {
+                    s.repaint_viewport(bid);
                 }
             }
             // Host relays cursor updates to other peers.
@@ -1683,8 +1691,10 @@ fn handle_incoming_message(
                         board.annotation_sync_version += 1;
                     }
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(bid);
                 } else {
                     s.annotation_sync_version += 1;
+                    repaint_replay_viewports(&s);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -1718,8 +1728,10 @@ fn handle_incoming_message(
                         board.annotation_sync_version += 1;
                     }
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(bid);
                 } else {
                     s.annotation_sync_version += 1;
+                    repaint_replay_viewports(&s);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -1738,11 +1750,13 @@ fn handle_incoming_message(
                         board.annotation_sync_version += 1;
                     }
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(bid);
                 } else if let Some(sync) = s.current_annotation_sync.as_mut() {
                     sync.annotations.clear();
                     sync.owners.clear();
                     sync.ids.clear();
                     s.annotation_sync_version += 1;
+                    repaint_replay_viewports(&s);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -1760,6 +1774,7 @@ fn handle_incoming_message(
                 let opts = s.current_render_options.get_or_insert_with(Default::default);
                 opts.set_field(field, value);
                 s.render_options_version += 1;
+                repaint_replay_viewports(&s);
             }
             relay_if_host(sender_id, &PeerMessage::ToggleDisplayOption { field, value }, mesh);
         }
@@ -1773,6 +1788,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.current_range_overrides = Some(overrides.clone());
                 s.range_override_version += 1;
+                repaint_replay_viewports(&s);
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1786,6 +1802,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.current_trail_hidden = Some(hidden.clone());
                 s.trail_override_version += 1;
+                repaint_replay_viewports(&s);
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1795,6 +1812,7 @@ fn handle_incoming_message(
             {
                 let mut s = ui_state.lock();
                 s.pings.push(crate::collab::PeerPing { user_id: sender_id, color, pos, time: Instant::now() });
+                repaint_replay_viewports(&s);
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1823,6 +1841,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.render_options_version += 1;
                 s.current_render_options = Some(opts.clone());
+                repaint_replay_viewports(&s);
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1844,6 +1863,7 @@ fn handle_incoming_message(
                         board.annotation_sync_version += 1;
                     }
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(bid);
                 } else {
                     s.annotation_sync_version += 1;
                     s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
@@ -1851,6 +1871,7 @@ fn handle_incoming_message(
                         owners: owners.clone(),
                         ids: ids.clone(),
                     });
+                    repaint_replay_viewports(&s);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -1971,7 +1992,7 @@ fn handle_incoming_message(
                 game_duration,
             };
             trace!("Received frame: replay_id={replay_id} frame={frame_index}/{total_frames} clock={clock:.1}");
-            let _ = inbound_frame_tx.send(frame);
+            ui_state.lock().push_frame(replay_id, frame);
             // Host relays frames to other peers.
             relay_if_host(
                 sender_id,
@@ -1988,12 +2009,14 @@ fn handle_incoming_message(
             }
             {
                 let mut s = ui_state.lock();
-                s.open_replays.push(OpenReplay {
-                    replay_id,
-                    replay_name: replay_name.clone(),
-                    map_image_png: map_image_png.clone(),
-                    game_version: game_version.clone(),
-                });
+                if !s.open_replays.iter().any(|r| r.replay_id == replay_id) {
+                    s.open_replays.push(OpenReplay {
+                        replay_id,
+                        replay_name: replay_name.clone(),
+                        map_image_png: map_image_png.clone(),
+                        game_version: game_version.clone(),
+                    });
+                }
             }
             let _ = event_tx.send(SessionEvent::ReplayOpened { replay_id, replay_name, map_image_png, game_version });
         }
@@ -2029,6 +2052,7 @@ fn handle_incoming_message(
                     map_info: map_info.clone(),
                 };
                 s.tactics_boards_version += 1;
+                s.repaint_viewport(board_id);
             }
             relay_if_host(
                 sender_id,
@@ -2042,6 +2066,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.tactics_boards.remove(&board_id);
                 s.tactics_boards_version += 1;
+                s.repaint_viewport(board_id);
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -2066,6 +2091,7 @@ fn handle_incoming_message(
                     }
                     board.cap_point_sync_version += 1;
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(board_id);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -2083,6 +2109,7 @@ fn handle_incoming_message(
                     board.cap_point_sync.cap_points.retain(|c| c.id != id);
                     board.cap_point_sync_version += 1;
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(board_id);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -2103,6 +2130,7 @@ fn handle_incoming_message(
                     board.cap_point_sync = crate::collab::CapPointSyncState { cap_points: cap_points.clone() };
                     board.cap_point_sync_version += 1;
                     s.tactics_boards_version += 1;
+                    s.repaint_viewport(board_id);
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
@@ -2131,13 +2159,10 @@ fn handle_incoming_message(
         }
     }
 
-    // Wake the main window and any registered deferred viewports (e.g. tactics boards).
+    // Wake the main window so it can process session events.
     let s = ui_state.lock();
     if let Some(ctx) = &s.egui_ctx {
         ctx.request_repaint();
-        for viewport_id in &s.repaint_viewport_ids {
-            ctx.request_repaint_of(*viewport_id);
-        }
     }
 }
 
@@ -2371,9 +2396,7 @@ mod tests {
         mesh: Arc<Mutex<MeshState>>,
         ui_state: Arc<Mutex<SessionState>>,
         event_rx: mpsc::Receiver<SessionEvent>,
-        frame_rx: mpsc::Receiver<PlaybackFrame>,
         event_tx: mpsc::Sender<SessionEvent>,
-        frame_tx: mpsc::Sender<PlaybackFrame>,
     }
 
     impl MessageTestHarness {
@@ -2390,8 +2413,7 @@ mod tests {
             }));
             let ui_state = Arc::new(Mutex::new(SessionState::default()));
             let (event_tx, event_rx) = mpsc::channel();
-            let (frame_tx, frame_rx) = mpsc::channel();
-            Self { mesh, ui_state, event_rx, frame_rx, event_tx, frame_tx }
+            Self { mesh, ui_state, event_rx, event_tx }
         }
 
         fn with_permissions(self, annotations_locked: bool, settings_locked: bool) -> Self {
@@ -2405,8 +2427,19 @@ mod tests {
             self
         }
 
+        /// Register a viewport sink with a frame channel for a given replay_id
+        /// and return the receiver.
+        fn with_frame_channel(&self, replay_id: u64) -> mpsc::Receiver<PlaybackFrame> {
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.ui_state.lock().register_viewport_sink(replay_id, crate::collab::ViewportSink {
+                frame_tx: Some(tx),
+                viewport_id: egui::ViewportId::from_hash_of(replay_id),
+            });
+            rx
+        }
+
         fn dispatch(&self, sender_id: u64, msg: PeerMessage) {
-            handle_incoming_message(sender_id, msg, &self.mesh, &self.ui_state, &self.event_tx, &self.frame_tx);
+            handle_incoming_message(sender_id, msg, &self.mesh, &self.ui_state, &self.event_tx);
         }
 
         fn ui(&self) -> parking_lot::MutexGuard<'_, SessionState> {
@@ -2801,13 +2834,23 @@ mod tests {
                 compressed_commands: compressed,
             },
         );
-        // Frame should not arrive.
-        assert!(h.frame_rx.try_recv().is_err());
+        // Frame should not arrive (no channel registered, and even if there were one,
+        // the wrong sender should be rejected).
+        let rx = h.with_frame_channel(1);
+        // Re-dispatch to test with channel present.
+        let commands2: Vec<DrawCommand> = vec![];
+        let rkyv_bytes2 = rkyv::to_bytes::<rkyv::rancor::Error>(&commands2).unwrap();
+        let mut encoder2 = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder2.write_all(&rkyv_bytes2).unwrap();
+        let compressed2 = encoder2.finish().unwrap();
+        h.dispatch(99, PeerMessage::Frame { replay_id: 1, clock: 0.0, frame_index: 0, total_frames: 10, game_duration: 600.0, compressed_commands: compressed2 });
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
     fn frame_accepted_from_correct_source() {
         let h = MessageTestHarness::as_client().with_frame_source(0);
+        let rx = h.with_frame_channel(1);
         let commands: Vec<DrawCommand> = vec![];
         let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&commands).unwrap();
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
@@ -2825,7 +2868,7 @@ mod tests {
                 compressed_commands: compressed,
             },
         );
-        let frame = h.frame_rx.try_recv().unwrap();
+        let frame = rx.try_recv().expect("frame should arrive via channel");
         assert_eq!(frame.replay_id, 1);
         assert_eq!(frame.frame_index, 5);
     }
