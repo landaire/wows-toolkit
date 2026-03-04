@@ -3373,27 +3373,40 @@ impl ToolkitTabViewer<'_> {
             // ── Tactics Board ──
             {
                 let has_data = self.tab_state.world_of_warships_data.is_some();
-                let has_board = !self.tab_state.tactics_boards.lock().is_empty();
+                let board_count = self.tab_state.tactics_boards.lock().len();
+                let at_limit = board_count >= crate::collab::protocol::MAX_TACTICS_BOARDS;
                 let btn = ui.add_enabled(
-                    has_data && !has_board,
+                    has_data && !at_limit,
                     egui::Button::new(icon_str!(icons::MAP_TRIFOLD, "Tactics Board")),
                 );
                 let btn = if !has_data {
                     btn.on_hover_text("Waiting for game data to load\u{2026}")
-                } else if has_board {
-                    btn.on_hover_text("Tactics board is already open")
+                } else if at_limit {
+                    btn.on_hover_text(format!(
+                        "Maximum {} tactics boards open",
+                        crate::collab::protocol::MAX_TACTICS_BOARDS
+                    ))
                 } else {
                     btn
                 };
                 if btn.clicked() {
+                    let session_handle =
+                        self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+                    let owner_user_id =
+                        session_handle.map(|_| self.tab_state.session_state.lock().my_user_id).unwrap_or(0);
                     let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                        rand::random(),
+                        owner_user_id,
                         std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                         std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                         std::sync::Arc::clone(self.tab_state.world_of_warships_data.as_ref().unwrap()),
                     );
-                    let session_handle =
-                        self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
                     if let Some(handle) = session_handle {
+                        let is_authority = {
+                            let s = self.tab_state.session_state.lock();
+                            s.role.is_host() || s.role.is_co_host()
+                        };
+                        board.is_session_board = is_authority;
                         board.collab_local_tx = Some(handle.local_tx.clone());
                         board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                         board.collab_command_tx = Some(handle.command_tx.clone());
@@ -3712,11 +3725,44 @@ impl ToolkitTabViewer<'_> {
     }
 
     /// Show the "Shared Windows" section inside the session popover.
-    /// Lists open replays and tactics board with re-open buttons for closed windows.
+    /// Lists open replays and tactics boards with Open / Open-for-everyone buttons.
     fn show_shared_windows(&mut self, ui: &mut egui::Ui) {
-        let open_replays = self.tab_state.session_state.lock().open_replays.clone();
-        let has_tactics_map = self.tab_state.session_state.lock().tactics_map.is_some();
-        if open_replays.is_empty() && !has_tactics_map {
+        let ss = self.tab_state.session_state.lock();
+        let open_replays = ss.open_replays.clone();
+        let session_boards: Vec<(u64, u64, String)> = ss
+            .tactics_boards
+            .iter()
+            .map(|(&bid, bs)| {
+                let title = if !bs.window_title.is_empty() {
+                    bs.window_title.clone()
+                } else if !bs.tactics_map.map_name.is_empty() {
+                    // Fallback: translate the map name for peers who haven't opened the board yet.
+                    let translated = self
+                        .tab_state
+                        .world_of_warships_data
+                        .as_ref()
+                        .and_then(|wd| {
+                            let wd = wd.read();
+                            wd.game_metadata.as_ref().map(|gm| {
+                                wowsunpack::game_params::translations::translate_map_name(
+                                    &bs.tactics_map.map_name,
+                                    gm.as_ref(),
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| bs.tactics_map.map_name.clone());
+                    format!("Tactics Board \u{2014} {translated}")
+                } else {
+                    "Tactics Board".to_string()
+                };
+                (bid, bs.owner_user_id, title)
+            })
+            .collect();
+        let is_host_role = ss.role.is_host();
+        let connected_users = ss.connected_users.clone();
+        drop(ss);
+
+        if open_replays.is_empty() && session_boards.is_empty() {
             return;
         }
 
@@ -3738,38 +3784,57 @@ impl ToolkitTabViewer<'_> {
                     ui.label(&label);
                 } else {
                     ui.label(RichText::new(&label).weak());
-                    // Client can't re-open host replays — they stream frames.
-                    // Just show it as unavailable.
                 }
             });
         }
 
-        // ── Tactics Board ──
-        if has_tactics_map {
-            let has_board = !self.tab_state.tactics_boards.lock().is_empty();
+        // ── Tactics Boards ──
+        let local_boards = self.tab_state.tactics_boards.lock();
+        let local_board_ids: Vec<u64> = local_boards.iter().map(|b| b.board_id).collect();
+        drop(local_boards);
+
+        let session_handle = self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+
+        for (bid, owner_uid, title) in &session_boards {
+            let is_open_locally = local_board_ids.contains(bid);
+            let owner_name =
+                connected_users.iter().find(|u| u.id == *owner_uid).map(|u| u.name.as_str()).unwrap_or("unknown");
             ui.horizontal(|ui| {
-                let label = format!("{} Tactics Board", icons::MAP_TRIFOLD);
-                if has_board {
+                let label = format!("{} {} ({})", icons::MAP_TRIFOLD, title, owner_name);
+                if is_open_locally {
                     ui.label(&label);
                 } else {
                     ui.label(RichText::new(&label).weak());
-                    if ui.small_button("Re-open").clicked()
+                    if ui.small_button("Open").clicked()
                         && let Some(ref wows_data) = self.tab_state.world_of_warships_data
                     {
-                        let session_handle =
-                            self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
-                        let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
-                            std::sync::Arc::clone(&self.tab_state.cap_layout_db),
-                            std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
-                            std::sync::Arc::clone(wows_data),
-                        );
-                        if let Some(handle) = session_handle {
-                            board.collab_local_tx = Some(handle.local_tx.clone());
-                            board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
-                            board.collab_command_tx = Some(handle.command_tx.clone());
+                        let board_count = self.tab_state.tactics_boards.lock().len();
+                        if board_count < crate::collab::protocol::MAX_TACTICS_BOARDS {
+                            let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                                *bid,
+                                *owner_uid,
+                                std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                                std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                                std::sync::Arc::clone(wows_data),
+                            );
+                            board.is_session_board = true;
+                            if let Some(handle) = session_handle {
+                                board.collab_local_tx = Some(handle.local_tx.clone());
+                                board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                                board.collab_command_tx = Some(handle.command_tx.clone());
+                            }
+                            self.tab_state.tactics_boards.lock().push(board);
                         }
-                        self.tab_state.tactics_boards.lock().push(board);
                     }
+                }
+                // Host can request all peers to open this window.
+                if is_host_role
+                    && let Some(handle) = session_handle
+                    && ui.small_button("Open for everyone").clicked()
+                {
+                    let _ = handle
+                        .command_tx
+                        .send(crate::collab::SessionCommand::OpenWindowForEveryone { window_id: *bid });
                 }
             });
         }

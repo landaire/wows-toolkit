@@ -93,11 +93,11 @@ pub struct FrameBroadcast {
 /// Annotation events from the local UI.
 pub enum LocalAnnotationEvent {
     /// Upsert an annotation by unique ID.
-    Set { id: u64, annotation: Annotation, owner: u64 },
+    Set { board_id: Option<u64>, id: u64, annotation: Annotation, owner: u64 },
     /// Remove a specific annotation by ID.
-    Remove { id: u64 },
+    Remove { board_id: Option<u64>, id: u64 },
     /// Remove all annotations.
-    Clear,
+    Clear { board_id: Option<u64> },
 }
 
 /// Per-ship range overrides: vec of (entity_id, filter) pairs.
@@ -124,9 +124,14 @@ pub enum LocalEvent {
     TrailOverrides(TrailOverrideUpdate),
     Ping([f32; 2]),
     /// Cap point edit (tactics board).
-    CapPoint(LocalCapPointEvent),
+    CapPoint {
+        board_id: u64,
+        event: LocalCapPointEvent,
+    },
     /// Tactics map opened — broadcast map info to peers.
     TacticsMapOpened {
+        board_id: u64,
+        owner_user_id: u64,
         map_name: String,
         map_id: u32,
         map_image_png: Vec<u8>,
@@ -134,7 +139,9 @@ pub enum LocalEvent {
         map_info: Option<wows_minimap_renderer::map_data::MapInfo>,
     },
     /// Tactics map closed.
-    TacticsMapClosed,
+    TacticsMapClosed {
+        board_id: u64,
+    },
 }
 
 /// Handle returned from `start_peer_session` for UI interaction.
@@ -450,18 +457,33 @@ async fn host_main(
                             let msg = PeerMessage::RenderOptions(params.initial_render_options.clone());
                             broadcast_to_mesh(&mesh, &msg);
                         }
-                        SessionCommand::SyncAnnotations { annotations, owners, ids } => {
+                        SessionCommand::SyncAnnotations { board_id, annotations, owners, ids } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
-                                    annotations: annotations.clone(),
-                                    owners: owners.clone(),
-                                    ids: ids.clone(),
-                                });
-                                s.annotation_sync_version += 1;
+                                if let Some(bid) = board_id {
+                                    let board = s.tactics_boards.entry(bid).or_default();
+                                    board.annotation_sync = crate::collab::AnnotationSyncState {
+                                        annotations: annotations.clone(),
+                                        owners: owners.clone(),
+                                        ids: ids.clone(),
+                                    };
+                                    board.annotation_sync_version += 1;
+                                    s.tactics_boards_version += 1;
+                                } else {
+                                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                        annotations: annotations.clone(),
+                                        owners: owners.clone(),
+                                        ids: ids.clone(),
+                                    });
+                                    s.annotation_sync_version += 1;
+                                }
                             }
-                            let msg = PeerMessage::AnnotationSync { annotations, owners, ids };
+                            let msg = PeerMessage::AnnotationSync { board_id, annotations, owners, ids };
                             broadcast_to_mesh(&mesh, &msg);
+                        }
+                        SessionCommand::OpenWindowForEveryone { window_id } => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::OpenWindowForEveryone { window_id });
+                            ui_state.lock().force_open_window_ids.insert(window_id);
                         }
                         SessionCommand::PromoteToCoHost { user_id } => {
                             let msg = PeerMessage::PromoteToCoHost { user_id };
@@ -519,15 +541,17 @@ async fn host_main(
                             let msg = PeerMessage::ReplayClosed { replay_id };
                             broadcast_to_mesh(&mesh, &msg);
                         }
-                        SessionCommand::SyncCapPoints { cap_points } => {
+                        SessionCommand::SyncCapPoints { board_id, cap_points } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState {
+                                let board = s.tactics_boards.entry(board_id).or_default();
+                                board.cap_point_sync = crate::collab::CapPointSyncState {
                                     cap_points: cap_points.clone(),
-                                });
-                                s.cap_point_sync_version += 1;
+                                };
+                                board.cap_point_sync_version += 1;
+                                s.tactics_boards_version += 1;
                             }
-                            let msg = PeerMessage::CapPointSync { cap_points };
+                            let msg = PeerMessage::CapPointSync { board_id, cap_points };
                             broadcast_to_mesh(&mesh, &msg);
                         }
                     }
@@ -548,9 +572,15 @@ async fn host_main(
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
-                                LocalAnnotationEvent::Set { id, annotation, owner } => {
+                                LocalAnnotationEvent::Set { board_id, id, annotation, owner } => {
                                     let mut s = ui_state.lock();
-                                    let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                                    let sync = if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            &mut board.annotation_sync
+                                        } else { continue; }
+                                    } else {
+                                        s.current_annotation_sync.get_or_insert_with(Default::default)
+                                    };
                                     if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
                                         sync.annotations[pos] = annotation.clone();
                                         sync.owners[pos] = *owner;
@@ -559,30 +589,45 @@ async fn host_main(
                                         sync.owners.push(*owner);
                                         sync.ids.push(*id);
                                     }
-                                    s.annotation_sync_version += 1;
-                                    PeerMessage::SetAnnotation { id: *id, annotation: annotation.clone(), owner: *owner }
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) { board.annotation_sync_version += 1; }
+                                        s.tactics_boards_version += 1;
+                                    } else { s.annotation_sync_version += 1; }
+                                    PeerMessage::SetAnnotation { board_id: *board_id, id: *id, annotation: annotation.clone(), owner: *owner }
                                 }
-                                LocalAnnotationEvent::Remove { id } => {
+                                LocalAnnotationEvent::Remove { board_id, id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_annotation_sync.as_mut()
-                                        && let Some(pos) = sync.ids.iter().position(|&eid| eid == *id)
-                                    {
+                                    let sync = if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            &mut board.annotation_sync
+                                        } else { continue; }
+                                    } else if let Some(ref mut sync) = s.current_annotation_sync { sync } else { continue; };
+                                    if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
                                         sync.annotations.remove(pos);
                                         sync.owners.remove(pos);
                                         sync.ids.remove(pos);
-                                        s.annotation_sync_version += 1;
                                     }
-                                    PeerMessage::RemoveAnnotation { id: *id }
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) { board.annotation_sync_version += 1; }
+                                        s.tactics_boards_version += 1;
+                                    } else { s.annotation_sync_version += 1; }
+                                    PeerMessage::RemoveAnnotation { board_id: *board_id, id: *id }
                                 }
-                                LocalAnnotationEvent::Clear => {
+                                LocalAnnotationEvent::Clear { board_id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_annotation_sync.as_mut() {
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            board.annotation_sync = Default::default();
+                                            board.annotation_sync_version += 1;
+                                        }
+                                        s.tactics_boards_version += 1;
+                                    } else if let Some(sync) = s.current_annotation_sync.as_mut() {
                                         sync.annotations.clear();
                                         sync.owners.clear();
                                         sync.ids.clear();
                                         s.annotation_sync_version += 1;
                                     }
-                                    PeerMessage::ClearAnnotations
+                                    PeerMessage::ClearAnnotations { board_id: *board_id }
                                 }
                             };
                             broadcast_to_mesh(&mesh, &msg);
@@ -599,60 +644,60 @@ async fn host_main(
                         LocalEvent::Ping(pos) => {
                             broadcast_to_mesh(&mesh, &PeerMessage::Ping { pos });
                         }
-                        LocalEvent::CapPoint(evt) => {
+                        LocalEvent::CapPoint { board_id, event: evt } => {
                             let msg = match &evt {
                                 LocalCapPointEvent::Set(cp) => {
-                                    debug!("Host peer task: SetCapPoint id={} radius={}", cp.id, cp.radius);
+                                    debug!("Host peer task: SetCapPoint board={board_id} id={} radius={}", cp.id, cp.radius);
                                     let mut s = ui_state.lock();
-                                    let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
-                                    if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
-                                        sync.cap_points[pos] = cp.clone();
-                                    } else {
-                                        sync.cap_points.push(cp.clone());
+                                    if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                                        let sync = &mut board.cap_point_sync;
+                                        if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
+                                            sync.cap_points[pos] = cp.clone();
+                                        } else {
+                                            sync.cap_points.push(cp.clone());
+                                        }
+                                        board.cap_point_sync_version += 1;
+                                        s.tactics_boards_version += 1;
                                     }
-                                    s.cap_point_sync_version += 1;
-                                    debug!("Host peer task: cap_point_sync_version now {}", s.cap_point_sync_version);
-                                    PeerMessage::SetCapPoint(cp.clone())
+                                    PeerMessage::SetCapPoint { board_id, cap_point: cp.clone() }
                                 }
                                 LocalCapPointEvent::Remove { id } => {
-                                    debug!("Host peer task: RemoveCapPoint id={id}");
+                                    debug!("Host peer task: RemoveCapPoint board={board_id} id={id}");
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_cap_point_sync.as_mut() {
-                                        sync.cap_points.retain(|c| c.id != *id);
-                                        s.cap_point_sync_version += 1;
+                                    if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                                        board.cap_point_sync.cap_points.retain(|c| c.id != *id);
+                                        board.cap_point_sync_version += 1;
+                                        s.tactics_boards_version += 1;
                                     }
-                                    PeerMessage::RemoveCapPoint { id: *id }
+                                    PeerMessage::RemoveCapPoint { board_id, id: *id }
                                 }
                             };
                             broadcast_to_mesh(&mesh, &msg);
                         }
-                        LocalEvent::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                                let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
+                                let board = s.tactics_boards.entry(board_id).or_default();
+                                board.owner_user_id = owner;
+                                board.tactics_map = crate::collab::TacticsMapInfo {
                                     map_name: map_name.clone(),
                                     map_id,
                                     map_image_png: map_image_png.clone(),
                                     map_info: map_info.clone(),
-                                });
-                                s.tactics_map_version += 1;
-                                // Cap points are managed by explicit SyncCapPoints messages,
-                                // not cleared here — avoids race with SyncCapPoints on a
-                                // different channel during session wire-up.
+                                };
+                                s.tactics_boards_version += 1;
                             }
-                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info });
+                            let owner = ui_state.lock().my_user_id;
+                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, map_id, map_image_png, map_info });
                         }
-                        LocalEvent::TacticsMapClosed => {
+                        LocalEvent::TacticsMapClosed { board_id } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.tactics_map = None;
-                                s.tactics_map_version += 1;
-                                s.current_cap_point_sync = None;
-                                s.cap_point_sync_version += 1;
-                                s.current_annotation_sync = None;
-                                s.annotation_sync_version += 1;
+                                s.tactics_boards.remove(&board_id);
+                                s.tactics_boards_version += 1;
                             }
-                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapClosed);
+                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapClosed { board_id });
                         }
                     }
                 }
@@ -784,7 +829,7 @@ async fn host_accept_peer(
         return;
     }
 
-    // Send current annotations if any.
+    // Send current replay-context annotations if any.
     let ann_msg = {
         let s = ui_state.lock();
         s.current_annotation_sync.as_ref().and_then(|sync| {
@@ -792,6 +837,7 @@ async fn host_accept_peer(
                 None
             } else {
                 Some(PeerMessage::AnnotationSync {
+                    board_id: None,
                     annotations: sync.annotations.clone(),
                     owners: sync.owners.clone(),
                     ids: sync.ids.clone(),
@@ -805,30 +851,56 @@ async fn host_accept_peer(
         return;
     }
 
-    // Send current tactics board state if any (map + cap points).
-    let (tmap_msg, cap_msg) = {
+    // Send all open tactics boards (map + cap points + annotations per board).
+    let board_msgs: Vec<_> = {
         let s = ui_state.lock();
-        let tmap = s.tactics_map.as_ref().map(|tmap| PeerMessage::TacticsMapOpened {
-            map_name: tmap.map_name.clone(),
-            map_id: tmap.map_id,
-            map_image_png: tmap.map_image_png.clone(),
-            map_info: tmap.map_info.clone(),
-        });
-        let cap = s
-            .current_cap_point_sync
-            .as_ref()
-            .map(|sync| PeerMessage::CapPointSync { cap_points: sync.cap_points.clone() });
-        (tmap, cap)
+        s.tactics_boards
+            .iter()
+            .map(|(&bid, board)| {
+                let tmap = PeerMessage::TacticsMapOpened {
+                    board_id: bid,
+                    owner_user_id: board.owner_user_id,
+                    map_name: board.tactics_map.map_name.clone(),
+                    map_id: board.tactics_map.map_id,
+                    map_image_png: board.tactics_map.map_image_png.clone(),
+                    map_info: board.tactics_map.map_info.clone(),
+                };
+                let cap = if board.cap_point_sync.cap_points.is_empty() {
+                    None
+                } else {
+                    Some(PeerMessage::CapPointSync {
+                        board_id: bid,
+                        cap_points: board.cap_point_sync.cap_points.clone(),
+                    })
+                };
+                let ann = if board.annotation_sync.annotations.is_empty() {
+                    None
+                } else {
+                    Some(PeerMessage::AnnotationSync {
+                        board_id: Some(bid),
+                        annotations: board.annotation_sync.annotations.clone(),
+                        owners: board.annotation_sync.owners.clone(),
+                        ids: board.annotation_sync.ids.clone(),
+                    })
+                };
+                (tmap, cap, ann)
+            })
+            .collect()
     };
-    if let Some(msg) = tmap_msg
-        && write_peer_message(&mut send, &msg).await.is_err()
-    {
-        return;
-    }
-    if let Some(msg) = cap_msg
-        && write_peer_message(&mut send, &msg).await.is_err()
-    {
-        return;
+    for (tmap_msg, cap_msg, ann_msg) in board_msgs {
+        if write_peer_message(&mut send, &tmap_msg).await.is_err() {
+            return;
+        }
+        if let Some(msg) = cap_msg
+            && write_peer_message(&mut send, &msg).await.is_err()
+        {
+            return;
+        }
+        if let Some(msg) = ann_msg
+            && write_peer_message(&mut send, &msg).await.is_err()
+        {
+            return;
+        }
     }
 
     // Announce to all existing peers.
@@ -1307,18 +1379,33 @@ async fn join_main(
                             // Co-host could send render options — but we don't
                             // track initial options on the join side.
                         }
-                        SessionCommand::SyncAnnotations { annotations, owners, ids } => {
+                        SessionCommand::SyncAnnotations { board_id, annotations, owners, ids } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
-                                    annotations: annotations.clone(),
-                                    owners: owners.clone(),
-                                    ids: ids.clone(),
-                                });
-                                s.annotation_sync_version += 1;
+                                if let Some(bid) = board_id {
+                                    let board = s.tactics_boards.entry(bid).or_default();
+                                    board.annotation_sync = crate::collab::AnnotationSyncState {
+                                        annotations: annotations.clone(),
+                                        owners: owners.clone(),
+                                        ids: ids.clone(),
+                                    };
+                                    board.annotation_sync_version += 1;
+                                    s.tactics_boards_version += 1;
+                                } else {
+                                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                        annotations: annotations.clone(),
+                                        owners: owners.clone(),
+                                        ids: ids.clone(),
+                                    });
+                                    s.annotation_sync_version += 1;
+                                }
                             }
-                            let msg = PeerMessage::AnnotationSync { annotations, owners, ids };
+                            let msg = PeerMessage::AnnotationSync { board_id, annotations, owners, ids };
                             let _ = write_peer_message(&mut send, &msg).await;
+                        }
+                        SessionCommand::OpenWindowForEveryone { window_id } => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::OpenWindowForEveryone { window_id }).await;
+                            ui_state.lock().force_open_window_ids.insert(window_id);
                         }
                         SessionCommand::PromoteToCoHost { .. } => {
                             // Only the host can promote — ignore.
@@ -1331,15 +1418,17 @@ async fn join_main(
                         SessionCommand::ReplayOpened { .. } | SessionCommand::ReplayClosed { .. } => {
                             // Only the host sends replay lifecycle messages — ignore on join side.
                         }
-                        SessionCommand::SyncCapPoints { cap_points } => {
+                        SessionCommand::SyncCapPoints { board_id, cap_points } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState {
+                                let board = s.tactics_boards.entry(board_id).or_default();
+                                board.cap_point_sync = crate::collab::CapPointSyncState {
                                     cap_points: cap_points.clone(),
-                                });
-                                s.cap_point_sync_version += 1;
+                                };
+                                board.cap_point_sync_version += 1;
+                                s.tactics_boards_version += 1;
                             }
-                            let msg = PeerMessage::CapPointSync { cap_points };
+                            let msg = PeerMessage::CapPointSync { board_id, cap_points };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
                     }
@@ -1360,9 +1449,15 @@ async fn join_main(
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
-                                LocalAnnotationEvent::Set { id, annotation, owner } => {
+                                LocalAnnotationEvent::Set { board_id, id, annotation, owner } => {
                                     let mut s = ui_state.lock();
-                                    let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                                    let sync = if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            &mut board.annotation_sync
+                                        } else { continue; }
+                                    } else {
+                                        s.current_annotation_sync.get_or_insert_with(Default::default)
+                                    };
                                     if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
                                         sync.annotations[pos] = annotation.clone();
                                         sync.owners[pos] = *owner;
@@ -1371,30 +1466,45 @@ async fn join_main(
                                         sync.owners.push(*owner);
                                         sync.ids.push(*id);
                                     }
-                                    s.annotation_sync_version += 1;
-                                    PeerMessage::SetAnnotation { id: *id, annotation: annotation.clone(), owner: *owner }
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) { board.annotation_sync_version += 1; }
+                                        s.tactics_boards_version += 1;
+                                    } else { s.annotation_sync_version += 1; }
+                                    PeerMessage::SetAnnotation { board_id: *board_id, id: *id, annotation: annotation.clone(), owner: *owner }
                                 }
-                                LocalAnnotationEvent::Remove { id } => {
+                                LocalAnnotationEvent::Remove { board_id, id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_annotation_sync.as_mut()
-                                        && let Some(pos) = sync.ids.iter().position(|&eid| eid == *id)
-                                    {
+                                    let sync = if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            &mut board.annotation_sync
+                                        } else { continue; }
+                                    } else if let Some(ref mut sync) = s.current_annotation_sync { sync } else { continue; };
+                                    if let Some(pos) = sync.ids.iter().position(|&eid| eid == *id) {
                                         sync.annotations.remove(pos);
                                         sync.owners.remove(pos);
                                         sync.ids.remove(pos);
-                                        s.annotation_sync_version += 1;
                                     }
-                                    PeerMessage::RemoveAnnotation { id: *id }
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) { board.annotation_sync_version += 1; }
+                                        s.tactics_boards_version += 1;
+                                    } else { s.annotation_sync_version += 1; }
+                                    PeerMessage::RemoveAnnotation { board_id: *board_id, id: *id }
                                 }
-                                LocalAnnotationEvent::Clear => {
+                                LocalAnnotationEvent::Clear { board_id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_annotation_sync.as_mut() {
+                                    if let Some(bid) = board_id {
+                                        if let Some(board) = s.tactics_boards.get_mut(bid) {
+                                            board.annotation_sync = Default::default();
+                                            board.annotation_sync_version += 1;
+                                        }
+                                        s.tactics_boards_version += 1;
+                                    } else if let Some(sync) = s.current_annotation_sync.as_mut() {
                                         sync.annotations.clear();
                                         sync.owners.clear();
                                         sync.ids.clear();
                                         s.annotation_sync_version += 1;
                                     }
-                                    PeerMessage::ClearAnnotations
+                                    PeerMessage::ClearAnnotations { board_id: *board_id }
                                 }
                             };
                             let _ = write_peer_message(&mut send, &msg).await;
@@ -1411,54 +1521,58 @@ async fn join_main(
                         LocalEvent::Ping(pos) => {
                             let _ = write_peer_message(&mut send, &PeerMessage::Ping { pos }).await;
                         }
-                        LocalEvent::CapPoint(evt) => {
+                        LocalEvent::CapPoint { board_id, event: evt } => {
                             let msg = match &evt {
                                 LocalCapPointEvent::Set(cp) => {
                                     let mut s = ui_state.lock();
-                                    let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
-                                    if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
-                                        sync.cap_points[pos] = cp.clone();
-                                    } else {
-                                        sync.cap_points.push(cp.clone());
+                                    if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                                        let sync = &mut board.cap_point_sync;
+                                        if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
+                                            sync.cap_points[pos] = cp.clone();
+                                        } else {
+                                            sync.cap_points.push(cp.clone());
+                                        }
+                                        board.cap_point_sync_version += 1;
+                                        s.tactics_boards_version += 1;
                                     }
-                                    s.cap_point_sync_version += 1;
-                                    PeerMessage::SetCapPoint(cp.clone())
+                                    PeerMessage::SetCapPoint { board_id, cap_point: cp.clone() }
                                 }
                                 LocalCapPointEvent::Remove { id } => {
                                     let mut s = ui_state.lock();
-                                    if let Some(sync) = s.current_cap_point_sync.as_mut() {
-                                        sync.cap_points.retain(|c| c.id != *id);
-                                        s.cap_point_sync_version += 1;
+                                    if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                                        board.cap_point_sync.cap_points.retain(|c| c.id != *id);
+                                        board.cap_point_sync_version += 1;
+                                        s.tactics_boards_version += 1;
                                     }
-                                    PeerMessage::RemoveCapPoint { id: *id }
+                                    PeerMessage::RemoveCapPoint { board_id, id: *id }
                                 }
                             };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
-                        LocalEvent::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                                let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
+                                let board = s.tactics_boards.entry(board_id).or_default();
+                                board.owner_user_id = owner;
+                                board.tactics_map = crate::collab::TacticsMapInfo {
                                     map_name: map_name.clone(),
                                     map_id,
                                     map_image_png: map_image_png.clone(),
                                     map_info: map_info.clone(),
-                                });
-                                s.tactics_map_version += 1;
+                                };
+                                s.tactics_boards_version += 1;
                             }
-                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info }).await;
+                            let owner = ui_state.lock().my_user_id;
+                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, map_id, map_image_png, map_info }).await;
                         }
-                        LocalEvent::TacticsMapClosed => {
+                        LocalEvent::TacticsMapClosed { board_id } => {
                             {
                                 let mut s = ui_state.lock();
-                                s.tactics_map = None;
-                                s.tactics_map_version += 1;
-                                s.current_cap_point_sync = None;
-                                s.cap_point_sync_version += 1;
-                                s.current_annotation_sync = None;
-                                s.annotation_sync_version += 1;
+                                s.tactics_boards.remove(&board_id);
+                                s.tactics_boards_version += 1;
                             }
-                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapClosed).await;
+                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapClosed { board_id }).await;
                         }
                     }
                 }
@@ -1536,7 +1650,7 @@ fn handle_incoming_message(
         }
 
         // ── Annotation gated ────────────────────────────────────────────
-        PeerMessage::SetAnnotation { id, ref annotation, owner } => {
+        PeerMessage::SetAnnotation { board_id, id, ref annotation, owner } => {
             if permissions.annotations_locked && !sender_is_authority {
                 debug!("Dropping SetAnnotation from {sender_id} (locked)");
                 return;
@@ -1547,7 +1661,15 @@ fn handle_incoming_message(
             }
             {
                 let mut s = ui_state.lock();
-                let sync = s.current_annotation_sync.get_or_insert_with(Default::default);
+                let sync = if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        &mut board.annotation_sync
+                    } else {
+                        return;
+                    }
+                } else {
+                    s.current_annotation_sync.get_or_insert_with(Default::default)
+                };
                 if let Some(pos) = sync.ids.iter().position(|&eid| eid == id) {
                     sync.annotations[pos] = annotation.clone();
                     sync.owners[pos] = owner;
@@ -1556,38 +1678,67 @@ fn handle_incoming_message(
                     sync.owners.push(owner);
                     sync.ids.push(id);
                 }
-                s.annotation_sync_version += 1;
-            }
-            relay_if_host(sender_id, &msg, mesh);
-        }
-
-        PeerMessage::RemoveAnnotation { id } => {
-            if permissions.annotations_locked && !sender_is_authority {
-                debug!("Dropping RemoveAnnotation from {sender_id} (locked)");
-                return;
-            }
-            {
-                let mut s = ui_state.lock();
-                if let Some(sync) = s.current_annotation_sync.as_mut()
-                    && let Some(pos) = sync.ids.iter().position(|&eid| eid == id)
-                {
-                    sync.annotations.remove(pos);
-                    sync.owners.remove(pos);
-                    sync.ids.remove(pos);
+                if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        board.annotation_sync_version += 1;
+                    }
+                    s.tactics_boards_version += 1;
+                } else {
                     s.annotation_sync_version += 1;
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::ClearAnnotations => {
+        PeerMessage::RemoveAnnotation { board_id, id } => {
+            if permissions.annotations_locked && !sender_is_authority {
+                debug!("Dropping RemoveAnnotation from {sender_id} (locked)");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                let sync = if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        &mut board.annotation_sync
+                    } else {
+                        return;
+                    }
+                } else if let Some(ref mut sync) = s.current_annotation_sync {
+                    sync
+                } else {
+                    return;
+                };
+                if let Some(pos) = sync.ids.iter().position(|&eid| eid == id) {
+                    sync.annotations.remove(pos);
+                    sync.owners.remove(pos);
+                    sync.ids.remove(pos);
+                }
+                if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        board.annotation_sync_version += 1;
+                    }
+                    s.tactics_boards_version += 1;
+                } else {
+                    s.annotation_sync_version += 1;
+                }
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::ClearAnnotations { board_id } => {
             if permissions.annotations_locked && !sender_is_authority {
                 debug!("Dropping ClearAnnotations from {sender_id} (locked)");
                 return;
             }
             {
                 let mut s = ui_state.lock();
-                if let Some(sync) = s.current_annotation_sync.as_mut() {
+                if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        board.annotation_sync = Default::default();
+                        board.annotation_sync_version += 1;
+                    }
+                    s.tactics_boards_version += 1;
+                } else if let Some(sync) = s.current_annotation_sync.as_mut() {
                     sync.annotations.clear();
                     sync.owners.clear();
                     sync.ids.clear();
@@ -1676,19 +1827,31 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::AnnotationSync { ref annotations, ref owners, ref ids } => {
+        PeerMessage::AnnotationSync { board_id, ref annotations, ref owners, ref ids } => {
             if !sender_is_authority {
                 debug!("Dropping AnnotationSync from non-authority {sender_id}");
                 return;
             }
             {
                 let mut s = ui_state.lock();
-                s.annotation_sync_version += 1;
-                s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
-                    annotations: annotations.clone(),
-                    owners: owners.clone(),
-                    ids: ids.clone(),
-                });
+                if let Some(bid) = board_id {
+                    if let Some(board) = s.tactics_boards.get_mut(&bid) {
+                        board.annotation_sync = crate::collab::AnnotationSyncState {
+                            annotations: annotations.clone(),
+                            owners: owners.clone(),
+                            ids: ids.clone(),
+                        };
+                        board.annotation_sync_version += 1;
+                    }
+                    s.tactics_boards_version += 1;
+                } else {
+                    s.annotation_sync_version += 1;
+                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                        annotations: annotations.clone(),
+                        owners: owners.clone(),
+                        ids: ids.clone(),
+                    });
+                }
             }
             relay_if_host(sender_id, &msg, mesh);
         }
@@ -1850,78 +2013,84 @@ fn handle_incoming_message(
         }
 
         // ── Tactics board messages ────────────────────────────────────
-        PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+        PeerMessage::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
             {
                 let mut s = ui_state.lock();
-                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                if !s.tactics_boards.contains_key(&board_id) && s.tactics_boards.len() >= protocol::MAX_TACTICS_BOARDS {
+                    debug!("Dropping TacticsMapOpened from {sender_id}: max boards reached");
+                    return;
+                }
+                let board = s.tactics_boards.entry(board_id).or_default();
+                board.owner_user_id = owner_user_id;
+                board.tactics_map = crate::collab::TacticsMapInfo {
                     map_name: map_name.clone(),
                     map_id,
                     map_image_png: map_image_png.clone(),
                     map_info: map_info.clone(),
-                });
-                s.tactics_map_version += 1;
+                };
+                s.tactics_boards_version += 1;
             }
             relay_if_host(
                 sender_id,
-                &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info },
+                &PeerMessage::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info },
                 mesh,
             );
         }
 
-        PeerMessage::TacticsMapClosed => {
+        PeerMessage::TacticsMapClosed { board_id } => {
             {
                 let mut s = ui_state.lock();
-                s.tactics_map = None;
-                s.tactics_map_version += 1;
-                s.current_cap_point_sync = None;
-                s.cap_point_sync_version += 1;
-                s.current_annotation_sync = None;
-                s.annotation_sync_version += 1;
+                s.tactics_boards.remove(&board_id);
+                s.tactics_boards_version += 1;
             }
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::SetCapPoint(ref cp) => {
-            debug!("Received SetCapPoint from {sender_id}: id={} radius={}", cp.id, cp.radius);
+        PeerMessage::SetCapPoint { board_id, ref cap_point } => {
+            debug!(
+                "Received SetCapPoint from {sender_id}: board={board_id} id={} radius={}",
+                cap_point.id, cap_point.radius
+            );
             if permissions.annotations_locked && !sender_is_authority {
                 debug!("Dropping SetCapPoint from {sender_id} (locked)");
                 return;
             }
             {
                 let mut s = ui_state.lock();
-                let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
-                if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
-                    sync.cap_points[pos] = cp.clone();
-                } else {
-                    sync.cap_points.push(cp.clone());
+                if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                    let sync = &mut board.cap_point_sync;
+                    if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cap_point.id) {
+                        sync.cap_points[pos] = cap_point.clone();
+                    } else {
+                        sync.cap_points.push(cap_point.clone());
+                    }
+                    board.cap_point_sync_version += 1;
+                    s.tactics_boards_version += 1;
                 }
-                s.cap_point_sync_version += 1;
-                let ver = s.cap_point_sync_version;
-                let count = s.current_cap_point_sync.as_ref().map(|s| s.cap_points.len()).unwrap_or(0);
-                debug!("cap_point_sync_version now {ver} (total caps: {count})");
             }
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::RemoveCapPoint { id } => {
-            debug!("Received RemoveCapPoint from {sender_id}: id={id}");
+        PeerMessage::RemoveCapPoint { board_id, id } => {
+            debug!("Received RemoveCapPoint from {sender_id}: board={board_id} id={id}");
             if permissions.annotations_locked && !sender_is_authority {
                 debug!("Dropping RemoveCapPoint from {sender_id} (locked)");
                 return;
             }
             {
                 let mut s = ui_state.lock();
-                if let Some(sync) = s.current_cap_point_sync.as_mut() {
-                    sync.cap_points.retain(|c| c.id != id);
-                    s.cap_point_sync_version += 1;
+                if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                    board.cap_point_sync.cap_points.retain(|c| c.id != id);
+                    board.cap_point_sync_version += 1;
+                    s.tactics_boards_version += 1;
                 }
             }
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::CapPointSync { ref cap_points } => {
+        PeerMessage::CapPointSync { board_id, ref cap_points } => {
             debug!(
-                "Received CapPointSync from {sender_id}: {} caps, authority={sender_is_authority}",
+                "Received CapPointSync from {sender_id}: board={board_id} {} caps, authority={sender_is_authority}",
                 cap_points.len()
             );
             if !sender_is_authority {
@@ -1930,10 +2099,21 @@ fn handle_incoming_message(
             }
             {
                 let mut s = ui_state.lock();
-                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState { cap_points: cap_points.clone() });
-                s.cap_point_sync_version += 1;
-                debug!("cap_point_sync_version now {}", s.cap_point_sync_version);
+                if let Some(board) = s.tactics_boards.get_mut(&board_id) {
+                    board.cap_point_sync = crate::collab::CapPointSyncState { cap_points: cap_points.clone() };
+                    board.cap_point_sync_version += 1;
+                    s.tactics_boards_version += 1;
+                }
             }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::OpenWindowForEveryone { window_id } => {
+            if !sender_is_authority {
+                debug!("Dropping OpenWindowForEveryone from non-authority {sender_id}");
+                return;
+            }
+            ui_state.lock().force_open_window_ids.insert(window_id);
             relay_if_host(sender_id, &msg, mesh);
         }
 
@@ -2243,7 +2423,7 @@ mod tests {
     #[test]
     fn set_annotation_accepted_when_unlocked() {
         let h = MessageTestHarness::as_client();
-        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 2 };
+        let msg = PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 2 };
         h.dispatch(2, msg); // from a peer
         let s = h.ui();
         assert_eq!(s.annotation_sync_version, 1);
@@ -2254,7 +2434,7 @@ mod tests {
     #[test]
     fn set_annotation_dropped_when_locked_from_peer() {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
-        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 2 };
+        let msg = PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 2 };
         // Sender 2 is not authority (not in our peer list as co-host), so should be dropped.
         // But wait — in our client harness, peers are [(0, Host)]. Sender 2 is unknown → defaults to Peer role.
         h.dispatch(2, msg);
@@ -2264,7 +2444,7 @@ mod tests {
     #[test]
     fn set_annotation_accepted_when_locked_from_authority() {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
-        let msg = PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 };
+        let msg = PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 };
         h.dispatch(0, msg); // from the host (authority)
         assert_eq!(h.ui().annotation_sync_version, 1);
     }
@@ -2286,8 +2466,8 @@ mod tests {
             width: 5.0,
             filled: true,
         };
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 42, annotation: ann1, owner: 0 });
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 42, annotation: ann2, owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 42, annotation: ann1, owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 42, annotation: ann2, owner: 0 });
 
         let s = h.ui();
         let sync = s.current_annotation_sync.as_ref().unwrap();
@@ -2306,11 +2486,11 @@ mod tests {
     fn remove_annotation_accepted_when_unlocked() {
         let h = MessageTestHarness::as_client();
         // First add one.
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
         assert_eq!(h.ui().annotation_sync_version, 1);
 
         // Then remove it.
-        h.dispatch(0, PeerMessage::RemoveAnnotation { id: 1 });
+        h.dispatch(0, PeerMessage::RemoveAnnotation { board_id: None, id: 1 });
         let s = h.ui();
         assert_eq!(s.annotation_sync_version, 2);
         let sync = s.current_annotation_sync.as_ref().unwrap();
@@ -2321,9 +2501,9 @@ mod tests {
     fn remove_annotation_dropped_when_locked_from_peer() {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
         // Add via authority.
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
         // Try to remove from unknown peer.
-        h.dispatch(99, PeerMessage::RemoveAnnotation { id: 1 });
+        h.dispatch(99, PeerMessage::RemoveAnnotation { board_id: None, id: 1 });
         // Should still have the annotation.
         let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
         assert_eq!(sync.ids.len(), 1);
@@ -2332,10 +2512,10 @@ mod tests {
     #[test]
     fn clear_annotations_accepted_when_unlocked() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 2, annotation: test_annotation(), owner: 0 });
 
-        h.dispatch(99, PeerMessage::ClearAnnotations); // from anyone, unlocked
+        h.dispatch(99, PeerMessage::ClearAnnotations { board_id: None }); // from anyone, unlocked
         let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
         assert!(sync.ids.is_empty());
     }
@@ -2343,9 +2523,9 @@ mod tests {
     #[test]
     fn clear_annotations_dropped_when_locked_from_peer() {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
 
-        h.dispatch(99, PeerMessage::ClearAnnotations);
+        h.dispatch(99, PeerMessage::ClearAnnotations { board_id: None });
         let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
         assert_eq!(sync.ids.len(), 1, "Clear should have been dropped");
     }
@@ -2353,9 +2533,9 @@ mod tests {
     #[test]
     fn clear_annotations_accepted_when_locked_from_authority() {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
 
-        h.dispatch(0, PeerMessage::ClearAnnotations); // host is authority
+        h.dispatch(0, PeerMessage::ClearAnnotations { board_id: None }); // host is authority
         let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
         assert!(sync.ids.is_empty());
     }
@@ -2452,7 +2632,12 @@ mod tests {
         let h = MessageTestHarness::as_client();
         h.dispatch(
             0,
-            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![0], ids: vec![42] },
+            PeerMessage::AnnotationSync {
+                board_id: None,
+                annotations: vec![test_annotation()],
+                owners: vec![0],
+                ids: vec![42],
+            },
         );
         let s = h.ui();
         assert_eq!(s.annotation_sync_version, 1);
@@ -2465,7 +2650,12 @@ mod tests {
         let h = MessageTestHarness::as_client();
         h.dispatch(
             99,
-            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![0], ids: vec![42] },
+            PeerMessage::AnnotationSync {
+                board_id: None,
+                annotations: vec![test_annotation()],
+                owners: vec![0],
+                ids: vec![42],
+            },
         );
         assert_eq!(h.ui().annotation_sync_version, 0);
         assert!(h.ui().current_annotation_sync.is_none());
@@ -2688,7 +2878,7 @@ mod tests {
             },
         );
         // Add some annotation state.
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
 
         // Close the replay.
         h.dispatch(0, PeerMessage::ReplayClosed { replay_id: 1 });
@@ -2834,16 +3024,16 @@ mod tests {
         let h = MessageTestHarness::as_client();
         assert_eq!(h.ui().annotation_sync_version, 0);
 
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
         assert_eq!(h.ui().annotation_sync_version, 1);
 
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 2, annotation: test_annotation(), owner: 0 });
         assert_eq!(h.ui().annotation_sync_version, 2);
 
-        h.dispatch(0, PeerMessage::RemoveAnnotation { id: 1 });
+        h.dispatch(0, PeerMessage::RemoveAnnotation { board_id: None, id: 1 });
         assert_eq!(h.ui().annotation_sync_version, 3);
 
-        h.dispatch(0, PeerMessage::ClearAnnotations);
+        h.dispatch(0, PeerMessage::ClearAnnotations { board_id: None });
         assert_eq!(h.ui().annotation_sync_version, 4);
     }
 
@@ -2863,14 +3053,19 @@ mod tests {
     fn annotation_sync_replaces_entire_state() {
         let h = MessageTestHarness::as_client();
         // Add two annotations individually.
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 1, annotation: test_annotation(), owner: 0 });
-        h.dispatch(0, PeerMessage::SetAnnotation { id: 2, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 0 });
+        h.dispatch(0, PeerMessage::SetAnnotation { board_id: None, id: 2, annotation: test_annotation(), owner: 0 });
         assert_eq!(h.ui().current_annotation_sync.as_ref().unwrap().ids.len(), 2);
 
         // Full sync replaces everything.
         h.dispatch(
             0,
-            PeerMessage::AnnotationSync { annotations: vec![test_annotation()], owners: vec![5], ids: vec![99] },
+            PeerMessage::AnnotationSync {
+                board_id: None,
+                annotations: vec![test_annotation()],
+                owners: vec![5],
+                ids: vec![99],
+            },
         );
         let sync = h.ui().current_annotation_sync.as_ref().unwrap().clone();
         assert_eq!(sync.ids, vec![99]);

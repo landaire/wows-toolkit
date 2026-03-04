@@ -453,7 +453,8 @@ pub fn render_annotation(
                 // Draw line segments up to the endpoint
                 let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
                 for pair in screen_pts.windows(2) {
-                    painter.add(Shape::LineSegment { points: [pair[0], pair[1]], stroke: Stroke::new(stroke_w, *color) });
+                    painter
+                        .add(Shape::LineSegment { points: [pair[0], pair[1]], stroke: Stroke::new(stroke_w, *color) });
                 }
 
                 // Arrowhead triangle
@@ -924,7 +925,10 @@ pub fn render_tool_preview(
                     let screen_pts: Vec<Pos2> =
                         full_path.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
                     for pair in screen_pts.windows(2) {
-                        painter.add(Shape::LineSegment { points: [pair[0], pair[1]], stroke: Stroke::new(sw, ghost_color) });
+                        painter.add(Shape::LineSegment {
+                            points: [pair[0], pair[1]],
+                            stroke: Stroke::new(sw, ghost_color),
+                        });
                     }
 
                     // Arrowhead triangle
@@ -1867,6 +1871,7 @@ pub fn draw_annotation_edit_popup(
     bounds: Rect,
     map_space_size: Option<f32>,
     collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
+    board_id: Option<u64>,
 ) {
     use crate::icons;
 
@@ -1924,7 +1929,7 @@ pub fn draw_annotation_edit_popup(
                             Annotation::Triangle { radius, .. } => *radius = size,
                             _ => {}
                         }
-                        send_annotation_update(collab_local_tx, &ann, sel_idx);
+                        send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
                     }
                 });
             }
@@ -1947,7 +1952,7 @@ pub fn draw_annotation_edit_popup(
                     let old_color = *color_ref;
                     egui::color_picker::color_edit_button_srgba(ui, color_ref, egui::color_picker::Alpha::Opaque);
                     if *color_ref != old_color {
-                        send_annotation_update(collab_local_tx, &ann, sel_idx);
+                        send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
                     }
                 });
             }
@@ -1967,7 +1972,7 @@ pub fn draw_annotation_edit_popup(
                 let old_filled = *filled_ref;
                 ui.checkbox(filled_ref, egui::RichText::new("Filled").small());
                 if *filled_ref != old_filled {
-                    send_annotation_update(collab_local_tx, &ann, sel_idx);
+                    send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
                 }
             }
 
@@ -1978,7 +1983,7 @@ pub fn draw_annotation_edit_popup(
                     egui::Button::new(egui::RichText::new(label).color(color).small()).min_size(egui::vec2(60.0, 0.0));
                 if ui.add(btn).clicked() {
                     *friendly = !*friendly;
-                    send_annotation_update(collab_local_tx, &ann, sel_idx);
+                    send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
                 }
             }
 
@@ -1994,7 +1999,7 @@ pub fn draw_annotation_edit_popup(
                 ann.annotation_ids.remove(sel_idx);
                 ann.annotation_owners.remove(sel_idx);
                 ann.clear_selection();
-                send_annotation_remove(collab_local_tx, id);
+                send_annotation_remove(collab_local_tx, id, board_id);
             }
         });
     });

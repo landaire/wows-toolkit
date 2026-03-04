@@ -965,8 +965,9 @@ impl WowsToolkitApp {
                     board.collab_local_tx = Some(handle.local_tx.clone());
                     board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                     board.collab_command_tx = Some(handle.command_tx.clone());
-                    // Send current map + caps + annotations to peers so they can catch up.
                     if is_host {
+                        board.is_session_board = true;
+                        // Send current map + caps + annotations to peers so they can catch up.
                         let state = board.state_arc().lock();
                         if let Some((map_id, map_name)) = state.selected_map() {
                             let map_name = map_name.to_string();
@@ -997,18 +998,25 @@ impl WowsToolkitApp {
                                 .collect();
                             drop(state);
                             let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapOpened {
+                                board_id: board.board_id,
+                                owner_user_id: board.owner_user_id,
                                 map_name,
                                 map_id,
                                 map_image_png,
                                 map_info,
                             });
-                            let _ = handle
-                                .command_tx
-                                .send(crate::collab::SessionCommand::SyncCapPoints { cap_points: wire_caps });
+                            let _ = handle.command_tx.send(crate::collab::SessionCommand::SyncCapPoints {
+                                board_id: board.board_id,
+                                cap_points: wire_caps,
+                            });
                             // Push pre-existing annotations into the session.
                             let ann = board.annotation_state_arc().lock();
                             if !ann.annotations.is_empty() {
-                                crate::minimap_view::send_annotation_full_sync(&Some(handle.command_tx.clone()), &ann);
+                                crate::minimap_view::send_annotation_full_sync(
+                                    &Some(handle.command_tx.clone()),
+                                    &ann,
+                                    Some(board.board_id),
+                                );
                             }
                         }
                     }
@@ -1016,26 +1024,105 @@ impl WowsToolkitApp {
             }
         }
 
-        // Peer-only: auto-open a tactics board when a peer opens one and we don't have one.
-        // Only triggers on a new tactics_map_version to avoid re-opening after the user closes it.
-        if !is_host
-            && boards.is_empty()
+        // Promotion: when a peer becomes co-host, flip their local boards to session boards
+        // and announce them so they become visible to everyone.
+        if let Some(handle) = session_handle {
+            let is_authority = {
+                let s = self.tab_state.session_state.lock();
+                s.role.is_host() || s.role.is_co_host()
+            };
+            if is_authority {
+                for board in boards.iter_mut() {
+                    if !board.is_session_board && board.collab_local_tx.is_some() {
+                        board.is_session_board = true;
+                        // Announce this board to the session.
+                        let state = board.state_arc().lock();
+                        if let Some((map_id, map_name)) = state.selected_map() {
+                            let map_name = map_name.to_string();
+                            let map_image_png = state
+                                .map_image_raw()
+                                .map(|(data, w, h)| {
+                                    let mut buf = Vec::new();
+                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                        let mut cursor = std::io::Cursor::new(&mut buf);
+                                        let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
+                                    }
+                                    buf
+                                })
+                                .unwrap_or_default();
+                            let map_info = state.map_info().cloned();
+                            let wire_caps: Vec<crate::collab::protocol::WireCapPoint> = state
+                                .cap_points()
+                                .iter()
+                                .map(|c| crate::collab::protocol::WireCapPoint {
+                                    id: c.id,
+                                    index: c.index as u32,
+                                    world_x: c.world_x,
+                                    world_z: c.world_z,
+                                    radius: c.radius,
+                                    team_id: c.team_id,
+                                    frozen: c.frozen,
+                                })
+                                .collect();
+                            drop(state);
+                            let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapOpened {
+                                board_id: board.board_id,
+                                owner_user_id: board.owner_user_id,
+                                map_name,
+                                map_id,
+                                map_image_png,
+                                map_info,
+                            });
+                            let _ = handle.command_tx.send(crate::collab::SessionCommand::SyncCapPoints {
+                                board_id: board.board_id,
+                                cap_points: wire_caps,
+                            });
+                            let ann = board.annotation_state_arc().lock();
+                            if !ann.annotations.is_empty() {
+                                crate::minimap_view::send_annotation_full_sync(
+                                    &Some(handle.command_tx.clone()),
+                                    &ann,
+                                    Some(board.board_id),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Peer-only: auto-open tactics boards that appear in session state but aren't
+        // open locally.  Each board_id is tracked in `tactics_auto_opened_board_ids`
+        // so we don't re-open after the user closes one.
+        if is_client
+            && !self.tab_state.settings.disable_auto_open_session_windows
             && let Some(handle) = self.tab_state.client_session.as_ref()
+            && let Some(ref wows_data) = self.tab_state.world_of_warships_data
         {
             let ss = self.tab_state.session_state.lock();
-            let version = ss.tactics_map_version;
-            let has_map = ss.tactics_map.is_some();
+            let new_boards: Vec<(u64, u64)> = ss
+                .tactics_boards
+                .iter()
+                .filter(|(bid, _)| {
+                    !boards.iter().any(|b| b.board_id == **bid)
+                        && !self.tab_state.tactics_auto_opened_board_ids.contains(bid)
+                })
+                .map(|(&bid, bs)| (bid, bs.owner_user_id))
+                .collect();
             drop(ss);
-            if has_map
-                && version > self.tab_state.tactics_auto_open_version
-                && let Some(ref wows_data) = self.tab_state.world_of_warships_data
-            {
-                self.tab_state.tactics_auto_open_version = version;
+            for (bid, owner) in new_boards {
+                if boards.len() >= crate::collab::protocol::MAX_TACTICS_BOARDS {
+                    break;
+                }
+                self.tab_state.tactics_auto_opened_board_ids.insert(bid);
                 let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                    bid,
+                    owner,
                     std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                     std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                     std::sync::Arc::clone(wows_data),
                 );
+                board.is_session_board = true;
                 board.collab_local_tx = Some(handle.local_tx.clone());
                 board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                 board.collab_command_tx = Some(handle.command_tx.clone());
@@ -1043,11 +1130,45 @@ impl WowsToolkitApp {
             }
         }
 
-        // Peer-only: close local board when the host sends TacticsMapClosed.
+        // Drain force_open_window_ids — the host asked everyone to open these windows.
+        // For tactics boards, force-open even if the user previously closed them.
+        if let Some(handle) = self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref())
+            && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+        {
+            let mut ss = self.tab_state.session_state.lock();
+            let force_ids: Vec<u64> = ss.force_open_window_ids.drain().collect();
+            // Collect board info while we have the lock.
+            let force_boards: Vec<(u64, u64)> = force_ids
+                .iter()
+                .filter_map(|id| ss.tactics_boards.get(id).map(|bs| (*id, bs.owner_user_id)))
+                .filter(|(bid, _)| !boards.iter().any(|b| b.board_id == *bid))
+                .collect();
+            drop(ss);
+            for (bid, owner) in force_boards {
+                if boards.len() >= crate::collab::protocol::MAX_TACTICS_BOARDS {
+                    break;
+                }
+                self.tab_state.tactics_auto_opened_board_ids.insert(bid);
+                let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                    bid,
+                    owner,
+                    std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                    std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                    std::sync::Arc::clone(wows_data),
+                );
+                board.is_session_board = true;
+                board.collab_local_tx = Some(handle.local_tx.clone());
+                board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                board.collab_command_tx = Some(handle.command_tx.clone());
+                boards.push(board);
+            }
+        }
+
+        // Peer-only: close local session boards whose board_id is no longer in session state.
         if is_client && !boards.is_empty() {
-            let has_map = self.tab_state.session_state.lock().tactics_map.is_some();
-            if !has_map {
-                for board in boards.iter() {
+            let session = self.tab_state.session_state.lock();
+            for board in boards.iter() {
+                if board.is_session_board && !session.tactics_boards.contains_key(&board.board_id) {
                     board.open.store(false, Ordering::Relaxed);
                 }
             }
@@ -1055,20 +1176,25 @@ impl WowsToolkitApp {
 
         let mut remove = Vec::new();
         for (idx, board) in boards.iter().enumerate() {
-            board.draw(ctx);
             if !board.open.load(Ordering::Relaxed) {
                 remove.push(idx);
+            } else {
+                board.draw(ctx);
             }
         }
         if !remove.is_empty() {
-            // Host closing a board is authoritative — clear annotations and notify peers.
-            if is_host {
-                let closing_had_collab = remove.iter().any(|&idx| boards[idx].collab_local_tx.is_some());
-                if closing_had_collab && let Some(ref handle) = self.tab_state.host_session {
-                    let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::Annotation(
-                        crate::collab::peer::LocalAnnotationEvent::Clear,
-                    ));
-                    let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapClosed);
+            // Host/co-host closing a session board — clear annotations and notify peers per board.
+            let close_handle = self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+            if let Some(handle) = close_handle {
+                for &idx in &remove {
+                    if boards[idx].is_session_board && boards[idx].collab_local_tx.is_some() {
+                        let bid = boards[idx].board_id;
+                        let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::Annotation(
+                            crate::collab::peer::LocalAnnotationEvent::Clear { board_id: Some(bid) },
+                        ));
+                        let _ =
+                            handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapClosed { board_id: bid });
+                    }
                 }
             }
             *boards = boards

@@ -1576,7 +1576,7 @@ impl ReplayRendererViewer {
                                     ann.annotations.remove(idx);
                                     ann.annotation_ids.remove(idx);
                                     ann.annotation_owners.remove(idx);
-                                    send_annotation_remove(&state.collab_local_tx, id);
+                                    send_annotation_remove(&state.collab_local_tx, id, None);
                                 }
                             }
                             drop(state);
@@ -1608,14 +1608,14 @@ impl ReplayRendererViewer {
                                 ann.annotations.push(a);
                                 ann.annotation_ids.push(id);
                                 ann.annotation_owners.push(my_user_id);
-                                send_annotation_update(&state.collab_local_tx, &ann, ann.annotations.len() - 1);
+                                send_annotation_update(&state.collab_local_tx, &ann, ann.annotations.len() - 1, None);
                             }
                             if let Some(idx) = result.erase_index {
                                 let id = ann.annotation_ids[idx];
                                 ann.annotations.remove(idx);
                                 ann.annotation_ids.remove(idx);
                                 ann.annotation_owners.remove(idx);
-                                send_annotation_remove(&shared_state.lock().collab_local_tx, id);
+                                send_annotation_remove(&shared_state.lock().collab_local_tx, id, None);
                             }
                         } else {
                             // No tool active: select/move/rotate annotations
@@ -1623,10 +1623,10 @@ impl ReplayRendererViewer {
 
                             // Sync to collab after rotation stopped or annotation moved
                             if let Some(idx) = sm.rotation_stopped_index {
-                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx);
+                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
                             }
                             for &idx in &sm.moved_indices {
-                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx);
+                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
                             }
 
                             // Click on empty space → ping
@@ -1645,7 +1645,7 @@ impl ReplayRendererViewer {
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
                             ann.undo();
-                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann);
+                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
                         }
 
                         if response.clicked() {
@@ -1749,10 +1749,10 @@ impl ReplayRendererViewer {
                                         drop(tex_guard);
 
                                         if menu_result.did_clear {
-                                            send_annotation_clear(&shared_state.lock().collab_local_tx);
+                                            send_annotation_clear(&shared_state.lock().collab_local_tx, None);
                                         }
                                         if menu_result.did_undo {
-                                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann);
+                                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
                                         }
 
                                         // ── Ship-specific options (shown when right-clicking a ship) ──
@@ -1968,6 +1968,7 @@ impl ReplayRendererViewer {
                                 bounds,
                                 map_space,
                                 &collab_tx,
+                                None,
                             );
                         }
                     }

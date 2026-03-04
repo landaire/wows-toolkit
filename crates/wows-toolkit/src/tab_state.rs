@@ -219,9 +219,9 @@ pub struct TabState {
 
     #[serde(skip)]
     pub tactics_boards: Mutex<Vec<crate::minimap_view::tactics::TacticsBoardViewer>>,
-    /// The `tactics_map_version` we last auto-opened a board for (prevents re-open after close).
+    /// Board IDs we've already auto-opened (prevents re-open after user closes them).
     #[serde(skip)]
-    pub tactics_auto_open_version: u64,
+    pub tactics_auto_opened_board_ids: std::collections::HashSet<u64>,
 
     /// Shared tokio runtime for collab sessions and async tasks.
     #[serde(skip)]
@@ -492,7 +492,7 @@ impl Default for TabState {
             pending_collab_frame: None,
             cap_layout_db: Default::default(),
             tactics_boards: Default::default(),
-            tactics_auto_open_version: 0,
+            tactics_auto_opened_board_ids: Default::default(),
         }
     }
 }

@@ -386,6 +386,8 @@ pub struct TacticsBoardState {
     selected_map: Option<(u32, String)>,
     /// Currently selected mode key (or None for blank).
     selected_mode: Option<CapLayoutKey>,
+    /// Human-readable label for the selected mode (for dynamic window title).
+    selected_mode_label: Option<String>,
     /// Editable cap points on the board.
     cap_points: Vec<TacticsCapPoint>,
     /// Next unique ID for new cap points.
@@ -439,7 +441,6 @@ impl TacticsBoardState {
         self.applied_cap_sync_version = 0;
         self.applied_tactics_map_version = 0;
     }
-
 }
 
 impl Default for TacticsBoardState {
@@ -447,6 +448,7 @@ impl Default for TacticsBoardState {
         Self {
             selected_map: None,
             selected_mode: None,
+            selected_mode_label: None,
             cap_points: Vec::new(),
             next_cap_id: 1,
             map_image: None,
@@ -497,7 +499,12 @@ impl TacticsBoardState {
 
 /// A tactics board viewport. Created from the session popover or standalone.
 pub struct TacticsBoardViewer {
-    pub title: Arc<String>,
+    /// Unique board identifier (random u64).
+    pub board_id: u64,
+    /// User ID of the board creator (informational, for popover grouping).
+    pub owner_user_id: u64,
+    /// Whether this board is synced via the collab session.
+    pub is_session_board: bool,
     pub open: Arc<AtomicBool>,
 
     // Shared types
@@ -524,12 +531,16 @@ pub struct TacticsBoardViewer {
 impl TacticsBoardViewer {
     /// Create a new tactics board viewer.
     pub fn new(
+        board_id: u64,
+        owner_user_id: u64,
         cap_layout_db: Arc<Mutex<CapLayoutDb>>,
         asset_cache: Arc<Mutex<RendererAssetCache>>,
         wows_data: SharedWoWsData,
     ) -> Self {
         Self {
-            title: Arc::new("Tactics Board".to_string()),
+            board_id,
+            owner_user_id,
+            is_session_board: false,
             open: Arc::new(AtomicBool::new(true)),
             zoom_pan: Arc::new(Mutex::new(ViewportZoomPan::default())),
             annotation_state: Arc::new(Mutex::new(AnnotationState::default())),
@@ -556,7 +567,7 @@ impl TacticsBoardViewer {
     /// Draw the tactics board viewport as a deferred viewport (separate OS window).
     pub fn draw(&self, ctx: &egui::Context) {
         let open = self.open.clone();
-        let title = self.title.clone();
+        let board_id = self.board_id;
         let zoom_pan_arc = self.zoom_pan.clone();
         let annotation_state_arc = self.annotation_state.clone();
         let state_arc = self.state.clone();
@@ -567,7 +578,7 @@ impl TacticsBoardViewer {
         let collab_session_state = self.collab_session_state.clone();
         let collab_command_tx = self.collab_command_tx.clone();
 
-        let viewport_id = egui::ViewportId::from_hash_of(&*title);
+        let viewport_id = egui::ViewportId::from_hash_of(("tactics_board", self.board_id));
 
         // Register this viewport for repaint notifications from the peer task.
         if let Some(ref session_state) = self.collab_session_state {
@@ -580,19 +591,12 @@ impl TacticsBoardViewer {
         ctx.show_viewport_deferred(
             viewport_id,
             egui::ViewportBuilder::default()
-                .with_title(&*title)
+                .with_title("Tactics Board")
                 .with_inner_size([800.0, 850.0])
                 .with_min_inner_size([400.0, 450.0]),
             move |ctx, _class| {
-                // Handle window close
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    open.store(false, Ordering::Relaxed);
-                    // Unregister viewport from repaint notifications.
-                    if let Some(ref session_state) = collab_session_state {
-                        let mut s = session_state.lock();
-                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
-                    }
-                    ctx.request_repaint();
+                if !open.load(Ordering::Relaxed) {
+                    return;
                 }
 
                 let mut state = state_arc.lock();
@@ -600,25 +604,25 @@ impl TacticsBoardViewer {
                 // ── Collab: apply incoming annotation + cap point sync ──
                 if let Some(session_state) = &collab_session_state {
                     let s = session_state.lock();
-                    if s.annotation_sync_version > state.applied_annotation_sync_version {
-                        if let Some(ref sync) = s.current_annotation_sync {
+                    if let Some(board_state) = s.tactics_boards.get(&board_id) {
+                        if board_state.annotation_sync_version > state.applied_annotation_sync_version {
+                            let sync = &board_state.annotation_sync;
                             let mut ann = annotation_state_arc.lock();
                             ann.annotations =
                                 sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
                             ann.annotation_owners = sync.owners.clone();
                             ann.annotation_ids = sync.ids.clone();
+                            state.applied_annotation_sync_version = board_state.annotation_sync_version;
                         }
-                        state.applied_annotation_sync_version = s.annotation_sync_version;
-                    }
-                    if s.cap_point_sync_version > state.applied_cap_sync_version {
-                        tracing::debug!(
-                            "Applying cap sync: version {} -> {}, sync_data={}",
-                            state.applied_cap_sync_version,
-                            s.cap_point_sync_version,
-                            s.current_cap_point_sync.as_ref().map(|s| s.cap_points.len()).unwrap_or(0),
-                        );
-                        if let Some(ref sync) = s.current_cap_point_sync {
-                            state.cap_points = sync
+                        if board_state.cap_point_sync_version > state.applied_cap_sync_version {
+                            tracing::debug!(
+                                "Applying cap sync: version {} -> {}, sync_data={}",
+                                state.applied_cap_sync_version,
+                                board_state.cap_point_sync_version,
+                                board_state.cap_point_sync.cap_points.len(),
+                            );
+                            state.cap_points = board_state
+                                .cap_point_sync
                                 .cap_points
                                 .iter()
                                 .map(|wcp| TacticsCapPoint {
@@ -634,25 +638,22 @@ impl TacticsBoardViewer {
                             state.next_cap_id = state.cap_points.iter().map(|c| c.id).max().unwrap_or(0) + 1;
                             state.selected_cap = None;
                             state.dragging_cap = None;
+                            state.applied_cap_sync_version = board_state.cap_point_sync_version;
                         }
-                        state.applied_cap_sync_version = s.cap_point_sync_version;
-                    }
-                    if s.tactics_map_version > state.applied_tactics_map_version {
-                        if let Some(ref tmap) = s.tactics_map {
-                            let map_changed = state
-                                .selected_map
-                                .as_ref()
-                                .map_or(true, |(id, _)| *id != tmap.map_id);
+                        if s.tactics_boards_version > state.applied_tactics_map_version {
+                            let tmap = &board_state.tactics_map;
+                            let map_changed = state.selected_map.as_ref().is_none_or(|(id, _)| *id != tmap.map_id);
                             tracing::debug!(
                                 "Applying tactics map sync: version {} -> {}, map={}, changed={}",
                                 state.applied_tactics_map_version,
-                                s.tactics_map_version,
+                                s.tactics_boards_version,
                                 tmap.map_name,
                                 map_changed,
                             );
                             if map_changed {
                                 state.selected_map = Some((tmap.map_id, tmap.map_name.clone()));
                                 state.selected_mode = None;
+                                state.selected_mode_label = None;
                                 // Try loading map from local VFS first; fall back to decoding peer's PNG.
                                 load_map_image(&mut state, &tmap.map_name, &asset_cache, &wows_data);
                                 tracing::debug!(
@@ -674,19 +675,33 @@ impl TacticsBoardViewer {
                                     state.texture_dirty = true;
                                 }
                             }
-                        } else {
-                            // Map closed by peer — clear our selection.
-                            state.selected_map = None;
-                            state.selected_mode = None;
-                            state.map_image = None;
-                            state.map_info = None;
-                            state.map_texture = None;
-                            state.cap_points.clear();
-                            state.selected_cap = None;
+                            state.applied_tactics_map_version = s.tactics_boards_version;
                         }
-                        state.applied_tactics_map_version = s.tactics_map_version;
                     }
                     drop(s);
+                }
+
+                // ── Dynamic window title ──
+                {
+                    let mut title = String::from("Tactics Board");
+                    if let Some((_, ref map_name)) = state.selected_map {
+                        title.push_str(" \u{2014} ");
+                        title.push_str(&translate_or_pretty(map_name, &wows_data));
+                        if let Some(ref label) = state.selected_mode_label {
+                            title.push_str(" \u{2014} ");
+                            title.push_str(label);
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+                    // Store in session state so the popover shows the exact same title.
+                    if let Some(ref session_state) = collab_session_state {
+                        let mut s = session_state.lock();
+                        if let Some(board) = s.tactics_boards.get_mut(&board_id)
+                            && board.window_title != title
+                        {
+                            board.window_title = title;
+                        }
+                    }
                 }
 
                 // ── Bottom panel: map/mode selector + cap tools + presets ──
@@ -711,6 +726,7 @@ impl TacticsBoardViewer {
                                 &wows_data,
                                 &collab_local_tx,
                                 &collab_command_tx,
+                                board_id,
                             );
                         });
                         ui.add_space(2.0);
@@ -723,6 +739,7 @@ impl TacticsBoardViewer {
                                 &wows_data,
                                 &cap_layout_db,
                                 &collab_command_tx,
+                                board_id,
                             );
                             ui.separator();
                             Self::draw_scan_replays_button(ui, &mut state, &cap_layout_db, &wows_data);
@@ -743,8 +760,19 @@ impl TacticsBoardViewer {
                         &collab_local_tx,
                         &collab_session_state,
                         &collab_command_tx,
+                        board_id,
                     );
                 });
+
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    open.store(false, Ordering::Relaxed);
+                    // Unregister viewport from repaint notifications.
+                    if let Some(ref session_state) = collab_session_state {
+                        let mut s = session_state.lock();
+                        s.repaint_viewport_ids.retain(|id| *id != viewport_id);
+                    }
+                    ctx.request_repaint();
+                }
             },
         );
     }
@@ -758,6 +786,7 @@ impl TacticsBoardViewer {
         wows_data: &SharedWoWsData,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+        board_id: u64,
     ) {
         let db = cap_layout_db.lock();
 
@@ -812,11 +841,19 @@ impl TacticsBoardViewer {
                     if ui.selectable_label(selected, &label).clicked() {
                         state.selected_map = Some((*map_id, map_name.clone()));
                         state.selected_mode = None;
+                        state.selected_mode_label = None;
                         state.cap_points.clear();
                         state.selected_cap = None;
                         load_map_image(state, map_name, asset_cache, wows_data);
-                        send_tactics_map_opened(collab_local_tx, *map_id, map_name, &state.map_image, &state.map_info);
-                        send_cap_full_sync(collab_command_tx, &state.cap_points);
+                        send_tactics_map_opened(
+                            collab_local_tx,
+                            board_id,
+                            *map_id,
+                            map_name,
+                            &state.map_image,
+                            &state.map_info,
+                        );
+                        send_cap_full_sync(collab_command_tx, &state.cap_points, board_id);
                     }
                 }
             },
@@ -866,18 +903,20 @@ impl TacticsBoardViewer {
                     let is_blank = state.selected_mode.is_none();
                     if ui.selectable_label(is_blank, "Blank").clicked() {
                         state.selected_mode = None;
+                        state.selected_mode_label = None;
                         state.cap_points.clear();
                         state.selected_cap = None;
-                        send_cap_full_sync(collab_command_tx, &state.cap_points);
+                        send_cap_full_sync(collab_command_tx, &state.cap_points, board_id);
                     }
 
                     for (layout, label) in modes.iter().zip(display_labels.iter()) {
                         let selected = state.selected_mode.as_ref() == Some(&layout.key);
                         if ui.selectable_label(selected, label).clicked() {
                             state.selected_mode = Some(layout.key.clone());
+                            state.selected_mode_label = Some(label.clone());
                             state.selected_cap = None;
                             populate_cap_points(state, layout);
-                            send_cap_full_sync(collab_command_tx, &state.cap_points);
+                            send_cap_full_sync(collab_command_tx, &state.cap_points, board_id);
                         }
                     }
                 });
@@ -893,6 +932,7 @@ impl TacticsBoardViewer {
         wows_data: &SharedWoWsData,
         cap_layout_db: &Arc<Mutex<CapLayoutDb>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+        board_id: u64,
     ) {
         ui.label("Preset:");
 
@@ -960,8 +1000,8 @@ impl TacticsBoardViewer {
                     }
                     state.selected_cap = None;
                     state.preset_name.clear();
-                    send_cap_full_sync(collab_command_tx, &state.cap_points);
-                    send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock());
+                    send_cap_full_sync(collab_command_tx, &state.cap_points, board_id);
+                    send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock(), Some(board_id));
                 }
                 ui.separator();
                 let names = state.preset_names.clone();
@@ -978,6 +1018,7 @@ impl TacticsBoardViewer {
                         // Load map
                         state.selected_map = Some((preset.map_id, preset.map_name.clone()));
                         state.selected_mode = None;
+                        state.selected_mode_label = None;
                         load_map_image(state, &preset.map_name, asset_cache, wows_data);
 
                         // Load cap points
@@ -1008,8 +1049,8 @@ impl TacticsBoardViewer {
                         state.preset_name = name.clone();
 
                         // Sync to peers
-                        send_cap_full_sync(collab_command_tx, &state.cap_points);
-                        send_annotation_full_sync(collab_command_tx, &ann);
+                        send_cap_full_sync(collab_command_tx, &state.cap_points, board_id);
+                        send_annotation_full_sync(collab_command_tx, &ann, Some(board_id));
                     }
                 }
             },
@@ -1141,6 +1182,7 @@ impl TacticsBoardViewer {
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_session_state: &Option<Arc<Mutex<collab::SessionState>>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+        board_id: u64,
     ) {
         // Upload texture if needed
         if state.texture_dirty
@@ -1377,11 +1419,12 @@ impl TacticsBoardViewer {
                 &transform,
                 collab_local_tx,
                 collab_session_state,
+                Some(board_id),
             );
         } else if !annotation_state_arc.lock().show_context_menu {
             // Cap interaction only when no annotation tool active and context menu not showing
             if let Some(ref map_info) = state.map_info.clone() {
-                Self::handle_cap_interaction(ui, &response, state, &transform, map_info, collab_local_tx);
+                Self::handle_cap_interaction(ui, &response, state, &transform, map_info, collab_local_tx, board_id);
             }
 
             // When annotation tool is None, clicking on map can select/deselect/move annotations
@@ -1393,6 +1436,7 @@ impl TacticsBoardViewer {
                 state,
                 collab_local_tx,
                 collab_session_state,
+                Some(board_id),
             );
         }
 
@@ -1445,11 +1489,18 @@ impl TacticsBoardViewer {
         // Ctrl+Z to undo
         if ui.ctx().input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
             annotation_state_arc.lock().undo();
-            send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock());
+            send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock(), Some(board_id));
         }
 
         // ── Context menu ──
-        Self::draw_annotation_context_menu(ui, annotation_state_arc, state, collab_local_tx, collab_command_tx);
+        Self::draw_annotation_context_menu(
+            ui,
+            annotation_state_arc,
+            state,
+            collab_local_tx,
+            collab_command_tx,
+            Some(board_id),
+        );
 
         // ── Annotation selection edit popup ──
         {
@@ -1474,6 +1525,7 @@ impl TacticsBoardViewer {
                     bounds,
                     map_space,
                     collab_local_tx,
+                    Some(board_id),
                 );
             }
         }
@@ -1521,7 +1573,7 @@ impl TacticsBoardViewer {
                                 },
                             );
                             if cap.team_id != old_team {
-                                send_cap_update(collab_local_tx, cap);
+                                send_cap_update(collab_local_tx, cap, board_id);
                             }
                         });
 
@@ -1539,7 +1591,7 @@ impl TacticsBoardViewer {
                             );
                             if km != old_km {
                                 cap.radius = Km::from(km).to_bigworld().value();
-                                send_cap_update(collab_local_tx, cap);
+                                send_cap_update(collab_local_tx, cap, board_id);
                             }
                         });
 
@@ -1554,7 +1606,7 @@ impl TacticsBoardViewer {
                             }));
                             if idx != old_idx {
                                 cap.index = idx as usize;
-                                send_cap_update(collab_local_tx, cap);
+                                send_cap_update(collab_local_tx, cap, board_id);
                             }
                         });
 
@@ -1568,7 +1620,7 @@ impl TacticsBoardViewer {
                                 .clicked()
                         {
                             let id = cap.id;
-                            send_cap_remove(collab_local_tx, id);
+                            send_cap_remove(collab_local_tx, id, board_id);
                             state.cap_points.retain(|c| c.id != id);
                             state.selected_cap = None;
                         }
@@ -1616,6 +1668,7 @@ impl TacticsBoardViewer {
         transform: &MapTransform,
         map_info: &MapInfo,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
+        board_id: u64,
     ) {
         // Delete key: remove selected cap (only if not frozen)
         if state.selected_cap.is_some()
@@ -1627,7 +1680,7 @@ impl TacticsBoardViewer {
                 state.cap_points.retain(|c| c.id != sel_id);
                 state.selected_cap = None;
                 state.dragging_cap = None;
-                send_cap_remove(collab_local_tx, sel_id);
+                send_cap_remove(collab_local_tx, sel_id, board_id);
             }
         }
 
@@ -1650,7 +1703,7 @@ impl TacticsBoardViewer {
                                 cap.radius = (cap.radius + delta_bw).max(0.5);
                             }
                         }
-                        send_cap_update(collab_local_tx, cap);
+                        send_cap_update(collab_local_tx, cap, board_id);
                     }
                 }
             }
@@ -1682,7 +1735,7 @@ impl TacticsBoardViewer {
                     team_id: -1,
                     frozen: false,
                 };
-                send_cap_update(collab_local_tx, &new_cap);
+                send_cap_update(collab_local_tx, &new_cap, board_id);
                 state.cap_points.push(new_cap);
                 state.selected_cap = Some(id);
                 state.adding_cap = false;
@@ -1716,6 +1769,7 @@ impl TacticsBoardViewer {
         transform: &MapTransform,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_session_state: &Option<Arc<Mutex<collab::SessionState>>>,
+        board_id: Option<u64>,
     ) {
         let mut ann = annotation_state_arc.lock();
         let result = handle_tool_interaction(&mut ann, response, transform);
@@ -1731,14 +1785,14 @@ impl TacticsBoardViewer {
             ann.annotation_ids.push(id);
             ann.annotation_owners.push(my_user_id);
             let idx = ann.annotations.len() - 1;
-            send_annotation_update(collab_local_tx, &ann, idx);
+            send_annotation_update(collab_local_tx, &ann, idx, board_id);
         }
         if let Some(idx) = result.erase_index {
             let id = ann.annotation_ids[idx];
             ann.annotations.remove(idx);
             ann.annotation_ids.remove(idx);
             ann.annotation_owners.remove(idx);
-            send_annotation_remove(collab_local_tx, id);
+            send_annotation_remove(collab_local_tx, id, board_id);
         }
     }
 
@@ -1751,16 +1805,17 @@ impl TacticsBoardViewer {
         state: &mut TacticsBoardState,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_session_state: &Option<Arc<Mutex<collab::SessionState>>>,
+        board_id: Option<u64>,
     ) {
         let mut ann = annotation_state_arc.lock();
         let result = handle_annotation_select_move(&mut ann, response, transform);
 
         // Sync to collab after rotation stopped or annotation moved
         if let Some(idx) = result.rotation_stopped_index {
-            send_annotation_update(collab_local_tx, &ann, idx);
+            send_annotation_update(collab_local_tx, &ann, idx, board_id);
         }
         for &idx in &result.moved_indices {
-            send_annotation_update(collab_local_tx, &ann, idx);
+            send_annotation_update(collab_local_tx, &ann, idx, board_id);
         }
 
         // Click on empty space → ping
@@ -1780,6 +1835,7 @@ impl TacticsBoardViewer {
         state: &mut TacticsBoardState,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+        board_id: Option<u64>,
     ) {
         let show_menu = annotation_state_arc.lock().show_context_menu;
         if !show_menu {
@@ -1807,11 +1863,11 @@ impl TacticsBoardViewer {
                         let menu_result = draw_annotation_menu_common(ui, &mut ann, state.ship_icons.as_ref());
 
                         if menu_result.did_clear {
-                            send_annotation_clear(collab_local_tx);
+                            send_annotation_clear(collab_local_tx, board_id);
                         }
                         if menu_result.did_undo {
                             drop(ann);
-                            send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock());
+                            send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock(), board_id);
                         }
                     }
 
@@ -1839,8 +1895,10 @@ impl TacticsBoardViewer {
                                     ui.selectable_value(&mut cap.team_id, 0, "Team 1 (Green)");
                                     ui.selectable_value(&mut cap.team_id, 1, "Team 2 (Red)");
                                 });
-                            if cap.team_id != old_team {
-                                send_cap_update(collab_local_tx, cap);
+                            if cap.team_id != old_team
+                                && let Some(bid) = board_id
+                            {
+                                send_cap_update(collab_local_tx, cap, bid);
                             }
                         });
 
@@ -1858,7 +1916,9 @@ impl TacticsBoardViewer {
                             );
                             if km != old_km {
                                 cap.radius = Km::from(km).to_bigworld().value();
-                                send_cap_update(collab_local_tx, cap);
+                                if let Some(bid) = board_id {
+                                    send_cap_update(collab_local_tx, cap, bid);
+                                }
                             }
                         });
 
@@ -1872,7 +1932,9 @@ impl TacticsBoardViewer {
                                 .clicked()
                         {
                             let id = cap.id;
-                            send_cap_remove(collab_local_tx, id);
+                            if let Some(bid) = board_id {
+                                send_cap_remove(collab_local_tx, id, bid);
+                            }
                             state.cap_points.retain(|c| c.id != id);
                             state.selected_cap = None;
                             annotation_state_arc.lock().show_context_menu = false;
@@ -1898,7 +1960,7 @@ impl TacticsBoardViewer {
 }
 
 /// Send a `SetCapPoint` event for a cap point via the collab channel.
-fn send_cap_update(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, cap: &TacticsCapPoint) {
+fn send_cap_update(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, cap: &TacticsCapPoint, board_id: u64) {
     if let Some(tx) = collab_local_tx {
         tracing::debug!(
             "send_cap_update: id={} radius={} world=({}, {})",
@@ -1907,29 +1969,36 @@ fn send_cap_update(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, cap: &Tac
             cap.world_x,
             cap.world_z
         );
-        let _ = tx.send(LocalEvent::CapPoint(LocalCapPointEvent::Set(WireCapPoint {
-            id: cap.id,
-            index: cap.index as u32,
-            world_x: cap.world_x,
-            world_z: cap.world_z,
-            radius: cap.radius,
-            team_id: cap.team_id,
-            frozen: cap.frozen,
-        })));
+        let _ = tx.send(LocalEvent::CapPoint {
+            board_id,
+            event: LocalCapPointEvent::Set(WireCapPoint {
+                id: cap.id,
+                index: cap.index as u32,
+                world_x: cap.world_x,
+                world_z: cap.world_z,
+                radius: cap.radius,
+                team_id: cap.team_id,
+                frozen: cap.frozen,
+            }),
+        });
     } else {
         tracing::debug!("send_cap_update: collab_local_tx is None, not sending");
     }
 }
 
 /// Send a `RemoveCapPoint` event via the collab channel.
-fn send_cap_remove(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, id: u64) {
+fn send_cap_remove(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, id: u64, board_id: u64) {
     if let Some(tx) = collab_local_tx {
-        let _ = tx.send(LocalEvent::CapPoint(LocalCapPointEvent::Remove { id }));
+        let _ = tx.send(LocalEvent::CapPoint { board_id, event: LocalCapPointEvent::Remove { id } });
     }
 }
 
 /// Send a full cap point sync via the session command channel (used after bulk operations).
-fn send_cap_full_sync(collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>, caps: &[TacticsCapPoint]) {
+fn send_cap_full_sync(
+    collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+    caps: &[TacticsCapPoint],
+    board_id: u64,
+) {
     if let Some(tx) = collab_command_tx {
         let wire: Vec<WireCapPoint> = caps
             .iter()
@@ -1943,13 +2012,14 @@ fn send_cap_full_sync(collab_command_tx: &Option<mpsc::Sender<collab::SessionCom
                 frozen: c.frozen,
             })
             .collect();
-        let _ = tx.send(collab::SessionCommand::SyncCapPoints { cap_points: wire });
+        let _ = tx.send(collab::SessionCommand::SyncCapPoints { board_id, cap_points: wire });
     }
 }
 
 /// Send a `TacticsMapOpened` event via the collab channel, encoding the map image to PNG.
 fn send_tactics_map_opened(
     collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
+    board_id: u64,
     map_id: u32,
     map_name: &str,
     map_image: &Option<Arc<(Vec<u8>, u32, u32)>>,
@@ -1969,6 +2039,8 @@ fn send_tactics_map_opened(
             })
             .unwrap_or_default();
         let _ = tx.send(LocalEvent::TacticsMapOpened {
+            board_id,
+            owner_user_id: 0, // filled by peer task from session state
             map_name: map_name.to_string(),
             map_id,
             map_image_png,

@@ -264,6 +264,13 @@ impl ToolkitTabViewer<'_> {
                     "Collaborative sessions use peer-to-peer networking. \
                      Other users in the session may be able to see your IP address.",
                 );
+                ui.checkbox(
+                    &mut self.tab_state.settings.disable_auto_open_session_windows,
+                    "Disable auto-opening session windows",
+                ).on_hover_text(
+                    "When enabled, session windows (replays, tactics boards) won't \
+                     open automatically. You can still open them from the session popover.",
+                );
             });
 
             ui.add_space(12.0);

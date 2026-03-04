@@ -18,6 +18,8 @@ pub mod protocol;
 pub mod types;
 pub mod validation;
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -59,7 +61,7 @@ pub struct OpenReplay {
 }
 
 /// Info about the currently open tactics board map, received from a peer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TacticsMapInfo {
     pub map_name: String,
     pub map_id: u32,
@@ -91,6 +93,19 @@ pub struct AnnotationSyncState {
 #[derive(Debug, Clone, Default)]
 pub struct CapPointSyncState {
     pub cap_points: Vec<protocol::WireCapPoint>,
+}
+
+/// Per-board session state for multi-window tactics boards.
+#[derive(Debug, Clone, Default)]
+pub struct TacticsBoardSessionState {
+    pub owner_user_id: u64,
+    pub tactics_map: TacticsMapInfo,
+    /// Human-readable window title, set by the local viewer each frame.
+    pub window_title: String,
+    pub cap_point_sync: CapPointSyncState,
+    pub cap_point_sync_version: u64,
+    pub annotation_sync: AnnotationSyncState,
+    pub annotation_sync_version: u64,
 }
 
 /// Shared session state visible to the UI thread.
@@ -142,14 +157,12 @@ pub struct SessionState {
     pub current_trail_hidden: Option<Vec<String>>,
     /// Active map pings from peers (rendered as ripple effects).
     pub pings: Vec<PeerPing>,
-    /// Monotonically increasing version for cap point sync updates (tactics board).
-    pub cap_point_sync_version: u64,
-    /// Current cap point state from the tactics board.
-    pub current_cap_point_sync: Option<CapPointSyncState>,
-    /// Monotonically increasing version for tactics map updates.
-    pub tactics_map_version: u64,
-    /// Current tactics map info (map_name, map_id, map_image_png). Set when a peer opens a tactics board map.
-    pub tactics_map: Option<TacticsMapInfo>,
+    /// Per-board tactics session state, keyed by `board_id`.
+    pub tactics_boards: HashMap<u64, TacticsBoardSessionState>,
+    /// Monotonically increasing version bumped on any tactics board add/remove/update.
+    pub tactics_boards_version: u64,
+    /// Window IDs the host has requested all peers to open (consumed by UI thread).
+    pub force_open_window_ids: HashSet<u64>,
     /// Main window egui context, used by the peer task to wake the UI
     /// when session state changes.
     #[doc(hidden)]
@@ -181,10 +194,9 @@ impl Default for SessionState {
             trail_override_version: 0,
             current_trail_hidden: None,
             pings: Vec::new(),
-            cap_point_sync_version: 0,
-            current_cap_point_sync: None,
-            tactics_map_version: 0,
-            tactics_map: None,
+            tactics_boards: HashMap::new(),
+            tactics_boards_version: 0,
+            force_open_window_ids: HashSet::new(),
             egui_ctx: None,
             repaint_viewport_ids: Vec::new(),
         }
@@ -209,10 +221,9 @@ impl SessionState {
         self.trail_override_version = 0;
         self.current_trail_hidden = None;
         self.pings.clear();
-        self.cap_point_sync_version = 0;
-        self.current_cap_point_sync = None;
-        self.tactics_map_version = 0;
-        self.tactics_map = None;
+        self.tactics_boards.clear();
+        self.tactics_boards_version = 0;
+        self.force_open_window_ids.clear();
         self.repaint_viewport_ids.clear();
         self.permissions = Permissions::default();
     }
@@ -297,7 +308,8 @@ pub enum SessionCommand {
     /// Reset all peer display overrides (host/co-host only).
     ResetClientOverrides,
     /// Broadcast current annotation state (host/co-host only).
-    SyncAnnotations { annotations: Vec<types::Annotation>, owners: Vec<u64>, ids: Vec<u64> },
+    /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
+    SyncAnnotations { board_id: Option<u64>, annotations: Vec<types::Annotation>, owners: Vec<u64>, ids: Vec<u64> },
     /// Promote a peer to co-host (host only).
     PromoteToCoHost { user_id: u64 },
     /// Declare self as frame source (host/co-host only).
@@ -306,8 +318,10 @@ pub enum SessionCommand {
     ReplayOpened { replay_id: u64, replay_name: String, map_image_png: Vec<u8>, game_version: String },
     /// Notify peers that a replay was closed on the host.
     ReplayClosed { replay_id: u64 },
-    /// Broadcast full cap point state (tactics board).
-    SyncCapPoints { cap_points: Vec<protocol::WireCapPoint> },
+    /// Broadcast full cap point state for a specific tactics board.
+    SyncCapPoints { board_id: u64, cap_points: Vec<protocol::WireCapPoint> },
+    /// Request all peers to open a specific window (replay or tactics board).
+    OpenWindowForEveryone { window_id: u64 },
 }
 
 /// Create a shared session state wrapped in Arc<Mutex>.
@@ -413,10 +427,9 @@ mod tests {
         assert_eq!(state.trail_override_version, 0);
         assert!(state.current_trail_hidden.is_none());
         assert!(state.pings.is_empty());
-        assert_eq!(state.cap_point_sync_version, 0);
-        assert!(state.current_cap_point_sync.is_none());
-        assert_eq!(state.tactics_map_version, 0);
-        assert!(state.tactics_map.is_none());
+        assert!(state.tactics_boards.is_empty());
+        assert_eq!(state.tactics_boards_version, 0);
+        assert!(state.force_open_window_ids.is_empty());
         assert!(state.repaint_viewport_ids.is_empty());
     }
 

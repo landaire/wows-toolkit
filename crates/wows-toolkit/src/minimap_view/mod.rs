@@ -369,9 +369,15 @@ pub fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annot
 // ─── Shared collab helpers ──────────────────────────────────────────────────
 
 /// Send a `SetAnnotation` event for the annotation at `idx` via the collab channel.
-pub fn send_annotation_update(tx: &Option<mpsc::Sender<LocalEvent>>, ann: &AnnotationState, idx: usize) {
+pub fn send_annotation_update(
+    tx: &Option<mpsc::Sender<LocalEvent>>,
+    ann: &AnnotationState,
+    idx: usize,
+    board_id: Option<u64>,
+) {
     if let Some(tx) = tx {
         let _ = tx.send(LocalEvent::Annotation(LocalAnnotationEvent::Set {
+            board_id,
             id: ann.annotation_ids[idx],
             annotation: local_annotation_to_collab(&ann.annotations[idx]),
             owner: ann.annotation_owners.get(idx).copied().unwrap_or(0),
@@ -380,24 +386,29 @@ pub fn send_annotation_update(tx: &Option<mpsc::Sender<LocalEvent>>, ann: &Annot
 }
 
 /// Send a `RemoveAnnotation` event for the given annotation ID via the collab channel.
-pub fn send_annotation_remove(tx: &Option<mpsc::Sender<LocalEvent>>, id: u64) {
+pub fn send_annotation_remove(tx: &Option<mpsc::Sender<LocalEvent>>, id: u64, board_id: Option<u64>) {
     if let Some(tx) = tx {
-        let _ = tx.send(LocalEvent::Annotation(LocalAnnotationEvent::Remove { id }));
+        let _ = tx.send(LocalEvent::Annotation(LocalAnnotationEvent::Remove { board_id, id }));
     }
 }
 
 /// Send a `ClearAnnotations` event via the collab channel.
-pub fn send_annotation_clear(tx: &Option<mpsc::Sender<LocalEvent>>) {
+pub fn send_annotation_clear(tx: &Option<mpsc::Sender<LocalEvent>>, board_id: Option<u64>) {
     if let Some(tx) = tx {
-        let _ = tx.send(LocalEvent::Annotation(LocalAnnotationEvent::Clear));
+        let _ = tx.send(LocalEvent::Annotation(LocalAnnotationEvent::Clear { board_id }));
     }
 }
 
 /// Send a full annotation sync (used after undo to broadcast the complete state).
-pub fn send_annotation_full_sync(tx: &Option<mpsc::Sender<collab::SessionCommand>>, ann: &AnnotationState) {
+pub fn send_annotation_full_sync(
+    tx: &Option<mpsc::Sender<collab::SessionCommand>>,
+    ann: &AnnotationState,
+    board_id: Option<u64>,
+) {
     if let Some(tx) = tx {
         let collab_anns: Vec<_> = ann.annotations.iter().map(local_annotation_to_collab).collect();
         let _ = tx.send(collab::SessionCommand::SyncAnnotations {
+            board_id,
             annotations: collab_anns,
             owners: ann.annotation_owners.clone(),
             ids: ann.annotation_ids.clone(),

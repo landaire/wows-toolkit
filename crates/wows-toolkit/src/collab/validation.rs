@@ -197,7 +197,7 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
 
         PeerMessage::RemoveAnnotation { .. } => {}
 
-        PeerMessage::ClearAnnotations => {}
+        PeerMessage::ClearAnnotations { .. } => {}
 
         PeerMessage::ToggleDisplayOption { .. } => {
             // DisplayOptionField is exhaustive — rkyv rejects unknown variants.
@@ -207,7 +207,7 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
 
         PeerMessage::RenderOptions(_) => {}
 
-        PeerMessage::AnnotationSync { annotations, owners, ids } => {
+        PeerMessage::AnnotationSync { annotations, owners, ids, .. } => {
             if annotations.len() > MAX_ANNOTATIONS {
                 return Err(ValidationError(format!(
                     "too many annotations: {} > {MAX_ANNOTATIONS}",
@@ -297,15 +297,15 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
             }
         }
 
-        PeerMessage::TacticsMapClosed => {}
+        PeerMessage::TacticsMapClosed { .. } => {}
 
-        PeerMessage::SetCapPoint(cp) => {
-            validate_wire_cap_point(cp, "SetCapPoint")?;
+        PeerMessage::SetCapPoint { cap_point, .. } => {
+            validate_wire_cap_point(cap_point, "SetCapPoint")?;
         }
 
         PeerMessage::RemoveCapPoint { .. } => {}
 
-        PeerMessage::CapPointSync { cap_points } => {
+        PeerMessage::CapPointSync { cap_points, .. } => {
             if cap_points.len() > MAX_CAP_POINTS {
                 return Err(ValidationError(format!(
                     "CapPointSync too many cap points: {} > {MAX_CAP_POINTS}",
@@ -316,6 +316,8 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
                 validate_wire_cap_point(cp, &format!("CapPointSync[{i}]"))?;
             }
         }
+
+        PeerMessage::OpenWindowForEveryone { .. } => {}
 
         PeerMessage::Heartbeat => {}
     }
@@ -614,19 +616,19 @@ mod tests {
 
     #[test]
     fn valid_set_annotation() {
-        let msg = PeerMessage::SetAnnotation { id: 42, annotation: valid_circle(), owner: 1 };
+        let msg = PeerMessage::SetAnnotation { board_id: None, id: 42, annotation: valid_circle(), owner: 1 };
         assert!(validate_peer_message(&msg).is_ok());
     }
 
     #[test]
     fn valid_remove_annotation() {
-        let msg = PeerMessage::RemoveAnnotation { id: 42 };
+        let msg = PeerMessage::RemoveAnnotation { board_id: None, id: 42 };
         assert!(validate_peer_message(&msg).is_ok());
     }
 
     #[test]
     fn valid_clear_annotations() {
-        assert!(validate_peer_message(&PeerMessage::ClearAnnotations).is_ok());
+        assert!(validate_peer_message(&PeerMessage::ClearAnnotations { board_id: None }).is_ok());
     }
 
     #[test]
@@ -637,6 +639,7 @@ mod tests {
     #[test]
     fn valid_annotation_sync() {
         let msg = PeerMessage::AnnotationSync {
+            board_id: None,
             annotations: vec![valid_circle(), valid_line()],
             owners: vec![0, 1],
             ids: vec![100, 101],
@@ -721,6 +724,7 @@ mod tests {
     #[test]
     fn set_annotation_with_invalid_annotation_rejected() {
         let msg = PeerMessage::SetAnnotation {
+            board_id: None,
             id: 1,
             annotation: Annotation::Circle {
                 center: [f32::NAN, 0.0],
@@ -746,14 +750,19 @@ mod tests {
             })
             .collect();
         let count = anns.len();
-        let msg =
-            PeerMessage::AnnotationSync { annotations: anns, owners: vec![0; count], ids: (0..count as u64).collect() };
+        let msg = PeerMessage::AnnotationSync {
+            board_id: None,
+            annotations: anns,
+            owners: vec![0; count],
+            ids: (0..count as u64).collect(),
+        };
         assert!(validate_peer_message(&msg).is_err());
     }
 
     #[test]
     fn annotation_sync_owners_length_mismatch_rejected() {
         let msg = PeerMessage::AnnotationSync {
+            board_id: None,
             annotations: vec![valid_circle()],
             owners: vec![0, 1], // 2 owners for 1 annotation
             ids: vec![1],
@@ -764,6 +773,7 @@ mod tests {
     #[test]
     fn annotation_sync_ids_length_mismatch_rejected() {
         let msg = PeerMessage::AnnotationSync {
+            board_id: None,
             annotations: vec![valid_circle()],
             owners: vec![0],
             ids: vec![1, 2], // 2 IDs for 1 annotation
@@ -773,13 +783,14 @@ mod tests {
 
     #[test]
     fn annotation_sync_empty_is_valid() {
-        let msg = PeerMessage::AnnotationSync { annotations: vec![], owners: vec![], ids: vec![] };
+        let msg = PeerMessage::AnnotationSync { board_id: None, annotations: vec![], owners: vec![], ids: vec![] };
         assert!(validate_peer_message(&msg).is_ok());
     }
 
     #[test]
     fn annotation_sync_invalid_annotation_rejected() {
         let msg = PeerMessage::AnnotationSync {
+            board_id: None,
             annotations: vec![
                 valid_circle(),
                 Annotation::Circle { center: [f32::NAN, 0.0], radius: 10.0, color: [0; 4], width: 2.0, filled: false },

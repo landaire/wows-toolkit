@@ -56,6 +56,9 @@ pub const MAX_ENDPOINT_ADDR_LEN: usize = 4096;
 /// Maximum cap points in a tactics board sync message.
 pub const MAX_CAP_POINTS: usize = 50;
 
+/// Maximum tactics boards in a session.
+pub const MAX_TACTICS_BOARDS: usize = 4;
+
 /// Heartbeat send interval in seconds.
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 
@@ -145,16 +148,19 @@ pub enum PeerMessage {
     CursorPosition(Option<[f32; 2]>),
 
     /// Upsert an annotation (add new or update existing) by unique ID.
+    /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    SetAnnotation { id: u64, annotation: Annotation, owner: u64 },
+    SetAnnotation { board_id: Option<u64>, id: u64, annotation: Annotation, owner: u64 },
 
     /// Remove a specific annotation by ID.
+    /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    RemoveAnnotation { id: u64 },
+    RemoveAnnotation { board_id: Option<u64>, id: u64 },
 
     /// Remove all annotations.
+    /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    ClearAnnotations,
+    ClearAnnotations { board_id: Option<u64> },
 
     /// Toggle a display option.
     /// Receiver drops if `settings_locked` and sender is not host/co-host.
@@ -183,7 +189,9 @@ pub enum PeerMessage {
     RenderOptions(CollabRenderOptions),
 
     /// Full annotation state replacement. Receiver drops if sender is not host/co-host.
+    /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
     AnnotationSync {
+        board_id: Option<u64>,
         annotations: Vec<Annotation>,
         /// Parallel vec: which user_id created each annotation.
         owners: Vec<u64>,
@@ -237,8 +245,9 @@ pub enum PeerMessage {
 
     // ── Tactics board (any peer → all peers) ────────────────────────────
     /// A tactics board was opened with a specific map.
-    /// Receiver loads the same map if they have a tactics board open.
     TacticsMapOpened {
+        board_id: u64,
+        owner_user_id: u64,
         map_name: String,
         map_id: u32,
         /// PNG-encoded map background image.
@@ -247,20 +256,26 @@ pub enum PeerMessage {
         map_info: Option<wows_minimap_renderer::map_data::MapInfo>,
     },
 
-    /// The tactics board was closed.
-    TacticsMapClosed,
+    /// A tactics board was closed.
+    TacticsMapClosed { board_id: u64 },
 
-    /// Upsert a cap point on the tactics board.
+    /// Upsert a cap point on a tactics board.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    SetCapPoint(WireCapPoint),
+    SetCapPoint { board_id: u64, cap_point: WireCapPoint },
 
-    /// Remove a cap point from the tactics board.
+    /// Remove a cap point from a tactics board.
     /// Receiver drops if `annotations_locked` and sender is not host/co-host.
-    RemoveCapPoint { id: u64 },
+    RemoveCapPoint { board_id: u64, id: u64 },
 
-    /// Full cap point state sync (used after undo or bulk operations).
+    /// Full cap point state sync for a tactics board (used after undo or bulk operations).
     /// Receiver drops if sender is not host/co-host.
-    CapPointSync { cap_points: Vec<WireCapPoint> },
+    CapPointSync { board_id: u64, cap_points: Vec<WireCapPoint> },
+
+    // ── Session window management (host/co-host → all peers) ─────────
+    /// Request all peers to open a specific session window (replay or tactics board).
+    /// The `window_id` matches either a `replay_id` in `open_replays` or a `board_id`
+    /// in `tactics_boards`. Peers respect their `disable_auto_open_session_windows` setting.
+    OpenWindowForEveryone { window_id: u64 },
 
     // ── Connection keepalive ──────────────────────────────────────────
     /// Heartbeat keepalive. Sent every 10s; NOT relayed between peers.
@@ -750,12 +765,12 @@ mod tests {
         let messages = vec![
             PeerMessage::Join { toolkit_version: "1.0".into(), name: "Test".into() },
             PeerMessage::CursorPosition(None),
-            PeerMessage::ClearAnnotations,
+            PeerMessage::ClearAnnotations { board_id: None },
             PeerMessage::Permissions { annotations_locked: true, settings_locked: false },
             PeerMessage::UserLeft { user_id: 42 },
             PeerMessage::PromoteToCoHost { user_id: 3 },
             PeerMessage::Ping { pos: [100.0, 200.0] },
-            PeerMessage::RemoveAnnotation { id: 999 },
+            PeerMessage::RemoveAnnotation { board_id: None, id: 999 },
             PeerMessage::PlaybackState { playing: true, speed: 1.5 },
             PeerMessage::Heartbeat,
         ];
@@ -767,6 +782,7 @@ mod tests {
     #[test]
     fn frame_annotation_sync_roundtrip() {
         let msg = PeerMessage::AnnotationSync {
+            board_id: None,
             annotations: vec![Annotation::Circle {
                 center: [100.0, 200.0],
                 radius: 50.0,
@@ -780,7 +796,7 @@ mod tests {
         let framed = frame_peer_message(&msg).unwrap();
         let decoded = deserialize_payload(&framed);
         match decoded {
-            PeerMessage::AnnotationSync { annotations, owners, ids } => {
+            PeerMessage::AnnotationSync { annotations, owners, ids, .. } => {
                 assert_eq!(annotations.len(), 1);
                 assert_eq!(owners, vec![0]);
                 assert_eq!(ids, vec![42]);

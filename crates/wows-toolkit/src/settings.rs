@@ -296,6 +296,10 @@ pub struct Settings {
     /// If true, suppress the P2P IP disclosure warning when creating/joining sessions.
     #[serde(default)]
     pub suppress_p2p_ip_warning: bool,
+    /// If true, don't auto-open session windows (replays, tactics boards) when a peer opens them.
+    /// They still appear in the session popover with an "Open" button.
+    #[serde(default)]
+    pub disable_auto_open_session_windows: bool,
 }
 
 impl Default for Settings {
@@ -326,6 +330,7 @@ impl Default for Settings {
             enable_logging: true,
             collab_display_name: String::new(),
             suppress_p2p_ip_warning: false,
+            disable_auto_open_session_windows: false,
         }
     }
 }
