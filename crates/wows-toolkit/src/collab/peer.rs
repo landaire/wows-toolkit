@@ -636,9 +636,9 @@ async fn host_main(
                                     map_info: map_info.clone(),
                                 });
                                 s.tactics_map_version += 1;
-                                // Clear cap point sync when map changes.
-                                s.current_cap_point_sync = None;
-                                s.cap_point_sync_version += 1;
+                                // Cap points are managed by explicit SyncCapPoints messages,
+                                // not cleared here — avoids race with SyncCapPoints on a
+                                // different channel during session wire-up.
                             }
                             broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info });
                         }
@@ -1445,8 +1445,6 @@ async fn join_main(
                                     map_info: map_info.clone(),
                                 });
                                 s.tactics_map_version += 1;
-                                s.current_cap_point_sync = None;
-                                s.cap_point_sync_version += 1;
                             }
                             let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info }).await;
                         }
@@ -1862,8 +1860,6 @@ fn handle_incoming_message(
                     map_info: map_info.clone(),
                 });
                 s.tactics_map_version += 1;
-                s.current_cap_point_sync = None;
-                s.cap_point_sync_version += 1;
             }
             relay_if_host(
                 sender_id,

@@ -439,6 +439,7 @@ impl TacticsBoardState {
         self.applied_cap_sync_version = 0;
         self.applied_tactics_map_version = 0;
     }
+
 }
 
 impl Default for TacticsBoardState {
@@ -638,33 +639,40 @@ impl TacticsBoardViewer {
                     }
                     if s.tactics_map_version > state.applied_tactics_map_version {
                         if let Some(ref tmap) = s.tactics_map {
+                            let map_changed = state
+                                .selected_map
+                                .as_ref()
+                                .map_or(true, |(id, _)| *id != tmap.map_id);
                             tracing::debug!(
-                                "Applying tactics map sync: version {} -> {}, map={}",
+                                "Applying tactics map sync: version {} -> {}, map={}, changed={}",
                                 state.applied_tactics_map_version,
                                 s.tactics_map_version,
                                 tmap.map_name,
+                                map_changed,
                             );
-                            state.selected_map = Some((tmap.map_id, tmap.map_name.clone()));
-                            state.selected_mode = None;
-                            // Try loading map from local VFS first; fall back to decoding peer's PNG.
-                            load_map_image(&mut state, &tmap.map_name, &asset_cache, &wows_data);
-                            tracing::debug!(
-                                "After load_map_image: map_image={}, map_info={}",
-                                state.map_image.is_some(),
-                                state.map_info.is_some(),
-                            );
-                            // Fall back to peer-provided map_info if VFS didn't provide it.
-                            if state.map_info.is_none() {
-                                state.map_info = tmap.map_info.clone();
-                            }
-                            if state.map_image.is_none()
-                                && !tmap.map_image_png.is_empty()
-                                && let Ok(img) = image::load_from_memory(&tmap.map_image_png)
-                            {
-                                let rgba = img.into_rgba8();
-                                let (w, h) = (rgba.width(), rgba.height());
-                                state.map_image = Some(Arc::new((rgba.into_raw(), w, h)));
-                                state.texture_dirty = true;
+                            if map_changed {
+                                state.selected_map = Some((tmap.map_id, tmap.map_name.clone()));
+                                state.selected_mode = None;
+                                // Try loading map from local VFS first; fall back to decoding peer's PNG.
+                                load_map_image(&mut state, &tmap.map_name, &asset_cache, &wows_data);
+                                tracing::debug!(
+                                    "After load_map_image: map_image={}, map_info={}",
+                                    state.map_image.is_some(),
+                                    state.map_info.is_some(),
+                                );
+                                // Fall back to peer-provided map_info if VFS didn't provide it.
+                                if state.map_info.is_none() {
+                                    state.map_info = tmap.map_info.clone();
+                                }
+                                if state.map_image.is_none()
+                                    && !tmap.map_image_png.is_empty()
+                                    && let Ok(img) = image::load_from_memory(&tmap.map_image_png)
+                                {
+                                    let rgba = img.into_rgba8();
+                                    let (w, h) = (rgba.width(), rgba.height());
+                                    state.map_image = Some(Arc::new((rgba.into_raw(), w, h)));
+                                    state.texture_dirty = true;
+                                }
                             }
                         } else {
                             // Map closed by peer — clear our selection.

@@ -965,7 +965,7 @@ impl WowsToolkitApp {
                     board.collab_local_tx = Some(handle.local_tx.clone());
                     board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
                     board.collab_command_tx = Some(handle.command_tx.clone());
-                    // Send current map + caps to peers so they can catch up.
+                    // Send current map + caps + annotations to peers so they can catch up.
                     if is_host {
                         let state = board.state_arc().lock();
                         if let Some((map_id, map_name)) = state.selected_map() {
