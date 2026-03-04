@@ -1005,10 +1005,7 @@ impl WowsToolkitApp {
                             // Push pre-existing annotations into the session.
                             let ann = board.annotation_state_arc().lock();
                             if !ann.annotations.is_empty() {
-                                crate::minimap_view::send_annotation_full_sync(
-                                    &Some(handle.command_tx.clone()),
-                                    &ann,
-                                );
+                                crate::minimap_view::send_annotation_full_sync(&Some(handle.command_tx.clone()), &ann);
                             }
                         }
                     }

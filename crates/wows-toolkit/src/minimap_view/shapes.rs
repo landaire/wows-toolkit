@@ -441,7 +441,7 @@ pub fn render_annotation(
                 let ref_pt = minimap_vec2_to_screen(tip_minimap - minimap_dir * 10.0, transform);
                 let screen_dir = (tip - ref_pt).normalized();
 
-                let arrow_len = (stroke_w * 4.0).max(8.0);
+                let arrow_len = transform.scale_distance(*width * 4.0).max(8.0);
                 let base = tip - screen_dir * arrow_len;
                 let perp = Vec2::new(-screen_dir.y, screen_dir.x);
                 let wing = arrow_len * 0.5;
@@ -826,7 +826,7 @@ pub fn render_tool_preview(
                     let ref_pt = minimap_vec2_to_screen(minimap_pos - minimap_dir * 10.0, transform);
                     let screen_dir = (tip - ref_pt).normalized();
 
-                    let arrow_len = (sw * 4.0).max(8.0);
+                    let arrow_len = transform.scale_distance(stroke_width * 4.0).max(8.0);
                     let base = tip - screen_dir * arrow_len;
                     let perp = Vec2::new(-screen_dir.y, screen_dir.x);
                     let wing = arrow_len * 0.5;
