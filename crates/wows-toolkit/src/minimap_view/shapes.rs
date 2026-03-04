@@ -442,23 +442,22 @@ pub fn render_annotation(
                 let screen_dir = (tip - ref_pt).normalized();
 
                 let arrow_len = transform.scale_distance(*width * 4.0).max(8.0);
-                let base = tip - screen_dir * arrow_len;
                 let perp = Vec2::new(-screen_dir.y, screen_dir.x);
                 let wing = arrow_len * 0.5;
 
-                // Draw line segments, shortening the last one to stop at the arrowhead base
+                // Arrowhead: base center at the endpoint, tip extends forward
+                let arrow_tip = tip + screen_dir * arrow_len;
+                let left = tip + perp * wing;
+                let right = tip - perp * wing;
+
+                // Draw line segments up to the endpoint
                 let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
-                let last_seg = screen_pts.len() - 2;
-                for (i, pair) in screen_pts.windows(2).enumerate() {
-                    let a = pair[0];
-                    let b = if i == last_seg { base } else { pair[1] };
-                    painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(stroke_w, *color) });
+                for pair in screen_pts.windows(2) {
+                    painter.add(Shape::LineSegment { points: [pair[0], pair[1]], stroke: Stroke::new(stroke_w, *color) });
                 }
 
                 // Arrowhead triangle
-                let left = base + perp * wing;
-                let right = base - perp * wing;
-                painter.add(Shape::convex_polygon(vec![tip, left, right], *color, Stroke::NONE));
+                painter.add(Shape::convex_polygon(vec![arrow_tip, left, right], *color, Stroke::NONE));
             } else if points.len() == 1 {
                 let p = minimap_vec2_to_screen(points[0], transform);
                 painter.add(Shape::circle_filled(p, stroke_w / 2.0, *color));
@@ -524,6 +523,92 @@ fn arrow_direction_from_points(points: &[Vec2]) -> Vec2 {
     // Fallback: direction from first point to tip
     let fallback = tip - points[0];
     if fallback.length() > 0.001 { fallback.normalized() } else { Vec2::new(1.0, 0.0) }
+}
+
+/// Smooth a freehand polyline: Ramer-Douglas-Peucker simplification followed
+/// by Chaikin corner-cutting subdivision.  Preserves the first and last points
+/// so arrows still point the right way.
+fn smooth_freehand(points: Vec<Vec2>) -> Vec<Vec2> {
+    if points.len() <= 2 {
+        return points;
+    }
+
+    // 1. Simplify — remove points that contribute less than `epsilon` deviation.
+    //    Epsilon is relative to the path's bounding box diagonal so it adapts to
+    //    the scale of the drawing.
+    let bbox_diag = {
+        let (mut lo, mut hi) = (points[0], points[0]);
+        for p in &points {
+            lo.x = lo.x.min(p.x);
+            lo.y = lo.y.min(p.y);
+            hi.x = hi.x.max(p.x);
+            hi.y = hi.y.max(p.y);
+        }
+        (hi - lo).length()
+    };
+    let epsilon = (bbox_diag * 0.012).max(0.3);
+    let simplified = rdp_simplify(&points, epsilon);
+
+    // 2. Subdivide with Chaikin's algorithm (2 passes) to round out corners.
+    let mut result = simplified;
+    for _ in 0..2 {
+        result = chaikin_subdivide(&result);
+    }
+    result
+}
+
+/// Ramer-Douglas-Peucker polyline simplification.
+fn rdp_simplify(points: &[Vec2], epsilon: f32) -> Vec<Vec2> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+    let first = points[0];
+    let last = *points.last().unwrap();
+    let seg = last - first;
+    let seg_len_sq = seg.length_sq();
+
+    // Find the point with the greatest perpendicular distance from the line.
+    let mut max_dist = 0.0f32;
+    let mut max_idx = 0;
+    for (i, p) in points.iter().enumerate().skip(1).take(points.len() - 2) {
+        let d = if seg_len_sq < 1e-10 {
+            (*p - first).length()
+        } else {
+            let t = ((*p - first).dot(seg) / seg_len_sq).clamp(0.0, 1.0);
+            (*p - (first + seg * t)).length()
+        };
+        if d > max_dist {
+            max_dist = d;
+            max_idx = i;
+        }
+    }
+
+    if max_dist > epsilon {
+        let mut left = rdp_simplify(&points[..=max_idx], epsilon);
+        let right = rdp_simplify(&points[max_idx..], epsilon);
+        left.pop(); // avoid duplicate at split point
+        left.extend(right);
+        left
+    } else {
+        vec![first, last]
+    }
+}
+
+/// One pass of Chaikin's corner-cutting subdivision.
+/// Preserves the first and last points exactly.
+fn chaikin_subdivide(points: &[Vec2]) -> Vec<Vec2> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+    let mut out = Vec::with_capacity(points.len() * 2);
+    out.push(points[0]);
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        out.push(a + (b - a) * 0.25);
+        out.push(a + (b - a) * 0.75);
+    }
+    out.push(*points.last().unwrap());
+    out
 }
 
 /// Convert a minimap-space distance to kilometres, given the map's space_size.
@@ -827,24 +912,23 @@ pub fn render_tool_preview(
                     let screen_dir = (tip - ref_pt).normalized();
 
                     let arrow_len = transform.scale_distance(stroke_width * 4.0).max(8.0);
-                    let base = tip - screen_dir * arrow_len;
                     let perp = Vec2::new(-screen_dir.y, screen_dir.x);
                     let wing = arrow_len * 0.5;
 
-                    // Draw line segments, shortening the last one to stop at arrowhead base
+                    // Arrowhead: base center at the endpoint, tip extends forward
+                    let arrow_tip = tip + screen_dir * arrow_len;
+                    let left = tip + perp * wing;
+                    let right = tip - perp * wing;
+
+                    // Draw line segments up to the endpoint
                     let screen_pts: Vec<Pos2> =
                         full_path.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
-                    let last_seg = screen_pts.len() - 2;
-                    for (i, pair) in screen_pts.windows(2).enumerate() {
-                        let a = pair[0];
-                        let b = if i == last_seg { base } else { pair[1] };
-                        painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(sw, ghost_color) });
+                    for pair in screen_pts.windows(2) {
+                        painter.add(Shape::LineSegment { points: [pair[0], pair[1]], stroke: Stroke::new(sw, ghost_color) });
                     }
 
                     // Arrowhead triangle
-                    let left = base + perp * wing;
-                    let right = base - perp * wing;
-                    painter.add(Shape::convex_polygon(vec![tip, left, right], ghost_color, Stroke::NONE));
+                    painter.add(Shape::convex_polygon(vec![arrow_tip, left, right], ghost_color, Stroke::NONE));
                 }
             }
             let c = minimap_vec2_to_screen(minimap_pos, transform);
@@ -1118,6 +1202,7 @@ pub fn handle_tool_interaction(
                 && let Some(points) = current_stroke.take()
                 && points.len() >= 2
             {
+                let points = smooth_freehand(points);
                 new_annotation = Some(Annotation::FreehandStroke { points, color: paint_color, width: stroke_width });
             }
         }
@@ -1243,6 +1328,8 @@ pub fn handle_tool_interaction(
                 && let Some(points) = current_stroke.take()
                 && points.len() >= 2
             {
+                // Smooth freehand arrows but not straight-line (shift) arrows (only 2 points).
+                let points = if points.len() > 2 { smooth_freehand(points) } else { points };
                 new_annotation = Some(Annotation::Arrow { points, color: paint_color, width: stroke_width });
             }
         }
