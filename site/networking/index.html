@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WoWs Toolkit — Networking</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg: #060a06;
+                --bg-raised: #0a120a;
+                --border: #1a2e1a;
+                --text: #33dd55;
+                --text-bright: #bbffcc;
+                --text-dim: #287038;
+                --accent: #ffaa22;
+                --accent-hover: #ffbb44;
+                --glow-green: rgba(51, 221, 85, 0.4);
+                --glow-amber: rgba(255, 170, 34, 0.35);
+            }
+
+            body {
+                font-family: "IBM Plex Mono", monospace;
+                background: var(--bg);
+                color: var(--text);
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+                position: relative;
+            }
+
+            /* CRT scan line overlay */
+            body::after {
+                content: "";
+                position: fixed;
+                inset: 0;
+                z-index: 1;
+                pointer-events: none;
+                background: repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 0, 0, 0.08) 2px,
+                    rgba(0, 0, 0, 0.08) 4px
+                );
+            }
+
+            a {
+                color: var(--accent);
+                text-decoration: none;
+                transition: text-shadow 0.15s;
+            }
+            a:hover {
+                text-decoration: none;
+                text-shadow: 0 0 8px var(--glow-amber);
+            }
+
+            .container {
+                max-width: 1120px;
+                margin: 0 auto;
+                padding: 0 24px;
+            }
+
+            /* Header */
+            header {
+                border-bottom: 1px solid var(--border);
+                padding: 16px 0;
+            }
+            header .container {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .logo {
+                font-weight: 600;
+                font-size: 15px;
+                color: var(--text-bright);
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                text-shadow: 0 0 10px var(--glow-green);
+            }
+            .logo a {
+                color: inherit;
+            }
+            .logo a:hover {
+                text-shadow: 0 0 10px var(--glow-green);
+            }
+            nav {
+                display: flex;
+                gap: 24px;
+                font-size: 13px;
+            }
+            nav a {
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                transition:
+                    color 0.15s,
+                    text-shadow 0.15s;
+            }
+            nav a:hover {
+                color: var(--text);
+                text-shadow: 0 0 8px var(--glow-green);
+            }
+
+            /* Content */
+            .content {
+                padding: 60px 0;
+                max-width: 760px;
+                margin: 0 auto;
+            }
+            .content h1 {
+                font-size: 28px;
+                font-weight: 600;
+                color: var(--text-bright);
+                margin-bottom: 32px;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                text-shadow:
+                    0 0 20px var(--glow-green),
+                    0 0 40px rgba(51, 221, 85, 0.2);
+            }
+            .content h2 {
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--accent);
+                margin-top: 40px;
+                margin-bottom: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                text-shadow: 0 0 10px var(--glow-amber);
+            }
+            .content h2::before {
+                content: "// ";
+            }
+            .content p {
+                font-size: 14px;
+                color: var(--text);
+                line-height: 1.8;
+                margin-bottom: 16px;
+                opacity: 0.85;
+            }
+            .content strong {
+                color: var(--text-bright);
+                font-weight: 500;
+            }
+            .content code {
+                background: var(--bg-raised);
+                border: 1px solid var(--border);
+                padding: 2px 6px;
+                font-size: 13px;
+                color: var(--text-bright);
+                word-break: break-all;
+            }
+            .content pre {
+                background: var(--bg-raised);
+                border: 1px solid var(--border);
+                padding: 16px 20px;
+                font-size: 13px;
+                color: var(--text);
+                line-height: 1.7;
+                overflow-x: auto;
+                margin-bottom: 16px;
+            }
+            .content pre code {
+                background: none;
+                border: none;
+                padding: 0;
+                word-break: normal;
+            }
+            .content .prompt {
+                color: var(--text-dim);
+                user-select: none;
+            }
+            .content .output {
+                color: var(--text-dim);
+            }
+
+            .tldr {
+                background: var(--bg-raised);
+                border: 1px solid var(--border);
+                border-left: 3px solid var(--accent);
+                padding: 16px 20px;
+                margin: 32px 0;
+            }
+            .tldr p {
+                margin-bottom: 0;
+                opacity: 1;
+            }
+            .tldr strong {
+                color: var(--accent);
+            }
+
+            /* Diagram */
+            .diagram {
+                margin: 32px 0;
+                text-align: center;
+            }
+            .diagram svg {
+                max-width: 100%;
+                height: auto;
+            }
+
+            /* Message tables */
+            .msg-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 24px;
+                font-size: 13px;
+            }
+            .msg-table th {
+                text-align: left;
+                font-size: 11px;
+                font-weight: 500;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                padding: 8px 12px;
+                border-bottom: 1px solid var(--border);
+            }
+            .msg-table td {
+                padding: 8px 12px;
+                border-bottom: 1px solid var(--border);
+                vertical-align: top;
+            }
+            .msg-table td:first-child {
+                color: var(--text-bright);
+                white-space: nowrap;
+                font-size: 12px;
+            }
+            .msg-table td:last-child {
+                color: var(--text);
+                opacity: 0.7;
+                font-size: 12px;
+            }
+            .msg-table tr:last-child td {
+                border-bottom: none;
+            }
+            .msg-group {
+                background: var(--bg-raised);
+                border: 1px solid var(--border);
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+            .msg-group h3 {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--accent);
+                margin-bottom: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+            .msg-direction {
+                font-size: 11px;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 12px;
+                display: block;
+            }
+
+            /* Footer */
+            footer {
+                border-top: 1px solid var(--border);
+                padding: 32px 0;
+                text-align: center;
+            }
+            footer nav {
+                justify-content: center;
+                margin-bottom: 16px;
+            }
+            footer nav a {
+                color: var(--text-dim);
+            }
+            footer nav a:hover {
+                color: var(--text);
+            }
+            .legal {
+                font-size: 11px;
+                color: var(--text-dim);
+                opacity: 0.6;
+            }
+
+            /* Responsive */
+            @media (max-width: 700px) {
+                .content h1 {
+                    font-size: 22px;
+                }
+                nav {
+                    gap: 16px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <div class="container">
+                <span class="logo"><a href="..">WoWs Toolkit</a></span>
+                <nav>
+                    <a href="..#features">Features</a>
+                    <a href="https://github.com/landaire/wows-toolkit">Source</a>
+                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                </nav>
+            </div>
+        </header>
+
+        <div class="container">
+            <div class="content">
+                <h1>How Connections Work</h1>
+
+                <p>
+                    Sessions are end-to-end encrypted using
+                    <a href="https://www.iroh.computer/">iroh</a> to manage
+                    connections. When connecting to other people in a session,
+                    they join using a session token like:
+                </p>
+
+                <pre><code>toolkit-eNoNycEBwCAIA8CVkIDWcQyY_Uew9z3F_ECMzbKFrmqPHIorIZUmqihX4HLmoh_YP-s4OrjvA1SEEm4</code></pre>
+
+                <p>
+                    This token only contains an <code>EndpointId</code> of the
+                    session host:
+                </p>
+
+                <pre><code><span class="prompt">$ </span>echo 'eNoNycEBwCAIA8CVkIDWcQyY_Uew9z3F_ECMzbKFrmqPHIorIZUmqihX4HLmoh_YP-s4OrjvA1SEEm4' \
+  | base64 -d | crabz -d -f zlib
+
+<span class="output">f4683b319bc073dccd2451f4eff35f50fbfcbf2f43eb657b2a30f357a23d4b9e</span></code></pre>
+
+                <h2>Connection Establishment</h2>
+
+                <p>
+                    The <code>EndpointId</code> is a cryptographic identifier
+                    which is used to connect to the host. To establish this
+                    connection, a relay server is used to find your peer and
+                    relay communications to them until a direct peer-to-peer
+                    connection can be established.
+                </p>
+
+                <p>
+                    Once a direct connection is negotiated, all traffic flows
+                    directly between peers over QUIC&mdash;the relay is no
+                    longer in the path. If a direct connection cannot be
+                    established (e.g. due to restrictive NAT), the relay
+                    continues to forward encrypted traffic. In either case, the
+                    relay server cannot read the contents of your messages
+                    because the connection is end-to-end encrypted.
+                </p>
+
+                <div class="tldr">
+                    <p>
+                        <strong>tl;dr:</strong> Connections are secure and use a
+                        central relay to establish the initial connection until a
+                        direct connection between peers in the session can be
+                        established.
+                    </p>
+                </div>
+
+                <div class="diagram">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" fill="none">
+                        <!-- Background -->
+                        <rect width="680" height="340" rx="0" fill="#0a120a"/>
+
+                        <!-- Host box -->
+                        <rect x="40" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060a06"/>
+                        <text x="110" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">HOST</text>
+                        <text x="110" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">EndpointId</text>
+                        <text x="110" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">f4683b31...</text>
+
+                        <!-- Relay box -->
+                        <rect x="260" y="40" width="160" height="60" rx="0" stroke="#287038" fill="#060a06"/>
+                        <text x="340" y="67" text-anchor="middle" fill="#ffaa22" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">RELAY SERVER</text>
+                        <text x="340" y="85" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">cannot read traffic</text>
+
+                        <!-- Peer box -->
+                        <rect x="500" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060a06"/>
+                        <text x="570" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">PEER</text>
+                        <text x="570" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">joins with</text>
+                        <text x="570" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">session token</text>
+
+                        <!-- Phase 1: Relay lines (dashed) -->
+                        <!-- Host to Relay -->
+                        <line x1="155" y1="130" x2="270" y2="100" stroke="#287038" stroke-width="1" stroke-dasharray="6 4"/>
+                        <!-- Relay to Peer -->
+                        <line x1="410" y1="100" x2="525" y2="130" stroke="#287038" stroke-width="1" stroke-dasharray="6 4"/>
+
+                        <!-- Phase 1 label -->
+                        <text x="340" y="128" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">1. initial relay</text>
+
+                        <!-- Phase 2: Direct connection (solid, bright) -->
+                        <line x1="180" y1="180" x2="500" y2="180" stroke="#33dd55" stroke-width="2"/>
+                        <!-- Arrow head -->
+                        <polygon points="500,180 490,174 490,186" fill="#33dd55"/>
+                        <polygon points="180,180 190,174 190,186" fill="#33dd55"/>
+
+                        <!-- Phase 2 label -->
+                        <text x="340" y="202" text-anchor="middle" fill="#33dd55" font-family="IBM Plex Mono, monospace" font-size="10">2. direct P2P (QUIC, encrypted)</text>
+
+                        <!-- Lock icon (simplified) -->
+                        <rect x="326" y="228" width="28" height="20" rx="3" stroke="#33dd55" stroke-width="1.5" fill="none"/>
+                        <path d="M333 228 V221 A7 7 0 0 1 347 221 V228" stroke="#33dd55" stroke-width="1.5" fill="none"/>
+
+                        <!-- Encryption label -->
+                        <text x="340" y="268" text-anchor="middle" fill="#33dd55" font-family="IBM Plex Mono, monospace" font-size="10" opacity="0.7">end-to-end encrypted</text>
+
+                        <!-- Token flow -->
+                        <text x="340" y="300" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">token = toolkit-&lt;base64(zlib(EndpointId))&gt;</text>
+                        <text x="340" y="320" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="9" opacity="0.6">shared out-of-band (copy/paste)</text>
+                    </svg>
+                </div>
+
+                <h2>Protocol Messages</h2>
+
+                <p>
+                    All messages are serialized with
+                    <a href="https://rkyv.org/">rkyv</a> (zero-copy
+                    deserialization) and framed with a 4-byte length prefix.
+                    Permission enforcement is client-side: each receiver
+                    decides what to accept based on the sender's role.
+                </p>
+
+                <div class="msg-group">
+                    <h3>Handshake</h3>
+                    <span class="msg-direction">Peer &rarr; Host, then Host &rarr; Peer</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Join / SessionInfo</td>
+                            <td>Peer sends version + display name; host responds with the peer list, permissions, and current session state.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Session Sync</h3>
+                    <span class="msg-direction">Any peer &harr; All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Cursors &amp; Pings</td>
+                            <td>Live minimap cursor positions and map pings shared between all peers.</td>
+                        </tr>
+                        <tr>
+                            <td>Annotations</td>
+                            <td>Drawing annotations (lines, circles, freehand strokes, etc.) synced in real time.</td>
+                        </tr>
+                        <tr>
+                            <td>Heartbeat</td>
+                            <td>Sent every 10s per connection. 30s without any message = connection considered dead.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Replay Streaming</h3>
+                    <span class="msg-direction">Frame source &rarr; All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Frames</td>
+                            <td>Zlib-compressed draw commands streamed from whoever has the replay open.</td>
+                        </tr>
+                        <tr>
+                            <td>Playback &amp; Display</td>
+                            <td>Play/pause, speed, and render options (ship names, range rings, trails, etc.).</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Host Authority</h3>
+                    <span class="msg-direction">Host / Co-host &rarr; All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Permissions</td>
+                            <td>Lock or unlock annotations and display settings for regular peers.</td>
+                        </tr>
+                        <tr>
+                            <td>Roster</td>
+                            <td>UserJoined / UserLeft notifications and co-host promotion.</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <div class="container">
+                <nav>
+                    <a href="https://github.com/landaire/wows-toolkit">GitHub</a>
+                    <a href="https://github.com/landaire/wows-toolkit/releases/latest">Releases</a>
+                    <a href="https://discord.gg/SpmXzfSdux">Discord</a>
+                </nav>
+                <p class="legal">
+                    Not affiliated with or endorsed by Wargaming.net. World of
+                    Warships is a trademark of Wargaming.net.
+                </p>
+            </div>
+        </footer>
+    </body>
+</html>

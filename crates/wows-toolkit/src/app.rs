@@ -1762,6 +1762,8 @@ impl WowsToolkitApp {
                     "Collaborative sessions use peer-to-peer networking. \
                      Other users in the session may be able to see your IP address.",
                 );
+                ui.add_space(4.0);
+                ui.hyperlink_to("More info", "https://landaire.github.io/wows-toolkit/networking");
                 ui.add_space(8.0);
                 ui.checkbox(&mut self.tab_state.settings.suppress_p2p_ip_warning, "Don't show this again");
                 ui.add_space(4.0);
