@@ -146,6 +146,9 @@ impl BigWorldDistance {
     pub fn to_meters(self) -> Meters {
         Meters(self.0 * BW_TO_METERS)
     }
+    pub fn to_km(self) -> Km {
+        self.to_meters().to_km()
+    }
 }
 
 impl ShipModelDistance {
@@ -171,6 +174,9 @@ impl Km {
     }
     pub fn to_meters(self) -> Meters {
         Meters(self.0 * 1000.0)
+    }
+    pub fn to_bigworld(self) -> BigWorldDistance {
+        self.to_meters().to_bigworld()
     }
 }
 

@@ -52,7 +52,7 @@ use super::BackgroundTaskKind;
 
 use crate::task::networking::load_versioned_constants_from_disk_with_fallback;
 
-fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
+pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
 
     if replays_dir.exists() {
@@ -434,6 +434,32 @@ fn parse_replay_data_in_background(
                     (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
                 };
                 if let Some(metadata_provider) = metadata_provider {
+                    // Try to populate cap layout cache from this replay (lightweight
+                    // parse of first ~50 packets only).
+                    {
+                        let key = crate::cap_layout::CapLayoutKey {
+                            map_id: replay_file.meta.mapId,
+                            scenario_config_id: replay_file.meta.scenarioConfigId,
+                        };
+                        let needs_extract = !data.cap_layout_db.lock().contains(&key);
+                        if needs_extract
+                            && let Some(layout) = crate::cap_layout::extract_cap_layout_from_replay(
+                                path,
+                                metadata_provider.as_ref(),
+                                Some(gc.as_ref()),
+                            )
+                        {
+                            let mut db = data.cap_layout_db.lock();
+                            if db.insert(layout) {
+                                debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
+                                // Save is best-effort; ignore errors.
+                                if let Some(cache_path) = crate::cap_layout::cache_path() {
+                                    let _ = db.save(&cache_path);
+                                }
+                            }
+                        }
+                    }
+
                     let mut replay = Replay::new(replay_file, Arc::clone(&metadata_provider));
                     replay.game_constants = Some(gc);
                     replay.source_path = Some(path.to_path_buf());
@@ -638,6 +664,7 @@ pub struct BackgroundParserThread {
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     pub is_debug: bool,
     pub parser_lock: Arc<Mutex<()>>,
+    pub cap_layout_db: Arc<Mutex<crate::cap_layout::CapLayoutDb>>,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {

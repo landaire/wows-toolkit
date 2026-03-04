@@ -7,18 +7,33 @@ use egui::Stroke;
 use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
-use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::RenderOptions;
 
 use super::Annotation;
-use super::ENEMY_COLOR;
-use super::FRIENDLY_COLOR;
 use super::ICON_SIZE;
 use super::MapTransform;
 use super::PaintTool;
 use super::RendererTextures;
-use super::game_font;
+
+// Re-export shared annotation helpers so `use shapes::*` in mod.rs still works.
+pub(super) use crate::minimap_view::shapes::GridStyle;
+pub(super) use crate::minimap_view::shapes::MapPing;
+pub(super) use crate::minimap_view::shapes::PING_DURATION;
+pub(super) use crate::minimap_view::shapes::annotation_cursor_icon;
+pub(super) use crate::minimap_view::shapes::annotation_screen_bounds;
+pub(super) use crate::minimap_view::shapes::draw_annotation_edit_popup;
+pub(super) use crate::minimap_view::shapes::draw_annotation_menu_common;
+pub(super) use crate::minimap_view::shapes::draw_grid;
+pub(super) use crate::minimap_view::shapes::draw_pings;
+pub(super) use crate::minimap_view::shapes::draw_remote_cursors;
+pub(super) use crate::minimap_view::shapes::game_font;
+pub(super) use crate::minimap_view::shapes::handle_annotation_select_move;
+pub(super) use crate::minimap_view::shapes::handle_scroll_yaw;
+pub(super) use crate::minimap_view::shapes::handle_tool_interaction;
+pub(super) use crate::minimap_view::shapes::register_game_fonts;
+pub(super) use crate::minimap_view::shapes::render_selection_highlight;
+pub(super) use crate::minimap_view::shapes::tool_label;
 
 pub(super) fn color_from_rgb(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -28,37 +43,7 @@ pub(super) fn color_from_rgba(rgb: [u8; 3], alpha: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], (alpha * 255.0) as u8)
 }
 
-/// Build a rotated textured quad mesh for a ship/plane icon.
-pub(super) fn make_rotated_icon_mesh(
-    texture_id: egui::TextureId,
-    center: Pos2,
-    icon_size: f32,
-    yaw: f32,
-    tint: Color32,
-) -> Shape {
-    let half = icon_size / 2.0;
-    // ImageTarget uses inverse rotation (dest→src) with:
-    //   cos_r = sin(yaw), sin_r = cos(yaw)
-    //   src_x =  dx*cos_r + dy*sin_r
-    //   src_y = -dx*sin_r + dy*cos_r
-    // For forward vertex rotation we need the transpose (negate sin terms):
-    //   dst_x = dx*cos_r - dy*sin_r
-    //   dst_y = dx*sin_r + dy*cos_r
-    let cos_r = yaw.sin();
-    let sin_r = yaw.cos();
-
-    let corners = [(-half, -half), (half, -half), (half, half), (-half, half)];
-    let uvs = [egui::pos2(0.0, 0.0), egui::pos2(1.0, 0.0), egui::pos2(1.0, 1.0), egui::pos2(0.0, 1.0)];
-
-    let mut mesh = egui::Mesh::with_texture(texture_id);
-    for (&(dx, dy), &uv) in corners.iter().zip(uvs.iter()) {
-        let rx = dx * cos_r - dy * sin_r + center.x;
-        let ry = dx * sin_r + dy * cos_r + center.y;
-        mesh.vertices.push(egui::epaint::Vertex { pos: egui::pos2(rx, ry), uv, color: tint });
-    }
-    mesh.indices = vec![0, 1, 2, 0, 2, 3];
-    Shape::Mesh(mesh.into())
-}
+pub(super) use crate::minimap_view::shapes::make_rotated_icon_mesh;
 
 /// Build an unrotated textured quad mesh for a plane icon.
 pub(super) fn make_icon_mesh(texture_id: egui::TextureId, center: Pos2, w: f32, h: f32) -> Shape {
@@ -160,181 +145,21 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
     }
 }
 
-/// Distance from a point to the nearest part of an annotation (in minimap logical coords).
-/// Returns 0 if the point is inside the shape.
-pub(super) fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
-    match ann {
-        Annotation::Ship { pos, .. } => (*pos - point).length(),
-        Annotation::FreehandStroke { points, .. } => {
-            points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
-        }
-        Annotation::Line { start, end, .. } => point_to_segment_dist(point, *start, *end),
-        Annotation::Circle { center, radius, .. } => {
-            let dist_from_center = (point - *center).length();
-            if dist_from_center <= *radius {
-                0.0 // inside the circle
-            } else {
-                dist_from_center - *radius
-            }
-        }
-        Annotation::Rectangle { center, half_size, rotation, .. } => {
-            // Transform point into the rectangle's local coordinate space
-            let dp = point - *center;
-            let cos_r = rotation.cos();
-            let sin_r = rotation.sin();
-            let local = Vec2::new(dp.x * cos_r + dp.y * sin_r, -dp.x * sin_r + dp.y * cos_r);
-            let dx = (local.x.abs() - half_size.x).max(0.0);
-            let dy = (local.y.abs() - half_size.y).max(0.0);
-            (dx * dx + dy * dy).sqrt()
-        }
-        Annotation::Triangle { center, radius, rotation, .. } => {
-            // Check if inside: use distance from center vs circumradius as approximation
-            let dist = (point - *center).length();
-            // Inradius of equilateral triangle = radius / 2
-            let inradius = *radius * 0.5;
-            if dist <= inradius {
-                0.0
-            } else {
-                // Distance to nearest edge
-                let verts: Vec<Vec2> = (0..3)
-                    .map(|i| {
-                        let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
-                        *center + Vec2::new(radius * angle.cos(), radius * angle.sin())
-                    })
-                    .collect();
-                let mut min_dist = f32::MAX;
-                for i in 0..3 {
-                    let d = point_to_segment_dist(point, verts[i], verts[(i + 1) % 3]);
-                    if d < min_dist {
-                        min_dist = d;
-                    }
-                }
-                min_dist
-            }
-        }
-    }
-}
-
-/// Distance from a point to a line segment.
-pub(super) fn point_to_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let ab = b - a;
-    let ap = p - a;
-    let len_sq = ab.length_sq();
-    if len_sq < 0.001 {
-        return ap.length();
-    }
-    let t = (ap.x * ab.x + ap.y * ab.y) / len_sq;
-    let t = t.clamp(0.0, 1.0);
-    let closest = a + ab * t;
-    (p - closest).length()
-}
-
-/// Short display name for ship species (used in context menu buttons).
-pub(super) fn ship_short_name(species: &str) -> &str {
-    match species {
-        "Destroyer" => "DD",
-        "Cruiser" => "CA",
-        "Battleship" => "BB",
-        "AirCarrier" => "CV",
-        "Submarine" => "SS",
-        _ => species,
-    }
-}
-
-/// Helper to convert a minimap Vec2 position to screen Pos2 via MapTransform.
-pub(super) fn minimap_vec2_to_screen(pos: Vec2, transform: &MapTransform) -> Pos2 {
-    transform.minimap_to_screen(&MinimapPos { x: pos.x as i32, y: pos.y as i32 })
-}
-
 /// Render a single annotation onto the map painter.
+/// Thin wrapper around the shared `minimap_view::shapes::render_annotation` that
+/// adapts the `RendererTextures` parameter.
 pub(super) fn render_annotation(
     ann: &Annotation,
     transform: &MapTransform,
     textures: &RendererTextures,
     painter: &egui::Painter,
 ) {
-    match ann {
-        Annotation::Ship { pos, yaw, species, friendly } => {
-            let screen_pos = minimap_vec2_to_screen(*pos, transform);
-            let icon_size = transform.scale_distance(ICON_SIZE);
-            let tint = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
-            // Draw outline ring to distinguish from replay ships
-            let ring_radius = icon_size * 0.6;
-            painter.add(Shape::circle_stroke(screen_pos, ring_radius, Stroke::new(1.5, tint)));
-            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
-            } else {
-                painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
-            }
-        }
-        Annotation::FreehandStroke { points, color, width } => {
-            let stroke_w = transform.scale_stroke(*width);
-            for pair in points.windows(2) {
-                let a = minimap_vec2_to_screen(pair[0], transform);
-                let b = minimap_vec2_to_screen(pair[1], transform);
-                painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(stroke_w, *color) });
-            }
-        }
-        Annotation::Line { start, end, color, width } => {
-            let a = minimap_vec2_to_screen(*start, transform);
-            let b = minimap_vec2_to_screen(*end, transform);
-            painter.add(Shape::LineSegment {
-                points: [a, b],
-                stroke: Stroke::new(transform.scale_stroke(*width), *color),
-            });
-        }
-        Annotation::Circle { center, radius, color, width, filled } => {
-            let c = minimap_vec2_to_screen(*center, transform);
-            let r = transform.scale_distance(*radius);
-            if *filled {
-                painter.add(Shape::circle_filled(c, r, *color));
-            } else {
-                painter.add(Shape::circle_stroke(c, r, Stroke::new(transform.scale_stroke(*width), *color)));
-            }
-        }
-        Annotation::Rectangle { center, half_size, rotation, color, width, filled } => {
-            let cos_r = rotation.cos();
-            let sin_r = rotation.sin();
-            let corners_local = [
-                Vec2::new(-half_size.x, -half_size.y),
-                Vec2::new(half_size.x, -half_size.y),
-                Vec2::new(half_size.x, half_size.y),
-                Vec2::new(-half_size.x, half_size.y),
-            ];
-            let screen_corners: Vec<Pos2> = corners_local
-                .iter()
-                .map(|c| {
-                    let rotated = Vec2::new(c.x * cos_r - c.y * sin_r, c.x * sin_r + c.y * cos_r);
-                    minimap_vec2_to_screen(*center + rotated, transform)
-                })
-                .collect();
-            if *filled {
-                painter.add(Shape::convex_polygon(screen_corners, *color, Stroke::NONE));
-            } else {
-                let stroke = Stroke::new(transform.scale_stroke(*width), *color);
-                painter.add(egui::epaint::PathShape::closed_line(screen_corners, stroke));
-            }
-        }
-        Annotation::Triangle { center, radius, rotation, color, width, filled } => {
-            let screen_verts: Vec<Pos2> = (0..3)
-                .map(|i| {
-                    let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
-                    let dx = radius * angle.cos();
-                    let dy = radius * angle.sin();
-                    minimap_vec2_to_screen(*center + Vec2::new(dx, dy), transform)
-                })
-                .collect();
-            if *filled {
-                painter.add(Shape::convex_polygon(screen_verts, *color, Stroke::NONE));
-            } else {
-                let stroke = Stroke::new(transform.scale_stroke(*width), *color);
-                painter.add(egui::epaint::PathShape::closed_line(screen_verts, stroke));
-            }
-        }
-    }
+    crate::minimap_view::shapes::render_annotation(ann, transform, Some(&textures.ship_icons), painter);
 }
 
 /// Render a preview of the active tool at the cursor position.
+/// Thin wrapper around the shared `minimap_view::shapes::render_tool_preview` that
+/// adapts the `RendererTextures` parameter.
 pub(super) fn render_tool_preview(
     tool: &PaintTool,
     minimap_pos: Vec2,
@@ -344,252 +169,15 @@ pub(super) fn render_tool_preview(
     textures: &RendererTextures,
     painter: &egui::Painter,
 ) {
-    let ghost_alpha = 128u8;
-    match tool {
-        PaintTool::PlacingShip { species, friendly, yaw } => {
-            let screen_pos = minimap_vec2_to_screen(minimap_pos, transform);
-            let icon_size = transform.scale_distance(ICON_SIZE);
-            let base = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
-            let tint = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), ghost_alpha);
-            if let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
-            } else {
-                painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
-            }
-        }
-        PaintTool::Freehand { current_stroke } => {
-            if let Some(points) = current_stroke {
-                let sw = transform.scale_stroke(stroke_width);
-                for pair in points.windows(2) {
-                    let a = minimap_vec2_to_screen(pair[0], transform);
-                    let b = minimap_vec2_to_screen(pair[1], transform);
-                    painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(sw, color) });
-                }
-            }
-            // Draw stroke-width circle at cursor
-            let c = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
-            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.0, color)));
-        }
-        PaintTool::Eraser => {
-            let c = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = transform.scale_distance(15.0);
-            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.5, Color32::from_rgb(255, 100, 100))));
-        }
-        PaintTool::DrawingLine { start, .. } => {
-            // Stroke-width circle at cursor
-            let c = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
-            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.0, color)));
-            if let Some(s) = start {
-                let a = minimap_vec2_to_screen(*s, transform);
-                let b = minimap_vec2_to_screen(minimap_pos, transform);
-                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
-                painter.add(Shape::LineSegment {
-                    points: [a, b],
-                    stroke: Stroke::new(transform.scale_stroke(stroke_width), ghost_color),
-                });
-            }
-        }
-        PaintTool::DrawingCircle { center: origin, filled, .. } => {
-            // Stroke-width circle at cursor
-            let cursor_screen = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
-            painter.add(Shape::circle_stroke(cursor_screen, r, Stroke::new(1.0, color)));
-            if let Some(org) = origin {
-                // Circle centered on drag origin, radius = distance to cursor
-                let radius = (minimap_pos - *org).length();
-                let c = minimap_vec2_to_screen(*org, transform);
-                let r = transform.scale_distance(radius);
-                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
-                if *filled {
-                    painter.add(Shape::circle_filled(c, r, ghost_color));
-                } else {
-                    painter.add(Shape::circle_stroke(
-                        c,
-                        r,
-                        Stroke::new(transform.scale_stroke(stroke_width), ghost_color),
-                    ));
-                }
-            }
-        }
-        PaintTool::DrawingRect { center: origin, filled, .. } => {
-            // Stroke-width circle at cursor
-            let cursor_screen = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
-            painter.add(Shape::circle_stroke(cursor_screen, r, Stroke::new(1.0, color)));
-            if let Some(org) = origin {
-                // Rect from drag origin corner to cursor corner
-                let min = Vec2::new(org.x.min(minimap_pos.x), org.y.min(minimap_pos.y));
-                let max = Vec2::new(org.x.max(minimap_pos.x), org.y.max(minimap_pos.y));
-                let corners: Vec<Pos2> = [
-                    Vec2::new(min.x, min.y),
-                    Vec2::new(max.x, min.y),
-                    Vec2::new(max.x, max.y),
-                    Vec2::new(min.x, max.y),
-                ]
-                .iter()
-                .map(|p| minimap_vec2_to_screen(*p, transform))
-                .collect();
-                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
-                if *filled {
-                    painter.add(Shape::convex_polygon(corners, ghost_color, Stroke::NONE));
-                } else {
-                    let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
-                    painter.add(egui::epaint::PathShape::closed_line(corners, stroke));
-                }
-            }
-        }
-        PaintTool::DrawingTriangle { center, filled, .. } => {
-            // Stroke-width circle at cursor
-            let cursor_screen = minimap_vec2_to_screen(minimap_pos, transform);
-            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
-            painter.add(Shape::circle_stroke(cursor_screen, r, Stroke::new(1.0, color)));
-            if let Some(ctr) = center {
-                let radius = (minimap_pos - *ctr).length();
-                let verts: Vec<Pos2> = (0..3)
-                    .map(|i| {
-                        let angle = i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
-                        let dx = radius * angle.cos();
-                        let dy = radius * angle.sin();
-                        minimap_vec2_to_screen(*ctr + Vec2::new(dx, dy), transform)
-                    })
-                    .collect();
-                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
-                if *filled {
-                    painter.add(Shape::convex_polygon(verts, ghost_color, Stroke::NONE));
-                } else {
-                    let stroke = Stroke::new(transform.scale_stroke(stroke_width), ghost_color);
-                    painter.add(egui::epaint::PathShape::closed_line(verts, stroke));
-                }
-            }
-        }
-        PaintTool::None => {}
-    }
-}
-
-/// Render a selection highlight around an annotation (corner brackets + rotation handle).
-pub(super) fn render_selection_highlight(ann: &Annotation, transform: &MapTransform, painter: &egui::Painter) {
-    let highlight_stroke = Stroke::new(1.5, Color32::from_rgb(255, 255, 100));
-    let margin = 8.0; // extra pixels around the bounding box
-
-    let screen_rect = annotation_screen_bounds(ann, transform);
-    let expanded = screen_rect.expand(margin);
-
-    // Draw corner brackets instead of full rectangle for a cleaner look
-    let corners = [expanded.left_top(), expanded.right_top(), expanded.right_bottom(), expanded.left_bottom()];
-    let bracket_len = 8.0f32.min(expanded.width() / 3.0).min(expanded.height() / 3.0);
-    for i in 0..4 {
-        let c = corners[i];
-        let next = corners[(i + 1) % 4];
-        let prev = corners[(i + 3) % 4];
-        let to_next = (next - c).normalized() * bracket_len;
-        let to_prev = (prev - c).normalized() * bracket_len;
-        painter.add(Shape::LineSegment { points: [c, c + to_next], stroke: highlight_stroke });
-        painter.add(Shape::LineSegment { points: [c, c + to_prev], stroke: highlight_stroke });
-    }
-
-    // Draw center crosshair for shapes that have a geometric center
-    let center_minimap = match ann {
-        Annotation::Circle { center, .. } => Some(*center),
-        Annotation::Rectangle { center, .. } => Some(*center),
-        Annotation::Triangle { center, .. } => Some(*center),
-        _ => None,
-    };
-    if let Some(center) = center_minimap {
-        let c = minimap_vec2_to_screen(center, transform);
-        let arm = 5.0;
-        let thin_stroke = Stroke::new(1.0, Color32::from_rgb(255, 255, 100));
-        painter.add(Shape::LineSegment { points: [c - Vec2::X * arm, c + Vec2::X * arm], stroke: thin_stroke });
-        painter.add(Shape::LineSegment { points: [c - Vec2::Y * arm, c + Vec2::Y * arm], stroke: thin_stroke });
-    }
-
-    // Draw rotation handle for rotatable annotations
-    let has_rotation =
-        matches!(ann, Annotation::Ship { .. } | Annotation::Rectangle { .. } | Annotation::Triangle { .. });
-    if has_rotation {
-        let (handle_pos, anchor) = rotation_handle_pos(ann, transform);
-        let thin_stroke = Stroke::new(1.0, Color32::from_rgb(255, 255, 100));
-        painter.add(Shape::LineSegment { points: [anchor, handle_pos], stroke: thin_stroke });
-        painter.add(Shape::circle_filled(handle_pos, ROTATION_HANDLE_RADIUS, Color32::from_rgb(255, 255, 100)));
-    }
-}
-
-pub(super) const ROTATION_HANDLE_RADIUS: f32 = 5.0;
-pub(super) const ROTATION_HANDLE_DISTANCE: f32 = 25.0;
-
-/// Get the screen position of the rotation handle and its anchor point on the bounding box.
-pub(super) fn rotation_handle_pos(ann: &Annotation, transform: &MapTransform) -> (Pos2, Pos2) {
-    let bounds = annotation_screen_bounds(ann, transform);
-    let anchor = Pos2::new(bounds.center().x, bounds.top());
-    let handle = Pos2::new(anchor.x, anchor.y - ROTATION_HANDLE_DISTANCE);
-    (handle, anchor)
-}
-
-/// Compute the screen-space bounding rect for an annotation.
-pub(super) fn annotation_screen_bounds(ann: &Annotation, transform: &MapTransform) -> Rect {
-    match ann {
-        Annotation::Ship { pos, .. } => {
-            let c = minimap_vec2_to_screen(*pos, transform);
-            let half = transform.scale_distance(ICON_SIZE) / 2.0;
-            Rect::from_center_size(c, egui::vec2(half * 2.0, half * 2.0))
-        }
-        Annotation::FreehandStroke { points, .. } => {
-            let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
-            let mut rect = Rect::from_min_max(screen_pts[0], screen_pts[0]);
-            for p in &screen_pts[1..] {
-                rect = rect.union(Rect::from_min_max(*p, *p));
-            }
-            rect
-        }
-        Annotation::Line { start, end, .. } => {
-            let a = minimap_vec2_to_screen(*start, transform);
-            let b = minimap_vec2_to_screen(*end, transform);
-            Rect::from_two_pos(a, b)
-        }
-        Annotation::Circle { center, radius, .. } => {
-            let c = minimap_vec2_to_screen(*center, transform);
-            let r = transform.scale_distance(*radius);
-            Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0))
-        }
-        Annotation::Rectangle { center, half_size, rotation, .. } => {
-            let cos_r = rotation.cos();
-            let sin_r = rotation.sin();
-            let corners_local = [
-                Vec2::new(-half_size.x, -half_size.y),
-                Vec2::new(half_size.x, -half_size.y),
-                Vec2::new(half_size.x, half_size.y),
-                Vec2::new(-half_size.x, half_size.y),
-            ];
-            let screen_corners: Vec<Pos2> = corners_local
-                .iter()
-                .map(|c| {
-                    let rotated = Vec2::new(c.x * cos_r - c.y * sin_r, c.x * sin_r + c.y * cos_r);
-                    minimap_vec2_to_screen(*center + rotated, transform)
-                })
-                .collect();
-            let mut rect = Rect::from_min_max(screen_corners[0], screen_corners[0]);
-            for p in &screen_corners[1..] {
-                rect = rect.union(Rect::from_min_max(*p, *p));
-            }
-            rect
-        }
-        Annotation::Triangle { center, radius, rotation, .. } => {
-            let screen_verts: Vec<Pos2> = (0..3)
-                .map(|i| {
-                    let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
-                    let dx = radius * angle.cos();
-                    let dy = radius * angle.sin();
-                    minimap_vec2_to_screen(*center + Vec2::new(dx, dy), transform)
-                })
-                .collect();
-            let mut rect = Rect::from_min_max(screen_verts[0], screen_verts[0]);
-            for p in &screen_verts[1..] {
-                rect = rect.union(Rect::from_min_max(*p, *p));
-            }
-            rect
-        }
-    }
+    crate::minimap_view::shapes::render_tool_preview(
+        tool,
+        minimap_pos,
+        color,
+        stroke_width,
+        transform,
+        Some(&textures.ship_icons),
+        painter,
+    );
 }
 
 /// Convert a single DrawCommand into epaint shapes.

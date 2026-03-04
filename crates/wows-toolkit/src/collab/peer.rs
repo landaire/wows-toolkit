@@ -107,6 +107,14 @@ pub type RangeOverrideUpdate =
 /// Per-ship trail overrides: set of player names whose trails are hidden.
 pub type TrailOverrideUpdate = Vec<String>;
 
+/// Cap point events from the local UI (tactics board).
+pub enum LocalCapPointEvent {
+    /// Upsert a cap point.
+    Set(protocol::WireCapPoint),
+    /// Remove a cap point by ID.
+    Remove { id: u64 },
+}
+
 /// Unified channel for all UI → peer task messages.
 pub enum LocalEvent {
     CursorPosition(Option<[f32; 2]>),
@@ -115,6 +123,18 @@ pub enum LocalEvent {
     RangeOverrides(RangeOverrideUpdate),
     TrailOverrides(TrailOverrideUpdate),
     Ping([f32; 2]),
+    /// Cap point edit (tactics board).
+    CapPoint(LocalCapPointEvent),
+    /// Tactics map opened — broadcast map info to peers.
+    TacticsMapOpened {
+        map_name: String,
+        map_id: u32,
+        map_image_png: Vec<u8>,
+        /// Map metadata for coordinate transforms.
+        map_info: Option<wows_minimap_renderer::map_data::MapInfo>,
+    },
+    /// Tactics map closed.
+    TacticsMapClosed,
 }
 
 /// Handle returned from `start_peer_session` for UI interaction.
@@ -503,6 +523,17 @@ async fn host_main(
                             let msg = PeerMessage::ReplayClosed { replay_id };
                             broadcast_to_mesh(&mesh, &msg);
                         }
+                        SessionCommand::SyncCapPoints { cap_points } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState {
+                                    cap_points: cap_points.clone(),
+                                });
+                                s.cap_point_sync_version += 1;
+                            }
+                            let msg = PeerMessage::CapPointSync { cap_points };
+                            broadcast_to_mesh(&mesh, &msg);
+                        }
                     }
                 }
 
@@ -571,6 +602,59 @@ async fn host_main(
                         }
                         LocalEvent::Ping(pos) => {
                             broadcast_to_mesh(&mesh, &PeerMessage::Ping { pos });
+                        }
+                        LocalEvent::CapPoint(evt) => {
+                            let msg = match &evt {
+                                LocalCapPointEvent::Set(cp) => {
+                                    debug!("Host peer task: SetCapPoint id={} radius={}", cp.id, cp.radius);
+                                    let mut s = ui_state.lock();
+                                    let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
+                                    if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
+                                        sync.cap_points[pos] = cp.clone();
+                                    } else {
+                                        sync.cap_points.push(cp.clone());
+                                    }
+                                    s.cap_point_sync_version += 1;
+                                    debug!("Host peer task: cap_point_sync_version now {}", s.cap_point_sync_version);
+                                    PeerMessage::SetCapPoint(cp.clone())
+                                }
+                                LocalCapPointEvent::Remove { id } => {
+                                    debug!("Host peer task: RemoveCapPoint id={id}");
+                                    let mut s = ui_state.lock();
+                                    if let Some(sync) = s.current_cap_point_sync.as_mut() {
+                                        sync.cap_points.retain(|c| c.id != *id);
+                                        s.cap_point_sync_version += 1;
+                                    }
+                                    PeerMessage::RemoveCapPoint { id: *id }
+                                }
+                            };
+                            broadcast_to_mesh(&mesh, &msg);
+                        }
+                        LocalEvent::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                                    map_name: map_name.clone(),
+                                    map_id,
+                                    map_image_png: map_image_png.clone(),
+                                    map_info: map_info.clone(),
+                                });
+                                s.tactics_map_version += 1;
+                                // Clear cap point sync when map changes.
+                                s.current_cap_point_sync = None;
+                                s.cap_point_sync_version += 1;
+                            }
+                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info });
+                        }
+                        LocalEvent::TacticsMapClosed => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.tactics_map = None;
+                                s.tactics_map_version += 1;
+                                s.current_cap_point_sync = None;
+                                s.cap_point_sync_version += 1;
+                            }
+                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapClosed);
                         }
                     }
                 }
@@ -724,6 +808,32 @@ async fn host_accept_peer(
         })
     };
     if let Some(msg) = ann_msg
+        && write_peer_message(&mut send, &msg).await.is_err()
+    {
+        return;
+    }
+
+    // Send current tactics board state if any (map + cap points).
+    let (tmap_msg, cap_msg) = {
+        let s = ui_state.lock();
+        let tmap = s.tactics_map.as_ref().map(|tmap| PeerMessage::TacticsMapOpened {
+            map_name: tmap.map_name.clone(),
+            map_id: tmap.map_id,
+            map_image_png: tmap.map_image_png.clone(),
+            map_info: tmap.map_info.clone(),
+        });
+        let cap = s
+            .current_cap_point_sync
+            .as_ref()
+            .map(|sync| PeerMessage::CapPointSync { cap_points: sync.cap_points.clone() });
+        (tmap, cap)
+    };
+    if let Some(msg) = tmap_msg
+        && write_peer_message(&mut send, &msg).await.is_err()
+    {
+        return;
+    }
+    if let Some(msg) = cap_msg
         && write_peer_message(&mut send, &msg).await.is_err()
     {
         return;
@@ -1177,6 +1287,17 @@ async fn join_main(
                         SessionCommand::ReplayOpened { .. } | SessionCommand::ReplayClosed { .. } => {
                             // Only the host sends replay lifecycle messages — ignore on join side.
                         }
+                        SessionCommand::SyncCapPoints { cap_points } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState {
+                                    cap_points: cap_points.clone(),
+                                });
+                                s.cap_point_sync_version += 1;
+                            }
+                            let msg = PeerMessage::CapPointSync { cap_points };
+                            let _ = write_peer_message(&mut send, &msg).await;
+                        }
                     }
                 }
 
@@ -1245,6 +1366,55 @@ async fn join_main(
                         }
                         LocalEvent::Ping(pos) => {
                             let _ = write_peer_message(&mut send, &PeerMessage::Ping { pos }).await;
+                        }
+                        LocalEvent::CapPoint(evt) => {
+                            let msg = match &evt {
+                                LocalCapPointEvent::Set(cp) => {
+                                    let mut s = ui_state.lock();
+                                    let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
+                                    if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
+                                        sync.cap_points[pos] = cp.clone();
+                                    } else {
+                                        sync.cap_points.push(cp.clone());
+                                    }
+                                    s.cap_point_sync_version += 1;
+                                    PeerMessage::SetCapPoint(cp.clone())
+                                }
+                                LocalCapPointEvent::Remove { id } => {
+                                    let mut s = ui_state.lock();
+                                    if let Some(sync) = s.current_cap_point_sync.as_mut() {
+                                        sync.cap_points.retain(|c| c.id != *id);
+                                        s.cap_point_sync_version += 1;
+                                    }
+                                    PeerMessage::RemoveCapPoint { id: *id }
+                                }
+                            };
+                            let _ = write_peer_message(&mut send, &msg).await;
+                        }
+                        LocalEvent::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                                    map_name: map_name.clone(),
+                                    map_id,
+                                    map_image_png: map_image_png.clone(),
+                                    map_info: map_info.clone(),
+                                });
+                                s.tactics_map_version += 1;
+                                s.current_cap_point_sync = None;
+                                s.cap_point_sync_version += 1;
+                            }
+                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info }).await;
+                        }
+                        LocalEvent::TacticsMapClosed => {
+                            {
+                                let mut s = ui_state.lock();
+                                s.tactics_map = None;
+                                s.tactics_map_version += 1;
+                                s.current_cap_point_sync = None;
+                                s.cap_point_sync_version += 1;
+                            }
+                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapClosed).await;
                         }
                     }
                 }
@@ -1638,6 +1808,94 @@ fn handle_incoming_message(
                 s.annotation_sync_version += 1;
             }
             let _ = event_tx.send(SessionEvent::ReplayClosed { replay_id });
+        }
+
+        // ── Tactics board messages ────────────────────────────────────
+        PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info } => {
+            {
+                let mut s = ui_state.lock();
+                s.tactics_map = Some(crate::collab::TacticsMapInfo {
+                    map_name: map_name.clone(),
+                    map_id,
+                    map_image_png: map_image_png.clone(),
+                    map_info: map_info.clone(),
+                });
+                s.tactics_map_version += 1;
+                s.current_cap_point_sync = None;
+                s.cap_point_sync_version += 1;
+            }
+            relay_if_host(
+                sender_id,
+                &PeerMessage::TacticsMapOpened { map_name, map_id, map_image_png, map_info },
+                mesh,
+            );
+        }
+
+        PeerMessage::TacticsMapClosed => {
+            {
+                let mut s = ui_state.lock();
+                s.tactics_map = None;
+                s.tactics_map_version += 1;
+                s.current_cap_point_sync = None;
+                s.cap_point_sync_version += 1;
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::SetCapPoint(ref cp) => {
+            debug!("Received SetCapPoint from {sender_id}: id={} radius={}", cp.id, cp.radius);
+            if permissions.annotations_locked && !sender_is_authority {
+                debug!("Dropping SetCapPoint from {sender_id} (locked)");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                let sync = s.current_cap_point_sync.get_or_insert_with(Default::default);
+                if let Some(pos) = sync.cap_points.iter().position(|c| c.id == cp.id) {
+                    sync.cap_points[pos] = cp.clone();
+                } else {
+                    sync.cap_points.push(cp.clone());
+                }
+                s.cap_point_sync_version += 1;
+                let ver = s.cap_point_sync_version;
+                let count = s.current_cap_point_sync.as_ref().map(|s| s.cap_points.len()).unwrap_or(0);
+                debug!("cap_point_sync_version now {ver} (total caps: {count})");
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::RemoveCapPoint { id } => {
+            debug!("Received RemoveCapPoint from {sender_id}: id={id}");
+            if permissions.annotations_locked && !sender_is_authority {
+                debug!("Dropping RemoveCapPoint from {sender_id} (locked)");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                if let Some(sync) = s.current_cap_point_sync.as_mut() {
+                    sync.cap_points.retain(|c| c.id != id);
+                    s.cap_point_sync_version += 1;
+                }
+            }
+            relay_if_host(sender_id, &msg, mesh);
+        }
+
+        PeerMessage::CapPointSync { ref cap_points } => {
+            debug!(
+                "Received CapPointSync from {sender_id}: {} caps, authority={sender_is_authority}",
+                cap_points.len()
+            );
+            if !sender_is_authority {
+                debug!("Dropping CapPointSync from non-authority {sender_id}");
+                return;
+            }
+            {
+                let mut s = ui_state.lock();
+                s.current_cap_point_sync = Some(crate::collab::CapPointSyncState { cap_points: cap_points.clone() });
+                s.cap_point_sync_version += 1;
+                debug!("cap_point_sync_version now {}", s.cap_point_sync_version);
+            }
+            relay_if_host(sender_id, &msg, mesh);
         }
 
         // ── Handshake messages (not expected post-handshake) ────────────

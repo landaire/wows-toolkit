@@ -53,6 +53,23 @@ pub const MAX_PEERS: usize = 12;
 /// Maximum length of a serialized EndpointAddr JSON string.
 pub const MAX_ENDPOINT_ADDR_LEN: usize = 4096;
 
+/// Maximum cap points in a tactics board sync message.
+pub const MAX_CAP_POINTS: usize = 50;
+
+// ─── Wire cap point ─────────────────────────────────────────────────────────
+
+/// A serializable capture point for tactics board collab sync.
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct WireCapPoint {
+    pub id: u64,
+    pub index: u32,
+    pub world_x: f32,
+    pub world_z: f32,
+    pub radius: f32,
+    pub team_id: i64,
+    pub frozen: bool,
+}
+
 // ─── Peer identity types ───────────────────────────────────────────────────
 
 /// Information needed to connect to a peer in the mesh.
@@ -211,6 +228,33 @@ pub enum PeerMessage {
 
     /// A replay was closed on the host.
     ReplayClosed { replay_id: u64 },
+
+    // ── Tactics board (any peer → all peers) ────────────────────────────
+    /// A tactics board was opened with a specific map.
+    /// Receiver loads the same map if they have a tactics board open.
+    TacticsMapOpened {
+        map_name: String,
+        map_id: u32,
+        /// PNG-encoded map background image.
+        map_image_png: Vec<u8>,
+        /// Map metadata for coordinate transforms.
+        map_info: Option<wows_minimap_renderer::map_data::MapInfo>,
+    },
+
+    /// The tactics board was closed.
+    TacticsMapClosed,
+
+    /// Upsert a cap point on the tactics board.
+    /// Receiver drops if `annotations_locked` and sender is not host/co-host.
+    SetCapPoint(WireCapPoint),
+
+    /// Remove a cap point from the tactics board.
+    /// Receiver drops if `annotations_locked` and sender is not host/co-host.
+    RemoveCapPoint { id: u64 },
+
+    /// Full cap point state sync (used after undo or bulk operations).
+    /// Receiver drops if sender is not host/co-host.
+    CapPointSync { cap_points: Vec<WireCapPoint> },
 }
 
 // ─── Display option field enum ──────────────────────────────────────────────

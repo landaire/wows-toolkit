@@ -3,11 +3,13 @@
 mod app;
 mod armor_viewer;
 mod build_tracker;
+pub mod cap_layout;
 pub mod collab;
 mod consts;
 pub(crate) mod controls;
 mod error;
 mod game_params;
+pub(crate) mod minimap_view;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
 mod personal_rating;

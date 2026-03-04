@@ -13,3 +13,7 @@ run = "cargo fix --all-features --allow-dirty"
 [tasks.clippy-fix]
 description = "Runs cargo-clippy-fix against all features"
 run = "cargo clippy --fix --all-features --allow-dirty"
+
+[tasks.fix-all]
+description = "Runs cargo-clippy-fix against all features"
+run = "cargo clippy --fix --all-features --allow-dirty && cargo +nightly fmt"

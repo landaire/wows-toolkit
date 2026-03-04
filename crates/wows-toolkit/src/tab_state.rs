@@ -217,6 +217,12 @@ pub struct TabState {
     #[serde(skip)]
     pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay_renderer::RendererAssetCache>>,
 
+    #[serde(skip)]
+    pub tactics_boards: Mutex<Vec<crate::minimap_view::tactics::TacticsBoardViewer>>,
+    /// The `tactics_map_version` we last auto-opened a board for (prevents re-open after close).
+    #[serde(skip)]
+    pub tactics_auto_open_version: u64,
+
     /// Shared tokio runtime for collab sessions and async tasks.
     #[serde(skip)]
     pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
@@ -399,6 +405,13 @@ pub struct TabState {
     /// Most recent frame received before its renderer was created; retried each poll.
     #[serde(skip)]
     pub pending_collab_frame: Option<crate::replay_renderer::PlaybackFrame>,
+
+    // ─── Tactics Board ────────────────────────────────────────────────────
+    /// Local cache of cap layouts extracted from replays. Persisted to disk
+    /// via rkyv, loaded on startup, and updated incrementally when new
+    /// `(mapId, scenarioConfigId)` combinations are encountered.
+    #[serde(skip)]
+    pub cap_layout_db: Arc<Mutex<crate::cap_layout::CapLayoutDb>>,
 }
 
 impl Default for TabState {
@@ -472,6 +485,9 @@ impl Default for TabState {
             next_replay_id: 1,
             replay_open_timestamps: std::collections::VecDeque::new(),
             pending_collab_frame: None,
+            cap_layout_db: Default::default(),
+            tactics_boards: Default::default(),
+            tactics_auto_open_version: 0,
         }
     }
 }
@@ -755,6 +771,7 @@ impl TabState {
                 player_tracker: Arc::clone(&self.settings.player_tracker),
                 is_debug: self.settings.debug_mode,
                 parser_lock: Arc::clone(&self.parser_lock),
+                cap_layout_db: Arc::clone(&self.cap_layout_db),
             };
             crate::task::start_background_parsing_thread(background_thread_data);
         }

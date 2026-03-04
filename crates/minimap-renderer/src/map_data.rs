@@ -6,6 +6,7 @@ pub const NATIVE_MINIMAP_SIZE: u32 = 760;
 
 /// Map metadata for coordinate conversion.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct MapInfo {
     pub space_size: i32,
 }
@@ -34,6 +35,43 @@ impl MapInfo {
             x: ((pos.x as f64 * scale + half) * rescale) as i32,
             y: ((-pos.z as f64 * scale + half) * rescale) as i32,
         }
+    }
+
+    /// Convert minimap pixel coordinates back to world coordinates.
+    ///
+    /// Inverse of [`world_to_minimap`](Self::world_to_minimap).
+    pub fn minimap_to_world(&self, pos: MinimapPos, output_size: u32) -> WorldPos {
+        let native = NATIVE_MINIMAP_SIZE as f64;
+        let scale = native / self.space_size as f64;
+        let half = native / 2.0;
+        let rescale = output_size as f64 / native;
+        let x = (pos.x as f64 / rescale - half) / scale;
+        let z = -(pos.y as f64 / rescale - half) / scale;
+        WorldPos { x: x as f32, y: 0.0, z: z as f32 }
+    }
+
+    /// Convert minimap pixel coordinates (as f32) back to world coordinates.
+    ///
+    /// Like [`minimap_to_world`](Self::minimap_to_world) but accepts fractional
+    /// pixel positions (useful for sub-pixel mouse positions).
+    pub fn minimap_to_world_f32(&self, x: f32, y: f32, output_size: u32) -> WorldPos {
+        let native = NATIVE_MINIMAP_SIZE as f64;
+        let scale = native / self.space_size as f64;
+        let half = native / 2.0;
+        let rescale = output_size as f64 / native;
+        let wx = (x as f64 / rescale - half) / scale;
+        let wz = -(y as f64 / rescale - half) / scale;
+        WorldPos { x: wx as f32, y: 0.0, z: wz as f32 }
+    }
+
+    /// Convert a distance in world (BigWorld) units to minimap pixels.
+    pub fn world_distance_to_minimap(&self, distance: f32, output_size: u32) -> f32 {
+        distance * output_size as f32 / self.space_size as f32
+    }
+
+    /// Convert a distance in minimap pixels to world (BigWorld) units.
+    pub fn minimap_distance_to_world(&self, pixels: f32, output_size: u32) -> f32 {
+        pixels * self.space_size as f32 / output_size as f32
     }
 
     /// Convert a NormalizedPos (from `updateMinimapVisionInfo` packets) to minimap pixels.

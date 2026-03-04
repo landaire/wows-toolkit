@@ -265,6 +265,48 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
         PeerMessage::Ping { pos } => {
             check_position(pos, "Ping.pos")?;
         }
+
+        // ── Tactics board messages ──────────────────────────────────────
+        PeerMessage::TacticsMapOpened { map_name, map_image_png, .. } => {
+            check_string_len(map_name, MAX_STRING_LEN, "TacticsMapOpened.map_name")?;
+            if map_image_png.len() > MAX_MAP_IMAGE_SIZE {
+                return Err(ValidationError(format!(
+                    "TacticsMapOpened.map_image_png too large: {} > {MAX_MAP_IMAGE_SIZE}",
+                    map_image_png.len()
+                )));
+            }
+        }
+
+        PeerMessage::TacticsMapClosed => {}
+
+        PeerMessage::SetCapPoint(cp) => {
+            validate_wire_cap_point(cp, "SetCapPoint")?;
+        }
+
+        PeerMessage::RemoveCapPoint { .. } => {}
+
+        PeerMessage::CapPointSync { cap_points } => {
+            if cap_points.len() > MAX_CAP_POINTS {
+                return Err(ValidationError(format!(
+                    "CapPointSync too many cap points: {} > {MAX_CAP_POINTS}",
+                    cap_points.len()
+                )));
+            }
+            for (i, cp) in cap_points.iter().enumerate() {
+                validate_wire_cap_point(cp, &format!("CapPointSync[{i}]"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate a single `WireCapPoint` struct.
+fn validate_wire_cap_point(cp: &WireCapPoint, ctx: &str) -> Result<(), ValidationError> {
+    check_finite(cp.world_x, &format!("{ctx}.world_x"))?;
+    check_finite(cp.world_z, &format!("{ctx}.world_z"))?;
+    check_finite(cp.radius, &format!("{ctx}.radius"))?;
+    if cp.radius <= 0.0 {
+        return Err(ValidationError(format!("{ctx}.radius must be positive: {}", cp.radius)));
     }
     Ok(())
 }

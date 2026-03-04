@@ -58,6 +58,16 @@ pub struct OpenReplay {
     pub game_version: String,
 }
 
+/// Info about the currently open tactics board map, received from a peer.
+#[derive(Debug, Clone)]
+pub struct TacticsMapInfo {
+    pub map_name: String,
+    pub map_id: u32,
+    pub map_image_png: Vec<u8>,
+    /// Map metadata for coordinate transforms.
+    pub map_info: Option<wows_minimap_renderer::map_data::MapInfo>,
+}
+
 /// A map ping from a peer, rendered as an expanding ripple effect.
 #[derive(Debug, Clone)]
 pub struct PeerPing {
@@ -75,6 +85,12 @@ pub struct AnnotationSyncState {
     pub annotations: Vec<types::Annotation>,
     pub owners: Vec<u64>,
     pub ids: Vec<u64>,
+}
+
+/// Authoritative cap point state maintained by the session for tactics board sync.
+#[derive(Debug, Clone, Default)]
+pub struct CapPointSyncState {
+    pub cap_points: Vec<protocol::WireCapPoint>,
 }
 
 /// Shared session state visible to the UI thread.
@@ -126,6 +142,14 @@ pub struct SessionState {
     pub current_trail_hidden: Option<Vec<String>>,
     /// Active map pings from peers (rendered as ripple effects).
     pub pings: Vec<PeerPing>,
+    /// Monotonically increasing version for cap point sync updates (tactics board).
+    pub cap_point_sync_version: u64,
+    /// Current cap point state from the tactics board.
+    pub current_cap_point_sync: Option<CapPointSyncState>,
+    /// Monotonically increasing version for tactics map updates.
+    pub tactics_map_version: u64,
+    /// Current tactics map info (map_name, map_id, map_image_png). Set when a peer opens a tactics board map.
+    pub tactics_map: Option<TacticsMapInfo>,
 }
 
 impl Default for SessionState {
@@ -150,6 +174,10 @@ impl Default for SessionState {
             trail_override_version: 0,
             current_trail_hidden: None,
             pings: Vec::new(),
+            cap_point_sync_version: 0,
+            current_cap_point_sync: None,
+            tactics_map_version: 0,
+            tactics_map: None,
         }
     }
 }
@@ -242,6 +270,8 @@ pub enum SessionCommand {
     ReplayOpened { replay_id: u64, replay_name: String, map_image_png: Vec<u8>, game_version: String },
     /// Notify peers that a replay was closed on the host.
     ReplayClosed { replay_id: u64 },
+    /// Broadcast full cap point state (tactics board).
+    SyncCapPoints { cap_points: Vec<protocol::WireCapPoint> },
 }
 
 /// Create a shared session state wrapped in Arc<Mutex>.
@@ -347,6 +377,10 @@ mod tests {
         assert_eq!(state.trail_override_version, 0);
         assert!(state.current_trail_hidden.is_none());
         assert!(state.pings.is_empty());
+        assert_eq!(state.cap_point_sync_version, 0);
+        assert!(state.current_cap_point_sync.is_none());
+        assert_eq!(state.tactics_map_version, 0);
+        assert!(state.tactics_map.is_none());
     }
 
     #[test]

@@ -252,6 +252,10 @@ impl WowsToolkitApp {
         //     ],
         // ));
 
+        // Register "GameFont" as a proportional fallback so game_font() never panics.
+        // Upgraded to real game fonts once WoWs data is loaded.
+        crate::minimap_view::shapes::register_game_fonts(&mut fonts, None);
+
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_theme(egui::Theme::Dark);
 
@@ -362,6 +366,19 @@ impl WowsToolkitApp {
 
         // Share the tokio runtime with tab_state for collab sessions
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
+
+        // Load persisted cap layout cache from disk.
+        if let Some(cache_path) = crate::cap_layout::cache_path()
+            && let Some(mut db) = crate::cap_layout::CapLayoutDb::load(&cache_path)
+        {
+            let removed = db.dedup();
+            if removed > 0 {
+                tracing::info!("removed {removed} duplicate cap layouts from cache");
+                let _ = db.save(&cache_path);
+            }
+            tracing::info!("loaded {} cap layouts from cache", db.len());
+            *state.tab_state.cap_layout_db.lock() = db;
+        }
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
@@ -491,7 +508,7 @@ impl WowsToolkitApp {
                             }
                         }
 
-                        self.handle_task_completion(result);
+                        self.handle_task_completion(ui.ctx(), result);
                         true
                     } else {
                         false
@@ -636,7 +653,7 @@ impl WowsToolkitApp {
     }
 
     /// Handle a completed background task result.
-    fn handle_task_completion(&mut self, result: Result<BackgroundTaskCompletion, Report>) {
+    fn handle_task_completion(&mut self, ctx: &egui::Context, result: Result<BackgroundTaskCompletion, Report>) {
         match result {
             Ok(data) => match data {
                 BackgroundTaskCompletion::NoReceiver => {}
@@ -665,6 +682,15 @@ impl WowsToolkitApp {
                             self.tab_state.mod_action_receiver.take().unwrap(),
                             self.tab_state.background_task_sender.clone(),
                         );
+                    }
+
+                    // Register real game fonts from VFS now that data is available.
+                    {
+                        let wdata = self.tab_state.world_of_warships_data.as_ref().unwrap().read();
+                        let gf = self.tab_state.renderer_asset_cache.lock().get_or_load_game_fonts(&wdata.vfs);
+                        let mut font_defs = ctx.fonts(|r| r.definitions().clone());
+                        crate::minimap_view::shapes::register_game_fonts(&mut font_defs, Some(&gf));
+                        ctx.set_fonts(font_defs);
                     }
 
                     // Initialize or update the version data map.
@@ -921,6 +947,125 @@ impl WowsToolkitApp {
             .enumerate()
             .filter_map(|(idx, r)| if !remove_renderers.contains(&idx) { Some(r) } else { None })
             .collect();
+    }
+
+    fn sync_tactics_boards(&mut self, ctx: &egui::Context) {
+        let is_host = self.tab_state.host_session.is_some();
+        let is_client = self.tab_state.client_session.is_some();
+        let mut boards = self.tab_state.tactics_boards.lock();
+
+        // Auto-wire existing tactics boards to session when one starts.
+        let session_handle = self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+        if let Some(handle) = session_handle {
+            for board in boards.iter_mut() {
+                if board.collab_local_tx.is_none() {
+                    board.collab_local_tx = Some(handle.local_tx.clone());
+                    board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                    board.collab_command_tx = Some(handle.command_tx.clone());
+                    // Send current map + caps to peers so they can catch up.
+                    if is_host {
+                        let state = board.state_arc().lock();
+                        if let Some((map_id, map_name)) = state.selected_map() {
+                            let map_name = map_name.to_string();
+                            let map_image_png = state
+                                .map_image_raw()
+                                .map(|(data, w, h)| {
+                                    let mut buf = Vec::new();
+                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                        let mut cursor = std::io::Cursor::new(&mut buf);
+                                        let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
+                                    }
+                                    buf
+                                })
+                                .unwrap_or_default();
+                            let map_info = state.map_info().cloned();
+                            let wire_caps: Vec<crate::collab::protocol::WireCapPoint> = state
+                                .cap_points()
+                                .iter()
+                                .map(|c| crate::collab::protocol::WireCapPoint {
+                                    id: c.id,
+                                    index: c.index as u32,
+                                    world_x: c.world_x,
+                                    world_z: c.world_z,
+                                    radius: c.radius,
+                                    team_id: c.team_id,
+                                    frozen: c.frozen,
+                                })
+                                .collect();
+                            drop(state);
+                            let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapOpened {
+                                map_name,
+                                map_id,
+                                map_image_png,
+                                map_info,
+                            });
+                            let _ = handle
+                                .command_tx
+                                .send(crate::collab::SessionCommand::SyncCapPoints { cap_points: wire_caps });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Peer-only: auto-open a tactics board when a peer opens one and we don't have one.
+        // Only triggers on a new tactics_map_version to avoid re-opening after the user closes it.
+        if !is_host
+            && boards.is_empty()
+            && let Some(handle) = self.tab_state.client_session.as_ref()
+        {
+            let ss = self.tab_state.session_state.lock();
+            let version = ss.tactics_map_version;
+            let has_map = ss.tactics_map.is_some();
+            drop(ss);
+            if has_map
+                && version > self.tab_state.tactics_auto_open_version
+                && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+            {
+                self.tab_state.tactics_auto_open_version = version;
+                let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                    std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                    std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                    std::sync::Arc::clone(wows_data),
+                );
+                board.collab_local_tx = Some(handle.local_tx.clone());
+                board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                board.collab_command_tx = Some(handle.command_tx.clone());
+                boards.push(board);
+            }
+        }
+
+        // Peer-only: close local board when the host sends TacticsMapClosed.
+        if is_client && !boards.is_empty() {
+            let has_map = self.tab_state.session_state.lock().tactics_map.is_some();
+            if !has_map {
+                for board in boards.iter() {
+                    board.open.store(false, Ordering::Relaxed);
+                }
+            }
+        }
+
+        let mut remove = Vec::new();
+        for (idx, board) in boards.iter().enumerate() {
+            board.draw(ctx);
+            if !board.open.load(Ordering::Relaxed) {
+                remove.push(idx);
+            }
+        }
+        if !remove.is_empty() {
+            // Host closing a board is authoritative — notify peers.
+            if is_host {
+                let closing_had_collab = remove.iter().any(|&idx| boards[idx].collab_local_tx.is_some());
+                if closing_had_collab && let Some(ref handle) = self.tab_state.host_session {
+                    let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapClosed);
+                }
+            }
+            *boards = boards
+                .drain(..)
+                .enumerate()
+                .filter_map(|(idx, b)| if !remove.contains(&idx) { Some(b) } else { None })
+                .collect();
+        }
     }
 
     /// Poll pending armor viewer requests from replay renderers and spawn viewers.
@@ -1288,6 +1433,7 @@ impl WowsToolkitApp {
         drop(file_viewer);
 
         self.sync_replay_renderers(ctx);
+        self.sync_tactics_boards(ctx);
 
         self.poll_armor_viewer_requests();
 
@@ -1682,6 +1828,12 @@ impl WowsToolkitApp {
                 s.collab_session_state = None;
                 s.collab_local_tx = None;
             }
+            // Unwire all tactics boards.
+            for b in self.tab_state.tactics_boards.lock().iter_mut() {
+                b.collab_local_tx = None;
+                b.collab_session_state = None;
+                b.collab_command_tx = None;
+            }
             self.tab_state.host_session = None;
             {
                 let mut s = self.tab_state.session_state.lock();
@@ -1801,6 +1953,11 @@ impl WowsToolkitApp {
                 }
                 crate::collab::SessionEvent::Error(msg) => {
                     self.tab_state.toasts.lock().error(format!("Session: {msg}"));
+                    for b in self.tab_state.tactics_boards.lock().iter_mut() {
+                        b.collab_local_tx = None;
+                        b.collab_session_state = None;
+                        b.collab_command_tx = None;
+                    }
                     self.tab_state.client_session = None;
                     return;
                 }
@@ -1811,6 +1968,11 @@ impl WowsToolkitApp {
                 }
                 crate::collab::SessionEvent::Ended => {
                     self.tab_state.toasts.lock().info("Session ended");
+                    for b in self.tab_state.tactics_boards.lock().iter_mut() {
+                        b.collab_local_tx = None;
+                        b.collab_session_state = None;
+                        b.collab_command_tx = None;
+                    }
                     self.tab_state.client_session = None;
                     return;
                 }

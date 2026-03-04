@@ -59,347 +59,28 @@ const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const ICON_SIZE: f32 = assets::ICON_SIZE as f32;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 
-/// Font ID using the game font family (Warhelios Bold + CJK fallbacks).
-/// Falls back to default proportional font if game fonts haven't been registered yet.
-fn game_font(size: f32) -> FontId {
-    FontId::new(size, egui::FontFamily::Name("GameFont".into()))
-}
+// ─── Shared types (from minimap_view) ────────────────────────────────────────
 
-// ─── Zoom/Pan State ─────────────────────────────────────────────────────────
-
-/// Overlay controls visibility state. Persists across frames.
-struct OverlayState {
-    /// Last time the mouse moved or a control was interacted with (ctx.input time).
-    last_activity: f64,
-}
-
-impl Default for OverlayState {
-    fn default() -> Self {
-        Self { last_activity: 0.0 }
-    }
-}
-
-/// Zoom and pan state for the replay viewport. Persists across frames.
-struct ViewportZoomPan {
-    /// Zoom level. 1.0 = no zoom (fit to window). Range: [1.0, 10.0].
-    zoom: f32,
-    /// Pan offset in zoomed-minimap-pixel space.
-    /// (0,0) = top-left corner of the map is at the top-left of the viewport.
-    pan: Vec2,
-}
-
-impl Default for ViewportZoomPan {
-    fn default() -> Self {
-        Self { zoom: 1.0, pan: Vec2::ZERO }
-    }
-}
-
-/// Encapsulates coordinate transforms for a single frame of viewport rendering.
-/// Handles both window-fit scaling and zoom/pan for the map region.
-struct MapTransform {
-    /// Top-left of the allocated painter rect in screen space.
-    origin: Pos2,
-    /// Uniform scale from logical canvas pixels to screen pixels.
-    window_scale: f32,
-    /// Zoom level (1.0 = no zoom).
-    zoom: f32,
-    /// Pan offset in zoomed-minimap-pixel space.
-    pan: Vec2,
-    /// HUD height in logical pixels.
-    hud_height: f32,
-    /// Logical canvas width (768).
-    canvas_width: f32,
-}
-
-impl MapTransform {
-    /// Convert a MinimapPos (in [0..768] space) to screen Pos2.
-    /// Applies zoom and pan, then window scale. Used for all map elements.
-    fn minimap_to_screen(&self, pos: &MinimapPos) -> Pos2 {
-        let zoomed_x = pos.x as f32 * self.zoom - self.pan.x;
-        let zoomed_y = pos.y as f32 * self.zoom - self.pan.y;
-        Pos2::new(
-            self.origin.x + zoomed_x * self.window_scale,
-            self.origin.y + (self.hud_height + zoomed_y) * self.window_scale,
-        )
-    }
-
-    /// Scale a distance (e.g., radius, icon size) from minimap space to screen space.
-    /// Scales with both zoom and window_scale.
-    fn scale_distance(&self, d: f32) -> f32 {
-        d * self.zoom * self.window_scale
-    }
-
-    /// Scale a stroke width. Scales with window_scale only (not zoom),
-    /// keeping lines readable at all zoom levels.
-    fn scale_stroke(&self, width: f32) -> f32 {
-        width * self.window_scale
-    }
-
-    /// Position for HUD elements (ScoreBar, Timer, KillFeed).
-    /// These scale with the window but NOT with zoom/pan.
-    fn hud_pos(&self, x: f32, y: f32) -> Pos2 {
-        Pos2::new(self.origin.x + x * self.window_scale, self.origin.y + y * self.window_scale)
-    }
-
-    /// The HUD-scaled canvas width in screen pixels.
-    fn screen_canvas_width(&self) -> f32 {
-        self.canvas_width * self.window_scale
-    }
-
-    /// Convert a screen Pos2 to minimap logical coords (inverse of minimap_to_screen).
-    fn screen_to_minimap(&self, screen_pos: Pos2) -> Vec2 {
-        let sx = (screen_pos.x - self.origin.x) / self.window_scale;
-        let sy = (screen_pos.y - self.origin.y) / self.window_scale - self.hud_height;
-        Vec2::new((sx + self.pan.x) / self.zoom, (sy + self.pan.y) / self.zoom)
-    }
-}
-
-// ─── Annotation / Painting State ─────────────────────────────────────────────
-
-pub(super) const SHIP_SPECIES: [&str; 5] = ["Destroyer", "Cruiser", "Battleship", "AirCarrier", "Submarine"];
-pub(super) const FRIENDLY_COLOR: Color32 = Color32::from_rgb(76, 232, 170);
-pub(super) const ENEMY_COLOR: Color32 = Color32::from_rgb(254, 77, 42);
-
-/// A single annotation placed on the map.
-#[derive(Clone)]
-enum Annotation {
-    Ship { pos: Vec2, yaw: f32, species: String, friendly: bool },
-    FreehandStroke { points: Vec<Vec2>, color: Color32, width: f32 },
-    Line { start: Vec2, end: Vec2, color: Color32, width: f32 },
-    Circle { center: Vec2, radius: f32, color: Color32, width: f32, filled: bool },
-    Rectangle { center: Vec2, half_size: Vec2, rotation: f32, color: Color32, width: f32, filled: bool },
-    Triangle { center: Vec2, radius: f32, rotation: f32, color: Color32, width: f32, filled: bool },
-}
-
-/// Active drawing/placement tool.
-#[derive(Clone)]
-enum PaintTool {
-    None,
-    PlacingShip { species: String, friendly: bool, yaw: f32 },
-    Freehand { current_stroke: Option<Vec<Vec2>> },
-    Eraser,
-    DrawingLine { start: Option<Vec2> },
-    DrawingCircle { filled: bool, center: Option<Vec2> },
-    DrawingRect { filled: bool, center: Option<Vec2> },
-    DrawingTriangle { filled: bool, center: Option<Vec2> },
-}
-
-/// Snapshot of annotation state for undo/redo.
-#[derive(Clone)]
-struct AnnotationSnapshot {
-    annotations: Vec<Annotation>,
-    ids: Vec<u64>,
-    owners: Vec<u64>,
-}
-
-/// Persistent annotation layer state.
-struct AnnotationState {
-    annotations: Vec<Annotation>,
-    /// Unique ID for each annotation (parallel to `annotations`).
-    annotation_ids: Vec<u64>,
-    undo_stack: Vec<AnnotationSnapshot>,
-    active_tool: PaintTool,
-    paint_color: Color32,
-    stroke_width: f32,
-    selected_index: Option<usize>,
-    show_context_menu: bool,
-    context_menu_pos: Pos2,
-    dragging_rotation: bool,
-    /// Ships whose trails are explicitly hidden (by player name).
-    trail_hidden_ships: HashSet<String>,
-    /// Ship nearest to right-click position (entity_id, player_name) for context menu options.
-    context_menu_ship: Option<(EntityId, String)>,
-    /// Per-ship range overrides keyed by entity ID.
-    /// When a ship is in this map, these flags override the global range toggles.
-    ship_range_overrides: HashMap<EntityId, ShipConfigFilter>,
-    /// Initial self range filter from saved settings, applied once self entity ID is known.
-    pending_self_range_filter: Option<ShipConfigFilter>,
-    /// Owner user_ids for each annotation (parallel to `annotations`), received from collab sync.
-    annotation_owners: Vec<u64>,
-}
-
-impl Default for AnnotationState {
-    fn default() -> Self {
-        Self {
-            annotations: Vec::new(),
-            annotation_ids: Vec::new(),
-            undo_stack: Vec::new(),
-            active_tool: PaintTool::None,
-            paint_color: Color32::YELLOW,
-            stroke_width: 2.0,
-            selected_index: None,
-            show_context_menu: false,
-            context_menu_pos: Pos2::ZERO,
-            dragging_rotation: false,
-            trail_hidden_ships: HashSet::new(),
-            context_menu_ship: None,
-            ship_range_overrides: HashMap::new(),
-            pending_self_range_filter: None,
-            annotation_owners: Vec::new(),
-        }
-    }
-}
-
-impl AnnotationState {
-    /// Save current annotations as an undo snapshot.
-    fn save_undo(&mut self) {
-        self.undo_stack.push(AnnotationSnapshot {
-            annotations: self.annotations.clone(),
-            ids: self.annotation_ids.clone(),
-            owners: self.annotation_owners.clone(),
-        });
-        // Cap stack size
-        if self.undo_stack.len() > 50 {
-            self.undo_stack.remove(0);
-        }
-    }
-
-    /// Pop the last undo snapshot, restoring annotations.
-    fn undo(&mut self) {
-        if let Some(prev) = self.undo_stack.pop() {
-            self.annotations = prev.annotations;
-            self.annotation_ids = prev.ids;
-            self.annotation_owners = prev.owners;
-            self.selected_index = None;
-        }
-    }
-}
-
-// ─── Collab annotation conversion ────────────────────────────────────────────
-
-/// Convert a collab wire annotation (primitive arrays) to the local annotation (egui types).
-fn collab_annotation_to_local(ca: crate::collab::types::Annotation) -> Annotation {
-    use crate::collab::types as ct;
-    match ca {
-        ct::Annotation::Ship { pos, yaw, species, friendly } => {
-            Annotation::Ship { pos: Vec2::new(pos[0], pos[1]), yaw, species, friendly }
-        }
-        ct::Annotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
-            points: points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect(),
-            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-            width,
-        },
-        ct::Annotation::Line { start, end, color, width } => Annotation::Line {
-            start: Vec2::new(start[0], start[1]),
-            end: Vec2::new(end[0], end[1]),
-            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-            width,
-        },
-        ct::Annotation::Circle { center, radius, color, width, filled } => Annotation::Circle {
-            center: Vec2::new(center[0], center[1]),
-            radius,
-            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-            width,
-            filled,
-        },
-        ct::Annotation::Rectangle { center, half_size, rotation, color, width, filled } => Annotation::Rectangle {
-            center: Vec2::new(center[0], center[1]),
-            half_size: Vec2::new(half_size[0], half_size[1]),
-            rotation,
-            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-            width,
-            filled,
-        },
-        ct::Annotation::Triangle { center, radius, rotation, color, width, filled } => Annotation::Triangle {
-            center: Vec2::new(center[0], center[1]),
-            radius,
-            rotation,
-            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-            width,
-            filled,
-        },
-    }
-}
-
-/// Convert a local annotation (egui types) to collab wire annotation (primitive arrays).
-#[allow(dead_code)]
-fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annotation {
-    use crate::collab::types as ct;
-    match a {
-        Annotation::Ship { pos, yaw, species, friendly } => {
-            ct::Annotation::Ship { pos: [pos.x, pos.y], yaw: *yaw, species: species.clone(), friendly: *friendly }
-        }
-        Annotation::FreehandStroke { points, color, width } => ct::Annotation::FreehandStroke {
-            points: points.iter().map(|p| [p.x, p.y]).collect(),
-            color: color.to_array(),
-            width: *width,
-        },
-        Annotation::Line { start, end, color, width } => ct::Annotation::Line {
-            start: [start.x, start.y],
-            end: [end.x, end.y],
-            color: color.to_array(),
-            width: *width,
-        },
-        Annotation::Circle { center, radius, color, width, filled } => ct::Annotation::Circle {
-            center: [center.x, center.y],
-            radius: *radius,
-            color: color.to_array(),
-            width: *width,
-            filled: *filled,
-        },
-        Annotation::Rectangle { center, half_size, rotation, color, width, filled } => ct::Annotation::Rectangle {
-            center: [center.x, center.y],
-            half_size: [half_size.x, half_size.y],
-            rotation: *rotation,
-            color: color.to_array(),
-            width: *width,
-            filled: *filled,
-        },
-        Annotation::Triangle { center, radius, rotation, color, width, filled } => ct::Annotation::Triangle {
-            center: [center.x, center.y],
-            radius: *radius,
-            rotation: *rotation,
-            color: color.to_array(),
-            width: *width,
-            filled: *filled,
-        },
-    }
-}
-
-/// Send a `SetAnnotation` event for the annotation at `idx` via the collab channel.
-fn send_annotation_update(shared_state: &SharedRendererState, ann: &AnnotationState, idx: usize) {
-    if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Set {
-            id: ann.annotation_ids[idx],
-            annotation: local_annotation_to_collab(&ann.annotations[idx]),
-            owner: ann.annotation_owners.get(idx).copied().unwrap_or(0),
-        }));
-    }
-}
-
-/// Send a `RemoveAnnotation` event for the given annotation ID via the collab channel.
-fn send_annotation_remove(shared_state: &SharedRendererState, id: u64) {
-    if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ =
-            tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Remove {
-                id,
-            }));
-    }
-}
-
-/// Send a `ClearAnnotations` event via the collab channel.
-fn send_annotation_clear(shared_state: &SharedRendererState) {
-    if let Some(ref tx) = shared_state.collab_local_tx {
-        let _ = tx.send(crate::collab::peer::LocalEvent::Annotation(crate::collab::peer::LocalAnnotationEvent::Clear));
-    }
-}
-
-/// Send a full annotation sync (used after undo to broadcast the complete state).
-fn send_annotation_full_sync(shared_state: &SharedRendererState, ann: &AnnotationState) {
-    if let Some(ref tx) = shared_state.collab_command_tx {
-        let collab_anns: Vec<_> = ann.annotations.iter().map(local_annotation_to_collab).collect();
-        let _ = tx.send(crate::collab::SessionCommand::SyncAnnotations {
-            annotations: collab_anns,
-            owners: ann.annotation_owners.clone(),
-            ids: ann.annotation_ids.clone(),
-        });
-    }
-}
+use crate::minimap_view::Annotation;
+use crate::minimap_view::AnnotationState;
+use crate::minimap_view::ENEMY_COLOR;
+use crate::minimap_view::FRIENDLY_COLOR;
+use crate::minimap_view::MapTransform;
+use crate::minimap_view::OverlayState;
+use crate::minimap_view::PaintTool;
+use crate::minimap_view::ViewportZoomPan;
+use crate::minimap_view::collab_annotation_to_local;
+use crate::minimap_view::get_my_user_id;
+use crate::minimap_view::handle_map_click_ping;
+use crate::minimap_view::send_annotation_clear;
+use crate::minimap_view::send_annotation_full_sync;
+use crate::minimap_view::send_annotation_remove;
+use crate::minimap_view::send_annotation_update;
 
 // ─── Asset Cache ─────────────────────────────────────────────────────────────
 
 /// RGBA image data: (pixels, width, height).
-type RgbaAsset = (Vec<u8>, u32, u32);
+pub type RgbaAsset = (Vec<u8>, u32, u32);
 
 /// Cached assets shared across renderer instances. Lives in TabState.
 /// Ship and plane icons are game-global; map data is per-map.
@@ -420,7 +101,7 @@ struct CachedMapData {
 }
 
 impl RendererAssetCache {
-    fn get_or_load_ship_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+    pub fn get_or_load_ship_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.ship_icons {
             return Arc::clone(cached);
         }
@@ -505,7 +186,7 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_game_fonts(&mut self, vfs: &VfsPath) -> GameFonts {
+    pub fn get_or_load_game_fonts(&mut self, vfs: &VfsPath) -> GameFonts {
         if let Some(ref cached) = self.game_fonts {
             return cached.clone();
         }
@@ -514,7 +195,7 @@ impl RendererAssetCache {
         fonts
     }
 
-    fn get_or_load_map(&mut self, map_name: &str, vfs: &VfsPath) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
+    pub fn get_or_load_map(&mut self, map_name: &str, vfs: &VfsPath) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
         if let Some(cached) = self.maps.get(map_name) {
             return (cached.image.clone(), cached.info.clone());
         }
@@ -865,6 +546,8 @@ pub struct ReplayRendererViewer {
     overlay_state: Arc<Mutex<OverlayState>>,
     /// Annotation/painting layer state.
     annotation_state: Arc<Mutex<AnnotationState>>,
+    /// Local-only pings (shown when not in a collab session).
+    local_pings: Arc<Mutex<Vec<shapes::MapPing>>>,
     /// Shared flag for "suppress GPU encoder warning" (persisted in Settings).
     pub suppress_gpu_warning: Arc<AtomicBool>,
     /// Active GPU encoder warning dialog, if any.
@@ -974,6 +657,7 @@ pub fn launch_replay_renderer(
             }
             ann
         })),
+        local_pings: Arc::new(Mutex::new(Vec::new())),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
@@ -1109,6 +793,7 @@ pub fn launch_client_renderer(
             }
             ann
         })),
+        local_pings: Arc::new(Mutex::new(Vec::new())),
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
@@ -1167,6 +852,7 @@ impl ReplayRendererViewer {
         let zoom_pan_arc = self.zoom_pan.clone();
         let overlay_state_arc = self.overlay_state.clone();
         let annotation_arc = self.annotation_state.clone();
+        let local_pings_arc = self.local_pings.clone();
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
@@ -1192,40 +878,8 @@ impl ReplayRendererViewer {
                 // track whether we just registered to avoid using them too early.
                 let mut fonts_just_registered = false;
                 if !state.game_fonts_registered {
-                    let mut font_defs = egui::FontDefinitions::default();
-                    egui_phosphor::add_to_fonts(&mut font_defs, egui_phosphor::Variant::Regular);
-
-                    if let Some(ref fonts) = state.game_fonts {
-                        font_defs.font_data.insert(
-                            "game_font_primary".to_owned(),
-                            egui::FontData::from_owned(fonts.primary_bytes.clone()).into(),
-                        );
-                        let mut family_fonts = vec!["game_font_primary".to_owned()];
-                        let fallback_names = ["game_font_ko", "game_font_jp", "game_font_cn"];
-                        for (i, bytes) in fonts.fallback_bytes.iter().enumerate() {
-                            let name = fallback_names.get(i).unwrap_or(&"game_font_fallback").to_string();
-                            font_defs.font_data.insert(
-                                name.clone(),
-                                egui::FontData::from_owned(bytes.clone()).into(),
-                            );
-                            family_fonts.push(name);
-                        }
-                        font_defs.families.insert(
-                            egui::FontFamily::Name("GameFont".into()),
-                            family_fonts,
-                        );
-                    } else {
-                        let proportional = font_defs
-                            .families
-                            .get(&egui::FontFamily::Proportional)
-                            .cloned()
-                            .unwrap_or_default();
-                        font_defs.families.insert(
-                            egui::FontFamily::Name("GameFont".into()),
-                            proportional,
-                        );
-                    }
-
+                    let mut font_defs = ctx.fonts(|r| r.definitions().clone());
+                    register_game_fonts(&mut font_defs, state.game_fonts.as_ref());
                     ctx.set_fonts(font_defs);
                     state.game_fonts_registered = true;
                     fonts_just_registered = true;
@@ -1419,23 +1073,11 @@ impl ReplayRendererViewer {
                     let mut zoom_changed = false;
                     let tool_active = !matches!(annotation_arc.lock().active_tool, PaintTool::None);
 
-                    // Scroll-wheel: zoom (normal) or rotate (when placing ship/rect/tri)
+                    // Scroll-wheel: zoom (normal) or rotate (when placing ship)
                     if response.hovered() {
                         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
                         if scroll_delta != 0.0 {
-                            let mut ann = annotation_arc.lock();
-                            let scroll_used_by_tool = match &mut ann.active_tool {
-                                PaintTool::PlacingShip { yaw, .. } => {
-                                    *yaw += scroll_delta * 0.005;
-                                    true
-                                }
-                                PaintTool::DrawingRect { .. } | PaintTool::DrawingTriangle { .. } => {
-                                    // Rotation handled during placement in Phase 4
-                                    false
-                                }
-                                _ => false,
-                            };
-                            drop(ann);
+                            let scroll_used_by_tool = handle_scroll_yaw(&mut annotation_arc.lock(), scroll_delta);
 
                             if !scroll_used_by_tool {
                                 let zoom_speed = 0.01;
@@ -1504,63 +1146,30 @@ impl ReplayRendererViewer {
                     if response.hovered() {
                         let cursor = {
                             let ann = annotation_arc.lock();
-                            match &ann.active_tool {
-                                PaintTool::PlacingShip { .. } => Some(egui::CursorIcon::Cell),
-                                PaintTool::Freehand { .. }
-                                | PaintTool::Eraser
-                                | PaintTool::DrawingLine { .. }
-                                | PaintTool::DrawingCircle { .. }
-                                | PaintTool::DrawingRect { .. }
-                                | PaintTool::DrawingTriangle { .. } => Some(egui::CursorIcon::None),
-                                PaintTool::None => {
-                                    if let Some(sel) = ann.selected_index {
-                                        if ann.dragging_rotation {
-                                            Some(egui::CursorIcon::Grabbing)
-                                        } else if sel < ann.annotations.len() {
-                                            // Check if hovering the rotation handle
-                                            let has_rot = matches!(
-                                                ann.annotations[sel],
-                                                Annotation::Ship { .. }
-                                                    | Annotation::Rectangle { .. }
-                                                    | Annotation::Triangle { .. }
-                                            );
-                                            let on_handle = has_rot
-                                                && response.hover_pos().is_some_and(|hp| {
-                                                    let (handle, _) =
-                                                        rotation_handle_pos(&ann.annotations[sel], &transform);
-                                                    (hp - handle).length() < ROTATION_HANDLE_RADIUS + 8.0
-                                                });
-                                            if on_handle {
-                                                Some(egui::CursorIcon::Alias)
-                                            } else {
-                                                Some(egui::CursorIcon::Grab)
-                                            }
-                                        } else {
-                                            Some(egui::CursorIcon::Grab)
-                                        }
-                                    } else {
-                                        // Check if hovering over a ship (show context menu cursor)
-                                        let near_ship = response.hover_pos().is_some_and(|hp| {
-                                            let state = shared_state.lock();
-                                            if let Some(ref frame) = state.frame {
-                                                frame.commands.iter().any(|cmd| {
-                                                    if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
-                                                        let sp = transform.minimap_to_screen(pos);
-                                                        hp.distance(sp) < 30.0
-                                                    } else {
-                                                        false
-                                                    }
-                                                })
+                            let base = annotation_cursor_icon(&ann, &response, &transform);
+                            if base.is_some() {
+                                base
+                            } else {
+                                // No annotation cursor — check if hovering over a ship
+                                let near_ship = response.hover_pos().is_some_and(|hp| {
+                                    let state = shared_state.lock();
+                                    if let Some(ref frame) = state.frame {
+                                        frame.commands.iter().any(|cmd| {
+                                            if let DrawCommand::Ship { pos, player_name: Some(_), .. } = cmd {
+                                                let sp = transform.minimap_to_screen(pos);
+                                                hp.distance(sp) < 30.0
                                             } else {
                                                 false
                                             }
-                                        });
-                                        if near_ship {
-                                            Some(egui::CursorIcon::PointingHand)
-                                        } else {
-                                            None // fall through to zoom cursor
-                                        }
+                                        })
+                                    } else {
+                                        false
                                     }
+                                });
+                                if near_ship {
+                                    Some(egui::CursorIcon::PointingHand)
+                                } else {
+                                    None
                                 }
                             }
                         };
@@ -1610,55 +1219,12 @@ impl ReplayRendererViewer {
                         }
 
                         // Draw grid overlay (A-J / 1-10)
-                        {
-                            let cell_logical = MINIMAP_SIZE as f32 / 10.0;
-                            let grid_color = Color32::from_rgba_unmultiplied(255, 255, 255, 64);
-                            let grid_stroke = Stroke::new(transform.scale_stroke(1.0), grid_color);
-
-                            for i in 1..10 {
-                                let offset = (i as f32 * cell_logical) as i32;
-                                let top = transform.minimap_to_screen(&MinimapPos { x: offset, y: 0 });
-                                let bottom =
-                                    transform.minimap_to_screen(&MinimapPos { x: offset, y: MINIMAP_SIZE as i32 });
-                                map_painter.add(Shape::LineSegment { points: [top, bottom], stroke: grid_stroke });
-
-                                let left = transform.minimap_to_screen(&MinimapPos { x: 0, y: offset });
-                                let right =
-                                    transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: offset });
-                                map_painter.add(Shape::LineSegment { points: [left, right], stroke: grid_stroke });
-                            }
-
-                            let label_font = game_font(11.0 * window_scale);
-                            let label_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
-                            for i in 0..10 {
-                                // Numbers 1-10 across the top
-                                let num_label = format!("{}", i + 1);
-                                let galley =
-                                    ctx.fonts_mut(|f| f.layout_no_wrap(num_label, label_font.clone(), label_color));
-                                let text_w = galley.size().x;
-                                let cell_center_x = (i as f32 * cell_logical + cell_logical / 2.0) as i32;
-                                let pos = transform.minimap_to_screen(&MinimapPos { x: cell_center_x, y: 2 });
-                                map_painter.add(Shape::galley(
-                                    Pos2::new(pos.x - text_w / 2.0, pos.y),
-                                    galley,
-                                    label_color,
-                                ));
-
-                                // Letters A-J down the left
-                                let letter = (b'A' + i as u8) as char;
-                                let galley = ctx.fonts_mut(|f| {
-                                    f.layout_no_wrap(letter.to_string(), label_font.clone(), label_color)
-                                });
-                                let text_h = galley.size().y;
-                                let cell_center_y = (i as f32 * cell_logical + cell_logical / 2.0) as i32;
-                                let pos = transform.minimap_to_screen(&MinimapPos { x: 3, y: cell_center_y });
-                                map_painter.add(Shape::galley(
-                                    Pos2::new(pos.x, pos.y - text_h / 2.0),
-                                    galley,
-                                    label_color,
-                                ));
-                            }
-                        }
+                        draw_grid(&map_painter, &transform, &GridStyle {
+                            grid_color: Color32::from_rgba_unmultiplied(255, 255, 255, 64),
+                            label_color: Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                            line_width: 1.0,
+                            label_font: game_font(11.0 * window_scale),
+                        });
 
                         // Draw current frame's commands, filtered by UI-local options
                         let (trail_hidden_ships, ship_range_overrides) = {
@@ -1869,88 +1435,32 @@ impl ReplayRendererViewer {
                         let collab_ss = shared_state.lock().collab_session_state.clone();
                         if let Some(ref ss_arc) = collab_ss {
                             let s = ss_arc.lock();
-                            let now = std::time::Instant::now();
-                            for cursor in &s.cursors {
-                                // Skip our own cursor.
-                                if cursor.user_id == s.my_user_id {
-                                    continue;
-                                }
-                                if let Some(pos) = cursor.pos {
-                                    let age = now.duration_since(cursor.last_update).as_secs_f32();
-                                    if age > 5.0 {
-                                        continue; // fully faded
-                                    }
-                                    let alpha = if age > 3.0 {
-                                        ((5.0 - age) / 2.0 * 255.0) as u8
-                                    } else {
-                                        255
-                                    };
-                                    let [r, g, b] = cursor.color;
-                                    let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
-
-                                    let screen_pos = transform.minimap_to_screen(&MinimapPos { x: pos[0] as i32, y: pos[1] as i32 });
-
-                                    // Draw cursor arrow (small triangle pointing up-left)
-                                    let size = 10.0;
-                                    let points = vec![
-                                        screen_pos,
-                                        screen_pos + Vec2::new(0.0, size * 1.5),
-                                        screen_pos + Vec2::new(size * 0.6, size * 1.1),
-                                    ];
-                                    map_painter.add(egui::Shape::convex_polygon(
-                                        points,
-                                        color,
-                                        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 0, 0, alpha)),
-                                    ));
-
-                                    // Draw name label
-                                    let label_pos = screen_pos + Vec2::new(size * 0.8, size * 0.5);
-                                    let galley = map_painter.layout_no_wrap(
-                                        cursor.name.clone(),
-                                        egui::FontId::proportional(11.0),
-                                        color,
-                                    );
-                                    // Background for readability
-                                    let label_rect = egui::Rect::from_min_size(
-                                        label_pos - Vec2::new(2.0, 1.0),
-                                        galley.size() + Vec2::new(4.0, 2.0),
-                                    );
-                                    map_painter.rect_filled(
-                                        label_rect,
-                                        2.0,
-                                        Color32::from_rgba_unmultiplied(0, 0, 0, alpha / 2),
-                                    );
-                                    map_painter.galley(label_pos, galley, Color32::PLACEHOLDER);
-                                }
-                            }
+                            draw_remote_cursors(&s.cursors, s.my_user_id, &map_painter, &transform);
 
                             // ─── Render map pings (ripple effects) ──────────────
-                            let mut has_active_pings = false;
-                            for ping in &s.pings {
-                                let age = now.duration_since(ping.time).as_secs_f32();
-                                if age > 1.0 {
-                                    continue;
-                                }
-                                has_active_pings = true;
-                                let max_r = transform.scale_distance(40.0);
-                                let r = age * max_r;
-                                let alpha = ((1.0 - age) * 200.0) as u8;
-                                let [pr, pg, pb] = ping.color;
-                                let ping_color = Color32::from_rgba_unmultiplied(pr, pg, pb, alpha);
-                                let screen_pos = transform.minimap_to_screen(&MinimapPos { x: ping.pos[0] as i32, y: ping.pos[1] as i32 });
-                                map_painter.add(egui::Shape::circle_stroke(screen_pos, r, egui::Stroke::new(2.0, ping_color)));
-                                map_painter.add(egui::Shape::circle_stroke(screen_pos, r * 0.6, egui::Stroke::new(1.5, ping_color)));
-                            }
-                            if has_active_pings {
-                                repaint = true;
-                            }
+                            let ping_views: Vec<MapPing> = s.pings.iter().map(|p| MapPing {
+                                pos: p.pos,
+                                color: p.color,
+                                time: p.time,
+                            }).collect();
                             drop(s);
-                            // Clean up expired pings
-                            if has_active_pings {
+                            if draw_pings(&ping_views, &map_painter, &transform) {
+                                repaint = true;
                                 let mut s = ss_arc.lock();
-                                s.pings.retain(|p| now.duration_since(p.time).as_secs_f32() < 1.0);
+                                s.pings.retain(|p| p.time.elapsed().as_secs_f32() < PING_DURATION);
                             }
                         }
+                    }
+
+                    // ─── Render local pings (when not in a collab session) ───
+                    {
+                        let mut lp = local_pings_arc.lock();
+                        if !lp.is_empty()
+                            && draw_pings(&lp, &map_painter, &transform) {
+                                repaint = true;
+                                let now = std::time::Instant::now();
+                                lp.retain(|p| now.duration_since(p.time).as_secs_f32() < PING_DURATION);
+                            }
                     }
 
                     // ─── Send local cursor to collab session ────────────────
@@ -1969,20 +1479,7 @@ impl ReplayRendererViewer {
                     // ─── Active tool indicator ───────────────────────────────────
                     {
                         let ann = annotation_arc.lock();
-                        let tool_label = match &ann.active_tool {
-                            PaintTool::None => None,
-                            PaintTool::PlacingShip { species, friendly, .. } => {
-                                let team = if *friendly { "Friendly" } else { "Enemy" };
-                                Some(format!("Placing {} {}", team, ship_short_name(species)))
-                            }
-                            PaintTool::Freehand { .. } => Some("Freehand".into()),
-                            PaintTool::Eraser => Some("Eraser".into()),
-                            PaintTool::DrawingLine { .. } => Some("Line".into()),
-                            PaintTool::DrawingCircle { .. } => Some("Circle".into()),
-                            PaintTool::DrawingRect { .. } => Some("Rectangle".into()),
-                            PaintTool::DrawingTriangle { .. } => Some("Triangle".into()),
-                        };
-                        if let Some(label) = tool_label {
+                        if let Some(label) = tool_label(&ann.active_tool) {
                             let text_pos = Pos2::new(response.rect.left() + 8.0, response.rect.top() + 8.0);
                             painter.text(
                                 text_pos,
@@ -2053,7 +1550,10 @@ impl ReplayRendererViewer {
                             ann.annotation_ids.remove(sel);
                             ann.annotation_owners.remove(sel);
                             ann.selected_index = None;
-                            send_annotation_remove(&shared_state.lock(), id);
+                            {
+                                let state = shared_state.lock();
+                                send_annotation_remove(&state.collab_local_tx, id);
+                            }
                         }
 
                         // [ and ] to adjust stroke width when a tool is active
@@ -2067,308 +1567,55 @@ impl ReplayRendererViewer {
                         }
 
                         // Left-click/drag tool actions
-                        let cursor_minimap = response.hover_pos().map(|p| transform.screen_to_minimap(p));
+                        if tool_active {
+                            // Drawing tools: PlacingShip, Freehand, Eraser, Line, Circle, Rect, Triangle
+                            let result = handle_tool_interaction(&mut ann, &response, &transform);
 
-                        // Copy these before the match to avoid borrowing ann while matching on active_tool
-                        let paint_color = ann.paint_color;
-                        let stroke_width = ann.stroke_width;
-                        let mut new_annotation: Option<Annotation> = None;
-                        let mut erase_idx: Option<usize> = None;
+                            if result.new_annotation.is_some() || result.erase_index.is_some() {
+                                ann.save_undo();
+                            }
+                            if let Some(a) = result.new_annotation {
+                                let id: u64 = rand::random();
+                                let state = shared_state.lock();
+                                let my_user_id = get_my_user_id(&state.collab_session_state);
+                                ann.annotations.push(a);
+                                ann.annotation_ids.push(id);
+                                ann.annotation_owners.push(my_user_id);
+                                send_annotation_update(&state.collab_local_tx, &ann, ann.annotations.len() - 1);
+                            }
+                            if let Some(idx) = result.erase_index {
+                                let id = ann.annotation_ids[idx];
+                                ann.annotations.remove(idx);
+                                ann.annotation_ids.remove(idx);
+                                ann.annotation_owners.remove(idx);
+                                send_annotation_remove(&shared_state.lock().collab_local_tx, id);
+                            }
+                        } else {
+                            // No tool active: select/move/rotate annotations
+                            let sm = handle_annotation_select_move(&mut ann, &response, &transform);
 
-                        match &mut ann.active_tool {
-                            PaintTool::None => {
-                                // Check if drag started on the rotation handle
-                                if response.drag_started_by(egui::PointerButton::Primary)
-                                    && let Some(sel) = ann.selected_index
-                                    && sel < ann.annotations.len()
-                                {
-                                    let has_rot = matches!(
-                                        ann.annotations[sel],
-                                        Annotation::Ship { .. }
-                                            | Annotation::Rectangle { .. }
-                                            | Annotation::Triangle { .. }
+                            // Sync to collab after rotation stopped or annotation moved
+                            if let Some(idx) = sm.rotation_stopped_index.or(sm.moved_index) {
+                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx);
+                            }
+
+                            // Click on empty space → ping
+                            if sm.selected_by_click && ann.selected_index.is_none()
+                                && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p)) {
+                                    let state = shared_state.lock();
+                                    handle_map_click_ping(
+                                        click_pos,
+                                        &mut local_pings_arc.lock(),
+                                        &state.collab_session_state,
+                                        &state.collab_local_tx,
                                     );
-                                    if has_rot && let Some(drag_origin) = response.interact_pointer_pos() {
-                                        let (handle, _) = rotation_handle_pos(&ann.annotations[sel], &transform);
-                                        if (drag_origin - handle).length() < ROTATION_HANDLE_RADIUS + 8.0 {
-                                            ann.dragging_rotation = true;
-                                        }
-                                    }
                                 }
-
-                                // Handle rotation drag
-                                if ann.dragging_rotation
-                                    && response.dragged_by(egui::PointerButton::Primary)
-                                    && let Some(sel) = ann.selected_index
-                                    && sel < ann.annotations.len()
-                                    && let Some(cursor_screen) = response.hover_pos()
-                                {
-                                    let center_screen =
-                                        annotation_screen_bounds(&ann.annotations[sel], &transform).center();
-                                    let angle = -(cursor_screen.x - center_screen.x)
-                                        .atan2(-(cursor_screen.y - center_screen.y));
-                                    match &mut ann.annotations[sel] {
-                                        Annotation::Ship { yaw, .. } => *yaw = angle,
-                                        Annotation::Rectangle { rotation, .. } => *rotation = angle,
-                                        Annotation::Triangle { rotation, .. } => *rotation = angle,
-                                        _ => {}
-                                    }
-                                }
-
-                                // Stop rotation drag — sync final rotation to collab
-                                if ann.dragging_rotation && response.drag_stopped_by(egui::PointerButton::Primary) {
-                                    ann.dragging_rotation = false;
-                                    if let Some(sel) = ann.selected_index {
-                                        send_annotation_update(&shared_state.lock(), &ann, sel);
-                                    }
-                                }
-
-                                // Click to select/deselect annotations
-                                if response.clicked()
-                                    && let Some(click_pos) = cursor_minimap
-                                {
-                                    let threshold = 15.0;
-                                    let mut closest_idx = None;
-                                    let mut closest_dist = f32::MAX;
-                                    for (i, a) in ann.annotations.iter().enumerate() {
-                                        let d = annotation_distance(a, click_pos);
-                                        if d < closest_dist {
-                                            closest_dist = d;
-                                            closest_idx = Some(i);
-                                        }
-                                    }
-                                    if closest_dist < threshold {
-                                        ann.selected_index = closest_idx;
-                                    } else {
-                                        ann.selected_index = None;
-                                        // Click on empty space → send map ping
-                                        let state = shared_state.lock();
-                                        if let Some(ref tx) = state.collab_local_tx {
-                                            let _ = tx.send(crate::collab::peer::LocalEvent::Ping([click_pos.x, click_pos.y]));
-                                        }
-                                        // Also push a local ping so the sender sees their own ripple
-                                        if let Some(ref ss_arc) = state.collab_session_state {
-                                            let mut ss = ss_arc.lock();
-                                            let my_id = ss.my_user_id;
-                                            let color = ss.cursors.iter().find(|c| c.user_id == my_id).map(|c| c.color).unwrap_or([255, 255, 0]);
-                                            ss.pings.push(crate::collab::PeerPing {
-                                                user_id: my_id,
-                                                color,
-                                                pos: [click_pos.x, click_pos.y],
-                                                time: std::time::Instant::now(),
-                                            });
-                                        }
-                                    }
-                                }
-                                // Drag to move selected annotation (only if not rotating)
-                                if !ann.dragging_rotation
-                                    && response.dragged_by(egui::PointerButton::Primary)
-                                    && let Some(sel) = ann.selected_index
-                                    && sel < ann.annotations.len()
-                                {
-                                    let delta = response.drag_delta();
-                                    // Convert screen delta to minimap delta
-                                    let minimap_delta = Vec2::new(
-                                        delta.x / (transform.window_scale * transform.zoom),
-                                        delta.y / (transform.window_scale * transform.zoom),
-                                    );
-                                    match &mut ann.annotations[sel] {
-                                        Annotation::Ship { pos, .. } => *pos += minimap_delta,
-                                        Annotation::FreehandStroke { points, .. } => {
-                                            for p in points.iter_mut() {
-                                                *p += minimap_delta;
-                                            }
-                                        }
-                                        Annotation::Line { start, end, .. } => {
-                                            *start += minimap_delta;
-                                            *end += minimap_delta;
-                                        }
-                                        Annotation::Circle { center, .. } => *center += minimap_delta,
-                                        Annotation::Rectangle { center, .. } => *center += minimap_delta,
-                                        Annotation::Triangle { center, .. } => *center += minimap_delta,
-                                    }
-                                }
-                                // Sync moved annotation on drag release
-                                if !ann.dragging_rotation
-                                    && response.drag_stopped_by(egui::PointerButton::Primary)
-                                    && let Some(sel) = ann.selected_index
-                                    && sel < ann.annotations.len()
-                                {
-                                    send_annotation_update(&shared_state.lock(), &ann, sel);
-                                }
-                            }
-
-                            PaintTool::PlacingShip { species, friendly, yaw } => {
-                                if response.clicked()
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    new_annotation = Some(Annotation::Ship {
-                                        pos,
-                                        yaw: *yaw,
-                                        species: species.clone(),
-                                        friendly: *friendly,
-                                    });
-                                }
-                            }
-
-                            PaintTool::Freehand { current_stroke } => {
-                                if response.dragged_by(egui::PointerButton::Primary)
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    current_stroke.get_or_insert_with(Vec::new).push(pos);
-                                }
-                                if response.drag_stopped_by(egui::PointerButton::Primary)
-                                    && let Some(points) = current_stroke.take()
-                                    && points.len() >= 2
-                                {
-                                    new_annotation = Some(Annotation::FreehandStroke {
-                                        points,
-                                        color: paint_color,
-                                        width: stroke_width,
-                                    });
-                                }
-                            }
-
-                            PaintTool::Eraser => {
-                                if response.clicked()
-                                    && let Some(click_pos) = cursor_minimap
-                                {
-                                    let threshold = 15.0;
-                                    let mut closest_idx = None;
-                                    let mut closest_dist = f32::MAX;
-                                    for (i, a) in ann.annotations.iter().enumerate() {
-                                        let d = annotation_distance(a, click_pos);
-                                        if d < closest_dist {
-                                            closest_dist = d;
-                                            closest_idx = Some(i);
-                                        }
-                                    }
-                                    if closest_dist < threshold {
-                                        erase_idx = closest_idx;
-                                    }
-                                }
-                            }
-
-                            PaintTool::DrawingLine { start } => {
-                                if response.clicked()
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    if let Some(s) = *start {
-                                        new_annotation = Some(Annotation::Line {
-                                            start: s,
-                                            end: pos,
-                                            color: paint_color,
-                                            width: stroke_width,
-                                        });
-                                        *start = None;
-                                    } else {
-                                        *start = Some(pos);
-                                    }
-                                }
-                            }
-
-                            PaintTool::DrawingCircle { filled, center } => {
-                                // Drag to draw: click = center, drag outward = radius
-                                if response.drag_started_by(egui::PointerButton::Primary)
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    *center = Some(pos);
-                                }
-                                if response.drag_stopped_by(egui::PointerButton::Primary)
-                                    && let Some(origin) = *center
-                                {
-                                    if let Some(pos) = cursor_minimap {
-                                        let radius = (pos - origin).length();
-                                        if radius > 1.0 {
-                                            new_annotation = Some(Annotation::Circle {
-                                                center: origin,
-                                                radius,
-                                                color: paint_color,
-                                                width: stroke_width,
-                                                filled: *filled,
-                                            });
-                                        }
-                                    }
-                                    *center = None;
-                                }
-                            }
-
-                            PaintTool::DrawingRect { filled, center } => {
-                                // Drag to draw: press sets one corner, release sets opposite
-                                if response.drag_started_by(egui::PointerButton::Primary)
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    *center = Some(pos);
-                                }
-                                if response.drag_stopped_by(egui::PointerButton::Primary)
-                                    && let Some(origin) = *center
-                                {
-                                    if let Some(pos) = cursor_minimap {
-                                        let mid = (origin + pos) / 2.0;
-                                        let half = ((pos - origin) / 2.0).abs();
-                                        if half.x > 1.0 && half.y > 1.0 {
-                                            new_annotation = Some(Annotation::Rectangle {
-                                                center: mid,
-                                                half_size: half,
-                                                rotation: 0.0,
-                                                color: paint_color,
-                                                width: stroke_width,
-                                                filled: *filled,
-                                            });
-                                        }
-                                    }
-                                    *center = None;
-                                }
-                            }
-
-                            PaintTool::DrawingTriangle { filled, center } => {
-                                if response.clicked()
-                                    && let Some(pos) = cursor_minimap
-                                {
-                                    if let Some(ctr) = *center {
-                                        let radius = (pos - ctr).length();
-                                        new_annotation = Some(Annotation::Triangle {
-                                            center: ctr,
-                                            radius,
-                                            rotation: 0.0,
-                                            color: paint_color,
-                                            width: stroke_width,
-                                            filled: *filled,
-                                        });
-                                        *center = None;
-                                    } else {
-                                        *center = Some(pos);
-                                    }
-                                }
-                            }
-                        }
-
-                        // Apply deferred mutations after the match (borrow of active_tool is released)
-                        if new_annotation.is_some() || erase_idx.is_some() {
-                            ann.save_undo();
-                        }
-                        if let Some(a) = new_annotation {
-                            let id: u64 = rand::random();
-                            let my_user_id = shared_state.lock().collab_session_state.as_ref()
-                                .map(|ss| ss.lock().my_user_id).unwrap_or(0);
-                            ann.annotations.push(a);
-                            ann.annotation_ids.push(id);
-                            ann.annotation_owners.push(my_user_id);
-                            let state = shared_state.lock();
-                            send_annotation_update(&state, &ann, ann.annotations.len() - 1);
-                        }
-                        if let Some(idx) = erase_idx {
-                            let id = ann.annotation_ids[idx];
-                            ann.annotations.remove(idx);
-                            ann.annotation_ids.remove(idx);
-                            ann.annotation_owners.remove(idx);
-                            send_annotation_remove(&shared_state.lock(), id);
                         }
 
                         // Ctrl+Z to undo
                         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
                             ann.undo();
-                            send_annotation_full_sync(&shared_state.lock(), &ann);
+                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann);
                         }
 
                         if response.clicked() {
@@ -2467,184 +1714,16 @@ impl ReplayRendererViewer {
                                         ui.set_min_width(200.0);
                                         let mut ann = annotation_arc.lock();
                                         let tex_guard = textures_arc.lock();
-
-                                        // ── Friendly ships row ──
-                                        ui.label(egui::RichText::new("Friendly Ships").color(FRIENDLY_COLOR).small());
-                                        ui.horizontal(|ui| {
-                                            for species in &SHIP_SPECIES {
-                                                let clicked = if let Some(ref textures) = *tex_guard {
-                                                    if let Some(tex) = textures.ship_icons.get(*species) {
-                                                        let img = egui::Image::new(egui::load::SizedTexture::new(
-                                                            tex.id(),
-                                                            egui::vec2(24.0, 24.0),
-                                                        ))
-                                                        .rotate(std::f32::consts::FRAC_PI_2, egui::vec2(0.5, 0.5))
-                                                        .tint(FRIENDLY_COLOR);
-                                                        ui.add(egui::Button::image(img))
-                                                            .on_hover_text(format!(
-                                                                "Friendly {}",
-                                                                ship_short_name(species)
-                                                            ))
-                                                            .clicked()
-                                                    } else {
-                                                        ui.button(
-                                                            egui::RichText::new(ship_short_name(species))
-                                                                .color(FRIENDLY_COLOR),
-                                                        )
-                                                        .clicked()
-                                                    }
-                                                } else {
-                                                    ui.button(
-                                                        egui::RichText::new(ship_short_name(species))
-                                                            .color(FRIENDLY_COLOR),
-                                                    )
-                                                    .clicked()
-                                                };
-                                                if clicked {
-                                                    ann.active_tool = PaintTool::PlacingShip {
-                                                        species: species.to_string(),
-                                                        friendly: true,
-                                                        yaw: 0.0,
-                                                    };
-                                                    ann.show_context_menu = false;
-                                                }
-                                            }
-                                        });
-
-                                        // ── Enemy ships row ──
-                                        ui.label(egui::RichText::new("Enemy Ships").color(ENEMY_COLOR).small());
-                                        ui.horizontal(|ui| {
-                                            for species in &SHIP_SPECIES {
-                                                let clicked = if let Some(ref textures) = *tex_guard {
-                                                    if let Some(tex) = textures.ship_icons.get(*species) {
-                                                        let img = egui::Image::new(egui::load::SizedTexture::new(
-                                                            tex.id(),
-                                                            egui::vec2(24.0, 24.0),
-                                                        ))
-                                                        .rotate(std::f32::consts::FRAC_PI_2, egui::vec2(0.5, 0.5))
-                                                        .tint(ENEMY_COLOR);
-                                                        ui.add(egui::Button::image(img))
-                                                            .on_hover_text(format!(
-                                                                "Enemy {}",
-                                                                ship_short_name(species)
-                                                            ))
-                                                            .clicked()
-                                                    } else {
-                                                        ui.button(
-                                                            egui::RichText::new(ship_short_name(species))
-                                                                .color(ENEMY_COLOR),
-                                                        )
-                                                        .clicked()
-                                                    }
-                                                } else {
-                                                    ui.button(
-                                                        egui::RichText::new(ship_short_name(species))
-                                                            .color(ENEMY_COLOR),
-                                                    )
-                                                    .clicked()
-                                                };
-                                                if clicked {
-                                                    ann.active_tool = PaintTool::PlacingShip {
-                                                        species: species.to_string(),
-                                                        friendly: false,
-                                                        yaw: 0.0,
-                                                    };
-                                                    ann.show_context_menu = false;
-                                                }
-                                            }
-                                        });
+                                        let ship_icons = tex_guard.as_ref().map(|t| &t.ship_icons);
+                                        let menu_result = draw_annotation_menu_common(ui, &mut ann, ship_icons);
                                         drop(tex_guard);
 
-                                        ui.separator();
-
-                                        // ── Drawing tools row ──
-                                        ui.label(egui::RichText::new("Drawing Tools").small());
-                                        ui.horizontal(|ui| {
-                                            if ui.button(icons::PAINT_BRUSH).on_hover_text("Freehand").clicked() {
-                                                ann.active_tool = PaintTool::Freehand { current_stroke: None };
-                                                ann.show_context_menu = false;
-                                            }
-                                            if ui.button(icons::ERASER).on_hover_text("Eraser").clicked() {
-                                                ann.active_tool = PaintTool::Eraser;
-                                                ann.show_context_menu = false;
-                                            }
-                                            if ui.button(icons::LINE_SEGMENT).on_hover_text("Line").clicked() {
-                                                ann.active_tool = PaintTool::DrawingLine { start: None };
-                                                ann.show_context_menu = false;
-                                            }
-                                            if ui.button(icons::CIRCLE).on_hover_text("Circle").clicked() {
-                                                ann.active_tool =
-                                                    PaintTool::DrawingCircle { filled: false, center: None };
-                                                ann.show_context_menu = false;
-                                            }
-                                            if ui.button(icons::SQUARE).on_hover_text("Rectangle").clicked() {
-                                                ann.active_tool =
-                                                    PaintTool::DrawingRect { filled: false, center: None };
-                                                ann.show_context_menu = false;
-                                            }
-                                            if ui.button(icons::TRIANGLE).on_hover_text("Triangle").clicked() {
-                                                ann.active_tool =
-                                                    PaintTool::DrawingTriangle { filled: false, center: None };
-                                                ann.show_context_menu = false;
-                                            }
-                                        });
-
-                                        ui.separator();
-
-                                        // ── Color presets + custom picker + stroke width ──
-                                        const PRESET_COLORS: &[(Color32, &str)] = &[
-                                            (Color32::WHITE, "White"),
-                                            (Color32::from_rgb(160, 160, 160), "Gray"),
-                                            (Color32::from_rgb(230, 50, 50), "Red"),
-                                            (Color32::from_rgb(240, 140, 30), "Orange"),
-                                            (Color32::from_rgb(240, 230, 50), "Yellow"),
-                                            (Color32::from_rgb(50, 200, 50), "Green"),
-                                            (Color32::from_rgb(50, 120, 230), "Blue"),
-                                            (Color32::from_rgb(180, 60, 230), "Purple"),
-                                            (Color32::from_rgb(255, 130, 180), "Pink"),
-                                        ];
-                                        ui.horizontal(|ui| {
-                                            let swatch_size = egui::vec2(16.0, 16.0);
-
-                                            // Custom color picker first, with white outline
-                                            egui::color_picker::color_edit_button_srgba(
-                                                ui,
-                                                &mut ann.paint_color,
-                                                egui::color_picker::Alpha::Opaque,
-                                            );
-                                            let picker_rect = ui.min_rect();
-                                            ui.painter().rect_stroke(
-                                                picker_rect,
-                                                CornerRadius::same(2),
-                                                Stroke::new(1.5, Color32::WHITE),
-                                                egui::StrokeKind::Outside,
-                                            );
-
-                                            ui.add_space(4.0);
-
-                                            // Preset color swatches
-                                            for &(color, name) in PRESET_COLORS {
-                                                let selected = ann.paint_color == color;
-                                                let (rect, resp) =
-                                                    ui.allocate_exact_size(swatch_size, egui::Sense::click());
-                                                ui.painter().rect_filled(rect, CornerRadius::same(3), color);
-                                                if selected {
-                                                    ui.painter().rect_stroke(
-                                                        rect,
-                                                        CornerRadius::same(3),
-                                                        Stroke::new(2.0, Color32::WHITE),
-                                                        egui::StrokeKind::Outside,
-                                                    );
-                                                }
-                                                if resp.on_hover_text(name).clicked() {
-                                                    ann.paint_color = color;
-                                                }
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                            ui.label("Width:");
-                                            ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1));
-                                        });
+                                        if menu_result.did_clear {
+                                            send_annotation_clear(&shared_state.lock().collab_local_tx);
+                                        }
+                                        if menu_result.did_undo {
+                                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann);
+                                        }
 
                                         // ── Ship-specific options (shown when right-clicking a ship) ──
                                         if let Some((ship_eid, ref ship_name)) = ann.context_menu_ship.clone() {
@@ -2818,24 +1897,6 @@ impl ReplayRendererViewer {
                                                 repaint = true;
                                             }
                                         }
-                                        // ── Clear all ──
-                                        if !ann.annotations.is_empty() {
-                                            ui.separator();
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new(icon_str!(icons::TRASH, "Clear All"))
-                                                        .color(Color32::from_rgb(255, 100, 100)),
-                                                )
-                                                .clicked()
-                                            {
-                                                ann.save_undo();
-                                                ann.annotations.clear();
-                                                ann.annotation_ids.clear();
-                                                ann.annotation_owners.clear();
-                                                ann.show_context_menu = false;
-                                                send_annotation_clear(&shared_state.lock());
-                                            }
-                                        }
                                     });
                                 });
 
@@ -2867,155 +1928,17 @@ impl ReplayRendererViewer {
                         drop(ann);
 
                         if let Some((sel_idx, bounds)) = sel_info {
-                            // Position popup to the right of the annotation, or below if near edge
-                            let popup_pos = Pos2::new(bounds.right() + 8.0, bounds.center().y);
-                            egui::Area::new(ui.id().with("annotation_edit_popup"))
-                                .order(egui::Order::Foreground)
-                                .fixed_pos(popup_pos)
-                                .interactable(true)
-                                .show(ctx, |ui| {
-                                    let frame = egui::Frame::NONE
-                                        .fill(Color32::from_gray(30))
-                                        .corner_radius(CornerRadius::same(6))
-                                        .inner_margin(egui::Margin::same(6))
-                                        .stroke(Stroke::new(1.0, Color32::from_gray(80)));
-                                    frame.show(ui, |ui| {
-                                        let mut ann = annotation_arc.lock();
-                                        if sel_idx >= ann.annotations.len() {
-                                            return;
-                                        }
-
-                                        // Size slider (for circle, rect, triangle)
-                                        let has_size = matches!(
-                                            ann.annotations[sel_idx],
-                                            Annotation::Circle { .. }
-                                                | Annotation::Rectangle { .. }
-                                                | Annotation::Triangle { .. }
-                                        );
-                                        if has_size {
-                                            ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new("Size").small());
-                                                let is_circle = matches!(&ann.annotations[sel_idx], Annotation::Circle { .. });
-                                                let map_space = shared_state.lock().map_space_size;
-                                                let use_km = is_circle && map_space.is_some();
-                                                let mut size = match &ann.annotations[sel_idx] {
-                                                    Annotation::Circle { radius, .. } => *radius,
-                                                    Annotation::Rectangle { half_size, .. } => {
-                                                        (half_size.x + half_size.y) / 2.0
-                                                    }
-                                                    Annotation::Triangle { radius, .. } => *radius,
-                                                    _ => 0.0,
-                                                };
-                                                let old = size;
-                                                if use_km {
-                                                    let space_size = map_space.unwrap();
-                                                    let mut km = size / 768.0 * space_size * 30.0 / 1000.0;
-                                                    let old_km = km;
-                                                    ui.add(egui::DragValue::new(&mut km).speed(0.1).range(0.1..=20.0).fixed_decimals(1).suffix(" km"));
-                                                    if km != old_km {
-                                                        size = km * 1000.0 / 30.0 / space_size * 768.0;
-                                                    }
-                                                } else {
-                                                    ui.add(egui::DragValue::new(&mut size).speed(1.0).range(5.0..=500.0));
-                                                }
-                                                if size != old && size > 0.0 {
-                                                    match &mut ann.annotations[sel_idx] {
-                                                        Annotation::Circle { radius, .. } => *radius = size,
-                                                        Annotation::Rectangle { half_size, .. } => {
-                                                            let ratio = if old > 0.0 { size / old } else { 1.0 };
-                                                            *half_size *= ratio;
-                                                        }
-                                                        Annotation::Triangle { radius, .. } => *radius = size,
-                                                        _ => {}
-                                                    }
-                                                    send_annotation_update(&shared_state.lock(), &ann, sel_idx);
-                                                }
-                                            });
-                                        }
-
-                                        // Color picker (for non-ship annotations)
-                                        let is_ship = matches!(ann.annotations[sel_idx], Annotation::Ship { .. });
-                                        if !is_ship {
-                                            ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new("Color").small());
-                                                let color_ref = match &mut ann.annotations[sel_idx] {
-                                                    Annotation::FreehandStroke { color, .. } => color,
-                                                    Annotation::Line { color, .. } => color,
-                                                    Annotation::Circle { color, .. } => color,
-                                                    Annotation::Rectangle { color, .. } => color,
-                                                    Annotation::Triangle { color, .. } => color,
-                                                    _ => unreachable!(),
-                                                };
-                                                let old_color = *color_ref;
-                                                egui::color_picker::color_edit_button_srgba(
-                                                    ui,
-                                                    color_ref,
-                                                    egui::color_picker::Alpha::Opaque,
-                                                );
-                                                if *color_ref != old_color {
-                                                    send_annotation_update(&shared_state.lock(), &ann, sel_idx);
-                                                }
-                                            });
-                                        }
-
-                                        // Filled toggle (for circle, rect, triangle)
-                                        let has_filled = matches!(
-                                            ann.annotations[sel_idx],
-                                            Annotation::Circle { .. }
-                                                | Annotation::Rectangle { .. }
-                                                | Annotation::Triangle { .. }
-                                        );
-                                        if has_filled {
-                                            let filled_ref = match &mut ann.annotations[sel_idx] {
-                                                Annotation::Circle { filled, .. } => filled,
-                                                Annotation::Rectangle { filled, .. } => filled,
-                                                Annotation::Triangle { filled, .. } => filled,
-                                                _ => unreachable!(),
-                                            };
-                                            let old_filled = *filled_ref;
-                                            ui.checkbox(filled_ref, egui::RichText::new("Filled").small());
-                                            if *filled_ref != old_filled {
-                                                send_annotation_update(&shared_state.lock(), &ann, sel_idx);
-                                            }
-                                        }
-
-                                        // Team toggle (for ships)
-                                        if is_ship
-                                            && let Annotation::Ship { friendly, .. } = &mut ann.annotations[sel_idx]
-                                        {
-                                            let (label, color) = if *friendly {
-                                                ("Friendly", FRIENDLY_COLOR)
-                                            } else {
-                                                ("Enemy  ", ENEMY_COLOR)
-                                            };
-                                            let btn =
-                                                egui::Button::new(egui::RichText::new(label).color(color).small())
-                                                    .min_size(egui::vec2(60.0, 0.0));
-                                            if ui.add(btn).clicked() {
-                                                *friendly = !*friendly;
-                                                send_annotation_update(&shared_state.lock(), &ann, sel_idx);
-                                            }
-                                        }
-
-                                        // Delete button
-                                        if ui
-                                            .button(
-                                                egui::RichText::new(icons::TRASH)
-                                                    .color(Color32::from_rgb(255, 100, 100)),
-                                            )
-                                            .on_hover_text("Delete")
-                                            .clicked()
-                                        {
-                                            ann.save_undo();
-                                            let id = ann.annotation_ids[sel_idx];
-                                            ann.annotations.remove(sel_idx);
-                                            ann.annotation_ids.remove(sel_idx);
-                                            ann.annotation_owners.remove(sel_idx);
-                                            ann.selected_index = None;
-                                            send_annotation_remove(&shared_state.lock(), id);
-                                        }
-                                    });
-                                });
+                            let collab_tx = shared_state.lock().collab_local_tx.clone();
+                            let map_space = shared_state.lock().map_space_size;
+                            draw_annotation_edit_popup(
+                                ctx,
+                                ui.id().with("annotation_edit_popup"),
+                                &annotation_arc,
+                                sel_idx,
+                                bounds,
+                                map_space,
+                                &collab_tx,
+                            );
                         }
                     }
 

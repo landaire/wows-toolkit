@@ -3372,6 +3372,38 @@ impl ToolkitTabViewer<'_> {
 
             // ── Collab session popover ──
             self.show_session_popover(ui);
+
+            // ── Tactics Board ──
+            {
+                let has_data = self.tab_state.world_of_warships_data.is_some();
+                let has_board = !self.tab_state.tactics_boards.lock().is_empty();
+                let btn = ui.add_enabled(
+                    has_data && !has_board,
+                    egui::Button::new(icon_str!(icons::MAP_TRIFOLD, "Tactics Board")),
+                );
+                let btn = if !has_data {
+                    btn.on_hover_text("Waiting for game data to load\u{2026}")
+                } else if has_board {
+                    btn.on_hover_text("Tactics board is already open")
+                } else {
+                    btn
+                };
+                if btn.clicked() {
+                    let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                        std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                        std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                        std::sync::Arc::clone(self.tab_state.world_of_warships_data.as_ref().unwrap()),
+                    );
+                    let session_handle =
+                        self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+                    if let Some(handle) = session_handle {
+                        board.collab_local_tx = Some(handle.local_tx.clone());
+                        board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                        board.collab_command_tx = Some(handle.command_tx.clone());
+                    }
+                    self.tab_state.tactics_boards.lock().push(board);
+                }
+            }
         });
     }
 
@@ -3596,6 +3628,8 @@ impl ToolkitTabViewer<'_> {
                             }
                         });
                     }
+
+                    self.show_shared_windows(ui);
                 } else {
                     // ── No active session ──
 
@@ -3697,6 +3731,70 @@ impl ToolkitTabViewer<'_> {
                 }
             },
         );
+    }
+
+    /// Show the "Shared Windows" section inside the session popover.
+    /// Lists open replays and tactics board with re-open buttons for closed windows.
+    fn show_shared_windows(&mut self, ui: &mut egui::Ui) {
+        let open_replays = self.tab_state.session_state.lock().open_replays.clone();
+        let has_tactics_map = self.tab_state.session_state.lock().tactics_map.is_some();
+        if open_replays.is_empty() && !has_tactics_map {
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new("Shared Windows").small().strong());
+
+        // ── Replays ──
+        let renderers = self.tab_state.replay_renderers.lock();
+        let local_replay_ids: Vec<u64> =
+            renderers.iter().filter_map(|r| r.shared_state().lock().collab_replay_id).collect();
+        drop(renderers);
+
+        for replay in &open_replays {
+            let has_local = local_replay_ids.contains(&replay.replay_id);
+            ui.horizontal(|ui| {
+                let label = format!("{} {}", icons::MONITOR, replay.replay_name);
+                if has_local {
+                    ui.label(&label);
+                } else {
+                    ui.label(RichText::new(&label).weak());
+                    // Client can't re-open host replays — they stream frames.
+                    // Just show it as unavailable.
+                }
+            });
+        }
+
+        // ── Tactics Board ──
+        if has_tactics_map {
+            let has_board = !self.tab_state.tactics_boards.lock().is_empty();
+            ui.horizontal(|ui| {
+                let label = format!("{} Tactics Board", icons::MAP_TRIFOLD);
+                if has_board {
+                    ui.label(&label);
+                } else {
+                    ui.label(RichText::new(&label).weak());
+                    if ui.small_button("Re-open").clicked()
+                        && let Some(ref wows_data) = self.tab_state.world_of_warships_data
+                    {
+                        let session_handle =
+                            self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
+                        let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                            std::sync::Arc::clone(&self.tab_state.cap_layout_db),
+                            std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
+                            std::sync::Arc::clone(wows_data),
+                        );
+                        if let Some(handle) = session_handle {
+                            board.collab_local_tx = Some(handle.local_tx.clone());
+                            board.collab_session_state = Some(std::sync::Arc::clone(&self.tab_state.session_state));
+                            board.collab_command_tx = Some(handle.command_tx.clone());
+                        }
+                        self.tab_state.tactics_boards.lock().push(board);
+                    }
+                }
+            });
+        }
     }
 
     /// Builds the replay parser tab
