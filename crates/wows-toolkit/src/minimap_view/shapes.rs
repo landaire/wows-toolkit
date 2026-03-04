@@ -95,7 +95,7 @@ pub struct GridStyle {
 impl Default for GridStyle {
     fn default() -> Self {
         Self {
-            grid_color: Color32::from_rgba_unmultiplied(180, 180, 180, 64),
+            grid_color: Color32::from_rgba_unmultiplied(180, 180, 180, 32),
             label_color: Color32::from_rgba_unmultiplied(200, 200, 200, 180),
             line_width: 0.5,
             label_font: FontId::proportional(9.0),
@@ -273,6 +273,10 @@ pub fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
                 min_dist
             }
         }
+        Annotation::Arrow { points, .. } => {
+            points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
+        }
+        Annotation::Measurement { start, end, .. } => point_to_segment_dist(point, *start, *end),
     }
 }
 
@@ -426,10 +430,264 @@ pub fn render_annotation(
                 painter.add(egui::epaint::PathShape::closed_line(screen_verts, stroke));
             }
         }
+        Annotation::Arrow { points, color, width } => {
+            let stroke_w = transform.scale_stroke(*width);
+            if points.len() >= 2 {
+                // Compute direction in minimap space using averaged trailing points,
+                // then convert to screen space for the arrowhead.
+                let minimap_dir = arrow_direction_from_points(points);
+                let tip_minimap = *points.last().unwrap();
+                let tip = minimap_vec2_to_screen(tip_minimap, transform);
+                let ref_pt = minimap_vec2_to_screen(tip_minimap - minimap_dir * 10.0, transform);
+                let screen_dir = (tip - ref_pt).normalized();
+
+                let arrow_len = (stroke_w * 4.0).max(8.0);
+                let base = tip - screen_dir * arrow_len;
+                let perp = Vec2::new(-screen_dir.y, screen_dir.x);
+                let wing = arrow_len * 0.5;
+
+                // Draw line segments, shortening the last one to stop at the arrowhead base
+                let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
+                let last_seg = screen_pts.len() - 2;
+                for (i, pair) in screen_pts.windows(2).enumerate() {
+                    let a = pair[0];
+                    let b = if i == last_seg { base } else { pair[1] };
+                    painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(stroke_w, *color) });
+                }
+
+                // Arrowhead triangle
+                let left = base + perp * wing;
+                let right = base - perp * wing;
+                painter.add(Shape::convex_polygon(vec![tip, left, right], *color, Stroke::NONE));
+            } else if points.len() == 1 {
+                let p = minimap_vec2_to_screen(points[0], transform);
+                painter.add(Shape::circle_filled(p, stroke_w / 2.0, *color));
+            }
+        }
+        Annotation::Measurement { start, end, color, width } => {
+            let a = minimap_vec2_to_screen(*start, transform);
+            let b = minimap_vec2_to_screen(*end, transform);
+            painter.add(Shape::LineSegment {
+                points: [a, b],
+                stroke: Stroke::new(transform.scale_stroke(*width), *color),
+            });
+        }
+    }
+}
+
+/// Compute a stable arrow direction from a sequence of minimap-space points.
+///
+/// Uses the averaged direction over the trailing segment of the path (up to
+/// `ARROW_TRAILING_DISTANCE` minimap units or the last 10 points, whichever
+/// covers less distance). This avoids glitchy arrow directions from freehand
+/// jitter near the endpoint.
+fn arrow_direction_from_points(points: &[Vec2]) -> Vec2 {
+    const ARROW_TRAILING_DISTANCE: f32 = 30.0;
+    const MAX_TRAILING_POINTS: usize = 10;
+
+    let n = points.len();
+    if n < 2 {
+        return Vec2::new(1.0, 0.0);
+    }
+
+    let tip = points[n - 1];
+    let mut accumulated = Vec2::ZERO;
+    let mut total_weight = 0.0;
+    let mut distance_walked = 0.0;
+    let trailing = n.min(MAX_TRAILING_POINTS + 1);
+
+    for i in 1..trailing {
+        let idx = n - 1 - i;
+        let seg = points[idx + 1] - points[idx];
+        let seg_len = seg.length();
+        if seg_len < 0.001 {
+            continue;
+        }
+        let seg_dir = seg / seg_len;
+        // Weight nearer segments more heavily
+        let weight = 1.0 / (i as f32);
+        accumulated += seg_dir * weight;
+        total_weight += weight;
+        distance_walked += seg_len;
+        if distance_walked >= ARROW_TRAILING_DISTANCE {
+            break;
+        }
+    }
+
+    if total_weight > 0.0 {
+        let avg = accumulated / total_weight;
+        if avg.length() > 0.001 {
+            return avg.normalized();
+        }
+    }
+
+    // Fallback: direction from first point to tip
+    let fallback = tip - points[0];
+    if fallback.length() > 0.001 { fallback.normalized() } else { Vec2::new(1.0, 0.0) }
+}
+
+/// Convert a minimap-space distance to kilometres, given the map's space_size.
+///
+/// The minimap is 768px. The full map occupies `space_size` BigWorld units.
+#[inline]
+pub fn minimap_distance_to_km(minimap_dist: f32, space_size: f32) -> f32 {
+    let bw = minimap_dist / 768.0 * space_size;
+    BigWorldDistance::from(bw).to_km().value()
+}
+
+/// Convert kilometres to minimap-space distance, given the map's space_size.
+#[inline]
+pub fn km_to_minimap_distance(km: f32, space_size: f32) -> f32 {
+    Km::from(km).to_bigworld().value() / space_size * 768.0
+}
+
+/// Render measurement tick marks and distance labels along a line.
+///
+/// Draws perpendicular ticks at 0.5 km intervals (small) and 1 km intervals
+/// (large), with text labels every 2 km and the total distance at the endpoint.
+///
+/// When `map_space_size` is `None`, only the pixel distance is shown.
+pub fn render_measurement_details(
+    start: Vec2,
+    end: Vec2,
+    color: Color32,
+    width: f32,
+    transform: &MapTransform,
+    map_space_size: Option<f32>,
+    painter: &egui::Painter,
+) {
+    let screen_start = minimap_vec2_to_screen(start, transform);
+    let screen_end = minimap_vec2_to_screen(end, transform);
+    let minimap_dist = (end - start).length();
+    if minimap_dist < 0.1 {
+        return;
+    }
+    let dir = (end - start) / minimap_dist;
+    let stroke_w = transform.scale_stroke(width);
+
+    // Font scales with zoom so labels stay readable when zoomed in
+    let font_size = transform.scale_distance(3.5).max(9.0);
+    let label_font = FontId::proportional(font_size);
+
+    // Contrasting outline color: dark text gets light outline and vice versa
+    let luma = 0.299 * color.r() as f32 + 0.587 * color.g() as f32 + 0.114 * color.b() as f32;
+    let outline_color = if luma > 128.0 {
+        Color32::from_rgba_unmultiplied(0, 0, 0, 200)
+    } else {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 200)
+    };
+
+    let tick_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 200);
+    let small_tick_screen = transform.scale_distance(3.0);
+    let large_tick_screen = transform.scale_distance(6.0);
+    let tick_stroke = Stroke::new((stroke_w * 0.6).max(1.0), tick_color);
+    // Gap between tick end and nearest text edge
+    let text_gap = (font_size * 0.4).max(4.0);
+    // Outline thickness scales with font for visibility
+    let outline_d = (font_size * 0.1).clamp(1.0, 3.0);
+
+    // Endpoint markers (small circles)
+    painter.add(Shape::circle_filled(screen_start, (stroke_w * 1.2).max(3.0), color));
+    painter.add(Shape::circle_filled(screen_end, (stroke_w * 1.2).max(3.0), color));
+
+    if let Some(space_size) = map_space_size {
+        let total_km = minimap_distance_to_km(minimap_dist, space_size);
+        let half_km_minimap = km_to_minimap_distance(0.5, space_size);
+
+        // Walk along the line every 0.5 km
+        let mut d = half_km_minimap;
+        let mut tick_idx = 1u32; // 1 = 0.5km, 2 = 1.0km, 3 = 1.5km, ...
+        while d < minimap_dist {
+            let tick_pos_minimap = start + dir * d;
+            let tick_pos_screen = minimap_vec2_to_screen(tick_pos_minimap, transform);
+
+            let is_full_km = tick_idx.is_multiple_of(2);
+            let tick_half = if is_full_km { large_tick_screen } else { small_tick_screen };
+            let screen_perp = Vec2::new(screen_end.x - screen_start.x, screen_end.y - screen_start.y);
+            let screen_dir = screen_perp.normalized();
+            let screen_perp = Vec2::new(-screen_dir.y, screen_dir.x);
+
+            let p1 = tick_pos_screen + screen_perp * tick_half;
+            let p2 = tick_pos_screen - screen_perp * tick_half;
+            painter.add(Shape::LineSegment { points: [p1, p2], stroke: tick_stroke });
+
+            // Label every 2 km — with outline for contrast and breathing room
+            if tick_idx.is_multiple_of(4) {
+                let km_here = (tick_idx as f32) * 0.5;
+                let label = format!("{:.0}", km_here);
+                // Offset: tick half-extent + half font height + gap
+                let label_offset = screen_perp * (large_tick_screen + font_size * 0.5 + text_gap);
+                let label_pos = tick_pos_screen + label_offset;
+                // Outline: draw in 8 directions for solid stroke
+                for off in [
+                    Vec2::new(-outline_d, 0.0),
+                    Vec2::new(outline_d, 0.0),
+                    Vec2::new(0.0, -outline_d),
+                    Vec2::new(0.0, outline_d),
+                    Vec2::new(-outline_d, -outline_d),
+                    Vec2::new(outline_d, -outline_d),
+                    Vec2::new(-outline_d, outline_d),
+                    Vec2::new(outline_d, outline_d),
+                ] {
+                    painter.text(
+                        label_pos + off,
+                        egui::Align2::CENTER_CENTER,
+                        &label,
+                        label_font.clone(),
+                        outline_color,
+                    );
+                }
+                painter.text(label_pos, egui::Align2::CENTER_CENTER, label, label_font.clone(), tick_color);
+            }
+
+            d += half_km_minimap;
+            tick_idx += 1;
+        }
+
+        // Total distance label at endpoint — with outline and breathing room
+        let screen_line_dir = (screen_end - screen_start).normalized();
+        let screen_line_perp = Vec2::new(-screen_line_dir.y, screen_line_dir.x);
+        let label_offset = screen_line_perp * (large_tick_screen + font_size * 0.5 + text_gap);
+        let total_label = format!("{:.1} km", total_km);
+        let total_pos = screen_end + label_offset + screen_line_dir * 6.0;
+        for off in [
+            Vec2::new(-outline_d, 0.0),
+            Vec2::new(outline_d, 0.0),
+            Vec2::new(0.0, -outline_d),
+            Vec2::new(0.0, outline_d),
+            Vec2::new(-outline_d, -outline_d),
+            Vec2::new(outline_d, -outline_d),
+            Vec2::new(-outline_d, outline_d),
+            Vec2::new(outline_d, outline_d),
+        ] {
+            painter.text(total_pos + off, egui::Align2::LEFT_CENTER, &total_label, label_font.clone(), outline_color);
+        }
+        painter.text(total_pos, egui::Align2::LEFT_CENTER, total_label, label_font, color);
+    } else {
+        // No space_size: show pixel distance only
+        let screen_line_dir = (screen_end - screen_start).normalized();
+        let screen_line_perp = Vec2::new(-screen_line_dir.y, screen_line_dir.x);
+        let label_offset = screen_line_perp * (font_size * 0.5 + text_gap + 6.0);
+        let label = format!("{:.0} px", minimap_dist);
+        let label_pos = screen_end + label_offset;
+        for off in [
+            Vec2::new(-outline_d, 0.0),
+            Vec2::new(outline_d, 0.0),
+            Vec2::new(0.0, -outline_d),
+            Vec2::new(0.0, outline_d),
+            Vec2::new(-outline_d, -outline_d),
+            Vec2::new(outline_d, -outline_d),
+            Vec2::new(-outline_d, outline_d),
+            Vec2::new(outline_d, outline_d),
+        ] {
+            painter.text(label_pos + off, egui::Align2::LEFT_CENTER, &label, label_font.clone(), outline_color);
+        }
+        painter.text(label_pos, egui::Align2::LEFT_CENTER, label, label_font, color);
     }
 }
 
 /// Render a preview of the active tool at the cursor position.
+#[allow(clippy::too_many_arguments)]
 pub fn render_tool_preview(
     tool: &PaintTool,
     minimap_pos: Vec2,
@@ -438,6 +696,7 @@ pub fn render_tool_preview(
     transform: &MapTransform,
     ship_icons: Option<&HashMap<String, TextureHandle>>,
     painter: &egui::Painter,
+    map_space_size: Option<f32>,
 ) {
     let ghost_alpha = 128u8;
     match tool {
@@ -552,6 +811,69 @@ pub fn render_tool_preview(
                 }
             }
         }
+        PaintTool::DrawingArrow { current_stroke } => {
+            if let Some(points) = current_stroke {
+                let sw = transform.scale_stroke(stroke_width);
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+
+                // Build full path including cursor position for direction computation
+                let mut full_path = points.clone();
+                full_path.push(minimap_pos);
+
+                if full_path.len() >= 2 {
+                    let minimap_dir = arrow_direction_from_points(&full_path);
+                    let tip = minimap_vec2_to_screen(minimap_pos, transform);
+                    let ref_pt = minimap_vec2_to_screen(minimap_pos - minimap_dir * 10.0, transform);
+                    let screen_dir = (tip - ref_pt).normalized();
+
+                    let arrow_len = (sw * 4.0).max(8.0);
+                    let base = tip - screen_dir * arrow_len;
+                    let perp = Vec2::new(-screen_dir.y, screen_dir.x);
+                    let wing = arrow_len * 0.5;
+
+                    // Draw line segments, shortening the last one to stop at arrowhead base
+                    let screen_pts: Vec<Pos2> =
+                        full_path.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
+                    let last_seg = screen_pts.len() - 2;
+                    for (i, pair) in screen_pts.windows(2).enumerate() {
+                        let a = pair[0];
+                        let b = if i == last_seg { base } else { pair[1] };
+                        painter.add(Shape::LineSegment { points: [a, b], stroke: Stroke::new(sw, ghost_color) });
+                    }
+
+                    // Arrowhead triangle
+                    let left = base + perp * wing;
+                    let right = base - perp * wing;
+                    painter.add(Shape::convex_polygon(vec![tip, left, right], ghost_color, Stroke::NONE));
+                }
+            }
+            let c = minimap_vec2_to_screen(minimap_pos, transform);
+            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
+            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.0, color)));
+        }
+        PaintTool::DrawingMeasurement { start, .. } => {
+            let c = minimap_vec2_to_screen(minimap_pos, transform);
+            let r = (transform.scale_stroke(stroke_width) / 2.0).max(3.0);
+            painter.add(Shape::circle_stroke(c, r, Stroke::new(1.0, color)));
+            if let Some(s) = start {
+                let a = minimap_vec2_to_screen(*s, transform);
+                let b = minimap_vec2_to_screen(minimap_pos, transform);
+                let ghost_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ghost_alpha);
+                painter.add(Shape::LineSegment {
+                    points: [a, b],
+                    stroke: Stroke::new(transform.scale_stroke(stroke_width), ghost_color),
+                });
+                render_measurement_details(
+                    *s,
+                    minimap_pos,
+                    ghost_color,
+                    stroke_width,
+                    transform,
+                    map_space_size,
+                    painter,
+                );
+            }
+        }
         PaintTool::None => {}
     }
 }
@@ -600,6 +922,15 @@ pub fn render_selection_highlight(ann: &Annotation, transform: &MapTransform, pa
         let thin_stroke = Stroke::new(1.0, Color32::from_rgb(255, 255, 100));
         painter.add(Shape::LineSegment { points: [anchor, handle_pos], stroke: thin_stroke });
         painter.add(Shape::circle_filled(handle_pos, ROTATION_HANDLE_RADIUS, Color32::from_rgb(255, 255, 100)));
+    }
+
+    // Endpoint handles for measurement annotations
+    if let Annotation::Measurement { start, end, .. } = ann {
+        let handle_color = Color32::from_rgb(255, 255, 100);
+        let start_screen = minimap_vec2_to_screen(*start, transform);
+        let end_screen = minimap_vec2_to_screen(*end, transform);
+        painter.add(Shape::circle_stroke(start_screen, 6.0, Stroke::new(1.5, handle_color)));
+        painter.add(Shape::circle_stroke(end_screen, 6.0, Stroke::new(1.5, handle_color)));
     }
 }
 
@@ -675,6 +1006,19 @@ pub fn annotation_screen_bounds(ann: &Annotation, transform: &MapTransform) -> R
                 rect = rect.union(Rect::from_min_max(*p, *p));
             }
             rect
+        }
+        Annotation::Arrow { points, .. } => {
+            let screen_pts: Vec<Pos2> = points.iter().map(|p| minimap_vec2_to_screen(*p, transform)).collect();
+            let mut rect = Rect::from_min_max(screen_pts[0], screen_pts[0]);
+            for p in &screen_pts[1..] {
+                rect = rect.union(Rect::from_min_max(*p, *p));
+            }
+            rect
+        }
+        Annotation::Measurement { start, end, .. } => {
+            let a = minimap_vec2_to_screen(*start, transform);
+            let b = minimap_vec2_to_screen(*end, transform);
+            Rect::from_two_pos(a, b)
         }
     }
 }
@@ -879,6 +1223,42 @@ pub fn handle_tool_interaction(
                 }
             }
         }
+        PaintTool::DrawingArrow { current_stroke } => {
+            let shift_held = response.ctx.input(|i| i.modifiers.shift);
+            if response.dragged_by(egui::PointerButton::Primary)
+                && let Some(pos) = cursor_minimap
+            {
+                let stroke = current_stroke.get_or_insert_with(Vec::new);
+                if shift_held {
+                    // Straight line: keep only start point + cursor
+                    let start = stroke.first().copied().unwrap_or(pos);
+                    stroke.clear();
+                    stroke.push(start);
+                    stroke.push(pos);
+                } else {
+                    stroke.push(pos);
+                }
+            }
+            if response.drag_stopped_by(egui::PointerButton::Primary)
+                && let Some(points) = current_stroke.take()
+                && points.len() >= 2
+            {
+                new_annotation = Some(Annotation::Arrow { points, color: paint_color, width: stroke_width });
+            }
+        }
+        PaintTool::DrawingMeasurement { start } => {
+            if response.clicked()
+                && let Some(pos) = cursor_minimap
+            {
+                if let Some(s) = *start {
+                    new_annotation =
+                        Some(Annotation::Measurement { start: s, end: pos, color: paint_color, width: stroke_width });
+                    *start = None;
+                } else {
+                    *start = Some(pos);
+                }
+            }
+        }
         PaintTool::None => {}
     }
 
@@ -889,8 +1269,8 @@ pub fn handle_tool_interaction(
 
 /// Result of annotation selection/move/rotate for one frame.
 pub struct SelectMoveResult {
-    /// Index of annotation that was moved (for collab sync on drag-stop).
-    pub moved_index: Option<usize>,
+    /// Indices of annotations that were moved (for collab sync on drag-stop).
+    pub moved_indices: Vec<usize>,
     /// Index of annotation whose rotation drag just stopped.
     pub rotation_stopped_index: Option<usize>,
     /// Index of annotation that was selected by click.
@@ -906,11 +1286,12 @@ pub fn handle_annotation_select_move(
     response: &egui::Response,
     transform: &MapTransform,
 ) -> SelectMoveResult {
-    let mut result = SelectMoveResult { moved_index: None, rotation_stopped_index: None, selected_by_click: false };
+    let mut result =
+        SelectMoveResult { moved_indices: Vec::new(), rotation_stopped_index: None, selected_by_click: false };
 
-    // Check if drag started on the rotation handle
+    // Check if drag started on the rotation handle or a measurement endpoint (single selection only)
     if response.drag_started_by(egui::PointerButton::Primary)
-        && let Some(sel) = ann.selected_index
+        && let Some(sel) = ann.single_selected()
         && sel < ann.annotations.len()
     {
         let has_rot = matches!(
@@ -923,12 +1304,25 @@ pub fn handle_annotation_select_move(
                 ann.dragging_rotation = true;
             }
         }
+        // Check measurement endpoint
+        if let Annotation::Measurement { start, end, .. } = &ann.annotations[sel]
+            && let Some(drag_origin) = response.interact_pointer_pos()
+        {
+            let start_screen = minimap_vec2_to_screen(*start, transform);
+            let end_screen = minimap_vec2_to_screen(*end, transform);
+            let threshold = 15.0;
+            if (drag_origin - start_screen).length() < threshold {
+                ann.dragging_measurement_endpoint = Some(0);
+            } else if (drag_origin - end_screen).length() < threshold {
+                ann.dragging_measurement_endpoint = Some(1);
+            }
+        }
     }
 
-    // Handle rotation drag
+    // Handle rotation drag (single selection only)
     if ann.dragging_rotation
         && response.dragged_by(egui::PointerButton::Primary)
-        && let Some(sel) = ann.selected_index
+        && let Some(sel) = ann.single_selected()
         && sel < ann.annotations.len()
         && let Some(cursor_screen) = response.hover_pos()
     {
@@ -945,13 +1339,14 @@ pub fn handle_annotation_select_move(
     // Stop rotation drag
     if ann.dragging_rotation && response.drag_stopped_by(egui::PointerButton::Primary) {
         ann.dragging_rotation = false;
-        result.rotation_stopped_index = ann.selected_index;
+        result.rotation_stopped_index = ann.single_selected();
     }
 
     // Click to select/deselect annotations
     if response.clicked()
         && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p))
     {
+        let ctrl_held = response.ctx.input(|i| i.modifiers.command);
         let threshold = 15.0;
         let mut closest_idx = None;
         let mut closest_dist = f32::MAX;
@@ -963,52 +1358,89 @@ pub fn handle_annotation_select_move(
             }
         }
         if closest_dist < threshold {
-            ann.selected_index = closest_idx;
-        } else {
-            ann.selected_index = None;
+            if let Some(idx) = closest_idx {
+                if ctrl_held {
+                    // Toggle in/out of selection
+                    if ann.selected_indices.contains(&idx) {
+                        ann.selected_indices.remove(&idx);
+                    } else {
+                        ann.selected_indices.insert(idx);
+                    }
+                } else {
+                    ann.select_single(idx);
+                }
+            }
+        } else if !ctrl_held {
+            ann.clear_selection();
         }
         result.selected_by_click = true;
     }
 
-    // Drag to move selected annotation (only if not rotating)
-    if !ann.dragging_rotation
-        && response.dragged_by(egui::PointerButton::Primary)
-        && let Some(sel) = ann.selected_index
-        && sel < ann.annotations.len()
-    {
+    // Drag to move selected annotations (only if not rotating)
+    if !ann.dragging_rotation && response.dragged_by(egui::PointerButton::Primary) && ann.has_selection() {
         let delta = response.drag_delta();
         let minimap_delta = Vec2::new(
             delta.x / (transform.window_scale * transform.zoom),
             delta.y / (transform.window_scale * transform.zoom),
         );
-        match &mut ann.annotations[sel] {
-            Annotation::Ship { pos, .. } => *pos += minimap_delta,
-            Annotation::FreehandStroke { points, .. } => {
-                for p in points.iter_mut() {
-                    *p += minimap_delta;
-                }
-            }
-            Annotation::Line { start, end, .. } => {
+
+        // Measurement endpoint drag: move only the dragged endpoint (single selection only)
+        if let Some(ep) = ann.dragging_measurement_endpoint
+            && let Some(sel) = ann.single_selected()
+            && let Annotation::Measurement { start, end, .. } = &mut ann.annotations[sel]
+        {
+            if ep == 0 {
                 *start += minimap_delta;
+            } else {
                 *end += minimap_delta;
             }
-            Annotation::Circle { center, .. } => *center += minimap_delta,
-            Annotation::Rectangle { center, .. } => *center += minimap_delta,
-            Annotation::Triangle { center, .. } => *center += minimap_delta,
+            result.moved_indices.push(sel);
+        } else {
+            let indices: Vec<usize> = ann.selected_indices.iter().copied().collect();
+            for &sel in &indices {
+                if sel < ann.annotations.len() {
+                    move_annotation(&mut ann.annotations[sel], minimap_delta);
+                }
+            }
+            result.moved_indices = indices;
         }
-        result.moved_index = Some(sel);
     }
 
-    // Sync moved annotation on drag release
-    if !ann.dragging_rotation
-        && response.drag_stopped_by(egui::PointerButton::Primary)
-        && let Some(sel) = ann.selected_index
-        && sel < ann.annotations.len()
-    {
-        result.moved_index = Some(sel);
+    // Sync moved annotations on drag release
+    if !ann.dragging_rotation && response.drag_stopped_by(egui::PointerButton::Primary) && ann.has_selection() {
+        ann.dragging_measurement_endpoint = None;
+        result.moved_indices = ann.selected_indices.iter().copied().collect();
     }
 
     result
+}
+
+/// Move an annotation by a delta in minimap coordinates.
+fn move_annotation(ann: &mut Annotation, delta: Vec2) {
+    match ann {
+        Annotation::Ship { pos, .. } => *pos += delta,
+        Annotation::FreehandStroke { points, .. } => {
+            for p in points.iter_mut() {
+                *p += delta;
+            }
+        }
+        Annotation::Line { start, end, .. } => {
+            *start += delta;
+            *end += delta;
+        }
+        Annotation::Circle { center, .. } => *center += delta,
+        Annotation::Rectangle { center, .. } => *center += delta,
+        Annotation::Triangle { center, .. } => *center += delta,
+        Annotation::Arrow { points, .. } => {
+            for p in points.iter_mut() {
+                *p += delta;
+            }
+        }
+        Annotation::Measurement { start, end, .. } => {
+            *start += delta;
+            *end += delta;
+        }
+    }
 }
 
 // ─── Shared Context Menu Drawing ───────────────────────────────────────────
@@ -1052,28 +1484,36 @@ pub fn draw_annotation_menu_common(
     // ── Drawing tools row ──
     ui.label(egui::RichText::new("Drawing Tools").small());
     ui.horizontal(|ui| {
-        if ui.button(icons::PAINT_BRUSH).on_hover_text("Freehand").clicked() {
+        if ui.button(icons::ARROW_BEND_UP_RIGHT).on_hover_text("Arrow (Ctrl+1)").clicked() {
+            ann.active_tool = PaintTool::DrawingArrow { current_stroke: None };
+            ann.show_context_menu = false;
+        }
+        if ui.button(icons::PAINT_BRUSH).on_hover_text("Freehand (Ctrl+2)").clicked() {
             ann.active_tool = PaintTool::Freehand { current_stroke: None };
             ann.show_context_menu = false;
         }
-        if ui.button(icons::ERASER).on_hover_text("Eraser").clicked() {
+        if ui.button(icons::ERASER).on_hover_text("Eraser (Ctrl+3)").clicked() {
             ann.active_tool = PaintTool::Eraser;
             ann.show_context_menu = false;
         }
-        if ui.button(icons::LINE_SEGMENT).on_hover_text("Line").clicked() {
+        if ui.button(icons::LINE_SEGMENT).on_hover_text("Line (Ctrl+4)").clicked() {
             ann.active_tool = PaintTool::DrawingLine { start: None };
             ann.show_context_menu = false;
         }
-        if ui.button(icons::CIRCLE).on_hover_text("Circle").clicked() {
+        if ui.button(icons::CIRCLE).on_hover_text("Circle (Ctrl+5)").clicked() {
             ann.active_tool = PaintTool::DrawingCircle { filled: false, center: None };
             ann.show_context_menu = false;
         }
-        if ui.button(icons::SQUARE).on_hover_text("Rectangle").clicked() {
+        if ui.button(icons::SQUARE).on_hover_text("Rectangle (Ctrl+6)").clicked() {
             ann.active_tool = PaintTool::DrawingRect { filled: false, center: None };
             ann.show_context_menu = false;
         }
-        if ui.button(icons::TRIANGLE).on_hover_text("Triangle").clicked() {
+        if ui.button(icons::TRIANGLE).on_hover_text("Triangle (Ctrl+7)").clicked() {
             ann.active_tool = PaintTool::DrawingTriangle { filled: false, center: None };
+            ann.show_context_menu = false;
+        }
+        if ui.button(icons::RULER).on_hover_text("Measurement (Ctrl+M)").clicked() {
+            ann.active_tool = PaintTool::DrawingMeasurement { start: None };
             ann.show_context_menu = false;
         }
     });
@@ -1123,7 +1563,7 @@ pub fn draw_annotation_menu_common(
             ann.annotations.clear();
             ann.annotation_ids.clear();
             ann.annotation_owners.clear();
-            ann.selected_index = None;
+            ann.clear_selection();
             ann.show_context_menu = false;
             did_clear = true;
         }
@@ -1145,6 +1585,8 @@ pub fn tool_label(tool: &PaintTool) -> Option<String> {
         PaintTool::DrawingCircle { .. } => Some("Circle".into()),
         PaintTool::DrawingRect { .. } => Some("Rectangle".into()),
         PaintTool::DrawingTriangle { .. } => Some("Triangle".into()),
+        PaintTool::DrawingArrow { .. } => Some("Arrow".into()),
+        PaintTool::DrawingMeasurement { .. } => Some("Measurement".into()),
     }
 }
 
@@ -1165,13 +1607,17 @@ pub fn annotation_cursor_icon(
         | PaintTool::DrawingLine { .. }
         | PaintTool::DrawingCircle { .. }
         | PaintTool::DrawingRect { .. }
-        | PaintTool::DrawingTriangle { .. } => Some(egui::CursorIcon::Crosshair),
+        | PaintTool::DrawingTriangle { .. }
+        | PaintTool::DrawingArrow { .. }
+        | PaintTool::DrawingMeasurement { .. } => Some(egui::CursorIcon::Crosshair),
         PaintTool::None => {
-            if let Some(sel) = ann.selected_index {
+            if ann.has_selection() {
                 if ann.dragging_rotation {
                     Some(egui::CursorIcon::Grabbing)
-                } else if sel < ann.annotations.len() {
-                    // Check if hovering the rotation handle
+                } else if let Some(sel) = ann.single_selected()
+                    && sel < ann.annotations.len()
+                {
+                    // Check if hovering the rotation handle (single selection only)
                     let has_rot = matches!(
                         ann.annotations[sel],
                         Annotation::Ship { .. } | Annotation::Rectangle { .. } | Annotation::Triangle { .. }
@@ -1192,6 +1638,45 @@ pub fn annotation_cursor_icon(
     }
 }
 
+/// Handle keyboard shortcuts for switching annotation tools.
+///
+/// Reads `Ctrl+1..7` and `Ctrl+M` from the egui context input. Sets the
+/// active tool and clears selection when a shortcut is pressed.
+/// Returns `true` if a shortcut was consumed.
+pub fn handle_tool_shortcuts(ctx: &egui::Context, ann: &mut AnnotationState) -> bool {
+    let consumed = ctx.input(|i| {
+        if !i.modifiers.command {
+            return None;
+        }
+        if i.key_pressed(egui::Key::Num1) {
+            Some(PaintTool::DrawingArrow { current_stroke: None })
+        } else if i.key_pressed(egui::Key::Num2) {
+            Some(PaintTool::Freehand { current_stroke: None })
+        } else if i.key_pressed(egui::Key::Num3) {
+            Some(PaintTool::Eraser)
+        } else if i.key_pressed(egui::Key::Num4) {
+            Some(PaintTool::DrawingLine { start: None })
+        } else if i.key_pressed(egui::Key::Num5) {
+            Some(PaintTool::DrawingCircle { filled: false, center: None })
+        } else if i.key_pressed(egui::Key::Num6) {
+            Some(PaintTool::DrawingRect { filled: false, center: None })
+        } else if i.key_pressed(egui::Key::Num7) {
+            Some(PaintTool::DrawingTriangle { filled: false, center: None })
+        } else if i.key_pressed(egui::Key::M) {
+            Some(PaintTool::DrawingMeasurement { start: None })
+        } else {
+            None
+        }
+    });
+    if let Some(tool) = consumed {
+        ann.active_tool = tool;
+        ann.clear_selection();
+        true
+    } else {
+        false
+    }
+}
+
 /// Handle scroll-wheel yaw rotation for the PlacingShip tool.
 /// Returns `true` if the scroll was consumed (i.e. yaw was adjusted).
 pub fn handle_scroll_yaw(ann: &mut AnnotationState, scroll_delta: f32) -> bool {
@@ -1207,12 +1692,84 @@ pub fn handle_scroll_yaw(ann: &mut AnnotationState, scroll_delta: f32) -> bool {
     }
 }
 
+/// Draw a shortcut overlay visible while Ctrl is held.
+///
+/// Shows a semi-transparent panel in the bottom-right listing all tool
+/// shortcuts, undo, multi-select, stroke width, and delete keys.
+pub fn draw_shortcut_overlay(ctx: &egui::Context, area_id: egui::Id) {
+    if !ctx.input(|i| i.modifiers.command) {
+        return;
+    }
+    egui::Area::new(area_id)
+        .order(egui::Order::Tooltip)
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            let frame = egui::Frame::NONE
+                .fill(Color32::from_rgba_unmultiplied(20, 20, 20, 200))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::same(8));
+            frame.show(ui, |ui| {
+                let s = |text: &str| egui::RichText::new(text).size(11.0).color(Color32::from_gray(220));
+                let dim = |text: &str| egui::RichText::new(text).size(11.0).color(Color32::from_gray(130));
+                ui.label(s("Keyboard Shortcuts"));
+                ui.separator();
+                ui.label(dim("Tools"));
+                egui::Grid::new(area_id.with("grid")).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+                    ui.label(s("Ctrl+1"));
+                    ui.label(s("Arrow"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+2"));
+                    ui.label(s("Freehand"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+3"));
+                    ui.label(s("Eraser"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+4"));
+                    ui.label(s("Line"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+5"));
+                    ui.label(s("Circle"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+6"));
+                    ui.label(s("Rectangle"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+7"));
+                    ui.label(s("Triangle"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+M"));
+                    ui.label(s("Measurement"));
+                    ui.end_row();
+                });
+                ui.add_space(2.0);
+                ui.label(dim("Actions"));
+                egui::Grid::new(area_id.with("grid2")).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+                    ui.label(s("Ctrl+Z"));
+                    ui.label(s("Undo"));
+                    ui.end_row();
+                    ui.label(s("Ctrl+Click"));
+                    ui.label(s("Multi-select"));
+                    ui.end_row();
+                    ui.label(s("[ / ]"));
+                    ui.label(s("Stroke width"));
+                    ui.end_row();
+                    ui.label(s("Del"));
+                    ui.label(s("Delete"));
+                    ui.end_row();
+                    ui.label(s("Esc"));
+                    ui.label(s("Cancel / Deselect"));
+                    ui.end_row();
+                });
+            });
+        });
+}
+
 /// Draw the annotation selection edit popup (size, color, filled, team, delete).
 ///
 /// Shared between the replay renderer and the tactics board. The popup appears
 /// to the right of the selected annotation's screen bounds.
 ///
-/// Call this after checking `selected_index` and computing `bounds` via
+/// Call this after checking `single_selected()` and computing `bounds` via
 /// [`annotation_screen_bounds`]. The function locks `annotation_arc` internally
 /// (the caller must drop any prior lock before calling).
 pub fn draw_annotation_edit_popup(
@@ -1296,6 +1853,8 @@ pub fn draw_annotation_edit_popup(
                         Annotation::Circle { color, .. } => color,
                         Annotation::Rectangle { color, .. } => color,
                         Annotation::Triangle { color, .. } => color,
+                        Annotation::Arrow { color, .. } => color,
+                        Annotation::Measurement { color, .. } => color,
                         _ => unreachable!(),
                     };
                     let old_color = *color_ref;
@@ -1347,7 +1906,7 @@ pub fn draw_annotation_edit_popup(
                 ann.annotations.remove(sel_idx);
                 ann.annotation_ids.remove(sel_idx);
                 ann.annotation_owners.remove(sel_idx);
-                ann.selected_index = None;
+                ann.clear_selection();
                 send_annotation_remove(collab_local_tx, id);
             }
         });

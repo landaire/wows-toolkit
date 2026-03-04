@@ -60,11 +60,14 @@ use super::shapes::draw_annotation_menu_common;
 use super::shapes::draw_grid;
 use super::shapes::draw_pings;
 use super::shapes::draw_remote_cursors;
+use super::shapes::draw_shortcut_overlay;
 use super::shapes::game_font;
 use super::shapes::handle_annotation_select_move;
 use super::shapes::handle_scroll_yaw;
 use super::shapes::handle_tool_interaction;
+use super::shapes::handle_tool_shortcuts;
 use super::shapes::render_annotation;
+use super::shapes::render_measurement_details;
 use super::shapes::render_selection_highlight;
 use super::shapes::render_tool_preview;
 use super::shapes::tool_label;
@@ -118,6 +121,8 @@ enum PresetAnnotation {
     Circle { center: [f32; 2], radius: f32, color: [u8; 4], width: f32, filled: bool },
     Rectangle { center: [f32; 2], half_size: [f32; 2], rotation: f32, color: [u8; 4], width: f32, filled: bool },
     Triangle { center: [f32; 2], radius: f32, rotation: f32, color: [u8; 4], width: f32, filled: bool },
+    Arrow { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
+    Measurement { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
 }
 
 impl PresetAnnotation {
@@ -161,6 +166,17 @@ impl PresetAnnotation {
                 color: color.to_array(),
                 width: *width,
                 filled: *filled,
+            },
+            Annotation::Arrow { points, color, width } => PresetAnnotation::Arrow {
+                points: points.iter().map(|p| [p.x, p.y]).collect(),
+                color: color.to_array(),
+                width: *width,
+            },
+            Annotation::Measurement { start, end, color, width } => PresetAnnotation::Measurement {
+                start: [start.x, start.y],
+                end: [end.x, end.y],
+                color: color.to_array(),
+                width: *width,
             },
         }
     }
@@ -208,6 +224,17 @@ impl PresetAnnotation {
                 color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
                 width: *width,
                 filled: *filled,
+            },
+            PresetAnnotation::Arrow { points, color, width } => Annotation::Arrow {
+                points: points.iter().map(|p| Vec2::new(p[0], p[1])).collect(),
+                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+                width: *width,
+            },
+            PresetAnnotation::Measurement { start, end, color, width } => Annotation::Measurement {
+                start: Vec2::new(start[0], start[1]),
+                end: Vec2::new(end[0], end[1]),
+                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+                width: *width,
             },
         }
     }
@@ -909,7 +936,7 @@ impl TacticsBoardViewer {
                     ann.annotations.clear();
                     ann.annotation_ids.clear();
                     ann.annotation_owners.clear();
-                    ann.selected_index = None;
+                    ann.clear_selection();
                     drop(ann);
                     // Re-apply caps from the selected mode
                     let layout = state.selected_mode.as_ref().and_then(|key| cap_layout_db.lock().get(key).cloned());
@@ -963,7 +990,7 @@ impl TacticsBoardViewer {
                         ann.annotations = preset.annotations.iter().map(|a| a.to_annotation()).collect();
                         ann.annotation_ids = (0..ann.annotations.len()).map(|_| rand::random()).collect();
                         ann.annotation_owners = vec![0; ann.annotations.len()];
-                        ann.selected_index = None;
+                        ann.clear_selection();
 
                         state.preset_name = name.clone();
 
@@ -1165,7 +1192,7 @@ impl TacticsBoardViewer {
             }
 
             // Middle-drag always pans; left-drag pans when nothing else would consume it
-            let has_selection = annotation_state_arc.lock().selected_index.is_some();
+            let has_selection = annotation_state_arc.lock().has_selection();
             let cap_dragging = state.dragging_cap.is_some();
             let left_pan = !ann_tool_active
                 && !has_selection
@@ -1267,13 +1294,17 @@ impl TacticsBoardViewer {
         {
             let ann_state = annotation_state_arc.lock();
             let icons_ref = state.ship_icons.as_ref();
+            let map_space = state.map_info.as_ref().map(|m| m.space_size as f32);
             for ann in &ann_state.annotations {
                 render_annotation(ann, &transform, icons_ref, &map_painter);
+                if let Annotation::Measurement { start, end, color, width } = ann {
+                    render_measurement_details(*start, *end, *color, *width, &transform, map_space, &map_painter);
+                }
             }
-            if let Some(sel) = ann_state.selected_index
-                && sel < ann_state.annotations.len()
-            {
-                render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+            for &sel in &ann_state.selected_indices {
+                if sel < ann_state.annotations.len() {
+                    render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+                }
             }
             // Render tool preview (ghost shape at cursor)
             if let Some(cursor_pos) = response.hover_pos() {
@@ -1286,6 +1317,7 @@ impl TacticsBoardViewer {
                     &transform,
                     None,
                     &map_painter,
+                    map_space,
                 );
             }
         }
@@ -1373,12 +1405,18 @@ impl TacticsBoardViewer {
             if !matches!(ann.active_tool, PaintTool::None) {
                 ann.active_tool = PaintTool::None;
             } else {
-                ann.selected_index = None;
+                ann.clear_selection();
                 state.selected_cap = None;
                 state.adding_cap = false;
             }
             state.dragging_cap = None;
         }
+
+        // Tool shortcuts (Ctrl+1..7, Ctrl+M)
+        handle_tool_shortcuts(ui.ctx(), &mut annotation_state_arc.lock());
+
+        // Show shortcut overlay while Ctrl is held
+        draw_shortcut_overlay(ui.ctx(), ui.id().with("tactics_shortcut_overlay"));
 
         // Stroke width shortcuts
         {
@@ -1403,7 +1441,7 @@ impl TacticsBoardViewer {
         // ── Annotation selection edit popup ──
         {
             let ann = annotation_state_arc.lock();
-            let sel_info = ann.selected_index.and_then(|idx| {
+            let sel_info = ann.single_selected().and_then(|idx| {
                 if idx < ann.annotations.len() {
                     let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
                     Some((idx, bounds))
@@ -1705,13 +1743,16 @@ impl TacticsBoardViewer {
         let result = handle_annotation_select_move(&mut ann, response, transform);
 
         // Sync to collab after rotation stopped or annotation moved
-        if let Some(idx) = result.rotation_stopped_index.or(result.moved_index) {
+        if let Some(idx) = result.rotation_stopped_index {
+            send_annotation_update(collab_local_tx, &ann, idx);
+        }
+        for &idx in &result.moved_indices {
             send_annotation_update(collab_local_tx, &ann, idx);
         }
 
         // Click on empty space → ping
         if result.selected_by_click
-            && ann.selected_index.is_none()
+            && !ann.has_selection()
             && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p))
         {
             drop(ann);

@@ -117,6 +117,26 @@ pub fn validate_annotation(ann: &Annotation) -> Result<(), ValidationError> {
                 return Err(ValidationError(format!("Triangle.width out of range: {width}")));
             }
         }
+        Annotation::Arrow { points, width, .. } => {
+            if points.len() > MAX_FREEHAND_POINTS {
+                return Err(ValidationError(format!("Arrow has {} points (max {MAX_FREEHAND_POINTS})", points.len())));
+            }
+            for (i, p) in points.iter().enumerate() {
+                check_position(p, &format!("Arrow.points[{i}]"))?;
+            }
+            check_finite(*width, "Arrow.width")?;
+            if *width <= 0.0 || *width > MAX_STROKE_WIDTH {
+                return Err(ValidationError(format!("Arrow.width out of range: {width}")));
+            }
+        }
+        Annotation::Measurement { start, end, width, .. } => {
+            check_position(start, "Measurement.start")?;
+            check_position(end, "Measurement.end")?;
+            check_finite(*width, "Measurement.width")?;
+            if *width <= 0.0 || *width > MAX_STROKE_WIDTH {
+                return Err(ValidationError(format!("Measurement.width out of range: {width}")));
+            }
+        }
     }
     Ok(())
 }
@@ -392,6 +412,20 @@ mod tests {
 
     // ─── Annotation: valid cases ─────────────────────────────────────────
 
+    fn valid_arrow() -> Annotation {
+        Annotation::Arrow {
+            points: vec![[10.0, 10.0], [50.0, 50.0], [100.0, 30.0]],
+            color: [255, 100, 0, 255],
+            width: 3.0,
+        }
+    }
+
+    fn valid_measurement() -> Annotation {
+        Annotation::Measurement { start: [100.0, 100.0], end: [400.0, 400.0], color: [0, 255, 255, 255], width: 2.0 }
+    }
+
+    // ─── Annotation: valid cases ─────────────────────────────────────────
+
     #[test]
     fn valid_annotations_pass() {
         assert!(validate_annotation(&valid_circle()).is_ok());
@@ -400,6 +434,8 @@ mod tests {
         assert!(validate_annotation(&valid_triangle()).is_ok());
         assert!(validate_annotation(&valid_ship()).is_ok());
         assert!(validate_annotation(&valid_freehand()).is_ok());
+        assert!(validate_annotation(&valid_arrow()).is_ok());
+        assert!(validate_annotation(&valid_measurement()).is_ok());
     }
 
     #[test]

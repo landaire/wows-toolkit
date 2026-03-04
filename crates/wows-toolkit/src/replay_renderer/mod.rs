@@ -1113,7 +1113,7 @@ impl ReplayRendererViewer {
                     }
 
                     // Drag-to-pan: middle always pans, left only when no tool and no selection
-                    let has_selection = annotation_arc.lock().selected_index.is_some();
+                    let has_selection = annotation_arc.lock().has_selection();
                     if response.dragged_by(egui::PointerButton::Middle)
                         || (!tool_active && !has_selection && response.dragged_by(egui::PointerButton::Primary))
                     {
@@ -1419,14 +1419,18 @@ impl ReplayRendererViewer {
                         // ─── Render annotations on map ───────────────────────────
                         {
                             let ann_state = annotation_arc.lock();
+                            let map_space = shared_state.lock().map_space_size;
                             for ann in &ann_state.annotations {
                                 render_annotation(ann, &transform, textures, &map_painter);
+                                if let Annotation::Measurement { start, end, color, width } = ann {
+                                    render_measurement_details(*start, *end, *color, *width, &transform, map_space, &map_painter);
+                                }
                             }
                             // Draw selection highlight
-                            if let Some(sel) = ann_state.selected_index
-                                && sel < ann_state.annotations.len()
-                            {
-                                render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+                            for &sel in &ann_state.selected_indices {
+                                if sel < ann_state.annotations.len() {
+                                    render_selection_highlight(&ann_state.annotations[sel], &transform, &map_painter);
+                                }
                             }
                             // Render tool preview (ghost shape at cursor)
                             if let Some(cursor_pos) = response.hover_pos() {
@@ -1439,6 +1443,7 @@ impl ReplayRendererViewer {
                                     &transform,
                                     textures,
                                     &map_painter,
+                                    map_space,
                                 );
                             }
                         }
@@ -1510,7 +1515,7 @@ impl ReplayRendererViewer {
 
                         // When a tool is active, clear any selection
                         if tool_active {
-                            ann.selected_index = None;
+                            ann.clear_selection();
                         }
 
                         // Right-click: open context menu or cancel tool
@@ -1541,31 +1546,41 @@ impl ReplayRendererViewer {
                             }
                         }
 
+                        // Tool shortcuts (Ctrl+1..7, Ctrl+M)
+                        handle_tool_shortcuts(ctx, &mut ann);
+
+                        // Show shortcut overlay while Ctrl is held
+                        draw_shortcut_overlay(ctx, egui::Id::new("replay_shortcut_overlay"));
+
                         // Escape key: cancel tool or deselect
                         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                             if tool_active {
                                 ann.active_tool = PaintTool::None;
                             } else {
-                                ann.selected_index = None;
+                                ann.clear_selection();
                             }
                         }
 
-                        // Delete/Backspace to delete selected annotation
+                        // Delete/Backspace to delete selected annotations
                         if !tool_active
-                            && let Some(sel) = ann.selected_index
-                            && sel < ann.annotations.len()
+                            && ann.has_selection()
                             && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
                         {
                             ann.save_undo();
-                            let id = ann.annotation_ids[sel];
-                            ann.annotations.remove(sel);
-                            ann.annotation_ids.remove(sel);
-                            ann.annotation_owners.remove(sel);
-                            ann.selected_index = None;
-                            {
-                                let state = shared_state.lock();
-                                send_annotation_remove(&state.collab_local_tx, id);
+                            let mut indices: Vec<usize> = ann.selected_indices.iter().copied().collect();
+                            indices.sort_unstable_by(|a, b| b.cmp(a)); // remove from end first
+                            let state = shared_state.lock();
+                            for idx in indices {
+                                if idx < ann.annotations.len() {
+                                    let id = ann.annotation_ids[idx];
+                                    ann.annotations.remove(idx);
+                                    ann.annotation_ids.remove(idx);
+                                    ann.annotation_owners.remove(idx);
+                                    send_annotation_remove(&state.collab_local_tx, id);
+                                }
                             }
+                            drop(state);
+                            ann.clear_selection();
                         }
 
                         // [ and ] to adjust stroke width when a tool is active
@@ -1607,12 +1622,15 @@ impl ReplayRendererViewer {
                             let sm = handle_annotation_select_move(&mut ann, &response, &transform);
 
                             // Sync to collab after rotation stopped or annotation moved
-                            if let Some(idx) = sm.rotation_stopped_index.or(sm.moved_index) {
+                            if let Some(idx) = sm.rotation_stopped_index {
+                                send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx);
+                            }
+                            for &idx in &sm.moved_indices {
                                 send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx);
                             }
 
                             // Click on empty space → ping
-                            if sm.selected_by_click && ann.selected_index.is_none()
+                            if sm.selected_by_click && !ann.has_selection()
                                 && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p)) {
                                     let state = shared_state.lock();
                                     handle_map_click_ping(
@@ -1929,7 +1947,7 @@ impl ReplayRendererViewer {
                     // ─── Selection edit popup ─────────────────────────────────────
                     {
                         let ann = annotation_arc.lock();
-                        let sel_info = ann.selected_index.and_then(|idx| {
+                        let sel_info = ann.single_selected().and_then(|idx| {
                             if idx < ann.annotations.len() {
                                 let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
                                 Some((idx, bounds))

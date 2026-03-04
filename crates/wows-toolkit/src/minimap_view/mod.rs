@@ -128,6 +128,8 @@ pub enum Annotation {
     Circle { center: Vec2, radius: f32, color: Color32, width: f32, filled: bool },
     Rectangle { center: Vec2, half_size: Vec2, rotation: f32, color: Color32, width: f32, filled: bool },
     Triangle { center: Vec2, radius: f32, rotation: f32, color: Color32, width: f32, filled: bool },
+    Arrow { points: Vec<Vec2>, color: Color32, width: f32 },
+    Measurement { start: Vec2, end: Vec2, color: Color32, width: f32 },
 }
 
 /// Active drawing/placement tool.
@@ -141,6 +143,8 @@ pub enum PaintTool {
     DrawingCircle { filled: bool, center: Option<Vec2> },
     DrawingRect { filled: bool, center: Option<Vec2> },
     DrawingTriangle { filled: bool, center: Option<Vec2> },
+    DrawingArrow { current_stroke: Option<Vec<Vec2>> },
+    DrawingMeasurement { start: Option<Vec2> },
 }
 
 /// Snapshot of annotation state for undo/redo.
@@ -160,10 +164,12 @@ pub struct AnnotationState {
     pub active_tool: PaintTool,
     pub paint_color: Color32,
     pub stroke_width: f32,
-    pub selected_index: Option<usize>,
+    pub selected_indices: HashSet<usize>,
     pub show_context_menu: bool,
     pub context_menu_pos: Pos2,
     pub dragging_rotation: bool,
+    /// Which measurement endpoint is being dragged (0=start, 1=end), if any.
+    pub dragging_measurement_endpoint: Option<u8>,
     /// Ships whose trails are explicitly hidden (by player name).
     pub trail_hidden_ships: HashSet<String>,
     /// Ship nearest to right-click position (entity_id, player_name) for context menu options.
@@ -187,10 +193,11 @@ impl Default for AnnotationState {
             active_tool: PaintTool::None,
             paint_color: Color32::YELLOW,
             stroke_width: 2.0,
-            selected_index: None,
+            selected_indices: HashSet::new(),
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
             dragging_rotation: false,
+            dragging_measurement_endpoint: None,
             trail_hidden_ships: HashSet::new(),
             context_menu_ship: None,
             context_menu_cap: None,
@@ -221,8 +228,29 @@ impl AnnotationState {
             self.annotations = prev.annotations;
             self.annotation_ids = prev.ids;
             self.annotation_owners = prev.owners;
-            self.selected_index = None;
+            self.selected_indices.clear();
         }
+    }
+
+    /// Returns the single selected index, if exactly one is selected.
+    pub fn single_selected(&self) -> Option<usize> {
+        if self.selected_indices.len() == 1 { self.selected_indices.iter().next().copied() } else { None }
+    }
+
+    /// Returns `true` if at least one annotation is selected.
+    pub fn has_selection(&self) -> bool {
+        !self.selected_indices.is_empty()
+    }
+
+    /// Clear all selection.
+    pub fn clear_selection(&mut self) {
+        self.selected_indices.clear();
+    }
+
+    /// Select exactly one annotation, replacing any existing selection.
+    pub fn select_single(&mut self, idx: usize) {
+        self.selected_indices.clear();
+        self.selected_indices.insert(idx);
     }
 }
 
@@ -269,6 +297,17 @@ pub fn collab_annotation_to_local(ca: crate::collab::types::Annotation) -> Annot
             width,
             filled,
         },
+        ct::Annotation::Arrow { points, color, width } => Annotation::Arrow {
+            points: points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect(),
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+        },
+        ct::Annotation::Measurement { start, end, color, width } => Annotation::Measurement {
+            start: Vec2::new(start[0], start[1]),
+            end: Vec2::new(end[0], end[1]),
+            color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
+            width,
+        },
     }
 }
 
@@ -312,6 +351,17 @@ pub fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annot
             color: color.to_array(),
             width: *width,
             filled: *filled,
+        },
+        Annotation::Arrow { points, color, width } => ct::Annotation::Arrow {
+            points: points.iter().map(|p| [p.x, p.y]).collect(),
+            color: color.to_array(),
+            width: *width,
+        },
+        Annotation::Measurement { start, end, color, width } => ct::Annotation::Measurement {
+            start: [start.x, start.y],
+            end: [end.x, end.y],
+            color: color.to_array(),
+            width: *width,
         },
     }
 }

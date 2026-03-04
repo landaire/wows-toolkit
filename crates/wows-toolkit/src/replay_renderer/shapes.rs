@@ -27,11 +27,14 @@ pub(super) use crate::minimap_view::shapes::draw_annotation_menu_common;
 pub(super) use crate::minimap_view::shapes::draw_grid;
 pub(super) use crate::minimap_view::shapes::draw_pings;
 pub(super) use crate::minimap_view::shapes::draw_remote_cursors;
+pub(super) use crate::minimap_view::shapes::draw_shortcut_overlay;
 pub(super) use crate::minimap_view::shapes::game_font;
 pub(super) use crate::minimap_view::shapes::handle_annotation_select_move;
 pub(super) use crate::minimap_view::shapes::handle_scroll_yaw;
 pub(super) use crate::minimap_view::shapes::handle_tool_interaction;
+pub(super) use crate::minimap_view::shapes::handle_tool_shortcuts;
 pub(super) use crate::minimap_view::shapes::register_game_fonts;
+pub(super) use crate::minimap_view::shapes::render_measurement_details;
 pub(super) use crate::minimap_view::shapes::render_selection_highlight;
 pub(super) use crate::minimap_view::shapes::tool_label;
 
@@ -160,6 +163,7 @@ pub(super) fn render_annotation(
 /// Render a preview of the active tool at the cursor position.
 /// Thin wrapper around the shared `minimap_view::shapes::render_tool_preview` that
 /// adapts the `RendererTextures` parameter.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_tool_preview(
     tool: &PaintTool,
     minimap_pos: Vec2,
@@ -168,6 +172,7 @@ pub(super) fn render_tool_preview(
     transform: &MapTransform,
     textures: &RendererTextures,
     painter: &egui::Painter,
+    map_space_size: Option<f32>,
 ) {
     crate::minimap_view::shapes::render_tool_preview(
         tool,
@@ -177,6 +182,7 @@ pub(super) fn render_tool_preview(
         transform,
         Some(&textures.ship_icons),
         painter,
+        map_space_size,
     );
 }
 

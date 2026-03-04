@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use egui::Color32;
 use egui::OpenUrl;
+use egui::RichText;
 use egui::Slider;
 
 use crate::app::ToolkitTabViewer;
@@ -16,11 +17,30 @@ use crate::update_background_task;
 
 const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
 
+/// Render a styled section header with an icon, title, and dimmed description.
+fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(icon).size(16.0).strong());
+        ui.label(RichText::new(title).size(14.0).strong());
+    });
+    ui.label(RichText::new(description).size(11.0).weak());
+    ui.add_space(2.0);
+}
+
 impl ToolkitTabViewer<'_> {
     pub fn build_settings_tab(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.label("Application Settings");
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
+            // ── Application Settings ──────────────────────────────────
+            section_header(
+                ui,
+                icons::GEAR_FINE,
+                "Application Settings",
+                "General application behavior and appearance",
+            );
             ui.group(|ui| {
+                ui.set_width(ui.available_width());
                 ui.checkbox(&mut self.tab_state.settings.check_for_updates, "Check for Updates on Startup");
                 ui.checkbox(&mut self.tab_state.settings.enable_logging, "Enable Logging (takes effect on restart)")
                     .on_hover_text("Write debug logs to a file in the application data directory. Useful for troubleshooting.");
@@ -46,80 +66,117 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
             });
-            ui.label("World of Warships Settings");
+
+            ui.add_space(12.0);
+
+            // ── World of Warships Settings ────────────────────────────
+            section_header(
+                ui,
+                icons::FOLDER_OPEN,
+                "World of Warships Settings",
+                "Path to your World of Warships installation",
+            );
             ui.group(|ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose..."))
-                                .clicked()
-                            {
-                                let folder = rfd::FileDialog::new().pick_folder();
-                                if let Some(folder) = folder {
-                                    self.tab_state.prevent_changing_wows_dir();
-                                    update_background_task!(
-                                        self.tab_state.background_tasks,
-                                        Some(self.tab_state.load_game_data(folder))
-                                    );
-                                }
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(self.tab_state.can_change_wows_dir, egui::Button::new("Choose..."))
+                            .clicked()
+                        {
+                            let folder = rfd::FileDialog::new().pick_folder();
+                            if let Some(folder) = folder {
+                                self.tab_state.prevent_changing_wows_dir();
+                                update_background_task!(
+                                    self.tab_state.background_tasks,
+                                    Some(self.tab_state.load_game_data(folder))
+                                );
                             }
+                        }
 
-                            let show_text_error = {
-                                let path = Path::new(&self.tab_state.settings.wows_dir);
-                                if self.tab_state.settings.wows_dir.is_empty() {
-                                    false
-                                } else if !path.exists() {
-                                    true
-                                } else {
-                                    let has_exe = path.join("WorldOfWarships.exe").exists();
-                                    let has_bin = path.join("bin").exists();
-                                    let has_replays = path.join("replays").exists();
-                                    !has_exe && !has_bin && !has_replays
-                                }
-                            };
-
-                            let response = ui.add_sized(
-                                ui.available_size(),
-                                egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
-                                    .interactive(self.tab_state.can_change_wows_dir)
-                                    .hint_text("World of Warships Directory")
-                                    .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
-                            );
-
-                            // If someone pastes a path in, let's do some basic validation to see if this
-                            // can be a WoWs path. If so, reload game data.
-                            if response.changed() {
-                                let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
+                        let show_text_error = {
+                            let path = Path::new(&self.tab_state.settings.wows_dir);
+                            if self.tab_state.settings.wows_dir.is_empty() {
+                                false
+                            } else if !path.exists() {
+                                true
+                            } else {
                                 let has_exe = path.join("WorldOfWarships.exe").exists();
                                 let has_bin = path.join("bin").exists();
-                                if path.exists() && (has_bin || has_exe) {
-                                    self.tab_state.prevent_changing_wows_dir();
-                                    update_background_task!(
-                                        self.tab_state.background_tasks,
-                                        Some(self.tab_state.load_game_data(path))
-                                    );
-                                }
+                                let has_replays = path.join("replays").exists();
+                                !has_exe && !has_bin && !has_replays
                             }
-                        });
+                        };
+
+                        let response = ui.add_sized(
+                            ui.available_size(),
+                            egui::TextEdit::singleline(&mut self.tab_state.settings.wows_dir)
+                                .interactive(self.tab_state.can_change_wows_dir)
+                                .hint_text("World of Warships Directory")
+                                .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
+                        );
+
+                        // If someone pastes a path in, let's do some basic validation to see if this
+                        // can be a WoWs path. If so, reload game data.
+                        if response.changed() {
+                            let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
+                            let has_exe = path.join("WorldOfWarships.exe").exists();
+                            let has_bin = path.join("bin").exists();
+                            if path.exists() && (has_bin || has_exe) {
+                                self.tab_state.prevent_changing_wows_dir();
+                                update_background_task!(
+                                    self.tab_state.background_tasks,
+                                    Some(self.tab_state.load_game_data(path))
+                                );
+                            }
+                        }
                     });
-                })
+                });
             });
-            ui.label("Replay Settings");
+
+            ui.add_space(12.0);
+
+            // ── Replay Settings ───────────────────────────────────────
+            section_header(
+                ui,
+                icons::TABLE,
+                "Replay Settings",
+                "Configure which columns appear in the replay results table",
+            );
             ui.group(|ui| {
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Show Raw XP Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID Column");
-                ui.checkbox(
-                    &mut self.tab_state.settings.replay_settings.show_observed_damage,
-                    "Show Observed Damage Column",
-                );
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Show Fires Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Show Floods Column");
-                ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Show Citadels Column");
-                ui.checkbox(
-                    &mut self.tab_state.settings.replay_settings.show_crits,
-                    "Show Critical Module Hits Column",
-                );
+                ui.set_width(ui.available_width());
+
+                // 2-column grid for the column visibility checkboxes
+                egui::Grid::new("replay_columns_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Show Raw XP");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Show Entity ID");
+                        ui.end_row();
+
+                        ui.checkbox(
+                            &mut self.tab_state.settings.replay_settings.show_observed_damage,
+                            "Show Observed Damage",
+                        );
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Show Fires");
+                        ui.end_row();
+
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Show Floods");
+                        ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Show Citadels");
+                        ui.end_row();
+
+                        ui.checkbox(
+                            &mut self.tab_state.settings.replay_settings.show_crits,
+                            "Show Critical Module Hits",
+                        );
+                        ui.end_row();
+                    });
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
                 ui.horizontal(|ui| {
                     let mut alert_data_export_change = false;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -186,9 +243,19 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
             });
-            ui.label("Session Settings");
+
+            ui.add_space(12.0);
+
+            // ── Session Settings ──────────────────────────────────────
+            section_header(
+                ui,
+                icons::USERS,
+                "Session Settings",
+                "Collaborative replay session preferences",
+            );
             ui.group(|ui| {
-                ui.label("Display Name (used in collaborative replay sessions)");
+                ui.set_width(ui.available_width());
+                ui.label("Display Name");
                 ui.text_edit_singleline(&mut self.tab_state.settings.collab_display_name);
                 ui.checkbox(
                     &mut self.tab_state.settings.suppress_p2p_ip_warning,
@@ -198,8 +265,18 @@ impl ToolkitTabViewer<'_> {
                      Other users in the session may be able to see your IP address.",
                 );
             });
-            ui.label("Twitch Settings");
+
+            ui.add_space(12.0);
+
+            // ── Twitch Settings ───────────────────────────────────────
+            section_header(
+                ui,
+                icons::BROADCAST,
+                "Twitch Settings",
+                "Connect to Twitch for chat integration and player tracking",
+            );
             ui.group(|ui| {
+                ui.set_width(ui.available_width());
                 if ui
                     .button(icon_str!(icons::BROWSER, "Get Login Token"))
                     .on_hover_text(

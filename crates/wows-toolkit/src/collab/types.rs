@@ -19,6 +19,8 @@ pub enum Annotation {
     Circle { center: [f32; 2], radius: f32, color: [u8; 4], width: f32, filled: bool },
     Rectangle { center: [f32; 2], half_size: [f32; 2], rotation: f32, color: [u8; 4], width: f32, filled: bool },
     Triangle { center: [f32; 2], radius: f32, rotation: f32, color: [u8; 4], width: f32, filled: bool },
+    Arrow { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
+    Measurement { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
 }
 
 /// Active drawing/placement tool state.
