@@ -649,6 +649,8 @@ async fn host_main(
                                 s.tactics_map_version += 1;
                                 s.current_cap_point_sync = None;
                                 s.cap_point_sync_version += 1;
+                                s.current_annotation_sync = None;
+                                s.annotation_sync_version += 1;
                             }
                             broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapClosed);
                         }
@@ -1455,6 +1457,8 @@ async fn join_main(
                                 s.tactics_map_version += 1;
                                 s.current_cap_point_sync = None;
                                 s.cap_point_sync_version += 1;
+                                s.current_annotation_sync = None;
+                                s.annotation_sync_version += 1;
                             }
                             let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapClosed).await;
                         }
@@ -1875,6 +1879,8 @@ fn handle_incoming_message(
                 s.tactics_map_version += 1;
                 s.current_cap_point_sync = None;
                 s.cap_point_sync_version += 1;
+                s.current_annotation_sync = None;
+                s.annotation_sync_version += 1;
             }
             relay_if_host(sender_id, &msg, mesh);
         }

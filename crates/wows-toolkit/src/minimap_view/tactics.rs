@@ -547,6 +547,11 @@ impl TacticsBoardViewer {
         &self.state
     }
 
+    /// Access the shared annotation state.
+    pub fn annotation_state_arc(&self) -> &Arc<Mutex<AnnotationState>> {
+        &self.annotation_state
+    }
+
     /// Draw the tactics board viewport as a deferred viewport (separate OS window).
     pub fn draw(&self, ctx: &egui::Context) {
         let open = self.open.clone();

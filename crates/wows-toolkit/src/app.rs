@@ -1002,6 +1002,14 @@ impl WowsToolkitApp {
                             let _ = handle
                                 .command_tx
                                 .send(crate::collab::SessionCommand::SyncCapPoints { cap_points: wire_caps });
+                            // Push pre-existing annotations into the session.
+                            let ann = board.annotation_state_arc().lock();
+                            if !ann.annotations.is_empty() {
+                                crate::minimap_view::send_annotation_full_sync(
+                                    &Some(handle.command_tx.clone()),
+                                    &ann,
+                                );
+                            }
                         }
                     }
                 }
@@ -1053,10 +1061,13 @@ impl WowsToolkitApp {
             }
         }
         if !remove.is_empty() {
-            // Host closing a board is authoritative — notify peers.
+            // Host closing a board is authoritative — clear annotations and notify peers.
             if is_host {
                 let closing_had_collab = remove.iter().any(|&idx| boards[idx].collab_local_tx.is_some());
                 if closing_had_collab && let Some(ref handle) = self.tab_state.host_session {
+                    let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::Annotation(
+                        crate::collab::peer::LocalAnnotationEvent::Clear,
+                    ));
                     let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapClosed);
                 }
             }
