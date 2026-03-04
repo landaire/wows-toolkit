@@ -7,6 +7,7 @@ members = [
     "crates/minimap-renderer",
     "crates/replayshark",
     "crates/wows-data-mgr",
+    "crates/wt-collab-protocol",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ name = "wows-toolkit"
 wowsunpack = { version = "0.24.0", path = "crates/wowsunpack", default-features = false }
 wows_replays = { version = "0.25.0", path = "crates/wows-replays" }
 wows_minimap_renderer = { version = "0.17.0", path = "crates/minimap-renderer", default-features = false }
+wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 # Shared external dependencies
 bon = "3.9.0"
 bytemuck = { version = "1", features = ["derive"] }

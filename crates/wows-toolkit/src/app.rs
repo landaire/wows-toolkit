@@ -1958,7 +1958,7 @@ impl WowsToolkitApp {
         let params = crate::collab::peer::HostParams {
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
             display_name: self.tab_state.settings.collab_display_name.clone(),
-            initial_render_options: crate::collab::protocol::CollabRenderOptions::from_saved(
+            initial_render_options: crate::collab::protocol::collab_render_options_from_saved(
                 &crate::settings::SavedRenderOptions::default(),
             ),
         };

@@ -10375,6 +10375,7 @@ dependencies = [
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-protocol",
  "zip",
 ]
 
@@ -10447,6 +10448,17 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "wt-collab-protocol"
+version = "0.1.56"
+dependencies = [
+ "egui",
+ "flate2",
+ "rkyv",
+ "wows_minimap_renderer",
+ "wowsunpack",
 ]
 
 [[package]]

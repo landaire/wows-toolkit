@@ -746,7 +746,13 @@ async fn host_accept_peer(
         };
 
     let (client_name, client_version) = match &join_msg {
-        PeerMessage::Join { toolkit_version, name } => (name.clone(), toolkit_version.clone()),
+        PeerMessage::Join { name, client_type } => {
+            let version = match client_type {
+                ClientType::Desktop { toolkit_version } => toolkit_version.clone(),
+                ClientType::Web => String::new(),
+            };
+            (name.clone(), version)
+        }
         _ => {
             warn!("Peer {user_id} sent non-Join as first message");
             return;
@@ -1132,8 +1138,10 @@ async fn join_main(
     };
 
     // Handshake: send Join.
-    let join_msg =
-        PeerMessage::Join { toolkit_version: params.toolkit_version.clone(), name: params.display_name.clone() };
+    let join_msg = PeerMessage::Join {
+        name: params.display_name.clone(),
+        client_type: ClientType::Desktop { toolkit_version: params.toolkit_version.clone() },
+    };
     if let Err(e) = write_peer_message(&mut send, &join_msg).await {
         let msg = format!("Failed to send Join: {e}");
         let _ = event_tx.send(SessionEvent::Error(msg.clone()));
@@ -2145,6 +2153,11 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &msg, mesh);
         }
 
+        // ── Asset bundle (sent by host to web clients, ignored by desktop) ──
+        PeerMessage::AssetBundle { .. } => {
+            debug!("Ignoring AssetBundle from {sender_id} (desktop client)");
+        }
+
         // ── Handshake messages (not expected post-handshake) ────────────
         PeerMessage::Join { .. }
         | PeerMessage::SessionInfo { .. }
@@ -3016,7 +3029,13 @@ mod tests {
     #[test]
     fn join_ignored_post_handshake() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(99, PeerMessage::Join { toolkit_version: "1.0".into(), name: "Hacker".into() });
+        h.dispatch(
+            99,
+            PeerMessage::Join {
+                name: "Hacker".into(),
+                client_type: ClientType::Desktop { toolkit_version: "1.0".into() },
+            },
+        );
         // Should not crash or change state.
         assert!(h.ui().connected_users.is_empty());
     }

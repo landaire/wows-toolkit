@@ -2529,9 +2529,9 @@ impl ReplayRendererViewer {
                                                 let mut state = shared_state.lock();
                                                 // Broadcast diffs to collab peers if connected.
                                                 if let Some(ref tx) = state.collab_local_tx {
-                                                    use crate::collab::protocol::CollabRenderOptions;
-                                                    let old = CollabRenderOptions::from_render_options(&state.options, state.show_dead_ships);
-                                                    let new = CollabRenderOptions::from_render_options(&opts, show_dead);
+                                                    use crate::collab::protocol::collab_render_options_from_render_options;
+                                                    let old = collab_render_options_from_render_options(&state.options, state.show_dead_ships);
+                                                    let new = collab_render_options_from_render_options(&opts, show_dead);
                                                     for (field, value) in old.diff(&new) {
                                                         let _ = tx.send(crate::collab::peer::LocalEvent::DisplayToggle(field, value));
                                                     }

@@ -86,6 +86,7 @@ jiff = { workspace = true, features = ["serde"] }
 rootcause = { workspace = true }
 arboard = "3.6.1"
 iroh = { workspace = true }
+wt-collab-protocol = { workspace = true, features = ["egui"] }
 rand = "0.9"
 rkyv = { workspace = true }
 const_format = "0.2.35"

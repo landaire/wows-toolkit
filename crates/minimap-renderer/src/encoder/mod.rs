@@ -6,6 +6,11 @@
 //! - `videotoolbox`: GPU-accelerated encoding via VideoToolbox (macOS)
 //! - `cpu`: Software encoding via openh264 (all platforms)
 
+#[cfg(any(
+    feature = "cpu",
+    all(feature = "vulkan", not(target_os = "macos")),
+    all(feature = "videotoolbox", target_os = "macos"),
+))]
 use tracing::info;
 
 use crate::error::VideoError;
@@ -174,11 +179,12 @@ impl EncoderBackend {
             all(feature = "vulkan", not(target_os = "macos"))
         )))]
         {
-            return Err(rootcause::Error::new(VideoError::EncoderInit("No encoder backend available".into())));
+            return Err(VideoError::EncoderInit("No encoder backend available".into()).into());
         }
     }
 
     /// Encode an RGB frame to H.264 Annex B format.
+    #[allow(unused_variables)]
     pub fn encode_frame(&mut self, rgb: &[u8], width: u32, height: u32) -> rootcause::Result<Vec<u8>, VideoError> {
         match self {
             #[cfg(all(feature = "vulkan", not(target_os = "macos")))]
@@ -187,6 +193,14 @@ impl EncoderBackend {
             Self::VideoToolbox(enc) => enc.encode_frame(rgb, width, height),
             #[cfg(feature = "cpu")]
             Self::Cpu(enc) => enc.encode_frame(rgb, width as usize, height as usize),
+            // When no encoder backends are compiled in, `EncoderBackend` is uninhabited.
+            // This arm is unreachable but satisfies the exhaustiveness checker.
+            #[cfg(not(any(
+                feature = "cpu",
+                all(feature = "vulkan", not(target_os = "macos")),
+                all(feature = "videotoolbox", target_os = "macos")
+            ),))]
+            _ => unreachable!(),
         }
     }
 }
