@@ -4134,11 +4134,21 @@ pub(crate) fn draw_armor_visibility_popover(
                                 let on = z.name == zone.name;
                                 for p in &z.parts {
                                     pane.part_visibility.insert((z.name.clone(), p.name.clone()), on);
+                                    // Clear plate-level overrides so zone_all_on recomputes cleanly
+                                    for &t in &p.plates {
+                                        pane.plate_visibility.remove(&(z.name.clone(), p.name.clone(), t));
+                                    }
                                 }
                             }
                         } else {
                             for p in &zone.parts {
                                 pane.part_visibility.insert((zone.name.clone(), p.name.clone()), checked);
+                                // Clear plate-level overrides so zone_all_on recomputes cleanly
+                                if checked {
+                                    for &t in &p.plates {
+                                        pane.plate_visibility.remove(&(zone.name.clone(), p.name.clone(), t));
+                                    }
+                                }
                             }
                         }
                         zone_changed = true;

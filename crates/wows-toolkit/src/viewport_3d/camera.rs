@@ -151,7 +151,7 @@ impl ArcballCamera {
         let proj = mat4_to_na(self.projection_matrix(aspect));
         let vp = proj * view;
 
-        let pos = world_pos.to_homogeneous();
+        let pos = Vector4::new(world_pos.x, world_pos.y, world_pos.z, 1.0);
         let clip = vp * pos;
 
         if clip.w <= 0.0 {

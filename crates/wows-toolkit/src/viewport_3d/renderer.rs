@@ -980,7 +980,7 @@ impl Viewport3D {
 
     /// Transform a model-space position back to world space (apply model matrix).
     /// The model matrix is Ry(+yaw) * Rz(-roll): apply Rz(-roll) first, then Ry(+yaw).
-    fn pos_to_world_space(&self, p: Vec3) -> Vec3 {
+    pub fn pos_to_world_space(&self, p: Vec3) -> Vec3 {
         let has_roll = self.model_roll.abs() > 1e-6;
         let has_yaw = self.model_yaw.abs() > 1e-6;
         if !has_roll && !has_yaw {
