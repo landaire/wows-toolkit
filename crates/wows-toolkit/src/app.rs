@@ -1408,9 +1408,13 @@ impl WowsToolkitApp {
 
         self.show_confirmation_dialog(ctx);
         self.show_ip_warning_dialog(ctx);
-        if self.tab_state.pending_join {
+        if self.tab_state.pending_join && !self.tab_state.show_ip_warning {
             self.tab_state.pending_join = false;
             self.do_join_session();
+        }
+        if self.tab_state.pending_host && !self.tab_state.show_ip_warning {
+            self.tab_state.pending_host = false;
+            self.do_host_session();
         }
         self.poll_host_session_events(ctx);
         self.poll_client_session_events(ctx);
@@ -1748,7 +1752,7 @@ impl WowsToolkitApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(
-                    "Joining a collaborative session uses peer-to-peer networking. \
+                    "Collaborative sessions use peer-to-peer networking. \
                      Other users in the session may be able to see your IP address.",
                 );
                 ui.add_space(8.0);
@@ -1766,10 +1770,13 @@ impl WowsToolkitApp {
 
         if proceed {
             self.tab_state.show_ip_warning = false;
-            self.do_join_session();
+            // pending_join / pending_host were set before showing the dialog;
+            // they will execute on the next frame now that the gate is lifted.
         }
         if cancel {
             self.tab_state.show_ip_warning = false;
+            self.tab_state.pending_join = false;
+            self.tab_state.pending_host = false;
         }
     }
 
@@ -1789,6 +1796,25 @@ impl WowsToolkitApp {
 
         self.tab_state.client_session = Some(handle);
         self.tab_state.join_session_token.clear();
+    }
+
+    fn do_host_session(&mut self) {
+        let params = crate::collab::peer::HostParams {
+            toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
+            display_name: self.tab_state.settings.collab_display_name.clone(),
+            initial_render_options: crate::collab::protocol::CollabRenderOptions::from_saved(
+                &crate::settings::SavedRenderOptions::default(),
+            ),
+        };
+
+        let session_state = Arc::clone(&self.tab_state.session_state);
+        let handle = crate::collab::peer::start_peer_session(
+            Arc::clone(&self.runtime),
+            crate::collab::peer::PeerMode::Host(params),
+            session_state,
+        );
+
+        self.tab_state.host_session = Some(handle);
     }
 
     fn poll_host_session_events(&mut self, _ctx: &egui::Context) {

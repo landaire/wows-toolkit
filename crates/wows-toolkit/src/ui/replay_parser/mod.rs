@@ -37,9 +37,6 @@ use wowsunpack::game_params::types::ParamData;
 use crate::collab::Permissions;
 use crate::collab::SessionCommand;
 use crate::collab::SessionStatus;
-use crate::collab::peer::HostParams;
-use crate::collab::peer::PeerMode;
-use crate::collab::protocol::CollabRenderOptions;
 use crate::icons;
 use crate::replay_export::FlattenedVehicle;
 use crate::replay_export::Match;
@@ -3673,28 +3670,10 @@ impl ToolkitTabViewer<'_> {
                             self.tab_state.show_display_name_error = true;
                             self.tab_state.toasts.lock().error("Enter a display name first");
                         } else {
-                            let params = HostParams {
-                                toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
-                                display_name: self.tab_state.settings.collab_display_name.clone(),
-                                initial_render_options: CollabRenderOptions::from_saved(
-                                    &crate::settings::SavedRenderOptions::default(),
-                                ),
-                            };
-
-                            let rt = self.tab_state.tokio_runtime.clone().unwrap_or_else(|| {
-                                Arc::new(
-                                    tokio::runtime::Builder::new_multi_thread()
-                                        .enable_all()
-                                        .build()
-                                        .expect("Failed to create tokio runtime"),
-                                )
-                            });
-
-                            let session_state = Arc::clone(&self.tab_state.session_state);
-                            let handle =
-                                crate::collab::peer::start_peer_session(rt, PeerMode::Host(params), session_state);
-
-                            self.tab_state.host_session = Some(handle);
+                            self.tab_state.pending_host = true;
+                            if !self.tab_state.settings.suppress_p2p_ip_warning {
+                                self.tab_state.show_ip_warning = true;
+                            }
                         }
                     }
 
@@ -3721,9 +3700,8 @@ impl ToolkitTabViewer<'_> {
                             self.tab_state.toasts.lock().error(format!("Invalid token: {e}"));
                         } else {
                             self.tab_state.join_session_token = trimmed;
-                            if self.tab_state.settings.suppress_p2p_ip_warning {
-                                self.tab_state.pending_join = true;
-                            } else {
+                            self.tab_state.pending_join = true;
+                            if !self.tab_state.settings.suppress_p2p_ip_warning {
                                 self.tab_state.show_ip_warning = true;
                             }
                         }

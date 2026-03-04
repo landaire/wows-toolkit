@@ -375,6 +375,10 @@ pub struct TabState {
     #[serde(skip)]
     pub pending_join: bool,
 
+    /// Set by the session popover to trigger `do_host_session()` in the app update loop.
+    #[serde(skip)]
+    pub pending_host: bool,
+
     /// Active client session handle (when joined as a peer).
     #[serde(skip)]
     pub client_session: Option<crate::collab::peer::PeerSessionHandle>,
@@ -477,6 +481,7 @@ impl Default for TabState {
             join_session_token: String::new(),
             show_ip_warning: false,
             pending_join: false,
+            pending_host: false,
             client_session: None,
             host_session: None,
             session_state: Arc::new(Mutex::new(crate::collab::SessionState::default())),
