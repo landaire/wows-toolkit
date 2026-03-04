@@ -51,7 +51,7 @@ use crate::collab::UserCursor;
 use crate::collab::protocol;
 use crate::collab::protocol::*;
 use crate::collab::types::Annotation;
-use crate::collab::types::CURSOR_COLORS;
+use crate::collab::types::color_from_name;
 use crate::collab::validation::validate_annotation;
 use crate::collab::validation::validate_frame_commands_count;
 use crate::collab::validation::validate_peer_message;
@@ -289,7 +289,7 @@ async fn host_main(
     let token = encode_token(&endpoint.addr().id);
 
     let my_user_id = 0u64;
-    let my_color = CURSOR_COLORS[0];
+    let my_color = color_from_name(&params.display_name);
 
     // Initialize mesh state.
     let mesh = Arc::new(Mutex::new(MeshState {
@@ -349,7 +349,6 @@ async fn host_main(
     });
 
     let next_user_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
-    let next_color_idx = Arc::new(std::sync::atomic::AtomicUsize::new(1));
 
     // Channel for incoming peer messages from all connections.
     let (peer_msg_tx, mut peer_msg_rx) = tokio::sync::mpsc::channel::<(u64, PeerMessage)>(256);
@@ -373,8 +372,6 @@ async fn host_main(
                 };
 
                 let user_id = next_user_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let color_idx = next_color_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let color = CURSOR_COLORS[color_idx % CURSOR_COLORS.len()];
 
                 let mesh_clone = Arc::clone(&mesh);
                 let ui_state_clone = Arc::clone(&ui_state);
@@ -400,7 +397,6 @@ async fn host_main(
                     host_accept_peer(
                         conn,
                         user_id,
-                        color,
                         &toolkit_version,
                         &initial_render_options,
                         open_replays,
@@ -676,7 +672,6 @@ async fn host_main(
 async fn host_accept_peer(
     conn: iroh::endpoint::Connection,
     user_id: u64,
-    color: [u8; 3],
     toolkit_version: &str,
     initial_render_options: &CollabRenderOptions,
     open_replays: Vec<protocol::ReplayInfo>,
@@ -715,6 +710,8 @@ async fn host_accept_peer(
             return;
         }
     };
+
+    let color = color_from_name(&client_name);
 
     // Validate version.
     if client_version != toolkit_version {
@@ -1122,7 +1119,7 @@ async fn join_main(
             let host_peer = peers.first();
             let host_uid = host_peer.map(|p| p.user_id).unwrap_or(0);
             let host_name = host_peer.map(|p| p.name.clone()).unwrap_or_else(|| "Host".into());
-            let host_color = host_peer.map(|p| p.color).unwrap_or(CURSOR_COLORS[0]);
+            let host_color = host_peer.map(|p| p.color).unwrap_or([200, 200, 200]);
             (
                 assigned_identity.user_id,
                 assigned_identity.name.clone(),

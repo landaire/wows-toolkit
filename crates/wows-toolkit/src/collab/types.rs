@@ -66,19 +66,34 @@ pub fn arr_to_color32(a: [u8; 4]) -> Color32 {
     Color32::from_rgba_premultiplied(a[0], a[1], a[2], a[3])
 }
 
-/// Fixed palette of 12 distinct cursor colors for collaborative sessions.
-/// Index 0 is reserved for the host. Clients assigned round-robin from index 1.
-pub const CURSOR_COLORS: [[u8; 3]; 12] = [
-    [255, 87, 87],   // red (host)
-    [78, 205, 196],  // teal
-    [255, 195, 0],   // amber
-    [136, 84, 208],  // purple
-    [0, 200, 83],    // green
-    [255, 138, 101], // coral
-    [41, 182, 246],  // sky blue
-    [255, 167, 38],  // orange
-    [171, 71, 188],  // magenta
-    [102, 187, 106], // light green
-    [255, 112, 67],  // deep orange
-    [38, 166, 154],  // teal dark
-];
+/// Derive a distinct cursor color from a display name using HSV with full
+/// saturation and value.  The hue is determined by a simple hash of the
+/// name bytes, giving each user a stable, recognisable color.
+pub fn color_from_name(name: &str) -> [u8; 3] {
+    // FNV-1a 32-bit hash for a cheap, well-distributed spread.
+    let mut h: u32 = 2_166_136_261;
+    for &b in name.as_bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(16_777_619);
+    }
+    let hue = (h % 360) as f32; // 0..360
+    let saturation = 0.75_f32; // vivid but not eye-burning
+    let value = 0.90_f32; // bright but not white
+    hsv_to_rgb(hue, saturation, value)
+}
+
+/// Convert HSV (h in 0..360, s/v in 0..1) to an RGB [u8; 3].
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r1, g1, b1) = match h as u32 {
+        0..60 => (c, x, 0.0),
+        60..120 => (x, c, 0.0),
+        120..180 => (0.0, c, x),
+        180..240 => (0.0, x, c),
+        240..300 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    [((r1 + m) * 255.0) as u8, ((g1 + m) * 255.0) as u8, ((b1 + m) * 255.0) as u8]
+}
