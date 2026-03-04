@@ -228,6 +228,9 @@ impl WowsToolkitApp {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
+        // Install the ring crypto provider for rustls before any networking happens.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         // Include phosphor icons
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
