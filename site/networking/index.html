@@ -18,15 +18,15 @@
             }
 
             :root {
-                --bg: #060a06;
-                --bg-raised: #0a120a;
-                --border: #1a2e1a;
-                --text: #33dd55;
-                --text-bright: #bbffcc;
-                --text-dim: #287038;
+                --bg: #060608;
+                --bg-raised: #0a0a14;
+                --border: #1a1a30;
+                --text: #5588dd;
+                --text-bright: #bbccff;
+                --text-dim: #2850a0;
                 --accent: #ffaa22;
                 --accent-hover: #ffbb44;
-                --glow-green: rgba(51, 221, 85, 0.4);
+                --glow-blue: rgba(85, 136, 221, 0.4);
                 --glow-amber: rgba(255, 170, 34, 0.35);
             }
 
@@ -87,13 +87,13 @@
                 color: var(--text-bright);
                 letter-spacing: 0.12em;
                 text-transform: uppercase;
-                text-shadow: 0 0 10px var(--glow-green);
+                text-shadow: 0 0 10px var(--glow-blue);
             }
             .logo a {
                 color: inherit;
             }
             .logo a:hover {
-                text-shadow: 0 0 10px var(--glow-green);
+                text-shadow: 0 0 10px var(--glow-blue);
             }
             nav {
                 display: flex;
@@ -110,7 +110,7 @@
             }
             nav a:hover {
                 color: var(--text);
-                text-shadow: 0 0 8px var(--glow-green);
+                text-shadow: 0 0 8px var(--glow-blue);
             }
 
             /* Content */
@@ -127,8 +127,8 @@
                 letter-spacing: 0.06em;
                 text-transform: uppercase;
                 text-shadow:
-                    0 0 20px var(--glow-green),
-                    0 0 40px rgba(51, 221, 85, 0.2);
+                    0 0 20px var(--glow-blue),
+                    0 0 40px rgba(85, 136, 221, 0.2);
             }
             .content h2 {
                 font-size: 15px;
@@ -372,18 +372,18 @@
                         <rect width="680" height="340" rx="0" fill="#0a120a"/>
 
                         <!-- Host box -->
-                        <rect x="40" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060a06"/>
+                        <rect x="40" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060608"/>
                         <text x="110" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">HOST</text>
                         <text x="110" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">EndpointId</text>
                         <text x="110" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">f4683b31...</text>
 
                         <!-- Relay box -->
-                        <rect x="260" y="40" width="160" height="60" rx="0" stroke="#287038" fill="#060a06"/>
+                        <rect x="260" y="40" width="160" height="60" rx="0" stroke="#287038" fill="#060608"/>
                         <text x="340" y="67" text-anchor="middle" fill="#ffaa22" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">RELAY SERVER</text>
                         <text x="340" y="85" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">cannot read traffic</text>
 
                         <!-- Peer box -->
-                        <rect x="500" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060a06"/>
+                        <rect x="500" y="130" width="140" height="80" rx="0" stroke="#287038" fill="#060608"/>
                         <text x="570" y="162" text-anchor="middle" fill="#bbffcc" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">PEER</text>
                         <text x="570" y="182" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">joins with</text>
                         <text x="570" y="196" text-anchor="middle" fill="#287038" font-family="IBM Plex Mono, monospace" font-size="10">session token</text>

@@ -18,15 +18,15 @@
             }
 
             :root {
-                --bg: #060a06;
-                --bg-raised: #0a120a;
-                --border: #1a2e1a;
-                --text: #33dd55;
-                --text-bright: #bbffcc;
-                --text-dim: #287038;
+                --bg: #060608;
+                --bg-raised: #0a0a14;
+                --border: #1a1a30;
+                --text: #5588dd;
+                --text-bright: #bbccff;
+                --text-dim: #2850a0;
                 --accent: #ffaa22;
                 --accent-hover: #ffbb44;
-                --glow-green: rgba(51, 221, 85, 0.4);
+                --glow-blue: rgba(85, 136, 221, 0.4);
                 --glow-amber: rgba(255, 170, 34, 0.35);
             }
 
@@ -87,7 +87,7 @@
                 color: var(--text-bright);
                 letter-spacing: 0.12em;
                 text-transform: uppercase;
-                text-shadow: 0 0 10px var(--glow-green);
+                text-shadow: 0 0 10px var(--glow-blue);
             }
             nav {
                 display: flex;
@@ -104,7 +104,7 @@
             }
             nav a:hover {
                 color: var(--text);
-                text-shadow: 0 0 8px var(--glow-green);
+                text-shadow: 0 0 8px var(--glow-blue);
             }
 
             /* Hero — artillery plotting room */
@@ -116,16 +116,16 @@
                 background:
                     radial-gradient(
                         ellipse at 50% 55%,
-                        rgba(51, 221, 85, 0.05) 0%,
+                        rgba(85, 136, 221, 0.05) 0%,
                         transparent 60%
                     ),
                     linear-gradient(
-                        rgba(26, 46, 26, 0.25) 1px,
+                        rgba(26, 26, 48, 0.25) 1px,
                         transparent 1px
                     ),
                     linear-gradient(
                         90deg,
-                        rgba(26, 46, 26, 0.25) 1px,
+                        rgba(26, 26, 48, 0.25) 1px,
                         transparent 1px
                     );
                 background-size:
@@ -145,47 +145,47 @@
                     linear-gradient(
                         90deg,
                         transparent calc(50% - 0.5px),
-                        rgba(51, 221, 85, 0.1) calc(50% - 0.5px),
-                        rgba(51, 221, 85, 0.1) calc(50% + 0.5px),
+                        rgba(85, 136, 221, 0.1) calc(50% - 0.5px),
+                        rgba(85, 136, 221, 0.1) calc(50% + 0.5px),
                         transparent calc(50% + 0.5px)
                     ),
                     /* Horizontal crosshair */
                     linear-gradient(
                             0deg,
                             transparent calc(55% - 0.5px),
-                            rgba(51, 221, 85, 0.1) calc(55% - 0.5px),
-                            rgba(51, 221, 85, 0.1) calc(55% + 0.5px),
+                            rgba(85, 136, 221, 0.1) calc(55% - 0.5px),
+                            rgba(85, 136, 221, 0.1) calc(55% + 0.5px),
                             transparent calc(55% + 0.5px)
                         ),
                     /* Range rings (concentric, fading out) */
                     radial-gradient(
                             circle at 50% 55%,
                             transparent 79px,
-                            rgba(51, 221, 85, 0.06) 80px,
+                            rgba(85, 136, 221, 0.06) 80px,
                             transparent 82px
                         ),
                     radial-gradient(
                         circle at 50% 55%,
                         transparent 159px,
-                        rgba(51, 221, 85, 0.06) 160px,
+                        rgba(85, 136, 221, 0.06) 160px,
                         transparent 162px
                     ),
                     radial-gradient(
                         circle at 50% 55%,
                         transparent 249px,
-                        rgba(51, 221, 85, 0.05) 250px,
+                        rgba(85, 136, 221, 0.05) 250px,
                         transparent 252px
                     ),
                     radial-gradient(
                         circle at 50% 55%,
                         transparent 349px,
-                        rgba(51, 221, 85, 0.04) 350px,
+                        rgba(85, 136, 221, 0.04) 350px,
                         transparent 352px
                     ),
                     radial-gradient(
                         circle at 50% 55%,
                         transparent 459px,
-                        rgba(51, 221, 85, 0.03) 460px,
+                        rgba(85, 136, 221, 0.03) 460px,
                         transparent 462px
                     );
             }
@@ -201,9 +201,9 @@
                 letter-spacing: 0.08em;
                 text-transform: uppercase;
                 text-shadow:
-                    0 0 20px var(--glow-green),
-                    0 0 40px rgba(51, 221, 85, 0.2),
-                    0 0 80px rgba(51, 221, 85, 0.1);
+                    0 0 20px var(--glow-blue),
+                    0 0 40px rgba(85, 136, 221, 0.2),
+                    0 0 80px rgba(85, 136, 221, 0.1);
             }
             .hero p {
                 font-size: 14px;
@@ -250,8 +250,8 @@
             }
             .btn-secondary:hover {
                 border-color: var(--text);
-                box-shadow: 0 0 12px var(--glow-green);
-                text-shadow: 0 0 6px var(--glow-green);
+                box-shadow: 0 0 12px var(--glow-blue);
+                text-shadow: 0 0 6px var(--glow-blue);
                 text-decoration: none;
             }
             .version-tag {
@@ -297,7 +297,7 @@
             }
             .screenshot:hover {
                 border-color: var(--text-dim);
-                box-shadow: 0 0 20px rgba(51, 221, 85, 0.1);
+                box-shadow: 0 0 20px rgba(85, 136, 221, 0.1);
             }
             .screenshot img {
                 display: block;
@@ -389,7 +389,7 @@
             }
             .spec-label {
                 font-size: 10px;
-                color: #55aa66;
+                color: #5580bb;
                 text-transform: uppercase;
                 letter-spacing: 0.12em;
                 margin-bottom: 4px;
@@ -398,7 +398,7 @@
                 font-size: 14px;
                 color: var(--text-bright);
                 font-weight: 500;
-                text-shadow: 0 0 6px var(--glow-green);
+                text-shadow: 0 0 6px var(--glow-blue);
             }
 
             /* Footer */
@@ -429,7 +429,7 @@
                 position: fixed;
                 inset: 0;
                 z-index: 1000;
-                background: rgba(4, 8, 4, 0.92);
+                background: rgba(4, 4, 8, 0.92);
                 cursor: zoom-out;
                 align-items: center;
                 justify-content: center;
@@ -443,7 +443,7 @@
                 max-height: 100%;
                 border-radius: 0;
                 border: 1px solid var(--border);
-                box-shadow: 0 0 40px rgba(51, 221, 85, 0.15);
+                box-shadow: 0 0 40px rgba(85, 136, 221, 0.15);
             }
 
             /* Responsive */
