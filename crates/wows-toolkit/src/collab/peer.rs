@@ -781,7 +781,16 @@ async fn host_accept_peer(
         };
 
     let (client_name, client_type) = match &join_msg {
-        PeerMessage::Join { name, client_type } => (name.clone(), client_type.clone()),
+        PeerMessage::Join { name, client_type } => {
+            // Disambiguate duplicate names (case-insensitive) by appending the user_id.
+            let name_taken = {
+                let m = mesh.lock();
+                m.my_name.eq_ignore_ascii_case(name)
+                    || m.peers.values().any(|p| p.name.eq_ignore_ascii_case(name))
+            };
+            let final_name = if name_taken { format!("{name} ({user_id})") } else { name.clone() };
+            (final_name, client_type.clone())
+        }
         _ => {
             warn!("Peer {user_id} sent non-Join as first message");
             return;
