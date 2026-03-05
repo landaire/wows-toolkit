@@ -916,9 +916,9 @@ impl WowsToolkitApp {
                         .as_ref()
                         .and_then(|a| {
                             a.map_image.as_ref().map(|img| {
-                                let (ref data, w, h) = **img;
                                 let mut buf = Vec::new();
-                                if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                if let Some(image) = image::RgbaImage::from_raw(img.width, img.height, img.data.clone())
+                                {
                                     let mut cursor = std::io::Cursor::new(&mut buf);
                                     let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
                                 }
@@ -983,9 +983,11 @@ impl WowsToolkitApp {
                             let map_name = map_name.to_string();
                             let map_image_png = state
                                 .map_image_raw()
-                                .map(|(data, w, h)| {
+                                .map(|img| {
                                     let mut buf = Vec::new();
-                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                    if let Some(image) =
+                                        image::RgbaImage::from_raw(img.width, img.height, img.data.clone())
+                                    {
                                         let mut cursor = std::io::Cursor::new(&mut buf);
                                         let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
                                     }
@@ -1051,9 +1053,11 @@ impl WowsToolkitApp {
                             let map_name = map_name.to_string();
                             let map_image_png = state
                                 .map_image_raw()
-                                .map(|(data, w, h)| {
+                                .map(|img| {
                                     let mut buf = Vec::new();
-                                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                                    if let Some(image) =
+                                        image::RgbaImage::from_raw(img.width, img.height, img.data.clone())
+                                    {
                                         let mut cursor = std::io::Cursor::new(&mut buf);
                                         let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
                                     }

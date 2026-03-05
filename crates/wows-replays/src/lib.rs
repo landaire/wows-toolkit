@@ -4,14 +4,21 @@
 #![allow(clippy::module_inception)]
 
 pub mod analyzer;
+#[cfg(feature = "parsing")]
 mod error;
+#[cfg(feature = "parsing")]
 pub mod game_constants;
+#[cfg(feature = "parsing")]
 pub mod nested_property_path;
+#[cfg(feature = "parsing")]
 pub mod packet2;
 pub mod types;
+#[cfg(feature = "parsing")]
 mod wowsreplay;
 
+#[cfg(feature = "parsing")]
 pub use error::*;
+#[cfg(feature = "parsing")]
 pub use wowsreplay::*;
 
 #[cfg(feature = "arc")]

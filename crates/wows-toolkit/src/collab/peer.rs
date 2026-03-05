@@ -324,6 +324,7 @@ async fn host_main(
             name: params.display_name.clone(),
             color: my_color,
             role: PeerRole::Host,
+            client_type: ClientType::Desktop { toolkit_version: params.toolkit_version.clone() },
         });
     }
     let _ = event_tx.send(SessionEvent::Started);
@@ -745,14 +746,8 @@ async fn host_accept_peer(
             }
         };
 
-    let (client_name, client_version) = match &join_msg {
-        PeerMessage::Join { name, client_type } => {
-            let version = match client_type {
-                ClientType::Desktop { toolkit_version } => toolkit_version.clone(),
-                ClientType::Web => String::new(),
-            };
-            (name.clone(), version)
-        }
+    let (client_name, client_type) = match &join_msg {
+        PeerMessage::Join { name, client_type } => (name.clone(), client_type.clone()),
         _ => {
             warn!("Peer {user_id} sent non-Join as first message");
             return;
@@ -761,10 +756,12 @@ async fn host_accept_peer(
 
     let color = color_from_name(&client_name);
 
-    // Validate version.
-    if client_version != toolkit_version {
+    // Validate version (desktop clients only — web clients have no version).
+    if let ClientType::Desktop { toolkit_version: client_ver } = &client_type
+        && client_ver != toolkit_version
+    {
         let msg = PeerMessage::Rejected {
-            reason: format!("Version mismatch: host is v{toolkit_version}, you have v{client_version}"),
+            reason: format!("Version mismatch: host is v{toolkit_version}, you have v{client_ver}"),
         };
         let _ = write_peer_message(&mut send, &msg).await;
         return;
@@ -921,7 +918,13 @@ async fn host_accept_peer(
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::channel::<Arc<Vec<u8>>>(64);
 
     // Register in mesh.
-    let user = ConnectedUser { id: user_id, name: client_name.clone(), color, role: PeerRole::Peer };
+    let user = ConnectedUser {
+        id: user_id,
+        name: client_name.clone(),
+        color,
+        role: PeerRole::Peer,
+        client_type: client_type.clone(),
+    };
     {
         let mut m = mesh.lock();
         m.peers.insert(user_id, MeshPeer { user_id, name: client_name.clone(), color, role: PeerRole::Peer, msg_tx });
@@ -1169,47 +1172,49 @@ async fn join_main(
             }
         };
 
-    let (my_user_id, my_name, my_color, host_user_id, host_name, host_color, frame_source_id) = match &first_msg {
-        PeerMessage::Rejected { reason } => {
-            let _ = event_tx.send(SessionEvent::Rejected(reason.clone()));
-            set_status(&ui_state, SessionStatus::Error(format!("Rejected: {reason}")));
-            return;
-        }
-        PeerMessage::SessionInfo { peers, assigned_identity, frame_source_id, open_replays, .. } => {
-            if let Err(e) = validate_peer_message(&first_msg) {
-                let _ = event_tx.send(SessionEvent::Error(format!("Invalid SessionInfo: {e}")));
+    let (my_user_id, my_name, my_color, host_user_id, host_name, host_color, frame_source_id, toolkit_version) =
+        match &first_msg {
+            PeerMessage::Rejected { reason } => {
+                let _ = event_tx.send(SessionEvent::Rejected(reason.clone()));
+                set_status(&ui_state, SessionStatus::Error(format!("Rejected: {reason}")));
                 return;
             }
-            let open_replay_list: Vec<OpenReplay> = open_replays
-                .iter()
-                .map(|r| OpenReplay {
-                    replay_id: r.replay_id,
-                    replay_name: r.replay_name.clone(),
-                    map_image_png: r.map_image_png.clone(),
-                    game_version: r.game_version.clone(),
-                })
-                .collect();
-            let _ = event_tx.send(SessionEvent::SessionInfoReceived { open_replays: open_replay_list });
-            // The host is peer[0] (if present).
-            let host_peer = peers.first();
-            let host_uid = host_peer.map(|p| p.user_id).unwrap_or(0);
-            let host_name = host_peer.map(|p| p.name.clone()).unwrap_or_else(|| "Host".into());
-            let host_color = host_peer.map(|p| p.color).unwrap_or([200, 200, 200]);
-            (
-                assigned_identity.user_id,
-                assigned_identity.name.clone(),
-                assigned_identity.color,
-                host_uid,
-                host_name,
-                host_color,
-                *frame_source_id,
-            )
-        }
-        _ => {
-            let _ = event_tx.send(SessionEvent::Error("Expected SessionInfo as first message".into()));
-            return;
-        }
-    };
+            PeerMessage::SessionInfo { toolkit_version, peers, assigned_identity, frame_source_id, open_replays } => {
+                if let Err(e) = validate_peer_message(&first_msg) {
+                    let _ = event_tx.send(SessionEvent::Error(format!("Invalid SessionInfo: {e}")));
+                    return;
+                }
+                let open_replay_list: Vec<OpenReplay> = open_replays
+                    .iter()
+                    .map(|r| OpenReplay {
+                        replay_id: r.replay_id,
+                        replay_name: r.replay_name.clone(),
+                        map_image_png: r.map_image_png.clone(),
+                        game_version: r.game_version.clone(),
+                    })
+                    .collect();
+                let _ = event_tx.send(SessionEvent::SessionInfoReceived { open_replays: open_replay_list });
+                // The host is peer[0] (if present).
+                let host_peer = peers.first();
+                let host_uid = host_peer.map(|p| p.user_id).unwrap_or(0);
+                let host_name = host_peer.map(|p| p.name.clone()).unwrap_or_else(|| "Host".into());
+                let host_color = host_peer.map(|p| p.color).unwrap_or([200, 200, 200]);
+                (
+                    assigned_identity.user_id,
+                    assigned_identity.name.clone(),
+                    assigned_identity.color,
+                    host_uid,
+                    host_name,
+                    host_color,
+                    *frame_source_id,
+                    toolkit_version.clone(),
+                )
+            }
+            _ => {
+                let _ = event_tx.send(SessionEvent::Error("Expected SessionInfo as first message".into()));
+                return;
+            }
+        };
 
     // Initialize mesh state.
     let mesh = Arc::new(Mutex::new(MeshState {
@@ -1250,11 +1255,13 @@ async fn join_main(
         s.role = PeerRole::Peer;
         s.status = SessionStatus::Active;
         // Add host to connected users so they appear in the user list.
+        // Host is always a desktop client.
         s.connected_users.push(ConnectedUser {
             id: host_user_id,
             name: host_name,
             color: host_color,
             role: PeerRole::Host,
+            client_type: ClientType::Desktop { toolkit_version: toolkit_version.clone() },
         });
         s.cursors.push(UserCursor {
             user_id: my_user_id,
@@ -1899,7 +1906,14 @@ fn handle_incoming_message(
                 debug!("Dropping UserJoined from non-host {sender_id}");
                 return;
             }
-            let user = ConnectedUser { id: user_id, name: name.clone(), color, role: PeerRole::Peer };
+            // TODO: UserJoined doesn't carry client_type yet — default to Desktop.
+            let user = ConnectedUser {
+                id: user_id,
+                name: name.clone(),
+                color,
+                role: PeerRole::Peer,
+                client_type: ClientType::Desktop { toolkit_version: String::new() },
+            };
             {
                 let mut s = ui_state.lock();
                 s.connected_users.push(user.clone());

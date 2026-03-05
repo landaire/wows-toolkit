@@ -2,7 +2,74 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::draw_command::ShipConfigVisibility;
-use crate::renderer::RenderOptions;
+
+/// Configurable rendering options.
+#[derive(Clone, Debug)]
+pub struct RenderOptions {
+    pub show_hp_bars: bool,
+    pub show_tracers: bool,
+    pub show_torpedoes: bool,
+    pub show_planes: bool,
+    pub show_smoke: bool,
+    pub show_score: bool,
+    pub show_timer: bool,
+    pub show_kill_feed: bool,
+    pub show_player_names: bool,
+    pub show_ship_names: bool,
+    pub show_capture_points: bool,
+    pub show_buildings: bool,
+    pub show_weather: bool,
+    pub show_turret_direction: bool,
+    pub show_consumables: bool,
+    pub show_armament: bool,
+    pub show_trails: bool,
+    pub show_dead_trails: bool,
+    pub show_speed_trails: bool,
+    pub show_ship_config: bool,
+    pub show_dead_ship_names: bool,
+    pub show_battle_result: bool,
+    pub show_buffs: bool,
+    pub show_chat: bool,
+    pub show_advantage: bool,
+    pub show_score_timer: bool,
+    /// Controls which ships have their config circles rendered when show_ship_config is true.
+    /// Defaults to SelfOnly (only the replay owner's circles).
+    pub ship_config_visibility: ShipConfigVisibility,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self {
+            show_hp_bars: true,
+            show_tracers: true,
+            show_torpedoes: true,
+            show_planes: true,
+            show_smoke: true,
+            show_score: true,
+            show_timer: true,
+            show_kill_feed: true,
+            show_player_names: true,
+            show_ship_names: true,
+            show_capture_points: true,
+            show_buildings: true,
+            show_weather: true,
+            show_turret_direction: true,
+            show_consumables: true,
+            show_armament: false,
+            show_trails: false,
+            show_dead_trails: true,
+            show_speed_trails: false,
+            show_ship_config: false,
+            show_dead_ship_names: false,
+            show_battle_result: true,
+            show_buffs: true,
+            show_chat: true,
+            show_advantage: true,
+            show_score_timer: true,
+            ship_config_visibility: ShipConfigVisibility::default(),
+        }
+    }
+}
 
 /// CLI override flags for renderer configuration.
 ///

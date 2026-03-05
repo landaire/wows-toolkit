@@ -49,20 +49,22 @@ pub(super) fn generate_icon_outline(data: &[u8], w: u32, h: u32, thickness: i32)
 
 pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> RendererTextures {
     let map_texture = assets.map_image.as_ref().map(|asset| {
-        let (ref data, w, h) = **asset;
-        let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], data);
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
         ctx.load_texture("replay_map", image, egui::TextureOptions::LINEAR)
     });
 
     let mut ship_icons: HashMap<String, TextureHandle> = HashMap::new();
     let mut ship_icon_outlines: HashMap<String, TextureHandle> = HashMap::new();
-    for (key, (data, w, h)) in assets.ship_icons.iter() {
-        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+    for (key, asset) in assets.ship_icons.iter() {
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
         let handle = ctx.load_texture(format!("ship_{}", key), image, egui::TextureOptions::LINEAR);
         ship_icons.insert(key.clone(), handle);
 
-        let outline_data = generate_icon_outline(data, *w, *h, 2);
-        let outline_image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], &outline_data);
+        let outline_data = generate_icon_outline(&asset.data, asset.width, asset.height, 2);
+        let outline_image =
+            egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &outline_data);
         let outline_handle =
             ctx.load_texture(format!("ship_outline_{}", key), outline_image, egui::TextureOptions::LINEAR);
         ship_icon_outlines.insert(key.clone(), outline_handle);
@@ -71,8 +73,9 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
     let plane_icons: HashMap<String, TextureHandle> = assets
         .plane_icons
         .iter()
-        .map(|(key, (data, w, h))| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
             let handle = ctx.load_texture(format!("plane_{}", key), image, egui::TextureOptions::LINEAR);
             (key.clone(), handle)
         })
@@ -81,8 +84,9 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
     let consumable_icons: HashMap<String, TextureHandle> = assets
         .consumable_icons
         .iter()
-        .map(|(key, (data, w, h))| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
             let handle = ctx.load_texture(format!("consumable_{}", key), image, egui::TextureOptions::LINEAR);
             (key.clone(), handle)
         })
@@ -91,8 +95,9 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
     let death_cause_icons: HashMap<String, TextureHandle> = assets
         .death_cause_icons
         .iter()
-        .map(|(key, (data, w, h))| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
             let handle = ctx.load_texture(format!("death_{}", key), image, egui::TextureOptions::LINEAR);
             (key.clone(), handle)
         })
@@ -101,8 +106,9 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
     let powerup_icons: HashMap<String, TextureHandle> = assets
         .powerup_icons
         .iter()
-        .map(|(key, (data, w, h))| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
             let handle = ctx.load_texture(format!("powerup_{}", key), image, egui::TextureOptions::LINEAR);
             (key.clone(), handle)
         })

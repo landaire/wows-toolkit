@@ -79,8 +79,12 @@ use crate::minimap_view::send_annotation_update;
 
 // ─── Asset Cache ─────────────────────────────────────────────────────────────
 
-/// RGBA image data: (pixels, width, height).
-pub type RgbaAsset = (Vec<u8>, u32, u32);
+/// RGBA image data with dimensions.
+pub struct RgbaAsset {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
 
 /// Cached assets shared across renderer instances. Lives in TabState.
 /// Ship and plane icons are game-global; map data is per-map.
@@ -110,7 +114,7 @@ impl RendererAssetCache {
             .into_iter()
             .map(|(k, img)| {
                 let (w, h) = (img.width(), img.height());
-                (k, (img.into_raw(), w, h))
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
             })
             .collect();
         let arc = Arc::new(converted);
@@ -127,7 +131,7 @@ impl RendererAssetCache {
             .into_iter()
             .map(|(k, img)| {
                 let (w, h) = (img.width(), img.height());
-                (k, (img.into_raw(), w, h))
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
             })
             .collect();
         let arc = Arc::new(converted);
@@ -144,7 +148,7 @@ impl RendererAssetCache {
             .into_iter()
             .map(|(k, img)| {
                 let (w, h) = (img.width(), img.height());
-                (k, (img.into_raw(), w, h))
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
             })
             .collect();
         let arc = Arc::new(converted);
@@ -161,7 +165,7 @@ impl RendererAssetCache {
             .into_iter()
             .map(|(k, img)| {
                 let (w, h) = (img.width(), img.height());
-                (k, (img.into_raw(), w, h))
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
             })
             .collect();
         let arc = Arc::new(converted);
@@ -178,7 +182,7 @@ impl RendererAssetCache {
             .into_iter()
             .map(|(k, img)| {
                 let (w, h) = (img.width(), img.height());
-                (k, (img.into_raw(), w, h))
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
             })
             .collect();
         let arc = Arc::new(converted);
@@ -202,7 +206,7 @@ impl RendererAssetCache {
         let map_image = assets::load_map_image(map_name, vfs).map(|img| {
             let rgba = image::DynamicImage::ImageRgb8(img).into_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
-            Arc::new((rgba.into_raw(), w, h))
+            Arc::new(RgbaAsset { data: rgba.into_raw(), width: w, height: h })
         });
         let map_info = assets::load_map_info(map_name, vfs);
         self.maps.insert(map_name.to_string(), CachedMapData { image: map_image.clone(), info: map_info.clone() });
@@ -707,7 +711,7 @@ pub fn launch_client_renderer(
     let map_image = image::load_from_memory(&map_image_png).ok().map(|img| {
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
-        Arc::new((rgba.into_raw(), w, h) as RgbaAsset)
+        Arc::new(RgbaAsset { data: rgba.into_raw(), width: w, height: h })
     });
 
     // Load icons and fonts from VFS via the shared asset cache.

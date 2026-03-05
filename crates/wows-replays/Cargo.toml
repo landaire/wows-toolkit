@@ -9,20 +9,20 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-winnow = { workspace = true }
+winnow = { workspace = true, optional = true }
 flate2 = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true }
-rust-crypto = "0.2.36"
-roxmltree = { workspace = true }
-pickled = { workspace = true }
+rust-crypto = { version = "0.2.36", optional = true }
+roxmltree = { workspace = true, optional = true }
+pickled = { workspace = true, optional = true }
 kinded = "0.5"
 tracing = { workspace = true }
-wowsunpack = { workspace = true, features = ["json", "vfs"] }
-bon = { workspace = true }
-rootcause = { workspace = true }
-modular-bitfield = "0.13"
+wowsunpack = { workspace = true, default-features = false }
+bon = { workspace = true, optional = true }
+rootcause = { workspace = true, optional = true }
+modular-bitfield = { version = "0.13", optional = true }
 
 [build-dependencies]
 serde = { workspace = true }
@@ -34,5 +34,18 @@ sha2 = { workspace = true }
 wows-data-mgr = { path = "../wows-data-mgr" }
 
 [features]
-default = ["arc"]
+default = ["arc", "parsing"]
+parsing = [
+    "dep:winnow",
+    "dep:rust-crypto",
+    "dep:pickled",
+    "dep:modular-bitfield",
+    "dep:bon",
+    "dep:roxmltree",
+    "dep:serde_json",
+    "dep:rootcause",
+    "wowsunpack/json",
+    "wowsunpack/vfs",
+    "wowsunpack/parsing",
+]
 arc = ["wowsunpack/arc"]

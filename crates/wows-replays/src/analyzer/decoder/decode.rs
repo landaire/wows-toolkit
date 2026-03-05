@@ -33,7 +33,7 @@ use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::unpack_rpc_args;
 
-use super::analyzer::Analyzer;
+use super::super::analyzer::Analyzer;
 
 pub struct DecoderBuilder {
     silent: bool,
@@ -62,19 +62,17 @@ impl DecoderBuilder {
         Box::new(decoder)
     }
 }
-pub use wowsunpack::game_types::BatteryState;
-pub use wowsunpack::game_types::BattleStage;
-pub use wowsunpack::game_types::BuoyancyState;
-pub use wowsunpack::game_types::CameraMode;
-pub use wowsunpack::game_types::CollisionType;
-pub use wowsunpack::game_types::Consumable;
-pub use wowsunpack::game_types::DeathCause;
-pub use wowsunpack::game_types::FinishType;
-pub use wowsunpack::game_types::Ribbon;
-pub use wowsunpack::game_types::ShellHitType;
-pub use wowsunpack::game_types::VoiceLine;
-pub use wowsunpack::game_types::WeaponType;
-pub use wowsunpack::recognized::Recognized;
+// Types that are also re-exported from the parent module (decoder/mod.rs).
+// Imported here (non-pub) for internal use within this file.
+use wowsunpack::game_types::CameraMode;
+use wowsunpack::game_types::CollisionType;
+use wowsunpack::game_types::Consumable;
+use wowsunpack::game_types::DeathCause;
+use wowsunpack::game_types::FinishType;
+use wowsunpack::game_types::Ribbon;
+use wowsunpack::game_types::ShellHitType;
+use wowsunpack::game_types::VoiceLine;
+use wowsunpack::recognized::Recognized;
 
 /// Properties only present for human players (not bots)
 #[derive(Debug, Clone, Serialize, Deserialize)]

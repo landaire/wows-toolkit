@@ -223,37 +223,24 @@ pub(super) fn render_video_blocking(
         let (map_raw, map_info) = cache.get_or_load_map(map_name, &vfs);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
-        let ship_icons: HashMap<String, image::RgbaImage> = ship_raw
-            .iter()
-            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
-            .collect();
-
-        let plane_icons: HashMap<String, image::RgbaImage> = plane_raw
-            .iter()
-            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
-            .collect();
-
-        let consumable_icons: HashMap<String, image::RgbaImage> = consumable_raw
-            .iter()
-            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
-            .collect();
+        let to_rgba = |a: &super::RgbaAsset| image::RgbaImage::from_raw(a.width, a.height, a.data.clone()).unwrap();
+        let ship_icons: HashMap<String, image::RgbaImage> =
+            ship_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let plane_icons: HashMap<String, image::RgbaImage> =
+            plane_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let consumable_icons: HashMap<String, image::RgbaImage> =
+            consumable_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
         let map_image = map_raw.as_ref().and_then(|arc| {
-            let (data, w, h) = &**arc;
             // Cached data is RGBA, convert to RGB for ImageTarget
-            let rgba = image::RgbaImage::from_raw(*w, *h, data.clone())?;
+            let rgba = image::RgbaImage::from_raw(arc.width, arc.height, arc.data.clone())?;
             Some(image::DynamicImage::ImageRgba8(rgba).into_rgb8())
         });
 
-        let death_cause_icons: HashMap<String, image::RgbaImage> = death_cause_raw
-            .iter()
-            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
-            .collect();
-
-        let powerup_icons: HashMap<String, image::RgbaImage> = powerup_raw
-            .iter()
-            .map(|(k, (data, w, h))| (k.clone(), image::RgbaImage::from_raw(*w, *h, data.clone()).unwrap()))
-            .collect();
+        let death_cause_icons: HashMap<String, image::RgbaImage> =
+            death_cause_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let powerup_icons: HashMap<String, image::RgbaImage> =
+            powerup_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
         (map_image, ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, map_info, game_fonts)
     };

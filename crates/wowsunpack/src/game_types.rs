@@ -5,12 +5,18 @@
 
 use std::fmt;
 
+#[cfg(feature = "parsing")]
 use crate::data::Version;
+#[cfg(feature = "parsing")]
 use crate::game_constants::BattleConstants;
+#[cfg(feature = "parsing")]
 use crate::game_constants::CommonConstants;
+#[cfg(feature = "parsing")]
 use crate::game_constants::ShipsConstants;
+#[cfg(feature = "parsing")]
 use crate::recognized::Recognized;
 
+#[cfg(feature = "parsing")]
 use crate::game_params::types::Meters;
 
 // =============================================================================
@@ -349,6 +355,7 @@ impl std::iter::Sum for WorldPos {
     }
 }
 
+#[cfg(feature = "parsing")]
 impl WorldPos {
     /// Horizontal (XZ-plane) distance to another position, returned in meters.
     /// Both positions are in BigWorld coordinates (1 BW = 30m).
@@ -664,6 +671,7 @@ pub enum DeathCause {
     Missile,
 }
 
+#[cfg(feature = "parsing")]
 impl DeathCause {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.death_reason(id).map(|name| Self::from_name(name, version))
@@ -854,6 +862,7 @@ pub enum Consumable {
     Special,
 }
 
+#[cfg(feature = "parsing")]
 impl Consumable {
     pub fn from_id(id: i32, constants: &CommonConstants, version: Version) -> Option<Recognized<Self>> {
         constants.consumable_type(id).map(|name| Self::from_consumable_type(name, version))
@@ -1012,6 +1021,7 @@ pub enum CameraMode {
     IdleGame,
 }
 
+#[cfg(feature = "parsing")]
 impl CameraMode {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.camera_mode(id).map(|name| Self::from_name(name, version))
@@ -1099,6 +1109,7 @@ impl BattleStage {
     }
 }
 
+#[cfg(feature = "parsing")]
 impl BattleStage {
     pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
         match name {
@@ -1142,28 +1153,6 @@ pub enum FinishType {
 }
 
 impl FinishType {
-    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.finish_type(id).map(|name| Self::from_name(name, version))
-    }
-
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
-            "UNKNOWN" => Recognized::Known(FinishType::Unknown),
-            "EXTERMINATION" => Recognized::Known(FinishType::Extermination),
-            "BASE" => Recognized::Known(FinishType::BaseCaptured),
-            "TIMEOUT" => Recognized::Known(FinishType::Timeout),
-            "FAILURE" => Recognized::Known(FinishType::Failure),
-            "TECHNICAL" => Recognized::Known(FinishType::Technical),
-            "SCORE" => Recognized::Known(FinishType::Score),
-            "SCORE_ON_TIMEOUT" => Recognized::Known(FinishType::ScoreOnTimeout),
-            "PVE_MAIN_TASK_SUCCEEDED" => Recognized::Known(FinishType::PveMainTaskSucceeded),
-            "PVE_MAIN_TASK_FAILED" => Recognized::Known(FinishType::PveMainTaskFailed),
-            "SCORE_ZERO" => Recognized::Known(FinishType::ScoreZero),
-            "SCORE_EXCESS" => Recognized::Known(FinishType::ScoreExcess),
-            other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
     pub const fn name(&self) -> &'static str {
         match self {
             FinishType::Unknown => "UNKNOWN",
@@ -1199,6 +1188,31 @@ impl FinishType {
     }
 }
 
+#[cfg(feature = "parsing")]
+impl FinishType {
+    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.finish_type(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "UNKNOWN" => Recognized::Known(FinishType::Unknown),
+            "EXTERMINATION" => Recognized::Known(FinishType::Extermination),
+            "BASE" => Recognized::Known(FinishType::BaseCaptured),
+            "TIMEOUT" => Recognized::Known(FinishType::Timeout),
+            "FAILURE" => Recognized::Known(FinishType::Failure),
+            "TECHNICAL" => Recognized::Known(FinishType::Technical),
+            "SCORE" => Recognized::Known(FinishType::Score),
+            "SCORE_ON_TIMEOUT" => Recognized::Known(FinishType::ScoreOnTimeout),
+            "PVE_MAIN_TASK_SUCCEEDED" => Recognized::Known(FinishType::PveMainTaskSucceeded),
+            "PVE_MAIN_TASK_FAILED" => Recognized::Known(FinishType::PveMainTaskFailed),
+            "SCORE_ZERO" => Recognized::Known(FinishType::ScoreZero),
+            "SCORE_EXCESS" => Recognized::Known(FinishType::ScoreExcess),
+            other => Recognized::Unknown(other.to_string()),
+        }
+    }
+}
+
 impl fmt::Display for FinishType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.description())
@@ -1221,25 +1235,6 @@ pub enum BuoyancyState {
 }
 
 impl BuoyancyState {
-    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.depth_state(id).map(|name| Self::from_name(name, version))
-    }
-
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
-            "INVALID_STATE" => Recognized::Known(BuoyancyState::Invalid),
-            "SURFACE" => Recognized::Known(BuoyancyState::Surface),
-            "PERISCOPE" => Recognized::Known(BuoyancyState::Periscope),
-            "SEMI_DEEP_WATER" => Recognized::Known(BuoyancyState::SemiDeepWater),
-            "DEEP_WATER" => Recognized::Known(BuoyancyState::DeepWater),
-            "DEEP_WATER_INVUL" => Recognized::Known(BuoyancyState::DeepWaterInvul),
-            // Legacy names from old battle.xml
-            "WORKING" => Recognized::Known(BuoyancyState::SemiDeepWater),
-            "INVULNERABLE" => Recognized::Known(BuoyancyState::DeepWaterInvul),
-            other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
     pub const fn name(&self) -> &'static str {
         match self {
             BuoyancyState::Invalid => "INVALID_STATE",
@@ -1259,6 +1254,28 @@ impl BuoyancyState {
             BuoyancyState::SemiDeepWater => "Semi-Deep",
             BuoyancyState::DeepWater => "Deep",
             BuoyancyState::DeepWaterInvul => "Deep (Invul)",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl BuoyancyState {
+    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.depth_state(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "INVALID_STATE" => Recognized::Known(BuoyancyState::Invalid),
+            "SURFACE" => Recognized::Known(BuoyancyState::Surface),
+            "PERISCOPE" => Recognized::Known(BuoyancyState::Periscope),
+            "SEMI_DEEP_WATER" => Recognized::Known(BuoyancyState::SemiDeepWater),
+            "DEEP_WATER" => Recognized::Known(BuoyancyState::DeepWater),
+            "DEEP_WATER_INVUL" => Recognized::Known(BuoyancyState::DeepWaterInvul),
+            // Legacy names from old battle.xml
+            "WORKING" => Recognized::Known(BuoyancyState::SemiDeepWater),
+            "INVULNERABLE" => Recognized::Known(BuoyancyState::DeepWaterInvul),
+            other => Recognized::Unknown(other.to_string()),
         }
     }
 }
@@ -1284,21 +1301,6 @@ pub enum WeaponType {
 }
 
 impl WeaponType {
-    pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.weapon_type(id).map(|name| Self::from_name(name, version))
-    }
-
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
-            "ARTILLERY" => Recognized::Known(WeaponType::Artillery),
-            "ATBA" => Recognized::Known(WeaponType::Secondaries),
-            "TORPEDO" => Recognized::Known(WeaponType::Torpedoes),
-            "AIRPLANES" => Recognized::Known(WeaponType::Planes),
-            "PINGER" => Recognized::Known(WeaponType::Pinger),
-            other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
     pub const fn name(&self) -> &'static str {
         match self {
             WeaponType::Artillery => "ARTILLERY",
@@ -1316,6 +1318,24 @@ impl WeaponType {
             WeaponType::Torpedoes => "Torpedoes",
             WeaponType::Planes => "Planes",
             WeaponType::Pinger => "Sonar",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl WeaponType {
+    pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.weapon_type(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "ARTILLERY" => Recognized::Known(WeaponType::Artillery),
+            "ATBA" => Recognized::Known(WeaponType::Secondaries),
+            "TORPEDO" => Recognized::Known(WeaponType::Torpedoes),
+            "AIRPLANES" => Recognized::Known(WeaponType::Planes),
+            "PINGER" => Recognized::Known(WeaponType::Pinger),
+            other => Recognized::Unknown(other.to_string()),
         }
     }
 }
@@ -1344,24 +1364,6 @@ pub enum BatteryState {
 }
 
 impl BatteryState {
-    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
-        constants.battery_state(id).map(|name| Self::from_name(name, version))
-    }
-
-    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
-        match name {
-            "IDLE" => Recognized::Known(BatteryState::Idle),
-            "CHARGING" => Recognized::Known(BatteryState::Charging),
-            "DISCHARGING" => Recognized::Known(BatteryState::Discharging),
-            "CRITICAL_DISCHARGING" => Recognized::Known(BatteryState::CriticalDischarging),
-            "BROKEN_CHARGING" => Recognized::Known(BatteryState::BrokenCharging),
-            "BROKEN_IDLE" => Recognized::Known(BatteryState::BrokenIdle),
-            "REGENERATION" => Recognized::Known(BatteryState::Regeneration),
-            "EMPTY" => Recognized::Known(BatteryState::Empty),
-            other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
     pub const fn name(&self) -> &'static str {
         match self {
             BatteryState::Idle => "IDLE",
@@ -1385,6 +1387,27 @@ impl BatteryState {
             BatteryState::BrokenIdle => "Broken Idle",
             BatteryState::Regeneration => "Regeneration",
             BatteryState::Empty => "Empty",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl BatteryState {
+    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.battery_state(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "IDLE" => Recognized::Known(BatteryState::Idle),
+            "CHARGING" => Recognized::Known(BatteryState::Charging),
+            "DISCHARGING" => Recognized::Known(BatteryState::Discharging),
+            "CRITICAL_DISCHARGING" => Recognized::Known(BatteryState::CriticalDischarging),
+            "BROKEN_CHARGING" => Recognized::Known(BatteryState::BrokenCharging),
+            "BROKEN_IDLE" => Recognized::Known(BatteryState::BrokenIdle),
+            "REGENERATION" => Recognized::Known(BatteryState::Regeneration),
+            "EMPTY" => Recognized::Known(BatteryState::Empty),
+            other => Recognized::Unknown(other.to_string()),
         }
     }
 }
@@ -1418,27 +1441,6 @@ pub enum BattleType {
 }
 
 impl BattleType {
-    /// Parse from the string value in replay metadata (e.g. `"RandomBattle"`).
-    pub fn from_value(s: &str, _version: Version) -> Recognized<Self> {
-        match s {
-            "StandartBattle" => Recognized::Known(Self::Standard),
-            "SingleBattle" => Recognized::Known(Self::Single),
-            "Study" => Recognized::Known(Self::Study),
-            "RandomBattle" => Recognized::Known(Self::Random),
-            "TrainingBattle" => Recognized::Known(Self::Training),
-            "CooperativeBattle" => Recognized::Known(Self::Cooperative),
-            "RankedBattle" => Recognized::Known(Self::Ranked),
-            "OldRankedBattle" => Recognized::Known(Self::OldRanked),
-            "TutorialBattle" => Recognized::Known(Self::IntroMission),
-            "ClubBattle" => Recognized::Known(Self::Club),
-            "PVEBattle" => Recognized::Known(Self::Pve),
-            "ClanBattle" => Recognized::Known(Self::Clan),
-            "EventBattle" => Recognized::Known(Self::Event),
-            "BrawlBattle" => Recognized::Known(Self::Brawl),
-            other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
     /// Whether this battle type uses full-team divisions (no individual div coloring).
     pub fn is_clan_battle(&self) -> bool {
         matches!(self, Self::Clan)
@@ -1464,6 +1466,30 @@ impl BattleType {
     }
 }
 
+#[cfg(feature = "parsing")]
+impl BattleType {
+    /// Parse from the string value in replay metadata (e.g. `"RandomBattle"`).
+    pub fn from_value(s: &str, _version: Version) -> Recognized<Self> {
+        match s {
+            "StandartBattle" => Recognized::Known(Self::Standard),
+            "SingleBattle" => Recognized::Known(Self::Single),
+            "Study" => Recognized::Known(Self::Study),
+            "RandomBattle" => Recognized::Known(Self::Random),
+            "TrainingBattle" => Recognized::Known(Self::Training),
+            "CooperativeBattle" => Recognized::Known(Self::Cooperative),
+            "RankedBattle" => Recognized::Known(Self::Ranked),
+            "OldRankedBattle" => Recognized::Known(Self::OldRanked),
+            "TutorialBattle" => Recognized::Known(Self::IntroMission),
+            "ClubBattle" => Recognized::Known(Self::Club),
+            "PVEBattle" => Recognized::Known(Self::Pve),
+            "ClanBattle" => Recognized::Known(Self::Clan),
+            "EventBattle" => Recognized::Known(Self::Event),
+            "BrawlBattle" => Recognized::Known(Self::Brawl),
+            other => Recognized::Unknown(other.to_string()),
+        }
+    }
+}
+
 impl fmt::Display for BattleType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
@@ -1485,6 +1511,20 @@ pub enum CollisionType {
 }
 
 impl CollisionType {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            CollisionType::NoHit => "NO_HIT",
+            CollisionType::HitWater => "HIT_WATER",
+            CollisionType::HitGround => "HIT_GROUND",
+            CollisionType::HitEntity => "HIT_ENTITY",
+            CollisionType::HitEntityBB => "HIT_ENTITY_BB",
+            CollisionType::HitWave => "HIT_WAVE",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl CollisionType {
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
         constants.collision_type(id).map(|name| Self::from_name(name, version))
     }
@@ -1498,17 +1538,6 @@ impl CollisionType {
             "HIT_ENTITY_BB" => Recognized::Known(CollisionType::HitEntityBB),
             "HIT_WAVE" => Recognized::Known(CollisionType::HitWave),
             other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
-    pub const fn name(&self) -> &'static str {
-        match self {
-            CollisionType::NoHit => "NO_HIT",
-            CollisionType::HitWater => "HIT_WATER",
-            CollisionType::HitGround => "HIT_GROUND",
-            CollisionType::HitEntity => "HIT_ENTITY",
-            CollisionType::HitEntityBB => "HIT_ENTITY_BB",
-            CollisionType::HitWave => "HIT_WAVE",
         }
     }
 }
@@ -1544,6 +1573,22 @@ pub enum ShellHitType {
 }
 
 impl ShellHitType {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            ShellHitType::Normal => "SHELL_HIT_TYPE_NORMAL",
+            ShellHitType::Ricochet => "SHELL_HIT_TYPE_RICOCHET",
+            ShellHitType::MajorHit => "SHELL_HIT_TYPE_MAJORHIT",
+            ShellHitType::NoPenetration => "SHELL_HIT_TYPE_NOPENETRATION",
+            ShellHitType::Overpenetration => "SHELL_HIT_TYPE_OVERPENETRATION",
+            ShellHitType::None => "SHELL_HIT_TYPE_NONE",
+            ShellHitType::ExitOverpenetration => "SHELL_HIT_TYPE_EXIT_OVERPENETRATION",
+            ShellHitType::Underwater => "SHELL_HIT_TYPE_UNDERWATER",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl ShellHitType {
     pub fn from_id(id: i32, constants: &ShipsConstants, version: Version) -> Option<Recognized<Self>> {
         constants.shell_hit_type(id).map(|name| Self::from_name(name, version))
     }
@@ -1559,19 +1604,6 @@ impl ShellHitType {
             "SHELL_HIT_TYPE_EXIT_OVERPENETRATION" => Recognized::Known(ShellHitType::ExitOverpenetration),
             "SHELL_HIT_TYPE_UNDERWATER" => Recognized::Known(ShellHitType::Underwater),
             other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
-    pub const fn name(&self) -> &'static str {
-        match self {
-            ShellHitType::Normal => "SHELL_HIT_TYPE_NORMAL",
-            ShellHitType::Ricochet => "SHELL_HIT_TYPE_RICOCHET",
-            ShellHitType::MajorHit => "SHELL_HIT_TYPE_MAJORHIT",
-            ShellHitType::NoPenetration => "SHELL_HIT_TYPE_NOPENETRATION",
-            ShellHitType::Overpenetration => "SHELL_HIT_TYPE_OVERPENETRATION",
-            ShellHitType::None => "SHELL_HIT_TYPE_NONE",
-            ShellHitType::ExitOverpenetration => "SHELL_HIT_TYPE_EXIT_OVERPENETRATION",
-            ShellHitType::Underwater => "SHELL_HIT_TYPE_UNDERWATER",
         }
     }
 }
@@ -1605,6 +1637,26 @@ pub enum InteractiveZoneType {
 }
 
 impl InteractiveZoneType {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::NoType => "noType",
+            Self::ResourceZone => "resourceZone",
+            Self::ConvoyZone => "convoyZone",
+            Self::RepairZone => "repairZone",
+            Self::FelZone => "felZone",
+            Self::WeatherZone => "weatherZone",
+            Self::DropZone => "dropZone",
+            Self::ConsumableZone => "consumableZone",
+            Self::ColoredByRelation => "coloredByRelation",
+            Self::ControlPoint => "controlPoint",
+            Self::RescueZone => "rescue_zone",
+            Self::OrbitalStrikeZone => "orbital_strike_zone",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl InteractiveZoneType {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.interactive_zone_type(id).map(|name| Self::from_name(name, version))
     }
@@ -1624,23 +1676,6 @@ impl InteractiveZoneType {
             "rescue_zone" => Recognized::Known(Self::RescueZone),
             "orbital_strike_zone" => Recognized::Known(Self::OrbitalStrikeZone),
             other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::NoType => "noType",
-            Self::ResourceZone => "resourceZone",
-            Self::ConvoyZone => "convoyZone",
-            Self::RepairZone => "repairZone",
-            Self::FelZone => "felZone",
-            Self::WeatherZone => "weatherZone",
-            Self::DropZone => "dropZone",
-            Self::ConsumableZone => "consumableZone",
-            Self::ColoredByRelation => "coloredByRelation",
-            Self::ControlPoint => "controlPoint",
-            Self::RescueZone => "rescue_zone",
-            Self::OrbitalStrikeZone => "orbital_strike_zone",
         }
     }
 }
@@ -1668,6 +1703,20 @@ pub enum ControlPointType {
 }
 
 impl ControlPointType {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Control => "Control",
+            Self::Base => "Base",
+            Self::MegaBase => "MegaBase",
+            Self::BuildingCp => "BuildingCP",
+            Self::BaseWithPoints => "BaseWithPoints",
+            Self::EpicenterCp => "EpicenterCP",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl ControlPointType {
     pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
         constants.control_point_type(id).map(|name| Self::from_name(name, version))
     }
@@ -1681,17 +1730,6 @@ impl ControlPointType {
             "BaseWithPoints" => Recognized::Known(Self::BaseWithPoints),
             "EpicenterCP" => Recognized::Known(Self::EpicenterCp),
             other => Recognized::Unknown(other.to_string()),
-        }
-    }
-
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::Control => "Control",
-            Self::Base => "Base",
-            Self::MegaBase => "MegaBase",
-            Self::BuildingCp => "BuildingCP",
-            Self::BaseWithPoints => "BaseWithPoints",
-            Self::EpicenterCp => "EpicenterCP",
         }
     }
 }

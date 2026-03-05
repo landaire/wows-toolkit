@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+#[cfg(feature = "rendering")]
 use image::RgbaImage;
 use wows_replays::analyzer::decoder::DeathCause;
 use wows_replays::analyzer::decoder::Recognized;
@@ -273,6 +274,7 @@ pub enum DrawCommand {
         /// Color of the invading team (shown as progress arc)
         invader_color: Option<[u8; 3]>,
         /// Pre-selected flag icon for base-type capture points (drawn instead of text label)
+        #[cfg(feature = "rendering")]
         #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
         flag_icon: Option<RgbaImage>,
     },

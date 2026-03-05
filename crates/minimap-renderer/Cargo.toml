@@ -20,35 +20,54 @@ required-features = ["bin"]
 
 [features]
 default = ["bin", "vulkan", "videotoolbox", "arc"]
-bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "rkyv"]
+# Core rendering: gates heavy deps (image, ab_glyph, tiny-skia, resvg, etc.) and
+# modules that use them (renderer, drawing, video, encoder, assets).
+# Without this feature, only lightweight type modules are available (draw_command, map_data,
+# config, advantage, error).
+rendering = [
+    "dep:image",
+    "dep:ab_glyph",
+    "dep:mp4",
+    "dep:bytes",
+    "dep:convert_case",
+    "dep:roxmltree",
+    "dep:resvg",
+    "dep:tiny-skia",
+    "dep:rootcause",
+    "wows_replays/parsing",
+    "wowsunpack/json",
+    "wowsunpack/vfs",
+    "wowsunpack/parsing",
+]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wowsunpack/rkyv"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
-vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs"]
+vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
 # VideoToolbox encoder (macOS only)
-videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs"]
+videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
 # CPU encoder (fallback, all platforms)
-cpu = ["dep:openh264"]
+cpu = ["dep:openh264", "rendering"]
 arc = ["wows_replays/arc"]
 
 [dependencies]
-wows_replays = { workspace = true }
-wowsunpack = { workspace = true, features = ["json", "vfs"] }
-image = { workspace = true, features = ["png", "jpeg"] }
-ab_glyph = "0.2"
-mp4 = "0.14"
-bytes = "1"
+wows_replays = { workspace = true, default-features = false }
+wowsunpack = { workspace = true, default-features = false }
+image = { workspace = true, features = ["png", "jpeg"], optional = true }
+ab_glyph = { version = "0.2", optional = true }
+mp4 = { version = "0.14", optional = true }
+bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 serde = { workspace = true }
-convert_case = { workspace = true }
+convert_case = { workspace = true, optional = true }
 gettext = { workspace = true, optional = true }
-roxmltree = { workspace = true }
-resvg = "0.47"
-tiny-skia = "0.12"
+roxmltree = { workspace = true, optional = true }
+resvg = { version = "0.47", optional = true }
+tiny-skia = { version = "0.12", optional = true }
 indicatif = { workspace = true, optional = true }
-rootcause = { workspace = true }
+rootcause = { workspace = true, optional = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 
 # YUV conversion (shared by vulkan and videotoolbox backends)

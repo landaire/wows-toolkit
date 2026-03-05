@@ -35,7 +35,7 @@ egui-notify = "0.21.0"
 wgpu = { version = "27", default-features = true }
 
 tracing = { workspace = true }
-wows_replays = { workspace = true, features = ["arc"] }
+wows_replays = { workspace = true, features = ["arc", "parsing"] }
 serde = { workspace = true }
 wowsunpack = { workspace = true, features = [
     "arc",

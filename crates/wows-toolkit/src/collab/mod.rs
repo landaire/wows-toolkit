@@ -309,6 +309,7 @@ pub struct ConnectedUser {
     pub name: String,
     pub color: [u8; 3],
     pub role: PeerRole,
+    pub client_type: crate::collab::protocol::ClientType,
 }
 
 /// A user's cursor position with metadata for rendering.
@@ -520,7 +521,13 @@ mod tests {
 
     #[test]
     fn connected_user_clone() {
-        let user = ConnectedUser { id: 1, name: "Alice".into(), color: [255, 0, 0], role: PeerRole::Host };
+        let user = ConnectedUser {
+            id: 1,
+            name: "Alice".into(),
+            color: [255, 0, 0],
+            role: PeerRole::Host,
+            client_type: protocol::ClientType::Desktop { toolkit_version: "test".into() },
+        };
         let cloned = user.clone();
         assert_eq!(cloned.id, 1);
         assert_eq!(cloned.name, "Alice");

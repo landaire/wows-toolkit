@@ -392,8 +392,8 @@ pub struct TacticsBoardState {
     cap_points: Vec<TacticsCapPoint>,
     /// Next unique ID for new cap points.
     next_cap_id: u64,
-    /// Loaded map image RGBA data (pixels, width, height).
-    map_image: Option<Arc<(Vec<u8>, u32, u32)>>,
+    /// Loaded map image RGBA data.
+    map_image: Option<Arc<crate::replay_renderer::RgbaAsset>>,
     /// MapInfo for coordinate transforms.
     map_info: Option<MapInfo>,
     /// Uploaded map texture (egui handle).
@@ -476,12 +476,9 @@ impl TacticsBoardState {
         self.selected_map.as_ref().map(|(id, name)| (*id, name.as_str()))
     }
 
-    /// Access raw map image data (pixels, width, height) for PNG encoding.
-    pub fn map_image_raw(&self) -> Option<(&Vec<u8>, u32, u32)> {
-        self.map_image.as_ref().map(|img| {
-            let (ref data, w, h) = **img;
-            (data, w, h)
-        })
+    /// Access raw map image data for PNG encoding.
+    pub fn map_image_raw(&self) -> Option<&crate::replay_renderer::RgbaAsset> {
+        self.map_image.as_deref()
     }
 
     /// Access the cap points.
@@ -671,7 +668,11 @@ impl TacticsBoardViewer {
                                 {
                                     let rgba = img.into_rgba8();
                                     let (w, h) = (rgba.width(), rgba.height());
-                                    state.map_image = Some(Arc::new((rgba.into_raw(), w, h)));
+                                    state.map_image = Some(Arc::new(crate::replay_renderer::RgbaAsset {
+                                        data: rgba.into_raw(),
+                                        width: w,
+                                        height: h,
+                                    }));
                                     state.texture_dirty = true;
                                 }
                             }
@@ -1189,8 +1190,8 @@ impl TacticsBoardViewer {
         if state.texture_dirty
             && let Some(ref img) = state.map_image
         {
-            let (ref data, w, h) = **img;
-            let color_image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], data);
+            let color_image =
+                egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.data);
             state.map_texture = Some(ui.ctx().load_texture("tactics_map", color_image, egui::TextureOptions::LINEAR));
             state.texture_dirty = false;
         }
@@ -1325,8 +1326,11 @@ impl TacticsBoardViewer {
             let wdata = wows_data.read();
             let raw_icons = asset_cache.lock().get_or_load_ship_icons(&wdata.vfs);
             let mut icons = HashMap::new();
-            for (key, (data, w, h)) in raw_icons.iter() {
-                let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+            for (key, asset) in raw_icons.iter() {
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [asset.width as usize, asset.height as usize],
+                    &asset.data,
+                );
                 let handle = ui.ctx().load_texture(format!("tactics_ship_{key}"), image, egui::TextureOptions::LINEAR);
                 icons.insert(key.clone(), handle);
             }
@@ -2021,16 +2025,15 @@ fn send_tactics_map_opened(
     board_id: u64,
     map_id: u32,
     map_name: &str,
-    map_image: &Option<Arc<(Vec<u8>, u32, u32)>>,
+    map_image: &Option<Arc<crate::replay_renderer::RgbaAsset>>,
     map_info: &Option<MapInfo>,
 ) {
     if let Some(tx) = collab_local_tx {
         let map_image_png = map_image
             .as_ref()
             .map(|img| {
-                let (ref data, w, h) = **img;
                 let mut buf = Vec::new();
-                if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                if let Some(image) = image::RgbaImage::from_raw(img.width, img.height, img.data.clone()) {
                     let mut cursor = std::io::Cursor::new(&mut buf);
                     let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
                 }

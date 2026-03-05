@@ -22,7 +22,7 @@ name = "wows-toolkit"
 [workspace.dependencies]
 # Internal crates (version + path for publishable crates)
 wowsunpack = { version = "0.24.0", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.25.0", path = "crates/wows-replays" }
+wows_replays = { version = "0.25.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.17.0", path = "crates/minimap-renderer", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 # Shared external dependencies

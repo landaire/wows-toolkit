@@ -22,27 +22,27 @@ required-features = ["bin"]
 clap = { workspace = true, optional = true }
 flate2 = { workspace = true }
 rootcause = { workspace = true }
-memmap2 = "0.9"
+memmap2 = { version = "0.9", optional = true }
 thiserror = { workspace = true }
 rayon = { version = "1.11", optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 csv = { version = "1.4", optional = true }
 glob = { workspace = true, optional = true }
-pickled = { workspace = true, features = ["variantly"] }
-winnow = { workspace = true }
-meshopt-rs = "0.1.2"
-variantly = "0.4"
-roxmltree = { workspace = true }
+pickled = { workspace = true, features = ["variantly"], optional = true }
+winnow = { workspace = true, optional = true }
+variantly = { version = "0.4", optional = true }
+roxmltree = { workspace = true, optional = true }
 tracing = { workspace = true }
-itertools = { workspace = true }
-gettext = { workspace = true }
-convert_case = { workspace = true }
+itertools = { workspace = true, optional = true }
+gettext = { workspace = true, optional = true }
+convert_case = { workspace = true, optional = true }
 regex = { version = "1.12.3", optional = true }
 indicatif = { workspace = true, optional = true, features = ["rayon"] }
 thread_local = { version = "1.1.9", optional = true }
 rkyv = { workspace = true, optional = true }
-bon = { workspace = true }
+bon = { workspace = true, optional = true }
+meshopt-rs = { version = "0.1.2", optional = true }
 gltf-json = { version = "1", optional = true, features = ["KHR_materials_variants", "KHR_texture_transform"] }
 gltf = { version = "1", optional = true, features = ["KHR_materials_variants"] }
 half = { version = "2", optional = true }
@@ -71,7 +71,21 @@ arc = []
 serde = ["dep:serde"]
 rkyv = ["dep:rkyv"]
 json = ["dep:serde_json", "serde"]
-vfs = ["arc", "dep:vfs", "dep:oval"]
+# Core parsing/processing: gates heavy deps (memmap2, pickled, winnow, etc.) and
+# modules that use them (data, game_data, game_params, models, rpc, export, game_constants).
+# Without this feature, only lightweight type modules are available (game_types, recognized, error).
+parsing = [
+    "dep:memmap2",
+    "dep:pickled",
+    "dep:winnow",
+    "dep:variantly",
+    "dep:roxmltree",
+    "dep:gettext",
+    "dep:bon",
+    "dep:convert_case",
+    "dep:itertools",
+]
+vfs = ["arc", "dep:vfs", "dep:oval", "parsing"]
 async_vfs = ["vfs/async-vfs", "arc", "vfs", "dep:futures", "dep:async-std", "dep:async-trait"]
 models = [
     "dep:gltf-json",
@@ -80,6 +94,7 @@ models = [
     "dep:image_dds",
     "dep:image",
     "dep:unidecode",
+    "dep:meshopt-rs",
     "vfs",
 ]
 bin = [

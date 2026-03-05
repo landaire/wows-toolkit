@@ -103,10 +103,9 @@ pub(super) fn playback_thread(
         {
             let map_png = map_image_for_announce
                 .as_ref()
-                .map(|img: &Arc<(Vec<u8>, u32, u32)>| {
-                    let (ref data, w, h) = **img;
+                .map(|img: &Arc<super::RgbaAsset>| {
                     let mut buf = Vec::new();
-                    if let Some(image) = image::RgbaImage::from_raw(w, h, data.clone()) {
+                    if let Some(image) = image::RgbaImage::from_raw(img.width, img.height, img.data.clone()) {
                         let mut cursor = std::io::Cursor::new(&mut buf);
                         let _ = image.write_to(&mut cursor, image::ImageFormat::Png);
                     }
