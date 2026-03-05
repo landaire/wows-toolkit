@@ -87,95 +87,6 @@ pub fn collab_render_options_from_render_options(
     }
 }
 
-// ─── iroh-specific wire framing helpers ─────────────────────────────────────
-
-/// Write a length-prefixed rkyv-serialized `PeerMessage` to a QUIC send stream.
-pub async fn write_peer_message(
-    send: &mut iroh::endpoint::SendStream,
-    msg: &PeerMessage,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let framed = serialize_message(msg)?;
-    send.write_all(&framed).await.map_err(|e| format!("write: {e}"))?;
-    Ok(())
-}
-
-/// Serialize a `PeerMessage` to length-prefixed rkyv bytes (for broadcast).
-///
-/// This is an alias for `wt_collab_protocol::protocol::serialize_message` kept
-/// for backward compatibility with callers using the old name.
-pub fn frame_peer_message(msg: &PeerMessage) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    serialize_message(msg)
-}
-
-/// Read a length-prefixed rkyv `PeerMessage` from a QUIC receive stream.
-///
-/// Returns `None` if the stream is cleanly closed.
-pub async fn read_peer_message(
-    recv: &mut iroh::endpoint::RecvStream,
-    max_size: usize,
-) -> Result<Option<PeerMessage>, Box<dyn std::error::Error + Send + Sync>> {
-    read_framed_message(recv, max_size).await
-}
-
-/// Read raw bytes from the stream then deserialize with rkyv.
-async fn read_framed_message<T>(
-    recv: &mut iroh::endpoint::RecvStream,
-    max_size: usize,
-) -> Result<Option<T>, Box<dyn std::error::Error + Send + Sync>>
-where
-    T: rkyv::Archive,
-    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
-        + rkyv::Deserialize<T, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
-{
-    // Read 4-byte length prefix.
-    let mut len_buf = [0u8; 4];
-    if let Err(e) = read_exact_chunked(recv, &mut len_buf).await {
-        let msg = e.to_string();
-        if msg.contains("closed") || msg.contains("finished") || msg.contains("reset") {
-            return Ok(None);
-        }
-        return Err(format!("read len: {e}").into());
-    }
-
-    let len = u32::from_le_bytes(len_buf) as usize;
-    if len > max_size {
-        return Err(format!("message too large: {len} > {max_size}").into());
-    }
-
-    // Read payload using chunked reads.
-    let mut buf = vec![0u8; len];
-    read_exact_chunked(recv, &mut buf).await.map_err(|e| format!("read payload ({len} bytes): {e}"))?;
-
-    let msg = rkyv::from_bytes::<T, rkyv::rancor::Error>(&buf).map_err(|e| format!("rkyv deserialize: {e}"))?;
-    Ok(Some(msg))
-}
-
-/// Read exactly `buf.len()` bytes using chunked reads.
-async fn read_exact_chunked(
-    recv: &mut iroh::endpoint::RecvStream,
-    buf: &mut [u8],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let total = buf.len();
-    let mut pos = 0;
-    while pos < total {
-        match recv.read(&mut buf[pos..]).await {
-            Ok(Some(n)) => {
-                if n == 0 {
-                    return Err(format!("unexpected zero-length read at byte {pos}/{total}").into());
-                }
-                pos += n;
-            }
-            Ok(None) => {
-                return Err(format!("stream ended at byte {pos}/{total}").into());
-            }
-            Err(e) => {
-                return Err(format!("read error at byte {pos}/{total}: {e}").into());
-            }
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,7 +256,7 @@ mod tests {
 
     #[test]
     fn frame_peer_message_roundtrip() {
-        let msg = PeerMessage::CursorPosition(Some([100.0, 200.0]));
+        let msg = PeerMessage::CursorPosition { user_id: 1, pos: Some([100.0, 200.0]) };
         let framed = frame_peer_message(&msg).unwrap();
 
         // Should start with a 4-byte LE length prefix.
@@ -353,11 +264,11 @@ mod tests {
 
         let decoded = deserialize_payload(&framed);
         match decoded {
-            PeerMessage::CursorPosition(Some(pos)) => {
+            PeerMessage::CursorPosition { pos: Some(pos), .. } => {
                 assert!((pos[0] - 100.0).abs() < f32::EPSILON);
                 assert!((pos[1] - 200.0).abs() < f32::EPSILON);
             }
-            _ => panic!("Expected CursorPosition(Some(...))"),
+            _ => panic!("Expected CursorPosition {{ pos: Some(...) }}"),
         }
     }
 
@@ -369,12 +280,12 @@ mod tests {
                 name: "Test".into(),
                 client_type: ClientType::Desktop { toolkit_version: "1.0".into() },
             },
-            PeerMessage::CursorPosition(None),
+            PeerMessage::CursorPosition { user_id: 1, pos: None },
             PeerMessage::ClearAnnotations { board_id: None },
             PeerMessage::Permissions { annotations_locked: true, settings_locked: false },
             PeerMessage::UserLeft { user_id: 42 },
             PeerMessage::PromoteToCoHost { user_id: 3 },
-            PeerMessage::Ping { pos: [100.0, 200.0] },
+            PeerMessage::Ping { user_id: 1, pos: [100.0, 200.0], color: [255, 0, 0] },
             PeerMessage::RemoveAnnotation { board_id: None, id: 999 },
             PeerMessage::PlaybackState { playing: true, speed: 1.5 },
             PeerMessage::Heartbeat,

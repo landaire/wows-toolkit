@@ -930,11 +930,16 @@ impl WowsToolkitApp {
                     let replay_name = state.collab_replay_name.clone().unwrap_or_else(|| {
                         renderer.title.strip_prefix("Replay Renderer - ").unwrap_or(&renderer.title).to_string()
                     });
+                    let collab_map_name = state.collab_map_name.clone().unwrap_or_default();
+                    let display_name =
+                        translate_map_display_name(&collab_map_name, &self.tab_state.world_of_warships_data);
                     let _ = host_handle.command_tx.send(crate::collab::SessionCommand::ReplayOpened {
                         replay_id,
                         replay_name,
                         map_image_png: map_png,
                         game_version,
+                        map_name: collab_map_name,
+                        display_name,
                     });
                     state.session_announced = true;
                 }
@@ -1009,10 +1014,13 @@ impl WowsToolkitApp {
                                 })
                                 .collect();
                             drop(state);
+                            let display_name =
+                                translate_map_display_name(&map_name, &self.tab_state.world_of_warships_data);
                             let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapOpened {
                                 board_id: board.board_id,
                                 owner_user_id: board.owner_user_id,
                                 map_name,
+                                display_name,
                                 map_id,
                                 map_image_png,
                                 map_info,
@@ -1079,10 +1087,13 @@ impl WowsToolkitApp {
                                 })
                                 .collect();
                             drop(state);
+                            let display_name =
+                                translate_map_display_name(&map_name, &self.tab_state.world_of_warships_data);
                             let _ = handle.local_tx.send(crate::collab::peer::LocalEvent::TacticsMapOpened {
                                 board_id: board.board_id,
                                 owner_user_id: board.owner_user_id,
                                 map_name,
+                                display_name,
                                 map_id,
                                 map_image_png,
                                 map_info,
@@ -1959,12 +1970,15 @@ impl WowsToolkitApp {
     }
 
     fn do_host_session(&mut self) {
+        let web_asset_bundle = self.build_web_asset_bundle();
+
         let params = crate::collab::peer::HostParams {
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
             display_name: self.tab_state.settings.collab_display_name.clone(),
             initial_render_options: crate::collab::protocol::collab_render_options_from_saved(
                 &crate::settings::SavedRenderOptions::default(),
             ),
+            web_asset_bundle,
         };
 
         let session_state = Arc::clone(&self.tab_state.session_state);
@@ -1975,6 +1989,56 @@ impl WowsToolkitApp {
         );
 
         self.tab_state.host_session = Some(handle);
+    }
+
+    /// Build a pre-serialized `PeerMessage::AssetBundle` for web clients.
+    /// Returns `None` if game data isn't loaded yet.
+    fn build_web_asset_bundle(&self) -> Option<Arc<Vec<u8>>> {
+        use crate::collab::protocol::GameFontsWire;
+        use crate::collab::protocol::PeerMessage;
+        use crate::collab::protocol::RgbaAssetWire;
+        use crate::collab::protocol::frame_peer_message;
+
+        let wows_data = self.tab_state.world_of_warships_data.as_ref()?;
+        let wd = wows_data.read();
+        let mut cache = self.tab_state.renderer_asset_cache.lock();
+
+        let convert_icons = |icons: &std::collections::HashMap<String, crate::replay_renderer::RgbaAsset>| -> Vec<(String, RgbaAssetWire)> {
+            icons.iter().map(|(k, a)| {
+                (k.clone(), RgbaAssetWire { data: a.data.clone(), width: a.width, height: a.height })
+            }).collect()
+        };
+
+        let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs));
+        let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs));
+        let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs));
+        let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs));
+        let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs));
+
+        let fonts = cache.get_or_load_game_fonts(&wd.vfs);
+        let game_fonts = Some(GameFontsWire {
+            primary: fonts.primary_bytes.clone(),
+            fallback_ko: fonts.fallback_bytes.first().cloned(),
+            fallback_ja: fonts.fallback_bytes.get(1).cloned(),
+            fallback_zh: fonts.fallback_bytes.get(2).cloned(),
+        });
+
+        let msg = PeerMessage::AssetBundle {
+            ship_icons,
+            plane_icons,
+            consumable_icons,
+            death_cause_icons,
+            powerup_icons,
+            game_fonts,
+        };
+
+        match frame_peer_message(&msg) {
+            Ok(bytes) => Some(Arc::new(bytes)),
+            Err(e) => {
+                tracing::warn!("Failed to serialize AssetBundle: {e}");
+                None
+            }
+        }
     }
 
     fn poll_host_session_events(&mut self) {
@@ -1991,7 +2055,13 @@ impl WowsToolkitApp {
                 crate::collab::SessionEvent::UserJoined(user) => {
                     self.tab_state.toasts.lock().info(format!("{} joined", user.name));
                 }
-                crate::collab::SessionEvent::UserLeft { .. } => {}
+                crate::collab::SessionEvent::UserLeft { name, timed_out, .. } => {
+                    if timed_out {
+                        self.tab_state.toasts.lock().warning(format!("{name} timed out"));
+                    } else {
+                        self.tab_state.toasts.lock().info(format!("{name} left"));
+                    }
+                }
                 crate::collab::SessionEvent::Ended => {
                     self.tab_state.toasts.lock().info("Session ended");
                     session_ended = true;
@@ -2106,7 +2176,13 @@ impl WowsToolkitApp {
                         self.tab_state.replay_renderers.lock().push(viewer);
                     }
                 }
-                crate::collab::SessionEvent::ReplayOpened { replay_id, replay_name, map_image_png, game_version } => {
+                crate::collab::SessionEvent::ReplayOpened {
+                    replay_id,
+                    replay_name,
+                    map_image_png,
+                    game_version,
+                    ..
+                } => {
                     // Spam protection: track timestamps of ReplayOpened events.
                     let now = std::time::Instant::now();
                     self.tab_state.replay_open_timestamps.push_back(now);
@@ -2215,6 +2291,22 @@ impl eframe::App for WowsToolkitApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.update_impl(ctx, frame);
     }
+}
+
+/// Translate a map name to a human-readable display name using game metadata.
+///
+/// Falls back to a prettified version of the raw name if game data is unavailable.
+fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::wows_data::SharedWoWsData>) -> String {
+    if let Some(wd) = wows_data {
+        let wd = wd.read();
+        if let Some(ref gm) = wd.game_metadata {
+            return wowsunpack::game_params::translations::translate_map_name(map_name, gm.as_ref());
+        }
+    }
+    // Fallback: strip "spaces/" prefix and leading number prefix, replace underscores.
+    let bare = map_name.strip_prefix("spaces/").unwrap_or(map_name);
+    let stripped = bare.find('_').map(|i| &bare[i + 1..]).unwrap_or(bare);
+    stripped.replace('_', " ")
 }
 
 fn build_about_window(ui: &mut egui::Ui) {

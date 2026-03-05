@@ -1,12 +1,12 @@
 //! Wire protocol for collaborative replay sessions (mesh topology).
 //!
-//! All messages are serialized with rkyv and framed as `[u32 length][rkyv payload]`
-//! on a QUIC bidirectional stream. Frame draw commands are additionally compressed
-//! with zlib (flate2) before being placed in the `compressed_commands` field.
+//! All messages are serialized with rkyv, zlib-compressed, and framed as
+//! `[u32 compressed_length][zlib(rkyv payload)]` on a QUIC bidirectional stream.
 
 use crate::types::Annotation;
 
 // Re-export types from external crates used in the protocol.
+pub use wows_minimap_renderer::draw_command::DrawCommand;
 pub use wows_minimap_renderer::draw_command::ShipConfigFilter;
 pub use wows_minimap_renderer::map_data::MapInfo;
 pub use wowsunpack::game_types::EntityId;
@@ -146,6 +146,10 @@ pub struct ReplayInfo {
     pub replay_name: String,
     pub map_image_png: Vec<u8>,
     pub game_version: String,
+    /// Raw map name (e.g. "spaces/16_OC_bees_to_honey").
+    pub map_name: String,
+    /// Human-readable translated map name for display.
+    pub display_name: String,
 }
 
 // ─── Unified peer message ──────────────────────────────────────────────────
@@ -185,7 +189,7 @@ pub enum PeerMessage {
 
     // ── Regular messages (any peer → all peers) ────────────────────────
     /// Cursor position on the minimap. None = cursor left the map area.
-    CursorPosition(Option<[f32; 2]>),
+    CursorPosition { user_id: u64, pos: Option<[f32; 2]> },
 
     /// Upsert an annotation (add new or update existing) by unique ID.
     /// `board_id`: `None` = replay context, `Some(id)` = tactics board.
@@ -217,7 +221,7 @@ pub enum PeerMessage {
     ShipTrailOverrides { hidden: Vec<String> },
 
     /// Map ping — produces a ripple effect at the given position.
-    Ping { pos: [f32; 2] },
+    Ping { user_id: u64, pos: [f32; 2], color: [u8; 3] },
 
     // ── Authority messages (host/co-host → all peers) ──────────────────
     /// Permission state change. Receiver drops if sender is not host/co-host.
@@ -256,7 +260,7 @@ pub enum PeerMessage {
     /// Receiver drops if sender is not host/co-host.
     FrameSourceChanged { source_user_id: u64 },
 
-    /// A single playback frame with compressed draw commands.
+    /// A single playback frame with draw commands.
     /// Receiver drops if sender is not the current frame source.
     Frame {
         replay_id: u64,
@@ -264,8 +268,7 @@ pub enum PeerMessage {
         frame_index: u32,
         total_frames: u32,
         game_duration: f32,
-        /// `flate2::write::ZlibEncoder(rkyv::to_bytes(Vec<DrawCommand>))`
-        compressed_commands: Vec<u8>,
+        commands: Vec<DrawCommand>,
     },
 
     // ── Replay lifecycle (host → all peers) ─────────────────────────────
@@ -276,6 +279,10 @@ pub enum PeerMessage {
         /// PNG-encoded map background image.
         map_image_png: Vec<u8>,
         game_version: String,
+        /// Raw map name (e.g. "spaces/16_OC_bees_to_honey").
+        map_name: String,
+        /// Human-readable translated map name for display.
+        display_name: String,
     },
 
     /// A replay was closed on the host.
@@ -287,6 +294,8 @@ pub enum PeerMessage {
         board_id: u64,
         owner_user_id: u64,
         map_name: String,
+        /// Human-readable map name for display (translated or prettified by the host).
+        display_name: String,
         map_id: u32,
         /// PNG-encoded map background image.
         map_image_png: Vec<u8>,
@@ -316,6 +325,11 @@ pub enum PeerMessage {
     OpenWindowForEveryone { window_id: u64 },
 
     // ── Asset delivery (host → web clients) ─────────────────────────────
+    /// Request from a client to the host to (re-)send the AssetBundle.
+    /// Used when assets were not received after connecting or on reconnection.
+    /// Host may ignore if too many requests have been made by this peer.
+    RequestAssets,
+
     /// Asset bundle sent by the host to web clients after SessionInfo.
     /// Contains all icons and fonts needed for rendering.
     AssetBundle {
@@ -509,22 +523,224 @@ impl CollabRenderOptions {
 
 // ─── Wire framing helpers ───────────────────────────────────────────────────
 
-/// Serialize a `PeerMessage` to length-prefixed rkyv bytes.
+/// Serialize a `PeerMessage` to length-prefixed zlib-compressed rkyv bytes.
 ///
-/// Returns `[u32 LE length][rkyv payload]`.
+/// Returns `[u32 LE compressed_length][zlib(rkyv payload)]`.
 pub fn serialize_message(msg: &PeerMessage) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(msg).map_err(|e| format!("rkyv serialize: {e}"))?;
-    if bytes.len() > MAX_MESSAGE_SIZE {
-        return Err(format!("outgoing message too large: {} > {}", bytes.len(), MAX_MESSAGE_SIZE).into());
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&bytes).map_err(|e| format!("zlib compress: {e}"))?;
+    let compressed = encoder.finish().map_err(|e| format!("zlib finish: {e}"))?;
+
+    if compressed.len() > MAX_MESSAGE_SIZE {
+        return Err(
+            format!("outgoing message too large (compressed): {} > {}", compressed.len(), MAX_MESSAGE_SIZE).into()
+        );
     }
-    let len = bytes.len() as u32;
-    let mut framed = Vec::with_capacity(4 + bytes.len());
+    let len = compressed.len() as u32;
+    let mut framed = Vec::with_capacity(4 + compressed.len());
     framed.extend_from_slice(&len.to_le_bytes());
-    framed.extend_from_slice(&bytes);
+    framed.extend_from_slice(&compressed);
     Ok(framed)
 }
 
-/// Deserialize a `PeerMessage` from raw rkyv payload bytes (no length prefix).
+/// Deserialize a `PeerMessage` from zlib-compressed rkyv payload bytes (no length prefix).
 pub fn deserialize_message(buf: &[u8]) -> Result<PeerMessage, Box<dyn std::error::Error + Send + Sync>> {
-    rkyv::from_bytes::<PeerMessage, rkyv::rancor::Error>(buf).map_err(|e| format!("rkyv deserialize: {e}").into())
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let mut decoder = ZlibDecoder::new(buf);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).map_err(|e| format!("zlib decompress: {e}"))?;
+
+    if decompressed.len() > MAX_DECOMPRESSED_FRAME_SIZE {
+        return Err(format!(
+            "decompressed message too large: {} > {}",
+            decompressed.len(),
+            MAX_DECOMPRESSED_FRAME_SIZE
+        )
+        .into());
+    }
+
+    rkyv::from_bytes::<PeerMessage, rkyv::rancor::Error>(&decompressed)
+        .map_err(|e| format!("rkyv deserialize: {e}").into())
+}
+
+/// Alias for [`serialize_message`] kept for backward compatibility.
+pub fn frame_peer_message(msg: &PeerMessage) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    serialize_message(msg)
+}
+
+// ─── Stream I/O helpers ─────────────────────────────────────────────────────
+
+/// Write a length-prefixed compressed `PeerMessage` to a QUIC send stream.
+pub async fn write_peer_message(
+    send: &mut iroh::endpoint::SendStream,
+    msg: &PeerMessage,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let framed = serialize_message(msg)?;
+    send.write_all(&framed).await.map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}
+
+/// Read a length-prefixed compressed `PeerMessage` from a QUIC receive stream.
+///
+/// Returns `None` if the stream is cleanly closed.
+pub async fn read_peer_message(
+    recv: &mut iroh::endpoint::RecvStream,
+    max_size: usize,
+) -> Result<Option<PeerMessage>, Box<dyn std::error::Error + Send + Sync>> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    // Read 4-byte length prefix (compressed size).
+    let mut len_buf = [0u8; 4];
+    if let Err(e) = read_exact_chunked(recv, &mut len_buf).await {
+        let msg = e.to_string();
+        if msg.contains("closed") || msg.contains("finished") || msg.contains("reset") {
+            return Ok(None);
+        }
+        return Err(format!("read len: {e}").into());
+    }
+
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > max_size {
+        return Err(format!("message too large: {len} > {max_size}").into());
+    }
+
+    // Read compressed payload using chunked reads.
+    let mut buf = vec![0u8; len];
+    read_exact_chunked(recv, &mut buf).await.map_err(|e| format!("read payload ({len} bytes): {e}"))?;
+
+    // Decompress.
+    let mut decoder = ZlibDecoder::new(&buf[..]);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).map_err(|e| format!("zlib decompress: {e}"))?;
+
+    let msg = rkyv::from_bytes::<PeerMessage, rkyv::rancor::Error>(&decompressed)
+        .map_err(|e| format!("rkyv deserialize: {e}"))?;
+    Ok(Some(msg))
+}
+
+/// Read exactly `buf.len()` bytes using chunked reads.
+async fn read_exact_chunked(
+    recv: &mut iroh::endpoint::RecvStream,
+    buf: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let total = buf.len();
+    let mut pos = 0;
+    while pos < total {
+        match recv.read(&mut buf[pos..]).await {
+            Ok(Some(n)) => {
+                if n == 0 {
+                    return Err(format!("unexpected zero-length read at byte {pos}/{total}").into());
+                }
+                pos += n;
+            }
+            Ok(None) => {
+                return Err(format!("stream ended at byte {pos}/{total}").into());
+            }
+            Err(e) => {
+                return Err(format!("read error at byte {pos}/{total}: {e}").into());
+            }
+        }
+    }
+    Ok(())
+}
+
+// ─── Token encoding ─────────────────────────────────────────────────────────
+
+const TOKEN_PREFIX: &str = "toolkit-";
+
+/// Encode a public key into a session token: `toolkit-<base64url_nopad(zlib(key_bytes))>`.
+///
+/// Encodes the raw 32-byte public key (not the string representation) for compact tokens.
+pub fn encode_token(public_key: &iroh::PublicKey) -> String {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(public_key.as_bytes()).expect("zlib write");
+    let compressed = encoder.finish().expect("zlib finish");
+    let b64 = data_encoding::BASE64URL_NOPAD.encode(&compressed);
+    format!("{TOKEN_PREFIX}{b64}")
+}
+
+/// Decode a session token back to a public key.
+pub fn decode_token(token: &str) -> Result<iroh::PublicKey, String> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let token = token.trim();
+    let b64 = token.strip_prefix(TOKEN_PREFIX).ok_or_else(|| format!("Token must start with \"{TOKEN_PREFIX}\""))?;
+    let compressed =
+        data_encoding::BASE64URL_NOPAD.decode(b64.as_bytes()).map_err(|e| format!("Invalid base64: {e}"))?;
+    let mut decoder = ZlibDecoder::new(&compressed[..]);
+    let mut raw = Vec::new();
+    decoder.read_to_end(&mut raw).map_err(|e| format!("Decompression failed: {e}"))?;
+    let bytes: [u8; 32] = raw.try_into().map_err(|v: Vec<u8>| format!("Expected 32 bytes, got {}", v.len()))?;
+    iroh::PublicKey::from_bytes(&bytes).map_err(|e| format!("Invalid public key: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_encode_decode_roundtrip() {
+        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let public = key.public();
+        let token = encode_token(&public);
+        let decoded = decode_token(&token).unwrap();
+        assert_eq!(public, decoded);
+    }
+
+    #[test]
+    fn token_has_prefix() {
+        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let token = encode_token(&key.public());
+        assert!(token.starts_with(TOKEN_PREFIX));
+    }
+
+    #[test]
+    fn decode_token_rejects_missing_prefix() {
+        let err = decode_token("not-a-toolkit-token").unwrap_err();
+        assert!(err.contains("toolkit-"), "Error should mention prefix: {err}");
+    }
+
+    #[test]
+    fn decode_token_rejects_invalid_base64() {
+        let err = decode_token("toolkit-!!!invalid!!!").unwrap_err();
+        assert!(err.contains("base64") || err.contains("Base64"), "Error should mention base64: {err}");
+    }
+
+    #[test]
+    fn decode_token_rejects_empty_payload() {
+        let err = decode_token("toolkit-").unwrap_err();
+        assert!(err.is_empty() || !err.is_empty()); // Just shouldn't panic
+    }
+
+    #[test]
+    fn decode_token_trims_whitespace() {
+        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let token = encode_token(&key.public());
+        let padded = format!("  {token}  \n");
+        let decoded = decode_token(&padded).unwrap();
+        assert_eq!(key.public(), decoded);
+    }
+
+    #[test]
+    fn different_keys_produce_different_tokens() {
+        let key1 = iroh::SecretKey::generate(&mut rand::rng());
+        let key2 = iroh::SecretKey::generate(&mut rand::rng());
+        let token1 = encode_token(&key1.public());
+        let token2 = encode_token(&key2.public());
+        assert_ne!(token1, token2);
+    }
 }

@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'crates/wt-web/**'
+      - 'crates/wt-collab-egui/**'
+      - 'crates/wt-collab-protocol/**'
+      - 'crates/minimap-renderer/**'
+      - '.github/workflows/pages.yml'
   # Allow manual trigger
   workflow_dispatch:
 
@@ -27,13 +32,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: Build wt-web WASM app
+        run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/ crates/wt-web/index.html
+
+      - name: Assemble deploy directory
+        run: |
+          mkdir -p _deploy/tactics
+          cp -r site/* _deploy/
+          cp -r crates/wt-web/dist/* _deploy/tactics/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: _deploy
 
       - name: Deploy to GitHub Pages
         id: deployment

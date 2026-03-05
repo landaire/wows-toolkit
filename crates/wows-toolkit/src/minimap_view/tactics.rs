@@ -15,7 +15,6 @@ use egui::CornerRadius;
 use egui::FontId;
 use egui::Pos2;
 use egui::Rect;
-use egui::Shape;
 use egui::Stroke;
 use egui::TextureHandle;
 use egui::Vec2;
@@ -50,58 +49,34 @@ use super::AnnotationState;
 use super::MapTransform;
 use super::PaintTool;
 use super::ViewportZoomPan;
+use super::shapes::CapPointView;
 use super::shapes::GridStyle;
 use super::shapes::MapPing;
 use super::shapes::PING_DURATION;
+use super::shapes::ZoomPanConfig;
 use super::shapes::annotation_cursor_icon;
 use super::shapes::annotation_screen_bounds;
+use super::shapes::compute_canvas_layout;
+use super::shapes::compute_map_clip_rect;
 use super::shapes::draw_annotation_edit_popup;
-use super::shapes::draw_annotation_menu_common;
 use super::shapes::draw_grid;
+use super::shapes::draw_map_background;
 use super::shapes::draw_pings;
 use super::shapes::draw_remote_cursors;
 use super::shapes::draw_shortcut_overlay;
-use super::shapes::game_font;
 use super::shapes::handle_annotation_select_move;
-use super::shapes::handle_scroll_yaw;
 use super::shapes::handle_tool_interaction;
 use super::shapes::handle_tool_shortcuts;
+use super::shapes::handle_viewport_zoom_pan;
 use super::shapes::render_annotation;
-use super::shapes::render_measurement_details;
+use super::shapes::render_cap_point;
 use super::shapes::render_selection_highlight;
 use super::shapes::render_tool_preview;
 use super::shapes::tool_label;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Cap point fill alpha, matching the replay renderer's 0.15.
-const CAP_FILL_ALPHA: u8 = 38;
-
-/// Cap point fill colors by team_id. -1 = neutral (white), 0 = green, 1 = red.
-/// Alpha matches the replay renderer (15%).
-const CAP_NEUTRAL_FILL: Color32 = Color32::from_rgba_premultiplied(
-    (255 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (255 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (255 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    CAP_FILL_ALPHA,
-);
-const CAP_TEAM0_FILL: Color32 = Color32::from_rgba_premultiplied(
-    (76 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (232 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (170 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    CAP_FILL_ALPHA,
-);
-const CAP_TEAM1_FILL: Color32 = Color32::from_rgba_premultiplied(
-    (254 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (77 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    (42 * CAP_FILL_ALPHA as u16 / 255) as u8,
-    CAP_FILL_ALPHA,
-);
-
-/// Cap point outline colors (full opacity, matching replay renderer).
-const CAP_NEUTRAL_OUTLINE: Color32 = Color32::from_rgb(255, 255, 255);
-const CAP_TEAM0_OUTLINE: Color32 = Color32::from_rgb(76, 232, 170);
-const CAP_TEAM1_OUTLINE: Color32 = Color32::from_rgb(254, 77, 42);
+/// Selection highlight color for cap points (desktop-only).
 const CAP_SELECTED_COLOR: Color32 = Color32::from_rgb(255, 220, 50);
 
 /// How close to the edge (in screen pixels) a click must be to start a resize drag.
@@ -354,27 +329,28 @@ impl TacticsCapPoint {
         }
     }
 
-    /// Fill color (low alpha, matching replay renderer).
-    fn fill_color(&self) -> Color32 {
-        match self.team_id {
-            0 => CAP_TEAM0_FILL,
-            1 => CAP_TEAM1_FILL,
-            _ => CAP_NEUTRAL_FILL,
+    /// Convert to the rendering view (only the fields needed to draw).
+    pub fn view(&self) -> CapPointView {
+        CapPointView {
+            world_x: self.world_x,
+            world_z: self.world_z,
+            radius: self.radius,
+            team_id: self.team_id,
+            index: self.index as u32,
         }
     }
 
-    /// Outline color (full opacity, matching replay renderer).
-    fn outline_color(&self) -> Color32 {
-        match self.team_id {
-            0 => CAP_TEAM0_OUTLINE,
-            1 => CAP_TEAM1_OUTLINE,
-            _ => CAP_NEUTRAL_OUTLINE,
+    /// Convert to the wire protocol representation.
+    pub fn to_wire(&self) -> WireCapPoint {
+        WireCapPoint {
+            id: self.id,
+            index: self.index as u32,
+            world_x: self.world_x,
+            world_z: self.world_z,
+            radius: self.radius,
+            team_id: self.team_id,
+            frozen: self.frozen,
         }
-    }
-
-    fn label(&self) -> String {
-        let c = (b'A' + self.index as u8) as char;
-        c.to_string()
     }
 }
 
@@ -749,6 +725,28 @@ impl TacticsBoardViewer {
                     });
                 } // is_authority
 
+                // ── Annotation toolbar ──
+                egui::TopBottomPanel::top("tactics_annotation_toolbar").show(ctx, |ui| {
+                    let locked = collab_session_state
+                        .as_ref()
+                        .map(|ss| ss.lock().permissions.annotations_locked)
+                        .unwrap_or(false);
+                    let mut ann = annotation_state_arc.lock();
+                    let result = wt_collab_egui::toolbar::draw_annotation_toolbar(
+                        ui,
+                        &mut ann,
+                        state.ship_icons.as_ref(),
+                        locked,
+                    );
+                    if result.did_clear {
+                        send_annotation_clear(&collab_local_tx, Some(board_id));
+                    }
+                    if result.did_undo {
+                        drop(ann);
+                        send_annotation_full_sync(&collab_command_tx, &annotation_state_arc.lock(), Some(board_id));
+                    }
+                });
+
                 // ── Central panel: map viewport ──
                 egui::CentralPanel::default().show(ctx, |ui| {
                     Self::draw_map_viewport(
@@ -851,6 +849,7 @@ impl TacticsBoardViewer {
                             board_id,
                             *map_id,
                             map_name,
+                            &label,
                             &state.map_image,
                             &state.map_info,
                         );
@@ -1200,86 +1199,30 @@ impl TacticsBoardViewer {
         let canvas_size = MINIMAP_SIZE as f32;
         let logical_canvas = Vec2::new(canvas_size, canvas_size);
         let available = ui.available_size();
-        let scale_x = available.x / logical_canvas.x;
-        let scale_y = available.y / logical_canvas.y;
-        let fit_scale = scale_x.min(scale_y);
-        let fill_scale = scale_x.max(scale_y);
-
         let current_zoom = zoom_pan_arc.lock().zoom;
-        let t = ((current_zoom - 1.0) / 1.0).clamp(0.0, 1.0);
-        let window_scale = (fit_scale + t * (fill_scale - fit_scale)).max(0.1);
-
         let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-
-        // Center scaled canvas
-        let scaled_canvas = logical_canvas * window_scale;
-        let offset_x = ((available.x - scaled_canvas.x) / 2.0).max(0.0);
-        let offset_y = ((available.y - scaled_canvas.y) / 2.0).max(0.0);
-        let origin = response.rect.min + Vec2::new(offset_x, offset_y);
+        let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min);
+        let window_scale = layout.window_scale;
 
         // Zoom/pan input (scroll + middle-click)
         {
             let mut zp = zoom_pan_arc.lock();
-            let ann_tool_active = !matches!(annotation_state_arc.lock().active_tool, PaintTool::None);
-
-            // Scroll-wheel: zoom (normal) or rotate (when placing ship)
-            if response.hovered() {
-                let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll_delta != 0.0 {
-                    let scroll_used_by_tool =
-                        ann_tool_active && handle_scroll_yaw(&mut annotation_state_arc.lock(), scroll_delta);
-
-                    if !scroll_used_by_tool {
-                        let zoom_speed = 0.01;
-                        let old_zoom = zp.zoom;
-                        let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
-                        if new_zoom != old_zoom {
-                            if let Some(cursor) = response.hover_pos() {
-                                let local_x = (cursor.x - origin.x) / window_scale;
-                                let local_y = (cursor.y - origin.y) / window_scale;
-                                let minimap_x = (local_x + zp.pan.x) / old_zoom;
-                                let minimap_y = (local_y + zp.pan.y) / old_zoom;
-                                zp.pan.x = minimap_x * new_zoom - local_x;
-                                zp.pan.y = minimap_y * new_zoom - local_y;
-                            }
-                            zp.zoom = new_zoom;
-                        }
-                    }
-                }
-            }
-
-            // Middle-drag always pans; left-drag pans when nothing else would consume it
-            let has_selection = annotation_state_arc.lock().has_selection();
-            let cap_dragging = state.dragging_cap.is_some();
-            let left_pan = !ann_tool_active
-                && !has_selection
-                && !cap_dragging
-                && !state.adding_cap
-                && response.dragged_by(egui::PointerButton::Primary);
-            if response.dragged_by(egui::PointerButton::Middle) || left_pan {
-                let delta = response.drag_delta();
-                zp.pan.x -= delta.x / window_scale;
-                zp.pan.y -= delta.y / window_scale;
-            }
-
-            if response.double_clicked() {
-                zp.zoom = 1.0;
-                zp.pan = Vec2::ZERO;
-            }
-
-            // Clamp pan so the map can't scroll past its edges.
-            let visible_w = available.x.min(scaled_canvas.x) / window_scale;
-            let visible_h = available.y.min(scaled_canvas.y) / window_scale;
-            let map_zoomed = canvas_size * zp.zoom;
-            let max_pan_x = (map_zoomed - visible_w).max(0.0);
-            let max_pan_y = (map_zoomed - visible_h).max(0.0);
-            zp.pan.x = zp.pan.x.clamp(0.0, max_pan_x);
-            zp.pan.y = zp.pan.y.clamp(0.0, max_pan_y);
+            let left_pan_blocked = state.dragging_cap.is_some() || state.adding_cap;
+            handle_viewport_zoom_pan(
+                ui.ctx(),
+                &response,
+                &mut zp,
+                &layout,
+                logical_canvas,
+                &ZoomPanConfig { allow_left_drag_pan: true, hud_height: 0.0, handle_tool_yaw: true },
+                Some(&mut annotation_state_arc.lock()),
+                left_pan_blocked,
+            );
         }
 
         let zp = zoom_pan_arc.lock();
         let transform = MapTransform {
-            origin,
+            origin: layout.origin,
             window_scale,
             zoom: zp.zoom,
             pan: zp.pan,
@@ -1289,7 +1232,7 @@ impl TacticsBoardViewer {
         drop(zp);
 
         // Clip to map area
-        let map_clip = Rect::from_min_max(origin, Pos2::new(origin.x + scaled_canvas.x, origin.y + scaled_canvas.y));
+        let map_clip = compute_map_clip_rect(&layout, 0.0);
         let map_painter = painter.with_clip_rect(map_clip);
 
         // Draw map background
@@ -1306,16 +1249,7 @@ impl TacticsBoardViewer {
 
         // Draw map image
         if let Some(ref map_tex) = state.map_texture {
-            let map_tl = transform.minimap_to_screen(&wows_minimap_renderer::MinimapPos { x: 0, y: 0 });
-            let map_br = transform.minimap_to_screen(&wows_minimap_renderer::MinimapPos {
-                x: MINIMAP_SIZE as i32,
-                y: MINIMAP_SIZE as i32,
-            });
-            let map_rect = Rect::from_min_max(map_tl, map_br);
-            let mut mesh = egui::Mesh::with_texture(map_tex.id());
-            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            mesh.add_rect_with_uv(map_rect, uv, Color32::WHITE);
-            map_painter.add(Shape::Mesh(mesh.into()));
+            draw_map_background(&map_painter, &transform, Some(map_tex.id()));
 
             // Draw 10x10 grid overlay (matching replay renderer)
             draw_grid(&map_painter, &transform, &GridStyle::default());
@@ -1356,10 +1290,7 @@ impl TacticsBoardViewer {
             let icons_ref = state.ship_icons.as_ref();
             let map_space = state.map_info.as_ref().map(|m| m.space_size as f32);
             for ann in &ann_state.annotations {
-                render_annotation(ann, &transform, icons_ref, &map_painter);
-                if let Annotation::Measurement { start, end, color, width } = ann {
-                    render_measurement_details(*start, *end, *color, *width, &transform, map_space, &map_painter);
-                }
+                render_annotation(ann, &transform, icons_ref, &map_painter, map_space);
             }
             for &sel in &ann_state.selected_indices {
                 if sel < ann_state.annotations.len() {
@@ -1451,13 +1382,13 @@ impl TacticsBoardViewer {
             let mut ann = annotation_state_arc.lock();
             ann.active_tool = PaintTool::None;
             state.adding_cap = false;
-            ann.show_context_menu = true;
-            ann.context_menu_pos = click_pos;
             // Detect cap under cursor for context menu cap options
             ann.context_menu_cap = state
                 .map_info
                 .as_ref()
                 .and_then(|map_info| hit_test_cap(click_pos, &state.cap_points, &transform, map_info));
+            ann.show_context_menu = true;
+            ann.context_menu_pos = click_pos;
         }
 
         // Escape: cancel tool / deselect
@@ -1857,22 +1788,25 @@ impl TacticsBoardViewer {
                     .inner_margin(egui::Margin::same(8))
                     .stroke(Stroke::new(1.0, Color32::from_gray(80)));
                 frame.show(ui, |ui| {
-                    ui.set_min_width(200.0);
-                    let context_menu_cap;
+                    ui.set_min_width(160.0);
+
+                    // ── Annotation tools ──
                     {
                         let mut ann = annotation_state_arc.lock();
-                        context_menu_cap = ann.context_menu_cap;
-
-                        let menu_result = draw_annotation_menu_common(ui, &mut ann, state.ship_icons.as_ref());
-
-                        if menu_result.did_clear {
+                        let result = wt_collab_egui::toolbar::draw_annotation_menu_common(
+                            ui,
+                            &mut ann,
+                            state.ship_icons.as_ref(),
+                        );
+                        if result.did_clear {
                             send_annotation_clear(collab_local_tx, board_id);
                         }
-                        if menu_result.did_undo {
-                            drop(ann);
-                            send_annotation_full_sync(collab_command_tx, &annotation_state_arc.lock(), board_id);
+                        if result.did_undo {
+                            send_annotation_full_sync(collab_command_tx, &ann, board_id);
                         }
                     }
+
+                    let context_menu_cap = annotation_state_arc.lock().context_menu_cap;
 
                     // ── Cap options for right-clicked cap ──
                     if let Some(cap_id) = context_menu_cap
@@ -1972,18 +1906,7 @@ fn send_cap_update(collab_local_tx: &Option<mpsc::Sender<LocalEvent>>, cap: &Tac
             cap.world_x,
             cap.world_z
         );
-        let _ = tx.send(LocalEvent::CapPoint {
-            board_id,
-            event: LocalCapPointEvent::Set(WireCapPoint {
-                id: cap.id,
-                index: cap.index as u32,
-                world_x: cap.world_x,
-                world_z: cap.world_z,
-                radius: cap.radius,
-                team_id: cap.team_id,
-                frozen: cap.frozen,
-            }),
-        });
+        let _ = tx.send(LocalEvent::CapPoint { board_id, event: LocalCapPointEvent::Set(cap.to_wire()) });
     } else {
         tracing::debug!("send_cap_update: collab_local_tx is None, not sending");
     }
@@ -2003,18 +1926,7 @@ fn send_cap_full_sync(
     board_id: u64,
 ) {
     if let Some(tx) = collab_command_tx {
-        let wire: Vec<WireCapPoint> = caps
-            .iter()
-            .map(|c| WireCapPoint {
-                id: c.id,
-                index: c.index as u32,
-                world_x: c.world_x,
-                world_z: c.world_z,
-                radius: c.radius,
-                team_id: c.team_id,
-                frozen: c.frozen,
-            })
-            .collect();
+        let wire: Vec<WireCapPoint> = caps.iter().map(|c| c.to_wire()).collect();
         let _ = tx.send(collab::SessionCommand::SyncCapPoints { board_id, cap_points: wire });
     }
 }
@@ -2025,6 +1937,7 @@ fn send_tactics_map_opened(
     board_id: u64,
     map_id: u32,
     map_name: &str,
+    display_name: &str,
     map_image: &Option<Arc<crate::replay_renderer::RgbaAsset>>,
     map_info: &Option<MapInfo>,
 ) {
@@ -2044,6 +1957,7 @@ fn send_tactics_map_opened(
             board_id,
             owner_user_id: 0, // filled by peer task from session state
             map_name: map_name.to_string(),
+            display_name: display_name.to_string(),
             map_id,
             map_image_png,
             map_info: map_info.clone(),
@@ -2086,21 +2000,15 @@ fn draw_cap_point(
     cap: &TacticsCapPoint,
     selected: bool,
 ) {
-    let world_pos = WorldPos { x: cap.world_x, y: 0.0, z: cap.world_z };
-    let minimap_pos = map_info.world_to_minimap(world_pos, MINIMAP_SIZE);
-    let center = transform.minimap_to_screen(&minimap_pos);
-
-    let radius_minimap = map_info.world_distance_to_minimap(cap.radius, MINIMAP_SIZE);
-    let radius_screen = transform.scale_distance(radius_minimap);
-
-    // Filled circle (low alpha, matching replay renderer)
-    painter.circle_filled(center, radius_screen, cap.fill_color());
-
-    // Outline: team-colored (matching replay renderer), thicker + yellow when selected
-    let outline_width = transform.scale_stroke(1.5);
-    painter.circle_stroke(center, radius_screen, Stroke::new(outline_width, cap.outline_color()));
+    render_cap_point(painter, transform, map_info, &cap.view());
 
     if selected {
+        let world_pos = WorldPos { x: cap.world_x, y: 0.0, z: cap.world_z };
+        let minimap_pos = map_info.world_to_minimap(world_pos, MINIMAP_SIZE);
+        let center = transform.minimap_to_screen(&minimap_pos);
+        let radius_minimap = map_info.world_distance_to_minimap(cap.radius, MINIMAP_SIZE);
+        let radius_screen = transform.scale_distance(radius_minimap);
+
         let sel_width = transform.scale_stroke(2.5);
         painter.circle_stroke(center, radius_screen, Stroke::new(sel_width, CAP_SELECTED_COLOR));
         // Draw resize handles (4 small squares on cardinal edges)
@@ -2120,10 +2028,6 @@ fn draw_cap_point(
             );
         }
     }
-
-    // Label (game font, matching replay renderer)
-    let label = cap.label();
-    painter.text(center, egui::Align2::CENTER_CENTER, &label, game_font(11.0 * transform.window_scale), Color32::WHITE);
 }
 
 /// Hit-test: find the cap point under a screen position. Returns the cap's ID.

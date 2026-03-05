@@ -8,6 +8,8 @@ members = [
     "crates/replayshark",
     "crates/wows-data-mgr",
     "crates/wt-collab-protocol",
+    "crates/wt-collab-egui",
+    "crates/wt-web",
 ]
 
 [workspace.package]
@@ -25,8 +27,19 @@ wowsunpack = { version = "0.24.0", path = "crates/wowsunpack", default-features 
 wows_replays = { version = "0.25.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.17.0", path = "crates/minimap-renderer", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
+wt-collab-egui = { path = "crates/wt-collab-egui" }
+# Shared UI dependencies
+egui = "0.33.3"
+egui-phosphor = "0.11"
+egui_dock = "0.18.0"
+eframe = { version = "0.33.3", default-features = false }
+# Pin to match eframe's wgpu version so backend features unify correctly.
+# This dependency with `default-features = true` is also needed to ensure
+# that targets are properly initialized.
+wgpu = { version = "27", default-features = true }
 # Shared external dependencies
 bon = "3.9.0"
+data-encoding = "2.10.0"
 bytemuck = { version = "1", features = ["derive"] }
 flate2 = { version = "1.1", features = ["zlib-rs"], default-features = false }
 gettext = "0.4"
@@ -34,7 +47,7 @@ image = { version = "0.25", default-features = false }
 image_dds = { version = "0.7", default-features = false }
 itertools = "0.14"
 pickled = { version = "2.0.0-alpha3" }
-iroh = "0.96"
+iroh = { version = "0.96", default-features = false }
 rkyv = "0.8.15"
 rootcause = "0.12"
 roxmltree = "0.21"
@@ -43,6 +56,7 @@ serde_cbor = "0.11"
 serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
+web-time = "1"
 winnow = "0.7"
 # Shared tool/CLI dependencies
 anyhow = "1.0"

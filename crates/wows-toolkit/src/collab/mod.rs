@@ -21,9 +21,16 @@ pub mod validation;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 
 use parking_lot::Mutex;
+
+// Re-export shared types from wt-collab-egui.
+pub use wt_collab_egui::types::Permissions;
+pub use wt_collab_egui::types::UserCursor;
+
+/// Base URL of the deployed web client. The session token is appended as a
+/// URL hash fragment: `{WEB_CLIENT_URL}#{token}`.
+pub const WEB_CLIENT_URL: &str = "https://landaire.github.io/wows-toolkit/tactics/";
 
 /// Peer's role in the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,12 +65,18 @@ pub struct OpenReplay {
     pub replay_name: String,
     pub map_image_png: Vec<u8>,
     pub game_version: String,
+    /// Raw map name (e.g. "spaces/16_OC_bees_to_honey").
+    pub map_name: String,
+    /// Human-readable translated map name for display.
+    pub display_name: String,
 }
 
 /// Info about the currently open tactics board map, received from a peer.
 #[derive(Debug, Clone, Default)]
 pub struct TacticsMapInfo {
     pub map_name: String,
+    /// Human-readable map name for display.
+    pub display_name: String,
     pub map_id: u32,
     pub map_image_png: Vec<u8>,
     /// Map metadata for coordinate transforms.
@@ -76,7 +89,7 @@ pub struct PeerPing {
     pub user_id: u64,
     pub color: [u8; 3],
     pub pos: [f32; 2],
-    pub time: Instant,
+    pub time: web_time::Instant,
 }
 
 /// Authoritative annotation state maintained by the session.
@@ -312,27 +325,6 @@ pub struct ConnectedUser {
     pub client_type: crate::collab::protocol::ClientType,
 }
 
-/// A user's cursor position with metadata for rendering.
-#[derive(Debug, Clone)]
-pub struct UserCursor {
-    pub user_id: u64,
-    pub name: String,
-    pub color: [u8; 3],
-    /// Minimap-space position. None = cursor not on the minimap.
-    pub pos: Option<[f32; 2]>,
-    /// When the cursor position was last updated (for fade-out).
-    pub last_update: Instant,
-}
-
-/// Permission flags controlled by the host/co-host.
-#[derive(Debug, Clone, Default)]
-pub struct Permissions {
-    /// When true, peers cannot add or undo annotations.
-    pub annotations_locked: bool,
-    /// When true, peers cannot toggle display options.
-    pub settings_locked: bool,
-}
-
 // ─── UI ↔ Session task communication ────────────────────────────────────────
 
 /// Events sent from the background session task to the UI thread.
@@ -343,7 +335,7 @@ pub enum SessionEvent {
     /// A user joined the session.
     UserJoined(ConnectedUser),
     /// A user left the session.
-    UserLeft { user_id: u64 },
+    UserLeft { user_id: u64, name: String, timed_out: bool },
     /// Session ended (host stopped or disconnected).
     Ended,
     /// An error occurred.
@@ -357,7 +349,14 @@ pub enum SessionEvent {
     /// The frame source changed.
     FrameSourceChanged { source_user_id: u64 },
     /// A new replay was opened on the host.
-    ReplayOpened { replay_id: u64, replay_name: String, map_image_png: Vec<u8>, game_version: String },
+    ReplayOpened {
+        replay_id: u64,
+        replay_name: String,
+        map_image_png: Vec<u8>,
+        game_version: String,
+        map_name: String,
+        display_name: String,
+    },
     /// A replay was closed on the host.
     ReplayClosed { replay_id: u64 },
 }
@@ -379,7 +378,14 @@ pub enum SessionCommand {
     /// Declare self as frame source (host/co-host only).
     BecomeFrameSource,
     /// Notify peers that a replay was opened on the host.
-    ReplayOpened { replay_id: u64, replay_name: String, map_image_png: Vec<u8>, game_version: String },
+    ReplayOpened {
+        replay_id: u64,
+        replay_name: String,
+        map_image_png: Vec<u8>,
+        game_version: String,
+        map_name: String,
+        display_name: String,
+    },
     /// Notify peers that a replay was closed on the host.
     ReplayClosed { replay_id: u64 },
     /// Broadcast full cap point state for a specific tactics board.
@@ -544,6 +550,8 @@ mod tests {
             replay_name: "test.wowsreplay".into(),
             map_image_png: vec![0u8; 100],
             game_version: "13.5.0".into(),
+            map_name: "spaces/16_OC_bees_to_honey".into(),
+            display_name: "Bees to Honey".into(),
         };
         let cloned = replay.clone();
         assert_eq!(cloned.replay_id, 1);

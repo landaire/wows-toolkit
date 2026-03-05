@@ -3527,6 +3527,28 @@ impl ToolkitTabViewer<'_> {
                                 self.tab_state.toasts.lock().info("Token copied to clipboard");
                             }
                         });
+
+                        // Copy web link buttons
+                        if ui
+                            .button(icon_str!(icons::BROWSER, "Copy Web Link"))
+                            .on_hover_text("Copy link for the web client")
+                            .clicked()
+                        {
+                            let url = format!("{}#{}", crate::collab::WEB_CLIENT_URL, token);
+                            ui.ctx().copy_text(url);
+                            self.tab_state.toasts.lock().info("Web link copied to clipboard");
+                        }
+                        #[cfg(debug_assertions)]
+                        if ui
+                            .button(icon_str!(icons::BROWSER, "Copy Localhost Link"))
+                            .on_hover_text("Copy localhost link (dev)")
+                            .clicked()
+                        {
+                            let url = format!("http://localhost:8080/#{}", token);
+                            ui.ctx().copy_text(url);
+                            self.tab_state.toasts.lock().info("Localhost link copied to clipboard");
+                        }
+
                         ui.add_space(4.0);
                     }
 
@@ -3709,7 +3731,7 @@ impl ToolkitTabViewer<'_> {
                         } else if self.tab_state.settings.collab_display_name.trim().is_empty() {
                             self.tab_state.show_display_name_error = true;
                             self.tab_state.toasts.lock().error("Enter a display name first");
-                        } else if let Err(e) = crate::collab::peer::decode_token(&trimmed) {
+                        } else if let Err(e) = crate::collab::protocol::decode_token(&trimmed) {
                             self.tab_state.toasts.lock().error(format!("Invalid token: {e}"));
                         } else {
                             self.tab_state.join_session_token = trimmed;
@@ -3735,23 +3757,10 @@ impl ToolkitTabViewer<'_> {
             .map(|(&bid, bs)| {
                 let title = if !bs.window_title.is_empty() {
                     bs.window_title.clone()
+                } else if !bs.tactics_map.display_name.is_empty() {
+                    format!("Tactics Board \u{2014} {}", bs.tactics_map.display_name)
                 } else if !bs.tactics_map.map_name.is_empty() {
-                    // Fallback: translate the map name for peers who haven't opened the board yet.
-                    let translated = self
-                        .tab_state
-                        .world_of_warships_data
-                        .as_ref()
-                        .and_then(|wd| {
-                            let wd = wd.read();
-                            wd.game_metadata.as_ref().map(|gm| {
-                                wowsunpack::game_params::translations::translate_map_name(
-                                    &bs.tactics_map.map_name,
-                                    gm.as_ref(),
-                                )
-                            })
-                        })
-                        .unwrap_or_else(|| bs.tactics_map.map_name.clone());
-                    format!("Tactics Board \u{2014} {translated}")
+                    format!("Tactics Board \u{2014} {}", bs.tactics_map.map_name)
                 } else {
                     "Tactics Board".to_string()
                 };

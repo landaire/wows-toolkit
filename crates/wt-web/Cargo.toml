@@ -1,0 +1,36 @@
+[package]
+name = "wt-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "WASM web client for WoWs Toolkit collaborative sessions"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wt-collab-protocol = { workspace = true, features = ["egui"] }
+wt-collab-egui = { workspace = true }
+wows_minimap_renderer = { workspace = true, default-features = false, features = ["rkyv"] }
+egui = { workspace = true }
+egui-phosphor = { workspace = true }
+egui_dock = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
+wgpu = { workspace = true, features = ["webgl"] }
+iroh = { workspace = true, default-features = false }
+rkyv = { workspace = true }
+tracing = { workspace = true }
+web-time = { workspace = true }
+png = "0.17"
+rand = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "Storage", "Performance", "HtmlCanvasElement"] }
+js-sys = "0.3"
+tracing-wasm = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }

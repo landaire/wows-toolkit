@@ -19,17 +19,12 @@
 //! 4. Accepts incoming MeshHello connections from peers notified via PeerAnnounce
 
 use std::collections::HashMap;
-use std::io::Read as _;
-use std::io::Write as _;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::Instant;
+use web_time::Instant;
 
 use parking_lot::Mutex;
 
-use flate2::Compression;
-use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
 use iroh::Endpoint;
 use iroh::SecretKey;
 use tracing::debug;
@@ -70,6 +65,9 @@ pub struct HostParams {
     pub toolkit_version: String,
     pub display_name: String,
     pub initial_render_options: CollabRenderOptions,
+    /// Pre-serialized `PeerMessage::AssetBundle` bytes (length-prefixed rkyv).
+    /// Built once on the UI thread and sent to each web client on connect.
+    pub web_asset_bundle: Option<Arc<Vec<u8>>>,
 }
 
 /// Parameters for joining a session.
@@ -133,6 +131,8 @@ pub enum LocalEvent {
         board_id: u64,
         owner_user_id: u64,
         map_name: String,
+        /// Human-readable map name for display.
+        display_name: String,
         map_id: u32,
         map_image_png: Vec<u8>,
         /// Map metadata for coordinate transforms.
@@ -203,6 +203,8 @@ struct MeshPeer {
     role: PeerRole,
     /// Channel for sending serialized (length-prefixed) messages to this peer's writer task.
     msg_tx: tokio::sync::mpsc::Sender<Arc<Vec<u8>>>,
+    /// How many times this peer has requested assets. Capped at 5.
+    asset_request_count: u8,
 }
 
 /// Shared mesh state accessible from multiple tasks.
@@ -284,7 +286,7 @@ async fn host_main(
 
     endpoint.online().await;
 
-    // Generate the session token: toolkit-<base64(zlib(node_id))>.
+    // Generate the session token: toolkit-<base64url(zlib(public_key_bytes))>.
     // Both host and client use iroh's default relay, so the relay URL
     // is implicit and doesn't need to be in the token.
     let token = encode_token(&endpoint.addr().id);
@@ -342,7 +344,7 @@ async fn host_main(
     // Spawn frame compression task.
     let _frame_task = tokio::task::spawn_blocking(move || {
         while let Ok(frame) = frame_broadcast_rx.recv() {
-            if let Some(framed) = compress_frame(&frame) {
+            if let Some(framed) = serialize_frame(&frame) {
                 let arc = Arc::new(framed);
                 *last_frame_clone.lock() = Some(Arc::clone(&arc));
                 let _ = frame_bytes_tx_clone.send(arc);
@@ -390,10 +392,13 @@ async fn host_main(
                         replay_name: r.replay_name.clone(),
                         map_image_png: r.map_image_png.clone(),
                         game_version: r.game_version.clone(),
+                        map_name: r.map_name.clone(),
+                        display_name: r.display_name.clone(),
                     }
                 }).collect();
                 debug!("Peer {user_id} joining: {} open replay(s) in SessionInfo", open_replays.len());
                 let last_frame_for_peer = Arc::clone(&last_frame_bytes);
+                let web_asset_bundle = params.web_asset_bundle.clone();
 
                 tokio::spawn(async move {
                     host_accept_peer(
@@ -409,6 +414,7 @@ async fn host_main(
                         peer_msg_tx_clone,
                         frame_rx,
                         last_frame_for_peer,
+                        web_asset_bundle,
                     )
                     .await;
                 });
@@ -416,13 +422,34 @@ async fn host_main(
 
             // Process incoming peer messages.
             Some((sender_id, msg)) = peer_msg_rx.recv() => {
-                handle_incoming_message(
-                    sender_id,
-                    msg,
-                    &mesh,
-                    &ui_state,
-                    &event_tx,
-                );
+                // Handle asset requests directly here where web_asset_bundle is in scope.
+                if matches!(&msg, PeerMessage::RequestAssets) {
+                    if let Some(ref bundle_bytes) = params.web_asset_bundle {
+                        let mut m = mesh.lock();
+                        if let Some(peer) = m.peers.get_mut(&sender_id) {
+                            if peer.asset_request_count < 5 {
+                                peer.asset_request_count += 1;
+                                debug!(
+                                    "Sending AssetBundle to peer {sender_id} on request ({}/5)",
+                                    peer.asset_request_count
+                                );
+                                let _ = peer.msg_tx.try_send(Arc::clone(bundle_bytes));
+                            } else {
+                                debug!("Ignoring RequestAssets from {sender_id}: limit reached");
+                            }
+                        }
+                    } else {
+                        debug!("Ignoring RequestAssets from {sender_id}: no asset bundle available");
+                    }
+                } else {
+                    handle_incoming_message(
+                        sender_id,
+                        msg,
+                        &mesh,
+                        &ui_state,
+                        &event_tx,
+                    );
+                }
             }
 
             // Process UI commands + local events (non-blocking).
@@ -505,7 +532,7 @@ async fn host_main(
                             }
                             let _ = event_tx.send(SessionEvent::FrameSourceChanged { source_user_id: my_user_id });
                         }
-                        SessionCommand::ReplayOpened { replay_id, replay_name, map_image_png, game_version } => {
+                        SessionCommand::ReplayOpened { replay_id, replay_name, map_image_png, game_version, map_name, display_name } => {
                             // Store in session state (deduplicate by replay_id).
                             { let mut s = ui_state.lock();
                                 if !s.open_replays.iter().any(|r| r.replay_id == replay_id) {
@@ -514,6 +541,8 @@ async fn host_main(
                                         replay_name: replay_name.clone(),
                                         map_image_png: map_image_png.clone(),
                                         game_version: game_version.clone(),
+                                        map_name: map_name.clone(),
+                                        display_name: display_name.clone(),
                                     });
                                 }
                             }
@@ -523,6 +552,8 @@ async fn host_main(
                                 replay_name,
                                 map_image_png,
                                 game_version,
+                                map_name,
+                                display_name,
                             };
                             broadcast_to_mesh(&mesh, &msg);
                         }
@@ -564,7 +595,7 @@ async fn host_main(
                                     c.last_update = Instant::now();
                                 }
                             }
-                            broadcast_to_mesh(&mesh, &PeerMessage::CursorPosition(pos));
+                            broadcast_to_mesh(&mesh, &PeerMessage::CursorPosition { user_id: my_user_id, pos });
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
@@ -638,7 +669,8 @@ async fn host_main(
                             broadcast_to_mesh(&mesh, &PeerMessage::ShipTrailOverrides { hidden });
                         }
                         LocalEvent::Ping(pos) => {
-                            broadcast_to_mesh(&mesh, &PeerMessage::Ping { pos });
+                            let my_color = mesh.lock().my_color;
+                            broadcast_to_mesh(&mesh, &PeerMessage::Ping { user_id: my_user_id, pos, color: my_color });
                         }
                         LocalEvent::CapPoint { board_id, event: evt } => {
                             let msg = match &evt {
@@ -670,7 +702,7 @@ async fn host_main(
                             };
                             broadcast_to_mesh(&mesh, &msg);
                         }
-                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
+                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, display_name, map_id, map_image_png, map_info } => {
                             {
                                 let mut s = ui_state.lock();
                                 let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
@@ -678,6 +710,7 @@ async fn host_main(
                                 board.owner_user_id = owner;
                                 board.tactics_map = crate::collab::TacticsMapInfo {
                                     map_name: map_name.clone(),
+                                    display_name: display_name.clone(),
                                     map_id,
                                     map_image_png: map_image_png.clone(),
                                     map_info: map_info.clone(),
@@ -685,7 +718,7 @@ async fn host_main(
                                 s.tactics_boards_version += 1;
                             }
                             let owner = ui_state.lock().my_user_id;
-                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, map_id, map_image_png, map_info });
+                            broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, display_name, map_id, map_image_png, map_info });
                         }
                         LocalEvent::TacticsMapClosed { board_id } => {
                             {
@@ -725,6 +758,7 @@ async fn host_accept_peer(
     peer_msg_tx: tokio::sync::mpsc::Sender<(u64, PeerMessage)>,
     mut frame_rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
     last_frame_bytes: Arc<Mutex<Option<Arc<Vec<u8>>>>>,
+    web_asset_bundle: Option<Arc<Vec<u8>>>,
 ) {
     let (mut send, mut recv) = match conn.accept_bi().await {
         Ok(s) => s,
@@ -812,6 +846,19 @@ async fn host_accept_peer(
         return;
     }
 
+    // Send asset bundle to web clients (pre-serialized bytes, written directly).
+    if matches!(&client_type, ClientType::Web) {
+        if let Some(ref bundle_bytes) = web_asset_bundle {
+            debug!("Sending AssetBundle ({} bytes) to web peer {user_id}", bundle_bytes.len());
+            if send.write_all(bundle_bytes).await.is_err() {
+                warn!("Failed to send AssetBundle to peer {user_id}");
+                return;
+            }
+        } else {
+            debug!("No AssetBundle available for web peer {user_id}");
+        }
+    }
+
     // Send current permissions.
     let perm_msg = PeerMessage::Permissions {
         annotations_locked: current_perms.annotations_locked,
@@ -859,6 +906,7 @@ async fn host_accept_peer(
                     board_id: bid,
                     owner_user_id: board.owner_user_id,
                     map_name: board.tactics_map.map_name.clone(),
+                    display_name: board.tactics_map.display_name.clone(),
                     map_id: board.tactics_map.map_id,
                     map_image_png: board.tactics_map.map_image_png.clone(),
                     map_info: board.tactics_map.map_info.clone(),
@@ -927,7 +975,17 @@ async fn host_accept_peer(
     };
     {
         let mut m = mesh.lock();
-        m.peers.insert(user_id, MeshPeer { user_id, name: client_name.clone(), color, role: PeerRole::Peer, msg_tx });
+        m.peers.insert(
+            user_id,
+            MeshPeer {
+                user_id,
+                name: client_name.clone(),
+                color,
+                role: PeerRole::Peer,
+                msg_tx,
+                asset_request_count: 0,
+            },
+        );
     }
     {
         let mut s = ui_state.lock();
@@ -1062,11 +1120,7 @@ async fn host_accept_peer(
     }
     let leave_msg = PeerMessage::UserLeft { user_id };
     broadcast_to_mesh(&mesh, &leave_msg);
-    let _ = event_tx.send(SessionEvent::UserLeft { user_id });
-    if timed_out {
-        let _ = event_tx
-            .send(SessionEvent::Error(format!("{client_name} timed out (no heartbeat for {HEARTBEAT_TIMEOUT_SECS}s)")));
-    }
+    let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: client_name.clone(), timed_out });
     info!("Peer {user_id} ({client_name}) left session");
 }
 
@@ -1191,6 +1245,8 @@ async fn join_main(
                         replay_name: r.replay_name.clone(),
                         map_image_png: r.map_image_png.clone(),
                         game_version: r.game_version.clone(),
+                        map_name: r.map_name.clone(),
+                        display_name: r.display_name.clone(),
                     })
                     .collect();
                 let _ = event_tx.send(SessionEvent::SessionInfoReceived { open_replays: open_replay_list });
@@ -1242,6 +1298,7 @@ async fn join_main(
                 color: host_color,
                 role: PeerRole::Host,
                 msg_tx: host_msg_tx,
+                asset_request_count: 0,
             },
         );
     }
@@ -1279,7 +1336,7 @@ async fn join_main(
     let frame_bytes_tx_clone = frame_bytes_tx.clone();
     let _frame_task = tokio::task::spawn_blocking(move || {
         while let Ok(frame) = frame_broadcast_rx.recv() {
-            if let Some(framed) = compress_frame(&frame) {
+            if let Some(framed) = serialize_frame(&frame) {
                 let _ = frame_bytes_tx_clone.send(Arc::new(framed));
             }
         }
@@ -1452,7 +1509,7 @@ async fn join_main(
                                     c.last_update = Instant::now();
                                 }
                             }
-                            let _ = write_peer_message(&mut send, &PeerMessage::CursorPosition(pos)).await;
+                            let _ = write_peer_message(&mut send, &PeerMessage::CursorPosition { user_id: my_user_id, pos }).await;
                         }
                         LocalEvent::Annotation(evt) => {
                             let msg = match &evt {
@@ -1526,7 +1583,8 @@ async fn join_main(
                             let _ = write_peer_message(&mut send, &PeerMessage::ShipTrailOverrides { hidden }).await;
                         }
                         LocalEvent::Ping(pos) => {
-                            let _ = write_peer_message(&mut send, &PeerMessage::Ping { pos }).await;
+                            let my_color = mesh.lock().my_color;
+                            let _ = write_peer_message(&mut send, &PeerMessage::Ping { user_id: my_user_id, pos, color: my_color }).await;
                         }
                         LocalEvent::CapPoint { board_id, event: evt } => {
                             let msg = match &evt {
@@ -1556,7 +1614,7 @@ async fn join_main(
                             };
                             let _ = write_peer_message(&mut send, &msg).await;
                         }
-                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
+                        LocalEvent::TacticsMapOpened { board_id, owner_user_id, map_name, display_name, map_id, map_image_png, map_info } => {
                             {
                                 let mut s = ui_state.lock();
                                 let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
@@ -1564,6 +1622,7 @@ async fn join_main(
                                 board.owner_user_id = owner;
                                 board.tactics_map = crate::collab::TacticsMapInfo {
                                     map_name: map_name.clone(),
+                                    display_name: display_name.clone(),
                                     map_id,
                                     map_image_png: map_image_png.clone(),
                                     map_info: map_info.clone(),
@@ -1571,7 +1630,7 @@ async fn join_main(
                                 s.tactics_boards_version += 1;
                             }
                             let owner = ui_state.lock().my_user_id;
-                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, map_id, map_image_png, map_info }).await;
+                            let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapOpened { board_id, owner_user_id: owner, map_name, display_name, map_id, map_image_png, map_info }).await;
                         }
                         LocalEvent::TacticsMapClosed { board_id } => {
                             {
@@ -1631,7 +1690,9 @@ fn handle_incoming_message(
 
     match msg {
         // ── Always accept ───────────────────────────────────────────────
-        PeerMessage::CursorPosition(pos) => {
+        PeerMessage::CursorPosition { pos, .. } => {
+            // Use sender_id from the connection context (not the message's user_id)
+            // to prevent peers from spoofing other users' cursors.
             {
                 let mut s = ui_state.lock();
                 if let Some(c) = s.cursors.iter_mut().find(|c| c.user_id == sender_id) {
@@ -1657,8 +1718,8 @@ fn handle_incoming_message(
                     s.repaint_viewport(bid);
                 }
             }
-            // Host relays cursor updates to other peers.
-            relay_if_host(sender_id, &PeerMessage::CursorPosition(pos), mesh);
+            // Host relays cursor updates to other peers with the real sender_id.
+            relay_if_host(sender_id, &PeerMessage::CursorPosition { user_id: sender_id, pos }, mesh);
         }
 
         PeerMessage::MeshHello { user_id, name, color } => {
@@ -1822,14 +1883,14 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &msg, mesh);
         }
 
-        PeerMessage::Ping { pos } => {
-            let color = mesh.lock().peers.get(&sender_id).map(|p| p.color).unwrap_or([200, 200, 200]);
+        PeerMessage::Ping { pos, color, .. } => {
             {
                 let mut s = ui_state.lock();
                 s.pings.push(crate::collab::PeerPing { user_id: sender_id, color, pos, time: Instant::now() });
                 repaint_replay_viewports(&s);
             }
-            relay_if_host(sender_id, &msg, mesh);
+            // Relay with the real sender_id and their color.
+            relay_if_host(sender_id, &PeerMessage::Ping { user_id: sender_id, pos, color }, mesh);
         }
 
         // ── Authority-only ──────────────────────────────────────────────
@@ -1926,13 +1987,16 @@ fn handle_incoming_message(
                 debug!("Dropping UserLeft from non-host {sender_id}");
                 return;
             }
-            {
+            let left_name = {
                 let mut s = ui_state.lock();
+                let name =
+                    s.connected_users.iter().find(|u| u.id == user_id).map(|u| u.name.clone()).unwrap_or_default();
                 s.connected_users.retain(|u| u.id != user_id);
                 s.cursors.retain(|c| c.user_id != user_id);
-            }
+                name
+            };
             mesh.lock().peers.remove(&user_id);
-            let _ = event_tx.send(SessionEvent::UserLeft { user_id });
+            let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: left_name, timed_out: false });
         }
 
         // ── Co-host promotion (host only) ───────────────────────────────
@@ -1977,37 +2041,18 @@ fn handle_incoming_message(
             relay_if_host(sender_id, &PeerMessage::FrameSourceChanged { source_user_id }, mesh);
         }
 
-        PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, compressed_commands } => {
+        PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, commands } => {
             if sender_id != frame_source_id {
                 debug!("Dropping Frame from {sender_id} (frame source is {frame_source_id})");
                 return;
             }
-            // Decompress and forward to UI.
-            let mut decoder = ZlibDecoder::new(&compressed_commands[..]);
-            let mut decompressed = Vec::new();
-            if let Err(e) = decoder.read_to_end(&mut decompressed) {
-                warn!("Frame decompression failed: {e}");
-                return;
-            }
-            if decompressed.len() > MAX_DECOMPRESSED_FRAME_SIZE {
-                warn!("Decompressed frame too large: {}", decompressed.len());
-                return;
-            }
-            let commands: Vec<DrawCommand> =
-                match rkyv::from_bytes::<Vec<DrawCommand>, rkyv::rancor::Error>(&decompressed) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("Frame deserialization failed: {e}");
-                        return;
-                    }
-                };
             if let Err(e) = validate_frame_commands_count(commands.len()) {
                 warn!("{e}");
                 return;
             }
             let frame = PlaybackFrame {
                 replay_id,
-                commands,
+                commands: commands.clone(),
                 clock: wowsunpack::game_types::GameClock(clock),
                 frame_index: frame_index as usize,
                 total_frames: total_frames as usize,
@@ -2018,13 +2063,13 @@ fn handle_incoming_message(
             // Host relays frames to other peers.
             relay_if_host(
                 sender_id,
-                &PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, compressed_commands },
+                &PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, commands },
                 mesh,
             );
         }
 
         // ── Replay lifecycle (host → all peers) ────────────────────────
-        PeerMessage::ReplayOpened { replay_id, replay_name, map_image_png, game_version } => {
+        PeerMessage::ReplayOpened { replay_id, replay_name, map_image_png, game_version, map_name, display_name } => {
             if !sender_is_host {
                 debug!("Dropping ReplayOpened from non-host {sender_id}");
                 return;
@@ -2037,10 +2082,19 @@ fn handle_incoming_message(
                         replay_name: replay_name.clone(),
                         map_image_png: map_image_png.clone(),
                         game_version: game_version.clone(),
+                        map_name: map_name.clone(),
+                        display_name: display_name.clone(),
                     });
                 }
             }
-            let _ = event_tx.send(SessionEvent::ReplayOpened { replay_id, replay_name, map_image_png, game_version });
+            let _ = event_tx.send(SessionEvent::ReplayOpened {
+                replay_id,
+                replay_name,
+                map_image_png,
+                game_version,
+                map_name,
+                display_name,
+            });
         }
 
         PeerMessage::ReplayClosed { replay_id } => {
@@ -2058,7 +2112,15 @@ fn handle_incoming_message(
         }
 
         // ── Tactics board messages ────────────────────────────────────
-        PeerMessage::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info } => {
+        PeerMessage::TacticsMapOpened {
+            board_id,
+            owner_user_id,
+            map_name,
+            display_name,
+            map_id,
+            map_image_png,
+            map_info,
+        } => {
             {
                 let mut s = ui_state.lock();
                 if !s.tactics_boards.contains_key(&board_id) && s.tactics_boards.len() >= protocol::MAX_TACTICS_BOARDS {
@@ -2069,6 +2131,7 @@ fn handle_incoming_message(
                 board.owner_user_id = owner_user_id;
                 board.tactics_map = crate::collab::TacticsMapInfo {
                     map_name: map_name.clone(),
+                    display_name: display_name.clone(),
                     map_id,
                     map_image_png: map_image_png.clone(),
                     map_info: map_info.clone(),
@@ -2078,7 +2141,15 @@ fn handle_incoming_message(
             }
             relay_if_host(
                 sender_id,
-                &PeerMessage::TacticsMapOpened { board_id, owner_user_id, map_name, map_id, map_image_png, map_info },
+                &PeerMessage::TacticsMapOpened {
+                    board_id,
+                    owner_user_id,
+                    map_name,
+                    display_name,
+                    map_id,
+                    map_image_png,
+                    map_info,
+                },
                 mesh,
             );
         }
@@ -2172,6 +2243,11 @@ fn handle_incoming_message(
             debug!("Ignoring AssetBundle from {sender_id} (desktop client)");
         }
 
+        // ── Asset request (handled in host_main loop, should not reach here) ──
+        PeerMessage::RequestAssets => {
+            debug!("Ignoring RequestAssets from {sender_id} in handle_incoming_message");
+        }
+
         // ── Handshake messages (not expected post-handshake) ────────────
         PeerMessage::Join { .. }
         | PeerMessage::SessionInfo { .. }
@@ -2191,32 +2267,6 @@ fn handle_incoming_message(
     if let Some(ctx) = &s.egui_ctx {
         ctx.request_repaint();
     }
-}
-
-// ─── Token encoding ─────────────────────────────────────────────────────────
-
-const TOKEN_PREFIX: &str = "toolkit-";
-
-/// Encode a node ID into a session token: `toolkit-<base64(zlib(node_id_base32))>`.
-pub fn encode_token(node_id: &iroh::PublicKey) -> String {
-    let raw = node_id.to_string();
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
-    encoder.write_all(raw.as_bytes()).expect("zlib write");
-    let compressed = encoder.finish().expect("zlib finish");
-    let b64 = data_encoding::BASE64URL_NOPAD.encode(&compressed);
-    format!("{TOKEN_PREFIX}{b64}")
-}
-
-/// Decode a session token back to a node ID.
-pub fn decode_token(token: &str) -> Result<iroh::PublicKey, String> {
-    let token = token.trim();
-    let b64 = token.strip_prefix(TOKEN_PREFIX).ok_or_else(|| format!("Token must start with \"{TOKEN_PREFIX}\""))?;
-    let compressed =
-        data_encoding::BASE64URL_NOPAD.decode(b64.as_bytes()).map_err(|e| format!("Invalid base64: {e}"))?;
-    let mut decoder = ZlibDecoder::new(&compressed[..]);
-    let mut raw = String::new();
-    decoder.read_to_string(&mut raw).map_err(|e| format!("Decompression failed: {e}"))?;
-    raw.trim().parse::<iroh::PublicKey>().map_err(|e| format!("Invalid node ID: {e}"))
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -2258,28 +2308,15 @@ fn relay_if_host(sender_id: u64, msg: &PeerMessage, mesh: &Arc<Mutex<MeshState>>
     }
 }
 
-/// Compress a frame broadcast into a wire-ready PeerMessage::Frame.
-fn compress_frame(frame: &FrameBroadcast) -> Option<Vec<u8>> {
-    let rkyv_bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&frame.commands) {
-        Ok(b) => b,
-        Err(e) => {
-            warn!("Failed to serialize frame commands: {e}");
-            return None;
-        }
-    };
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
-    if encoder.write_all(&rkyv_bytes).is_err() {
-        return None;
-    }
-    let compressed = encoder.finish().ok()?;
-
+/// Serialize a frame broadcast into wire-ready bytes.
+fn serialize_frame(frame: &FrameBroadcast) -> Option<Vec<u8>> {
     let msg = PeerMessage::Frame {
         replay_id: frame.replay_id,
         clock: frame.clock,
         frame_index: frame.frame_index,
         total_frames: frame.total_frames,
         game_duration: frame.game_duration,
-        compressed_commands: compressed,
+        commands: frame.commands.clone(),
     };
     frame_peer_message(&msg).ok()
 }
@@ -2292,65 +2329,11 @@ fn set_status(state: &Arc<Mutex<SessionState>>, status: SessionStatus) {
 mod tests {
     use super::*;
 
-    // ─── Token encode/decode ─────────────────────────────────────────────
-
-    #[test]
-    fn token_encode_decode_roundtrip() {
-        let key = SecretKey::generate(&mut rand::rng());
-        let public = key.public();
-        let token = encode_token(&public);
-        let decoded = decode_token(&token).unwrap();
-        assert_eq!(public, decoded);
-    }
-
-    #[test]
-    fn token_has_prefix() {
-        let key = SecretKey::generate(&mut rand::rng());
-        let token = encode_token(&key.public());
-        assert!(token.starts_with(TOKEN_PREFIX));
-    }
-
-    #[test]
-    fn decode_token_rejects_missing_prefix() {
-        let err = decode_token("not-a-toolkit-token").unwrap_err();
-        assert!(err.contains("toolkit-"), "Error should mention prefix: {err}");
-    }
-
-    #[test]
-    fn decode_token_rejects_invalid_base64() {
-        let err = decode_token("toolkit-!!!invalid!!!").unwrap_err();
-        assert!(err.contains("base64") || err.contains("Base64"), "Error should mention base64: {err}");
-    }
-
-    #[test]
-    fn decode_token_rejects_empty_payload() {
-        let err = decode_token("toolkit-").unwrap_err();
-        assert!(err.is_empty() || !err.is_empty()); // Just shouldn't panic
-    }
-
-    #[test]
-    fn decode_token_trims_whitespace() {
-        let key = SecretKey::generate(&mut rand::rng());
-        let token = encode_token(&key.public());
-        let padded = format!("  {token}  \n");
-        let decoded = decode_token(&padded).unwrap();
-        assert_eq!(key.public(), decoded);
-    }
-
-    #[test]
-    fn different_keys_produce_different_tokens() {
-        let key1 = SecretKey::generate(&mut rand::rng());
-        let key2 = SecretKey::generate(&mut rand::rng());
-        let token1 = encode_token(&key1.public());
-        let token2 = encode_token(&key2.public());
-        assert_ne!(token1, token2);
-    }
-
     // ─── MeshState ───────────────────────────────────────────────────────
 
     fn make_mesh_peer(user_id: u64, role: PeerRole) -> MeshPeer {
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
-        MeshPeer { user_id, name: format!("Peer{user_id}"), color: [0; 3], role, msg_tx: tx }
+        MeshPeer { user_id, name: format!("Peer{user_id}"), color: [0; 3], role, msg_tx: tx, asset_request_count: 0 }
     }
 
     fn make_mesh_state(my_user_id: u64, my_role: PeerRole, peers: Vec<(u64, PeerRole)>) -> MeshState {
@@ -2775,7 +2758,7 @@ mod tests {
         let h = MessageTestHarness::as_client();
         // Simulate cursor from peer 5.
         h.dispatch(0, PeerMessage::UserJoined { user_id: 5, name: "Eve".into(), color: [0; 3] });
-        h.dispatch(5, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        h.dispatch(5, PeerMessage::CursorPosition { user_id: 5, pos: Some([100.0, 200.0]) });
         assert!(!h.ui().cursors.is_empty());
 
         h.dispatch(0, PeerMessage::UserLeft { user_id: 5 });
@@ -2845,12 +2828,6 @@ mod tests {
     #[test]
     fn frame_dropped_from_wrong_source() {
         let h = MessageTestHarness::as_client().with_frame_source(0);
-        // Create a minimal compressed frame.
-        let commands: Vec<DrawCommand> = vec![];
-        let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&commands).unwrap();
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&rkyv_bytes).unwrap();
-        let compressed = encoder.finish().unwrap();
 
         // Send from user 99 (not the frame source).
         h.dispatch(
@@ -2861,18 +2838,13 @@ mod tests {
                 frame_index: 0,
                 total_frames: 10,
                 game_duration: 600.0,
-                compressed_commands: compressed,
+                commands: vec![],
             },
         );
         // Frame should not arrive (no channel registered, and even if there were one,
         // the wrong sender should be rejected).
         let rx = h.with_frame_channel(1);
         // Re-dispatch to test with channel present.
-        let commands2: Vec<DrawCommand> = vec![];
-        let rkyv_bytes2 = rkyv::to_bytes::<rkyv::rancor::Error>(&commands2).unwrap();
-        let mut encoder2 = ZlibEncoder::new(Vec::new(), Compression::fast());
-        encoder2.write_all(&rkyv_bytes2).unwrap();
-        let compressed2 = encoder2.finish().unwrap();
         h.dispatch(
             99,
             PeerMessage::Frame {
@@ -2881,7 +2853,7 @@ mod tests {
                 frame_index: 0,
                 total_frames: 10,
                 game_duration: 600.0,
-                compressed_commands: compressed2,
+                commands: vec![],
             },
         );
         assert!(rx.try_recv().is_err());
@@ -2891,11 +2863,6 @@ mod tests {
     fn frame_accepted_from_correct_source() {
         let h = MessageTestHarness::as_client().with_frame_source(0);
         let rx = h.with_frame_channel(1);
-        let commands: Vec<DrawCommand> = vec![];
-        let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&commands).unwrap();
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&rkyv_bytes).unwrap();
-        let compressed = encoder.finish().unwrap();
 
         h.dispatch(
             0,
@@ -2905,7 +2872,7 @@ mod tests {
                 frame_index: 5,
                 total_frames: 100,
                 game_duration: 1200.0,
-                compressed_commands: compressed,
+                commands: vec![],
             },
         );
         let frame = rx.try_recv().expect("frame should arrive via channel");
@@ -2925,6 +2892,8 @@ mod tests {
                 replay_name: "test.wowsreplay".into(),
                 map_image_png: vec![0u8; 10],
                 game_version: "13.5".into(),
+                map_name: "spaces/01_solomon_islands".into(),
+                display_name: "Solomon Islands".into(),
             },
         );
         let s = h.ui();
@@ -2942,6 +2911,8 @@ mod tests {
                 replay_name: "test.wowsreplay".into(),
                 map_image_png: vec![],
                 game_version: "13.5".into(),
+                map_name: "spaces/01_solomon_islands".into(),
+                display_name: "Solomon Islands".into(),
             },
         );
         assert!(h.ui().open_replays.is_empty());
@@ -2958,6 +2929,8 @@ mod tests {
                 replay_name: "test.wowsreplay".into(),
                 map_image_png: vec![],
                 game_version: "13.5".into(),
+                map_name: "spaces/01_solomon_islands".into(),
+                display_name: "Solomon Islands".into(),
             },
         );
         // Add some annotation state.
@@ -2980,6 +2953,8 @@ mod tests {
                 replay_name: "test.wowsreplay".into(),
                 map_image_png: vec![],
                 game_version: "13.5".into(),
+                map_name: "spaces/01_solomon_islands".into(),
+                display_name: "Solomon Islands".into(),
             },
         );
         h.dispatch(99, PeerMessage::ReplayClosed { replay_id: 1 });
@@ -2991,7 +2966,7 @@ mod tests {
     #[test]
     fn cursor_position_creates_entry() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: Some([100.0, 200.0]) });
         let s = h.ui();
         assert_eq!(s.cursors.len(), 1);
         assert_eq!(s.cursors[0].user_id, 0);
@@ -3001,8 +2976,8 @@ mod tests {
     #[test]
     fn cursor_position_updates_existing() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
-        h.dispatch(0, PeerMessage::CursorPosition(Some([300.0, 400.0])));
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: Some([100.0, 200.0]) });
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: Some([300.0, 400.0]) });
         let s = h.ui();
         assert_eq!(s.cursors.len(), 1);
         assert_eq!(s.cursors[0].pos, Some([300.0, 400.0]));
@@ -3011,8 +2986,8 @@ mod tests {
     #[test]
     fn cursor_none_clears_position() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(0, PeerMessage::CursorPosition(Some([100.0, 200.0])));
-        h.dispatch(0, PeerMessage::CursorPosition(None));
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: Some([100.0, 200.0]) });
+        h.dispatch(0, PeerMessage::CursorPosition { user_id: 0, pos: None });
         let s = h.ui();
         assert_eq!(s.cursors.len(), 1);
         assert_eq!(s.cursors[0].pos, None);
@@ -3023,7 +2998,7 @@ mod tests {
     #[test]
     fn ping_adds_entry_when_settings_unlocked() {
         let h = MessageTestHarness::as_client();
-        h.dispatch(0, PeerMessage::Ping { pos: [100.0, 200.0] });
+        h.dispatch(0, PeerMessage::Ping { user_id: 0, pos: [100.0, 200.0], color: [200, 200, 200] });
         let s = h.ui();
         assert_eq!(s.pings.len(), 1);
         assert_eq!(s.pings[0].user_id, 0);
@@ -3034,7 +3009,7 @@ mod tests {
     fn ping_always_accepted() {
         // Pings are NOT settings-gated — they are always accepted.
         let h = MessageTestHarness::as_client().with_permissions(false, true);
-        h.dispatch(99, PeerMessage::Ping { pos: [100.0, 200.0] });
+        h.dispatch(99, PeerMessage::Ping { user_id: 99, pos: [100.0, 200.0], color: [200, 200, 200] });
         assert_eq!(h.ui().pings.len(), 1);
     }
 

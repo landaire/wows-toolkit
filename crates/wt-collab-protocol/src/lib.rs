@@ -1,9 +1,8 @@
 //! Wire protocol types for WoWs Toolkit collaborative sessions.
 //!
 //! This crate contains all serializable types, constants, framing helpers,
-//! and validation logic for the collab protocol. It has no dependency on
-//! iroh, tokio, or any platform-specific crate, making it usable from both
-//! the desktop app and the WASM web client.
+//! stream I/O, token encoding, and validation logic for the collab protocol.
+//! It is usable from both the desktop app and the WASM web client.
 
 pub mod protocol;
 pub mod types;

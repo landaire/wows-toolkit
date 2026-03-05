@@ -8347,6 +8347,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-wasm"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "triomphe"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9216,6 +9227,7 @@ dependencies = [
  "thiserror 2.0.18",
  "wgpu-core-deps-apple 27.0.0",
  "wgpu-core-deps-emscripten 27.0.0",
+ "wgpu-core-deps-wasm",
  "wgpu-core-deps-windows-linux-android 27.0.0",
  "wgpu-hal 27.0.4",
  "wgpu-types 27.0.1",
@@ -9287,6 +9299,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34b251c331f84feac147de3c4aa3aa45112622a95dd7ee1b74384fa0458dbd79"
 dependencies = [
  "wgpu-hal 28.0.0",
+]
+
+[[package]]
+name = "wgpu-core-deps-wasm"
+version = "27.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b1027dcf3b027a877e44819df7ceb0e2e98578830f8cd34cd6c3c7c2a7a50b7"
+dependencies = [
+ "wgpu-hal 27.0.4",
 ]
 
 [[package]]
@@ -10370,11 +10391,13 @@ dependencies = [
  "tracing-subscriber",
  "twitch_api",
  "unidecode",
+ "web-time",
  "wgpu 27.0.1",
  "winresource",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-egui",
  "wt-collab-protocol",
  "zip",
 ]
@@ -10451,14 +10474,57 @@ dependencies = [
 ]
 
 [[package]]
-name = "wt-collab-protocol"
+name = "wt-collab-egui"
 version = "0.1.56"
 dependencies = [
  "egui",
+ "egui-phosphor",
+ "web-time",
+ "wows_minimap_renderer",
+ "wows_replays",
+ "wt-collab-protocol",
+]
+
+[[package]]
+name = "wt-collab-protocol"
+version = "0.1.56"
+dependencies = [
+ "data-encoding",
+ "egui",
  "flate2",
+ "iroh",
+ "rand 0.9.2",
  "rkyv",
  "wows_minimap_renderer",
  "wowsunpack",
+]
+
+[[package]]
+name = "wt-web"
+version = "0.1.56"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui-phosphor",
+ "egui_dock",
+ "getrandom 0.3.4",
+ "iroh",
+ "js-sys",
+ "png 0.17.16",
+ "rand 0.9.2",
+ "ring",
+ "rkyv",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-wasm",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "wgpu 27.0.1",
+ "wows_minimap_renderer",
+ "wt-collab-egui",
+ "wt-collab-protocol",
 ]
 
 [[package]]

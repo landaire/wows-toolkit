@@ -187,7 +187,7 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
             check_string_len(name, MAX_DISPLAY_NAME_LEN, "MeshHello.name")?;
         }
 
-        PeerMessage::CursorPosition(pos) => {
+        PeerMessage::CursorPosition { pos, .. } => {
             if let Some(p) = pos {
                 check_position(p, "CursorPosition")?;
             }
@@ -249,22 +249,24 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
 
         PeerMessage::FrameSourceChanged { .. } => {}
 
-        PeerMessage::Frame { clock, game_duration, frame_index, total_frames, compressed_commands, .. } => {
+        PeerMessage::Frame { clock, game_duration, frame_index, total_frames, commands, .. } => {
             check_finite(*clock, "Frame.clock")?;
             check_finite(*game_duration, "Frame.game_duration")?;
             if *frame_index > *total_frames {
                 return Err(ValidationError(format!("frame_index ({frame_index}) > total_frames ({total_frames})")));
             }
-            if compressed_commands.len() > MAX_FRAME_SIZE {
+            if commands.len() > MAX_COMMANDS_PER_FRAME {
                 return Err(ValidationError(format!(
-                    "compressed_commands too large: {} > {MAX_FRAME_SIZE}",
-                    compressed_commands.len()
+                    "too many draw commands: {} > {MAX_COMMANDS_PER_FRAME}",
+                    commands.len()
                 )));
             }
         }
 
-        PeerMessage::ReplayOpened { replay_name, map_image_png, game_version, .. } => {
+        PeerMessage::ReplayOpened { replay_name, map_image_png, game_version, map_name, display_name, .. } => {
             validate_replay_info_fields(replay_name, map_image_png, game_version)?;
+            check_string_len(map_name, MAX_STRING_LEN, "ReplayOpened.map_name")?;
+            check_string_len(display_name, MAX_STRING_LEN, "ReplayOpened.display_name")?;
         }
 
         PeerMessage::ReplayClosed { .. } => {}
@@ -284,13 +286,14 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
             }
         }
 
-        PeerMessage::Ping { pos } => {
+        PeerMessage::Ping { pos, .. } => {
             check_position(pos, "Ping.pos")?;
         }
 
         // ── Tactics board messages ──────────────────────────────────────
-        PeerMessage::TacticsMapOpened { map_name, map_image_png, .. } => {
+        PeerMessage::TacticsMapOpened { map_name, display_name, map_image_png, .. } => {
             check_string_len(map_name, MAX_STRING_LEN, "TacticsMapOpened.map_name")?;
+            check_string_len(display_name, MAX_STRING_LEN, "TacticsMapOpened.display_name")?;
             if map_image_png.len() > MAX_MAP_IMAGE_SIZE {
                 return Err(ValidationError(format!(
                     "TacticsMapOpened.map_image_png too large: {} > {MAX_MAP_IMAGE_SIZE}",
@@ -321,6 +324,8 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
 
         PeerMessage::OpenWindowForEveryone { .. } => {}
 
+        PeerMessage::RequestAssets => {}
+
         PeerMessage::AssetBundle { .. } => {
             // Asset bundles are large but bounded by MAX_MESSAGE_SIZE at the framing layer.
         }
@@ -343,7 +348,10 @@ fn validate_wire_cap_point(cp: &WireCapPoint, ctx: &str) -> Result<(), Validatio
 
 /// Validate a `ReplayInfo` struct's fields.
 pub fn validate_replay_info(r: &ReplayInfo) -> Result<(), ValidationError> {
-    validate_replay_info_fields(&r.replay_name, &r.map_image_png, &r.game_version)
+    validate_replay_info_fields(&r.replay_name, &r.map_image_png, &r.game_version)?;
+    check_string_len(&r.map_name, MAX_STRING_LEN, "ReplayInfo.map_name")?;
+    check_string_len(&r.display_name, MAX_STRING_LEN, "ReplayInfo.display_name")?;
+    Ok(())
 }
 
 fn validate_replay_info_fields(

@@ -11,8 +11,8 @@ default-run = "wows_toolkit"
 
 [dependencies]
 # All of these need to be bumped with egui releases
-egui = "0.33.3"
-eframe = { version = "0.33.3", default-features = false, features = [
+egui = { workspace = true }
+eframe = { workspace = true, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
     # "glow",
@@ -21,18 +21,15 @@ eframe = { version = "0.33.3", default-features = false, features = [
     "wayland",       # To support Linux (and CI)
 ] }
 egui_extras = { version = "0.33.3", features = ["syntect", "image", "svg"] }
-egui_dock = { version = "0.18.0", features = ["serde"] }
-egui-phosphor = "0.11"
+egui_dock = { workspace = true, features = ["serde"] }
+egui-phosphor = { workspace = true }
 egui_table = "0.7.0"
 egui_commonmark = "0.22"
 egui_ltreeview = { version = "0.6.1", features = ["persistence"] }
 egui_plot = "0.34.1"
 egui_taffy = "0.10.0"
 egui-notify = "0.21.0"
-# Pin to match eframe's wgpu version so backend features unify correctly
-# This dependency with `default-features = true` is also needed to ensure
-# that targets are properly initialized.
-wgpu = { version = "27", default-features = true }
+wgpu = { workspace = true }
 
 tracing = { workspace = true }
 wows_replays = { workspace = true, features = ["arc", "parsing"] }
@@ -59,7 +56,7 @@ flate2 = { workspace = true }
 thousands = "0.2.0"
 notify = "8.2.0"
 serde_json = { workspace = true, features = ["preserve_order"] }
-data-encoding = "2.10.0"
+data-encoding = { workspace = true }
 image = { workspace = true, features = ["jpeg", "png"] }
 image_dds = { workspace = true, features = ["ddsfile", "image"] }
 octocrab = "0.49"
@@ -85,8 +82,10 @@ csv = "1.4.0"
 jiff = { workspace = true, features = ["serde"] }
 rootcause = { workspace = true }
 arboard = "3.6.1"
-iroh = { workspace = true }
+iroh = { workspace = true, features = ["default"] }
 wt-collab-protocol = { workspace = true, features = ["egui"] }
+wt-collab-egui = { workspace = true }
+web-time = { workspace = true }
 rand = "0.9"
 rkyv = { workspace = true }
 const_format = "0.2.35"

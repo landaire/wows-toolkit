@@ -426,6 +426,24 @@ pub enum DrawCommand {
     },
 }
 
+impl DrawCommand {
+    /// Returns true if this is a HUD overlay element (score bar, timer, kill feed, etc.)
+    /// that should be drawn unclipped, outside the map viewport area.
+    pub fn is_hud(&self) -> bool {
+        matches!(
+            self,
+            Self::ScoreBar { .. }
+                | Self::Timer { .. }
+                | Self::PreBattleCountdown { .. }
+                | Self::KillFeed { .. }
+                | Self::BattleResultOverlay { .. }
+                | Self::TeamBuffs { .. }
+                | Self::TeamAdvantage { .. }
+                | Self::ChatOverlay { .. }
+        )
+    }
+}
+
 /// Trait for rendering backends that consume `DrawCommand`s.
 ///
 /// Implementations produce visual output from high-level draw commands.

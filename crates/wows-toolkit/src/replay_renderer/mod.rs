@@ -11,7 +11,6 @@ use egui::CornerRadius;
 use egui::FontId;
 use egui::Pos2;
 use egui::Rect;
-use egui::Shape;
 use egui::Stroke;
 use egui::TextureHandle;
 use egui::Vec2;
@@ -21,7 +20,6 @@ use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
-use wows_minimap_renderer::MinimapPos;
 use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::assets;
@@ -56,7 +54,6 @@ use crate::controls::CommandGroup;
 /// Approximate number of frame snapshots per second of game time.
 /// Controls the granularity of seeking in the replay.
 const SNAPSHOTS_PER_SECOND: f32 = 1.5;
-const ICON_SIZE: f32 = assets::ICON_SIZE as f32;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 
 // ─── Shared types (from minimap_view) ────────────────────────────────────────
@@ -122,7 +119,7 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_plane_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+    pub fn get_or_load_plane_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.plane_icons {
             return Arc::clone(cached);
         }
@@ -139,7 +136,7 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+    pub fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.consumable_icons {
             return Arc::clone(cached);
         }
@@ -156,7 +153,7 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+    pub fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.death_cause_icons {
             return Arc::clone(cached);
         }
@@ -173,7 +170,7 @@ impl RendererAssetCache {
         arc
     }
 
-    fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+    pub fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
         if let Some(ref cached) = self.powerup_icons {
             return Arc::clone(cached);
         }
@@ -509,6 +506,8 @@ pub struct SharedRendererState {
     pub collab_command_tx: Option<std::sync::mpsc::Sender<crate::collab::SessionCommand>>,
     /// Replay name for collab announcements (set once at creation).
     pub collab_replay_name: Option<String>,
+    /// Raw map name for collab announcements (e.g. "spaces/16_OC_bees_to_honey").
+    pub collab_map_name: Option<String>,
     /// Map space size in BigWorld units (from MapInfo), used for px→km conversion.
     pub map_space_size: Option<f32>,
 }
@@ -629,6 +628,7 @@ pub fn launch_replay_renderer(
         collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: Some(replay_name.clone()),
+        collab_map_name: Some(map_name.clone()),
         map_space_size: None,
     }));
 
@@ -776,6 +776,7 @@ pub fn launch_client_renderer(
         collab_local_tx: None,
         collab_command_tx: None,
         collab_replay_name: None,
+        collab_map_name: None,
         map_space_size: None,
     }));
 
@@ -1051,6 +1052,34 @@ impl ReplayRendererViewer {
                     }
                 }
 
+                // ── Annotation toolbar ──
+                if !status_is_loading {
+                    egui::TopBottomPanel::top("replay_annotation_toolbar").show(ctx, |ui| {
+                        let locked = shared_state
+                            .lock()
+                            .collab_session_state
+                            .as_ref()
+                            .map(|ss| ss.lock().permissions.annotations_locked)
+                            .unwrap_or(false);
+                        let mut ann = annotation_arc.lock();
+                        let tex_guard = textures_arc.lock();
+                        let ship_icons = tex_guard.as_ref().map(|t| &t.ship_icons);
+                        let result = wt_collab_egui::toolbar::draw_annotation_toolbar(
+                            ui,
+                            &mut ann,
+                            ship_icons,
+                            locked,
+                        );
+                        drop(tex_guard);
+                        if result.did_clear {
+                            send_annotation_clear(&shared_state.lock().collab_local_tx, None);
+                        }
+                        if result.did_undo {
+                            send_annotation_full_sync(&shared_state.lock().collab_command_tx, &ann, None);
+                        }
+                    });
+                }
+
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
@@ -1066,93 +1095,37 @@ impl ReplayRendererViewer {
                         return;
                     }
 
-                    // Canvas area — fill all available space.
-                    // window_scale maps logical canvas pixels to screen pixels.
-                    // We use the full available rect so the viewport expands when
-                    // the window is resized (showing more map area when zoomed).
+                    // Canvas layout
                     let logical_canvas = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
                     let available = ui.available_size();
-                    let scale_x = available.x / logical_canvas.x;
-                    let scale_y = available.y / logical_canvas.y;
-                    let fit_scale = scale_x.min(scale_y);
-                    let fill_scale = scale_x.max(scale_y);
-                    // Smoothly blend from fit (full canvas visible, centered) at zoom 1.0
-                    // to fill (no empty borders) by zoom 2.0.
                     let current_zoom = zoom_pan_arc.lock().zoom;
-                    let t = ((current_zoom - 1.0) / 1.0).clamp(0.0, 1.0);
-                    let window_scale = (fit_scale + t * (fill_scale - fit_scale)).max(0.1);
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    // Center the scaled canvas within the available rect
-                    let scaled_canvas = logical_canvas * window_scale;
-                    let offset_x = ((available.x - scaled_canvas.x) / 2.0).max(0.0);
-                    let offset_y = ((available.y - scaled_canvas.y) / 2.0).max(0.0);
-                    let origin = response.rect.min + Vec2::new(offset_x, offset_y);
+                    let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min);
+                    let window_scale = layout.window_scale;
 
                     // Zoom/pan input handling
-                    let mut zp = zoom_pan_arc.lock();
-                    let mut zoom_changed = false;
-                    let tool_active = !matches!(annotation_arc.lock().active_tool, PaintTool::None);
-
-                    // Scroll-wheel: zoom (normal) or rotate (when placing ship)
-                    if response.hovered() {
-                        let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
-                        if scroll_delta != 0.0 {
-                            let scroll_used_by_tool = handle_scroll_yaw(&mut annotation_arc.lock(), scroll_delta);
-
-                            if !scroll_used_by_tool {
-                                let zoom_speed = 0.01;
-                                let old_zoom = zp.zoom;
-                                let new_zoom = (old_zoom * (1.0 + scroll_delta * zoom_speed)).clamp(1.0, 10.0);
-
-                                if new_zoom != old_zoom {
-                                    if let Some(cursor) = response.hover_pos() {
-                                        let local_x = (cursor.x - origin.x) / window_scale;
-                                        let local_y = (cursor.y - origin.y) / window_scale - HUD_HEIGHT as f32;
-                                        let minimap_x = (local_x + zp.pan.x) / old_zoom;
-                                        let minimap_y = (local_y + zp.pan.y) / old_zoom;
-                                        zp.pan.x = minimap_x * new_zoom - local_x;
-                                        zp.pan.y = minimap_y * new_zoom - local_y;
-                                    }
-                                    zp.zoom = new_zoom;
-                                    zoom_changed = true;
-                                }
-                            }
-                        }
-                    }
-
-                    // Drag-to-pan: middle always pans, left only when no tool and no selection
-                    let has_selection = annotation_arc.lock().has_selection();
-                    if response.dragged_by(egui::PointerButton::Middle)
-                        || (!tool_active && !has_selection && response.dragged_by(egui::PointerButton::Primary))
-                    {
-                        let drag = response.drag_delta();
-                        zp.pan.x -= drag.x / window_scale;
-                        zp.pan.y -= drag.y / window_scale;
-                        zoom_changed = true;
-                    }
-
-                    // Double-click to reset zoom
-                    if response.double_clicked() {
-                        zp.zoom = 1.0;
-                        zp.pan = Vec2::ZERO;
-                        zoom_changed = true;
-                    }
-
-                    // Clamp pan so the map can't scroll past its edges.
-                    // Visible area in logical space: use the smaller of available vs scaled_canvas
-                    // (when window < canvas, available constrains; when window > canvas, scaled_canvas constrains)
-                    let visible_w = available.x.min(scaled_canvas.x) / window_scale;
-                    let visible_h =
-                        (available.y.min(scaled_canvas.y) - HUD_HEIGHT as f32 * window_scale) / window_scale;
-                    let map_zoomed = MINIMAP_SIZE as f32 * zp.zoom;
-                    let max_pan_x = (map_zoomed - visible_w).max(0.0);
-                    let max_pan_y = (map_zoomed - visible_h).max(0.0);
-                    zp.pan.x = zp.pan.x.clamp(0.0, max_pan_x);
-                    zp.pan.y = zp.pan.y.clamp(0.0, max_pan_y);
+                    let zoom_changed = {
+                        let mut zp = zoom_pan_arc.lock();
+                        handle_viewport_zoom_pan(
+                            ctx,
+                            &response,
+                            &mut zp,
+                            &layout,
+                            logical_canvas,
+                            &ZoomPanConfig {
+                                allow_left_drag_pan: true,
+                                hud_height: HUD_HEIGHT as f32,
+                                handle_tool_yaw: true,
+                            },
+                            Some(&mut annotation_arc.lock()),
+                            false,
+                        )
+                    };
 
                     // Build transform for this frame
+                    let zp = zoom_pan_arc.lock();
                     let transform = MapTransform {
-                        origin,
+                        origin: layout.origin,
                         window_scale,
                         zoom: zp.zoom,
                         pan: zp.pan,
@@ -1217,26 +1190,13 @@ impl ReplayRendererViewer {
                     painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
 
                     // Clipped painter for map-region content (below HUD)
-                    let hud_screen_height = HUD_HEIGHT as f32 * window_scale;
-                    let map_clip = Rect::from_min_max(
-                        Pos2::new(origin.x, origin.y + hud_screen_height),
-                        Pos2::new(origin.x + scaled_canvas.x, origin.y + scaled_canvas.y),
-                    );
+                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32);
                     let map_painter = painter.with_clip_rect(map_clip);
 
                     let tex_guard = textures_arc.lock();
                     if let Some(ref textures) = *tex_guard {
-                        // Draw map texture (clipped to map region)
-                        if let Some(ref map_tex) = textures.map_texture {
-                            let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0, y: 0 });
-                            let map_br = transform
-                                .minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: MINIMAP_SIZE as i32 });
-                            let map_rect = Rect::from_min_max(map_tl, map_br);
-                            let mut mesh = egui::Mesh::with_texture(map_tex.id());
-                            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                            mesh.add_rect_with_uv(map_rect, uv, Color32::WHITE);
-                            map_painter.add(Shape::Mesh(mesh.into()));
-                        }
+                        // Draw map background texture
+                        draw_map_background(&map_painter, &transform, textures.map_texture.as_ref().map(|t| t.id()));
 
                         // Draw grid overlay (A-J / 1-10)
                         draw_grid(&map_painter, &transform, &GridStyle {
@@ -1292,17 +1252,7 @@ impl ReplayRendererViewer {
                                         continue;
                                     }
                                 }
-                                let is_hud = matches!(
-                                    cmd,
-                                    DrawCommand::ScoreBar { .. }
-                                        | DrawCommand::Timer { .. }
-                                        | DrawCommand::PreBattleCountdown { .. }
-                                        | DrawCommand::KillFeed { .. }
-                                        | DrawCommand::TeamBuffs { .. }
-                                        | DrawCommand::BattleResultOverlay { .. }
-                                        | DrawCommand::ChatOverlay { .. }
-                                        | DrawCommand::TeamAdvantage { .. }
-                                );
+                                let is_hud = cmd.is_hud();
                                 let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options, &mut placed_labels);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
@@ -1429,10 +1379,7 @@ impl ReplayRendererViewer {
                             let ann_state = annotation_arc.lock();
                             let map_space = shared_state.lock().map_space_size;
                             for ann in &ann_state.annotations {
-                                render_annotation(ann, &transform, textures, &map_painter);
-                                if let Annotation::Measurement { start, end, color, width } = ann {
-                                    render_measurement_details(*start, *end, *color, *width, &transform, map_space, &map_painter);
-                                }
+                                render_annotation(ann, &transform, textures, &map_painter, map_space);
                             }
                             // Draw selection highlight
                             for &sel in &ann_state.selected_indices {
@@ -1483,7 +1430,7 @@ impl ReplayRendererViewer {
                         if !lp.is_empty()
                             && draw_pings(&lp, &map_painter, &transform) {
                                 repaint = true;
-                                let now = std::time::Instant::now();
+                                let now = web_time::Instant::now();
                                 lp.retain(|p| now.duration_since(p.time).as_secs_f32() < PING_DURATION);
                             }
                     }
@@ -1532,7 +1479,6 @@ impl ReplayRendererViewer {
                                 ann.active_tool = PaintTool::None;
                             } else {
                                 let click_pos = response.interact_pointer_pos().unwrap_or(response.rect.center());
-                                ann.show_context_menu = true;
                                 ann.context_menu_pos = click_pos;
 
                                 // Detect nearest ship to right-click position
@@ -1551,6 +1497,7 @@ impl ReplayRendererViewer {
                                         }
                                     }
                                 }
+                                ann.show_context_menu = true;
                             }
                         }
 
@@ -1749,13 +1696,18 @@ impl ReplayRendererViewer {
                                         .inner_margin(egui::Margin::same(8))
                                         .stroke(Stroke::new(1.0, Color32::from_gray(80)));
                                     frame.show(ui, |ui| {
-                                        ui.set_min_width(200.0);
+                                        ui.set_min_width(160.0);
                                         let mut ann = annotation_arc.lock();
-                                        let tex_guard = textures_arc.lock();
-                                        let ship_icons = tex_guard.as_ref().map(|t| &t.ship_icons);
-                                        let menu_result = draw_annotation_menu_common(ui, &mut ann, ship_icons);
-                                        drop(tex_guard);
 
+                                        // ── Annotation tools ──
+                                        let tex_guard = textures_arc.lock();
+                                        let ship_icons_ref = tex_guard.as_ref().map(|t| &t.ship_icons);
+                                        let menu_result = wt_collab_egui::toolbar::draw_annotation_menu_common(
+                                            ui,
+                                            &mut ann,
+                                            ship_icons_ref,
+                                        );
+                                        drop(tex_guard);
                                         if menu_result.did_clear {
                                             send_annotation_clear(&shared_state.lock().collab_local_tx, None);
                                         }

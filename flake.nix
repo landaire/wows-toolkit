@@ -20,11 +20,12 @@
       overlays = [(import rust-overlay)];
       pkgs = import nixpkgs {inherit system overlays;};
 
-      rustToolchainToml = fromTOML (builtins.readFile ./rust-toolchain);
-      inherit (rustToolchainToml.toolchain) channel components;
+      rustToolchainToml = fromTOML (builtins.readFile ./rust-toolchain.toml);
+      inherit (rustToolchainToml.toolchain) channel components targets;
 
       rustToolchain = pkgs.rust-bin.stable.${channel}.default.override {
         extensions = components;
+        inherit targets;
       };
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
@@ -148,6 +149,13 @@
 
               # Development tools
               depotdownloader
+              trunk
+
+              # WASM build (ring C crypto → wasm32)
+              # Use unwrapped clang — the nix wrapper adds hardening flags
+              # (e.g. -fzero-call-used-regs) that are invalid for wasm32.
+              llvmPackages.clang-unwrapped
+              llvmPackages.llvm
             ]
             ++ lib.optionals stdenv.hostPlatform.isLinux [
               # GUI libs
@@ -164,6 +172,10 @@
               xorg.libXi
               xorg.libX11
             ];
+
+          # ring's cc crate needs clang + llvm-ar for wasm32-unknown-unknown
+          CC_wasm32_unknown_unknown = "${llvmPackages.clang-unwrapped}/bin/clang";
+          AR_wasm32_unknown_unknown = "${llvmPackages.llvm}/bin/llvm-ar";
 
           LD_LIBRARY_PATH =
             lib.optionalString stdenv.hostPlatform.isLinux

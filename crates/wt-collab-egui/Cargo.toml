@@ -1,0 +1,15 @@
+[package]
+name = "wt-collab-egui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Shared egui types, transforms, and rendering for WoWs Toolkit collaborative sessions"
+
+[dependencies]
+wt-collab-protocol = { workspace = true, features = ["egui"] }
+wows_minimap_renderer = { workspace = true, default-features = false, features = ["rkyv"] }
+wows_replays = { workspace = true, default-features = false }
+egui = { workspace = true }
+egui-phosphor = { workspace = true }
+web-time = { workspace = true }

@@ -114,11 +114,24 @@ pub(super) fn playback_thread(
                 .unwrap_or_default();
             let game_version = state.game_version.clone().unwrap_or_default();
             let replay_name = state.collab_replay_name.clone().unwrap_or_default();
+            let collab_map_name = state.collab_map_name.clone().unwrap_or_default();
+            let display_name = {
+                let wd = wows_data.read();
+                if let Some(ref gm) = wd.game_metadata {
+                    wowsunpack::game_params::translations::translate_map_name(&collab_map_name, gm.as_ref())
+                } else {
+                    let bare = collab_map_name.strip_prefix("spaces/").unwrap_or(&collab_map_name);
+                    let stripped = bare.find('_').map(|i| &bare[i + 1..]).unwrap_or(bare);
+                    stripped.replace('_', " ")
+                }
+            };
             let _ = tx.send(crate::collab::SessionCommand::ReplayOpened {
                 replay_id,
                 replay_name,
                 map_image_png: map_png,
                 game_version,
+                map_name: collab_map_name,
+                display_name,
             });
             state.session_announced = true;
         }
