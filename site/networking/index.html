@@ -424,9 +424,11 @@
                 <p>
                     All messages are serialized with
                     <a href="https://rkyv.org/">rkyv</a> (zero-copy
-                    deserialization) and framed with a 4-byte length prefix.
-                    Permission enforcement is client-side: each receiver
-                    decides what to accept based on the sender's role.
+                    deserialization), zlib-compressed, and framed as
+                    <code>[u32 compressed_length][zlib(rkyv payload)]</code>
+                    on each QUIC stream. Permission enforcement is
+                    client-side: each receiver decides what to accept based
+                    on the sender's role.
                 </p>
 
                 <div class="msg-group">
@@ -435,7 +437,11 @@
                     <table class="msg-table">
                         <tr>
                             <td>Join / SessionInfo</td>
-                            <td>Peer sends version + display name; host responds with the peer list, permissions, and current session state.</td>
+                            <td>Peer sends client type (desktop or web) + display name; host responds with the peer list, assigned identity, open replays, and current frame source.</td>
+                        </tr>
+                        <tr>
+                            <td>PeerAnnounce / MeshHello</td>
+                            <td>Host introduces the new joiner to existing peers, then the joiner establishes direct mesh connections.</td>
                         </tr>
                     </table>
                 </div>
@@ -450,7 +456,11 @@
                         </tr>
                         <tr>
                             <td>Annotations</td>
-                            <td>Drawing annotations (lines, circles, freehand strokes, etc.) synced in real time.</td>
+                            <td>ID-based drawing annotations (lines, circles, arrows, freehand, shapes, measurements, ship placements) synced in real time. Supports per-replay and per-tactics-board contexts.</td>
+                        </tr>
+                        <tr>
+                            <td>Display Overrides</td>
+                            <td>Per-ship range ring and trail visibility overrides.</td>
                         </tr>
                         <tr>
                             <td>Heartbeat</td>
@@ -465,11 +475,30 @@
                     <table class="msg-table">
                         <tr>
                             <td>Frames</td>
-                            <td>Zlib-compressed draw commands streamed from whoever has the replay open.</td>
+                            <td>Draw commands streamed from the current frame source, tagged with a replay ID.</td>
+                        </tr>
+                        <tr>
+                            <td>Replay Lifecycle</td>
+                            <td>ReplayOpened / ReplayClosed notifications when replays are loaded or unloaded on the host.</td>
                         </tr>
                         <tr>
                             <td>Playback &amp; Display</td>
-                            <td>Play/pause, speed, and render options (ship names, range rings, trails, etc.).</td>
+                            <td>Play/pause, speed, and 31 toggleable render options (ship names, range rings, trails, etc.).</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="msg-group">
+                    <h3>Tactics Boards</h3>
+                    <span class="msg-direction">Any peer &harr; All peers</span>
+                    <table class="msg-table">
+                        <tr>
+                            <td>Board Lifecycle</td>
+                            <td>TacticsMapOpened / TacticsMapClosed with map image, name, and coordinate metadata.</td>
+                        </tr>
+                        <tr>
+                            <td>Capture Points</td>
+                            <td>Add, remove, and sync capture points on tactics boards.</td>
                         </tr>
                     </table>
                 </div>
@@ -485,6 +514,14 @@
                         <tr>
                             <td>Roster</td>
                             <td>UserJoined / UserLeft notifications and co-host promotion.</td>
+                        </tr>
+                        <tr>
+                            <td>Window Management</td>
+                            <td>Request all peers to open a specific replay or tactics board window.</td>
+                        </tr>
+                        <tr>
+                            <td>Asset Delivery</td>
+                            <td>Ship/plane/consumable icons and game fonts sent to web clients for rendering.</td>
                         </tr>
                     </table>
                 </div>
