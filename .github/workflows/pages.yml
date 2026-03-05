@@ -41,7 +41,8 @@ jobs:
         uses: DeterminateSystems/magic-nix-cache-action@v8
 
       - name: Build wt-web WASM app
-        run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/ crates/wt-web/index.html
+        run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/
+        working-directory: crates/wt-web
 
       - name: Assemble deploy directory
         run: |
