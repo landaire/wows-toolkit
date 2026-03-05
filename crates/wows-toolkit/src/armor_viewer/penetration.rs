@@ -66,7 +66,7 @@ pub fn check_penetration(shell: &ShellInfo, thickness_mm: f32, ifhe: bool) -> Op
 
 /// Resolve all unique shells for a ship by param_index.
 ///
-/// Chain: ship param → vehicle → ShipConfigData.main_battery_ammo → Projectile lookup.
+/// Chain: ship param -> vehicle -> ShipConfigData.main_battery_ammo -> Projectile lookup.
 pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -> Option<ComparisonShip> {
     let param: Arc<Param> = metadata.game_param_by_index(param_index)?;
 
@@ -175,9 +175,7 @@ pub fn impact_angle_deg(ray_dir: &Vec3, normal: &Vec3) -> f32 {
     cos_angle.acos().to_degrees()
 }
 
-// ---------------------------------------------------------------------------
 // Per-plate ballistic simulation
-// ---------------------------------------------------------------------------
 
 use crate::armor_viewer::ballistics::ImpactResult;
 use crate::armor_viewer::ballistics::ShellParams;
@@ -424,9 +422,7 @@ pub fn distance_3d(a: &Vec3, b: &Vec3) -> f32 {
     (b - a).norm()
 }
 
-// ---------------------------------------------------------------------------
 // Server vs Simulation Comparison
-// ---------------------------------------------------------------------------
 
 use wowsunpack::game_types::ShellHitType;
 use wowsunpack::recognized::Recognized;

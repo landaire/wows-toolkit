@@ -56,9 +56,6 @@ enum GameParamsFormat {
     MinimalJson,
     MinimalCbor,
 }
-
-// ── Content search types ─────────────────────────────────────────────────
-
 /// A single match found during content search.
 #[derive(Clone)]
 pub struct ContentSearchHit {
@@ -74,9 +71,6 @@ pub(crate) enum ContentSearchMessage {
     Progress(usize, usize),
     Done,
 }
-
-// ── Dock pane types ──────────────────────────────────────────────────────
-
 /// Identifies which VFS a browser pane is for.
 #[derive(Clone, PartialEq, Eq)]
 pub enum BrowserSource {
@@ -250,9 +244,6 @@ struct FileEntry {
     size: u64,
     vfs_path: VfsPath,
 }
-
-// ── Inner TabViewer for the unpacker dock ────────────────────────────────
-
 /// Per-frame viewer implementing `egui_dock::TabViewer` for unpacker panes.
 struct UnpackerPaneViewer<'a> {
     items_to_extract: &'a Mutex<Vec<VfsPath>>,
@@ -626,9 +617,6 @@ impl UnpackerPaneViewer<'_> {
         }
     }
 }
-
-// ── Free functions ───────────────────────────────────────────────────────
-
 /// Push a VfsPath into the extraction queue if it's not already queued.
 fn queue_extract(items: &Mutex<Vec<VfsPath>>, path: VfsPath) {
     let mut items = items.lock();
@@ -1351,9 +1339,6 @@ fn collect_vfs_files(vfs: &VfsPath, prefix: &str) -> Vec<(Arc<PathBuf>, VfsPath)
     }
     result
 }
-
-// ── ToolkitTabViewer methods ─────────────────────────────────────────────
-
 impl ToolkitTabViewer<'_> {
     /// Start a content search on a background thread, creating a new search tab.
     /// Searches the specified browser pane's VFS.

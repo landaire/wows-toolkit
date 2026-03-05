@@ -117,7 +117,7 @@ async fn run_connection(
         a
     };
 
-    let mut reconnect_count: u32 = 0;
+    let mut reconnect_count: u32;
 
     loop {
         // Check for user disconnect before (re)connecting.

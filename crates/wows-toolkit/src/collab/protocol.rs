@@ -1,13 +1,4 @@
-//! Wire protocol for collaborative replay sessions (mesh topology).
-//!
-//! Re-exports all types from `wt_collab_protocol::protocol` and adds
-//! iroh-specific stream framing helpers.
-
-// Re-export everything from the protocol crate.
 pub use wt_collab_protocol::protocol::*;
-
-// ─── CollabRenderOptions desktop-specific conversion functions ──────────────
-
 /// Convert from the persisted settings format.
 pub fn collab_render_options_from_saved(s: &crate::data::settings::SavedRenderOptions) -> CollabRenderOptions {
     CollabRenderOptions {

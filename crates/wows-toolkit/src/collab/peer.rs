@@ -1,22 +1,12 @@
-//! Unified peer task for collaborative replay sessions (mesh topology).
-//!
-//! Every participant — host, co-host, or regular peer — runs the same code.
-//! The host is the initial rendezvous and identity authority; all other
-//! messaging flows peer-to-peer. Permission enforcement is client-side.
-//!
-//! # Connection lifecycle
-//!
-//! **Host mode:**
-//! 1. Creates iroh endpoint, publishes token
-//! 2. Accepts connections, handshakes (Join → SessionInfo + peer list)
-//! 3. Broadcasts PeerAnnounce to existing peers so they accept the new joiner
-//! 4. New joiner connects to each existing peer, sends MeshHello
-//!
-//! **Join mode:**
-//! 1. Connects to host via token, sends Join
-//! 2. Receives SessionInfo with peer list and assigned identity
-//! 3. Connects to each peer in the list, sends MeshHello
-//! 4. Accepts incoming MeshHello connections from peers notified via PeerAnnounce
+// Connection lifecycle:
+//
+// Host: create endpoint, publish token -> accept connections -> handshake
+// (Join -> SessionInfo + peer list) -> broadcast PeerAnnounce so existing
+// peers accept the new joiner -> new joiner connects to each peer via MeshHello.
+//
+// Join: connect to host via token -> send Join -> receive SessionInfo with
+// peer list -> connect to each peer via MeshHello -> accept incoming MeshHello
+// from peers notified via PeerAnnounce.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,9 +41,6 @@ use crate::collab::validation::validate_annotation;
 use crate::collab::validation::validate_frame_commands_count;
 use crate::collab::validation::validate_peer_message;
 use crate::replay::renderer::PlaybackFrame;
-
-// ─── Public types ───────────────────────────────────────────────────────────
-
 /// Whether to host or join a session.
 pub enum PeerMode {
     Host(HostParams),
@@ -113,7 +100,7 @@ pub enum LocalCapPointEvent {
     Remove { id: u64 },
 }
 
-/// Unified channel for all UI → peer task messages.
+/// Unified channel for all UI -> peer task messages.
 pub enum LocalEvent {
     CursorPosition(Option<[f32; 2]>),
     Annotation(LocalAnnotationEvent),
@@ -192,9 +179,6 @@ pub fn start_peer_session(
 
     PeerSessionHandle { event_rx, command_tx, frame_tx, local_tx, state }
 }
-
-// ─── Internal types ─────────────────────────────────────────────────────────
-
 /// A connected peer in the mesh (from our perspective).
 struct MeshPeer {
     user_id: u64,
@@ -240,9 +224,6 @@ impl MeshState {
         role.is_host() || role.is_co_host()
     }
 }
-
-// ─── Main peer task ─────────────────────────────────────────────────────────
-
 async fn peer_task(
     mode: PeerMode,
     event_tx: mpsc::Sender<SessionEvent>,
@@ -260,9 +241,6 @@ async fn peer_task(
         }
     }
 }
-
-// ─── Host main ──────────────────────────────────────────────────────────────
-
 async fn host_main(
     params: HostParams,
     event_tx: mpsc::Sender<SessionEvent>,
@@ -1146,9 +1124,6 @@ async fn host_accept_peer(
     let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: client_name.clone(), timed_out });
     info!("Peer {user_id} ({client_name}) left session");
 }
-
-// ─── Join main ──────────────────────────────────────────────────────────────
-
 async fn join_main(
     params: JoinParams,
     event_tx: mpsc::Sender<SessionEvent>,
@@ -1681,9 +1656,6 @@ async fn join_main(
     ui_state.lock().clear_session_data();
     info!("Left collab session");
 }
-
-// ─── Shared message handling (client-side permission enforcement) ────────────
-
 /// Repaint all replay viewports registered in the session state.
 /// Used for replay-scoped state changes (annotations with board_id=None,
 /// render options, range/trail overrides).
@@ -2091,7 +2063,7 @@ fn handle_incoming_message(
             );
         }
 
-        // ── Replay lifecycle (host → all peers) ────────────────────────
+        // ── Replay lifecycle (host -> all peers) ────────────────────────
         PeerMessage::ReplayOpened { replay_id, replay_name, map_image_png, game_version, map_name, display_name } => {
             if !sender_is_host {
                 debug!("Dropping ReplayOpened from non-host {sender_id}");
@@ -2291,9 +2263,6 @@ fn handle_incoming_message(
         ctx.request_repaint();
     }
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /// Broadcast a peer message to all connected peers in the mesh.
 fn broadcast_to_mesh(mesh: &Arc<Mutex<MeshState>>, msg: &PeerMessage) {
     let framed = match frame_peer_message(msg) {
@@ -2505,7 +2474,7 @@ mod tests {
         let h = MessageTestHarness::as_client().with_permissions(true, false);
         let msg = PeerMessage::SetAnnotation { board_id: None, id: 1, annotation: test_annotation(), owner: 2 };
         // Sender 2 is not authority (not in our peer list as co-host), so should be dropped.
-        // But wait — in our client harness, peers are [(0, Host)]. Sender 2 is unknown → defaults to Peer role.
+        // But wait — in our client harness, peers are [(0, Host)]. Sender 2 is unknown -> defaults to Peer role.
         h.dispatch(2, msg);
         assert_eq!(h.ui().annotation_sync_version, 0);
     }

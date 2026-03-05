@@ -1,5 +1,3 @@
-//! Data models for replay parsing and display.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 

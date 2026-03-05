@@ -20,8 +20,6 @@ use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::Meters;
-use wowsunpack::game_types::WorldPos;
 
 use crate::collab::peer::FrameBroadcast;
 use crate::data::wows_data::SharedWoWsData;
@@ -33,8 +31,6 @@ use super::RendererAssetCache;
 use super::RendererStatus;
 use super::ReplayPlayerInfo;
 use super::ReplayRendererAssets;
-use super::ReplaySalvoEvent;
-use super::ReplayShotData;
 use super::SNAPSHOTS_PER_SECOND;
 use super::SharedRendererState;
 use super::timeline::ShipShotTimeline;
@@ -338,9 +334,8 @@ pub(super) fn playback_thread(
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
 
-    // Tracks how many entries in `controller.active_shots()` / `shot_hits()` we've
-    // already pushed to bridges. Reset to 0 whenever the controller is rebuilt.
-    let mut salvo_cursor: usize = 0;
+    // Tracks how many entries in `controller.shot_hits()` we've already pushed
+    // to bridges. Reset to 0 whenever the controller is rebuilt.
     let mut hit_cursor: usize = 0;
 
     // Persistent parser + incremental parse tracking.
@@ -364,26 +359,16 @@ pub(super) fn playback_thread(
             frame_snapshots[0].clock,
             frame_duration,
             &mut staging,
-            &mut salvo_cursor,
             &mut hit_cursor,
         );
         populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
     }
 
-    /// Proximity threshold for salvo filtering.
-    /// Only salvos whose average target position is within this distance of
-    /// the bridge's target ship are forwarded to the armor viewer.
-    /// Large BBs are ~270 m long, so a bow/stern hit can be ~135 m from center.
-    /// With dispersion and position-tracking lag we use 300 m to avoid
-    /// rejecting legitimate hits.
-    const SALVO_PROXIMITY_THRESHOLD: Meters = Meters::new(300.0); // 10 BW
-
-    /// Per-bridge staging area used during `parse_to_clock` to collect salvos
+    /// Per-bridge staging area used during `parse_to_clock` to collect shot hits
     /// without holding the bridge lock. Swapped into the bridge atomically at the end.
     struct BridgeStaging {
         target_entity_id: EntityId,
-        salvos: Vec<ReplaySalvoEvent>,
         shot_hits: Vec<ResolvedShotHit>,
         last_clock: GameClock,
     }
@@ -396,7 +381,6 @@ pub(super) fn playback_thread(
                 let locked = b.lock();
                 BridgeStaging {
                     target_entity_id: locked.target_entity_id,
-                    salvos: Vec::new(),
                     shot_hits: Vec::new(),
                     last_clock: GameClock(0.0),
                 }
@@ -404,12 +388,12 @@ pub(super) fn playback_thread(
             .collect()
     }
 
-    /// Finalize staging: merge accumulated salvos/yaws into bridges.
+    /// Finalize staging: merge accumulated shot hits into bridges.
     ///
-    /// When `replace` is true (full rebuild), the bridge salvo vec is replaced
-    /// wholesale and generation is bumped.  When false (incremental parse),
-    /// new salvos are appended and generation is only bumped if there are new
-    /// salvos, so the viewer doesn't see a spurious "vec shrank" on every frame.
+    /// When `replace` is true (full rebuild), the bridge shot_hits vec is replaced
+    /// wholesale and generation is bumped. When false (incremental parse),
+    /// new hits are appended and generation is only bumped if there are new
+    /// hits, so the viewer doesn't see a spurious reset on every frame.
     fn finalize_bridge_staging(
         bridges: &[Arc<Mutex<RealtimeArmorBridge>>],
         staging: Vec<BridgeStaging>,
@@ -417,156 +401,15 @@ pub(super) fn playback_thread(
     ) {
         for (bridge, staged) in bridges.iter().zip(staging) {
             let mut b = bridge.lock();
-            let has_new = !staged.salvos.is_empty() || !staged.shot_hits.is_empty();
+            let has_new = !staged.shot_hits.is_empty();
             if replace {
-                b.salvos = staged.salvos;
                 b.shot_hits = staged.shot_hits;
                 b.generation += 1;
             } else if has_new {
-                b.salvos.extend(staged.salvos);
                 b.shot_hits.extend(staged.shot_hits);
                 b.generation += 1;
             }
             b.last_clock = staged.last_clock;
-        }
-    }
-
-    /// Extract *new* active shots from the controller and push them into staging vecs.
-    /// `cursor` tracks how many shots from `active_shots()` have already been processed;
-    /// it is updated in place and must be reset to 0 whenever the controller is rebuilt.
-    fn push_salvos_to_staging(
-        controller: &BattleController<'_, '_, GameMetadataProvider>,
-        staging: &mut [BridgeStaging],
-        clock: GameClock,
-        cursor: &mut usize,
-    ) {
-        if staging.is_empty() {
-            return;
-        }
-
-        let active_shots = controller.active_shots();
-        let new_count = active_shots.len();
-
-        // active_shots can shrink when shots are removed on ShotKills,
-        // so reset the cursor when that happens.
-        if new_count < *cursor {
-            *cursor = 0;
-        }
-        if new_count <= *cursor {
-            // No new shots — just update clock
-            for s in staging.iter_mut() {
-                s.last_clock = clock;
-            }
-            return;
-        }
-
-        let positions = controller.ship_positions();
-        let minimap_positions = controller.minimap_positions();
-
-        // receiveArtilleryShots is called on the replay owner's avatar entity for
-        // ALL shots visible to that player — NOT just shots aimed at them. The
-        // entity_id on ActiveShot is always the replay owner's avatar and cannot
-        // be used for target detection. Instead, we determine the target ship by
-        // checking which bridge's target ship is closest to each salvo's average
-        // tarPos (shell impact position in BigWorld coordinates).
-
-        let new_shots = &active_shots[*cursor..];
-        if *cursor == 0 && !new_shots.is_empty() {
-            tracing::trace!(
-                "push_salvos_to_staging: first batch — {} new shots, {} staging targets, clock={:.1}",
-                new_shots.len(),
-                staging.len(),
-                clock,
-            );
-        }
-        *cursor = new_count;
-
-        let mut closest_dist = Meters::from(f32::MAX);
-        let mut total_checked = 0u32;
-        let mut total_passed = 0u32;
-        let mut no_position = 0u32;
-
-        for shot in new_shots {
-            // Skip secondary battery salvos (salvo_id == 0xFFFFFFFF)
-            if shot.salvo.salvo_id == u32::MAX {
-                continue;
-            }
-
-            // Compute average target position for this salvo
-            let n = shot.salvo.shots.len() as f32;
-            if n < 1.0 {
-                continue;
-            }
-            let avg_target: WorldPos = shot.salvo.shots.iter().map(|s| s.target).sum::<WorldPos>() / n;
-
-            // Estimate flight time from average origin→target distance and shell speed.
-            // distance_xz returns meters; speed is in m/s (game units).
-            let avg_origin: WorldPos = shot.salvo.shots.iter().map(|s| s.origin).sum::<WorldPos>() / n;
-            let avg_speed = shot.salvo.shots.iter().map(|s| s.speed).sum::<f32>() / n;
-            let flight_distance_m = avg_origin.distance_xz(&avg_target).value();
-            let flight_time = if avg_speed > 0.0 { flight_distance_m / avg_speed } else { 0.0 };
-            let estimated_impact_clock = clock + flight_time;
-
-            let shot_data: Vec<ReplayShotData> =
-                shot.salvo.shots.iter().map(|s| ReplayShotData { origin: s.origin, target: s.target }).collect();
-
-            for s in staging.iter_mut() {
-                let target_eid = s.target_entity_id;
-
-                // Get the bridge target's current world position
-                let target_pos = positions.get(&target_eid);
-                let Some(tp) = target_pos else {
-                    no_position += 1;
-                    continue;
-                };
-
-                // Proximity check: is the salvo's average impact near our target ship?
-                let dist: Meters = avg_target.distance_xz(&tp.position);
-                total_checked += 1;
-                if dist < closest_dist {
-                    closest_dist = dist;
-                }
-                if dist > SALVO_PROXIMITY_THRESHOLD {
-                    continue;
-                }
-
-                total_passed += 1;
-                // Prefer minimap heading (accurate for all ships) over Position
-                // packet yaw (often ~0 for non-player entities).
-                // Minimap heading: degrees, compass (0=N, CW).
-                // Math yaw: radians, 0=E (+X), CCW.
-                // Conversion: yaw = PI/2 - heading.to_radians()
-                let target_yaw = minimap_positions
-                    .get(&target_eid)
-                    .map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians())
-                    .unwrap_or(tp.yaw);
-                s.salvos.push(ReplaySalvoEvent {
-                    clock,
-                    estimated_impact_clock,
-                    target_entity_id: target_eid,
-                    attacker_entity_id: shot.salvo.owner_id,
-                    params_id: shot.salvo.params_id,
-                    shots: shot_data.clone(),
-                    target_ship_yaw: target_yaw,
-                    target_ship_position: tp.position,
-                });
-            }
-        }
-
-        if !new_shots.is_empty() && !staging.is_empty() {
-            tracing::debug!(
-                "push_salvos_to_staging: {} shots, checked={} passed={} no_pos={} closest_dist={:.1}m threshold={:.0}m",
-                new_shots.len(),
-                total_checked,
-                total_passed,
-                no_position,
-                closest_dist.value(),
-                SALVO_PROXIMITY_THRESHOLD.value(),
-            );
-        }
-
-        for s in staging.iter_mut() {
-            s.last_clock = clock;
         }
     }
 
@@ -628,9 +471,6 @@ pub(super) fn playback_thread(
             return;
         }
 
-        // Find self team
-        let self_team = players.values().find(|p| p.relation().is_self()).map(|p| p.initial_state().team_id());
-
         let player_infos: Vec<ReplayPlayerInfo> = players
             .iter()
             .map(|(eid, player)| {
@@ -639,7 +479,6 @@ pub(super) fn playback_thread(
                     .map(|s| s.to_string())
                     .unwrap_or_default();
                 let team_id = player.initial_state().team_id();
-                let is_friendly = self_team.map(|st| st == team_id).unwrap_or(false);
                 let hull_param_id = player.vehicle_entity().map(|ve| ve.props().ship_config().hull());
                 ReplayPlayerInfo {
                     entity_id: *eid,
@@ -647,7 +486,6 @@ pub(super) fn playback_thread(
                     team_id,
                     vehicle: Arc::new(player.vehicle().clone()),
                     ship_display_name: display_name,
-                    is_friendly,
                     hull_param_id,
                 }
             })
@@ -678,7 +516,6 @@ pub(super) fn playback_thread(
         target_clock: GameClock,
         frame_duration: f32,
         staging: &mut [BridgeStaging],
-        salvo_cursor: &mut usize,
         hit_cursor: &mut usize,
     ) -> (usize, GameClock) {
         let mut remaining = &packet_data[start_offset..];
@@ -712,7 +549,6 @@ pub(super) fn playback_thread(
                     }
                     prev_clock = packet.clock;
                     controller.process(&packet);
-                    push_salvos_to_staging(controller, staging, packet.clock, salvo_cursor);
                     push_shot_hits_to_staging(controller, staging, hit_cursor);
                 }
                 Err(_) => break,
@@ -779,9 +615,8 @@ pub(super) fn playback_thread(
             live_renderer.set_fonts(game_fonts.clone());
             // Reset parser and tracking state for full re-parse
             live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
-            salvo_cursor = 0;
             hit_cursor = 0;
-            // Rebuild armor bridge salvos via staging (no intermediate empty state)
+            // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
             let mut staging = init_bridge_staging(&armor_bridges);
             (live_offset, live_clock) = parse_to_clock(
@@ -794,7 +629,6 @@ pub(super) fn playback_thread(
                 $target_clock,
                 frame_duration,
                 &mut staging,
-                &mut salvo_cursor,
                 &mut hit_cursor,
             );
             populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
@@ -809,12 +643,12 @@ pub(super) fn playback_thread(
             break;
         }
 
-        // Detect new armor bridges — rebuild from scratch so their salvos are re-parsed.
+        // Detect new armor bridges — rebuild from scratch so their shot hits are re-parsed.
         {
             let current_bridge_count = shared_state.lock().armor_bridges.len();
             if current_bridge_count != last_bridge_count {
                 tracing::debug!(
-                    "Replay renderer: armor bridge count changed {} -> {}, rebuilding to re-parse salvos",
+                    "Replay renderer: armor bridge count changed {} -> {}, rebuilding",
                     last_bridge_count,
                     current_bridge_count,
                 );
@@ -873,7 +707,6 @@ pub(super) fn playback_thread(
                             target_clock,
                             frame_duration,
                             &mut staging,
-                            &mut salvo_cursor,
                             &mut hit_cursor,
                         );
                         populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
@@ -935,7 +768,6 @@ pub(super) fn playback_thread(
                     target_clock,
                     frame_duration,
                     &mut staging,
-                    &mut salvo_cursor,
                     &mut hit_cursor,
                 );
                 populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);

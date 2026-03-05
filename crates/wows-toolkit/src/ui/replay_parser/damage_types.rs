@@ -1,5 +1,3 @@
-//! Damage and hit type constants and descriptions for replay parsing.
-
 pub const DAMAGE_MAIN_AP: &str = "damage_main_ap";
 pub const DAMAGE_MAIN_CS: &str = "damage_main_cs";
 pub const DAMAGE_MAIN_HE: &str = "damage_main_he";

@@ -324,9 +324,6 @@ pub struct ConnectedUser {
     pub role: PeerRole,
     pub client_type: crate::collab::protocol::ClientType,
 }
-
-// ─── UI ↔ Session task communication ────────────────────────────────────────
-
 /// Events sent from the background session task to the UI thread.
 #[derive(Debug)]
 pub enum SessionEvent {

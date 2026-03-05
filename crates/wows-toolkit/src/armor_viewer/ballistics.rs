@@ -1,8 +1,6 @@
-//! Shell ballistics simulation for World of Warships.
-//!
-//! Formulas ported from [wows_shell](https://github.com/jcw780/wows_shell)
-//! by jcw780, licensed under the MIT License.
-//! Copyright (c) 2020 jcw780
+// Formulas ported from https://github.com/jcw780/wows_shell
+// by jcw780, licensed under the MIT License.
+// Copyright (c) 2020 jcw780
 
 use std::f64::consts::PI;
 
@@ -321,7 +319,7 @@ pub fn compute_range_table(params: &ShellParams, max_range: Meters, step: Meters
 /// Simulate a trajectory and return normalized arc points for visualization.
 ///
 /// Returns `(points, height_ratio)` where:
-/// - `points`: list of `(x_frac, y_norm)` — x goes 0→1, y goes 0→1 at apex
+/// - `points`: list of `(x_frac, y_norm)` — x goes 0->1, y goes 0->1 at apex
 /// - `height_ratio`: `max_height / total_range` — the real aspect ratio of the arc
 ///
 /// The caller should scale: `y_model = y_norm * height_ratio * horiz_extent`
@@ -390,7 +388,7 @@ pub fn simulate_arc_points(params: &ShellParams, launch_angle: f64, num_points: 
         return (vec![(0.0, 0.0), (1.0, 0.0)], 0.0);
     }
 
-    // Normalize: x_frac = x/total_x (0→1), y_norm = y/max_height (0→1 at apex)
+    // Normalize: x_frac = x/total_x (0->1), y_norm = y/max_height (0->1 at apex)
     let normalized: Vec<(f64, f64)> = raw_points.iter().map(|(px, py)| (px / total_x, py / max_y)).collect();
 
     // Downsample to num_points evenly spaced along x_frac

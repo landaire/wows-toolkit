@@ -1,8 +1,3 @@
-//! Shared types for minimap-based viewers (replay renderer, tactics board).
-//!
-//! Types defined here are used by both `replay_renderer` and `tactics` to
-//! avoid duplicating map rendering, zoom/pan, and annotation logic.
-
 pub mod shapes;
 pub mod tactics;
 
@@ -24,9 +19,6 @@ pub use wt_collab_egui::types::AnnotationState;
 pub use wt_collab_egui::types::ENEMY_COLOR;
 pub use wt_collab_egui::types::FRIENDLY_COLOR;
 pub use wt_collab_egui::types::PaintTool;
-
-// ─── Zoom/Pan State ─────────────────────────────────────────────────────────
-
 /// Overlay controls visibility state. Persists across frames.
 pub struct OverlayState {
     /// Last time the mouse moved or a control was interacted with (ctx.input time).
@@ -38,9 +30,6 @@ impl Default for OverlayState {
         Self { last_activity: 0.0 }
     }
 }
-
-// ─── Collab annotation conversion ────────────────────────────────────────────
-
 /// Convert a collab wire annotation (primitive arrays) to the local annotation (egui types).
 pub fn collab_annotation_to_local(ca: crate::collab::types::Annotation) -> Annotation {
     wt_collab_egui::types::wire_to_local(ca)
@@ -50,9 +39,6 @@ pub fn collab_annotation_to_local(ca: crate::collab::types::Annotation) -> Annot
 pub fn local_annotation_to_collab(a: &Annotation) -> crate::collab::types::Annotation {
     wt_collab_egui::types::local_to_wire(a)
 }
-
-// ─── Shared collab helpers ──────────────────────────────────────────────────
-
 /// Send a `SetAnnotation` event for the annotation at `idx` via the collab channel.
 pub fn send_annotation_update(
     tx: &Option<mpsc::Sender<LocalEvent>>,

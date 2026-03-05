@@ -1,8 +1,3 @@
-//! Personal Rating (PR) calculation module for World of Warships
-//!
-//! This module provides functionality to calculate Personal Rating based on
-//! the wows-numbers.com expected values.
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -367,7 +362,7 @@ mod tests {
         let pr = loaded_pr_data();
         let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
 
-        // Play exactly at expected values → should give ~1150 (average PR).
+        // Play exactly at expected values -> should give ~1150 (average PR).
         // At ratio=1.0: nDmg=(1.0-0.4)/0.6=1.0, nFrags=(1.0-0.1)/0.9=1.0, nWins=(1.0-0.7)/0.3=1.0
         // PR = 700 + 300 + 150 = 1150
         let stats = [ShipBattleStats {
@@ -378,7 +373,7 @@ mod tests {
             frags: (ev.average_frags * 100.0) as i64,
         }];
         let result = pr.calculate_pr(&stats).expect("should calculate PR");
-        // Allow tolerance for float→int truncation in test data
+        // Allow tolerance for float->int truncation in test data
         assert!((result.pr - 1150.0).abs() < 20.0, "PR at expected values should be ~1150, got {}", result.pr);
         assert_eq!(result.category, PersonalRatingCategory::Average);
     }
@@ -388,7 +383,7 @@ mod tests {
         let pr = loaded_pr_data();
         let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
 
-        // Double all metrics → high PR
+        // Double all metrics -> high PR
         let stats = [ShipBattleStats {
             ship_id: GameParamId::from(3374266064u64),
             battles: 100,
@@ -425,7 +420,7 @@ mod tests {
         let ev_a = pr.get_ship_expected(ship_a).unwrap();
         let ev_b = pr.get_ship_expected(ship_b).unwrap();
 
-        // Both at expected values → combined should also be ~1150
+        // Both at expected values -> combined should also be ~1150
         let stats = [
             ShipBattleStats {
                 ship_id: ship_a,
@@ -451,7 +446,7 @@ mod tests {
         let pr = loaded_pr_data();
         let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
 
-        // One real ship + one unknown ship → should only use the real ship
+        // One real ship + one unknown ship -> should only use the real ship
         let stats = [
             ShipBattleStats {
                 ship_id: GameParamId::from(3374266064u64),

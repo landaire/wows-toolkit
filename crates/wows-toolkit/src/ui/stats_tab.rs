@@ -225,9 +225,6 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.stats_dock_state = dock_state;
     }
 }
-
-// ─── Overview Sub-Tab ────────────────────────────────────────────────────────
-
 fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egui::Ui) {
     // ── Summary stats: compact horizontal flow ──
     let wins = tab_state.settings.session_stats.games_won();
@@ -532,9 +529,6 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         }
     });
 }
-
-// ─── Charts Sub-Tab ──────────────────────────────────────────────────────────
-
 fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64, ui: &mut egui::Ui) {
     // Collect all session data into owned locals first to avoid borrow conflicts
     // with chart_configs (which requires &mut self via chart_config()).

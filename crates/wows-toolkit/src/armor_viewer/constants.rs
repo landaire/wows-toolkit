@@ -1,10 +1,6 @@
-// ─── Armor Viewer Constants ──────────────────────────────────────────────────
 //
 // Extracted from ui/armor_viewer.rs to avoid magic numbers and enable reuse
 // by the realtime armor viewer.
-
-// ─── Trajectory Visualization ────────────────────────────────────────────────
-
 /// Color palette for distinguishing multiple trajectories in the 3D view.
 /// Each color is [R, G, B, A] in 0.0–1.0 range.
 pub const TRAJECTORY_PALETTE: [[f32; 4]; 8] = [
@@ -30,9 +26,6 @@ pub const SHIP_COLORS: [[f32; 3]; 8] = [
     [0.2, 0.9, 0.8], // teal
     [0.8, 0.5, 1.0], // purple
 ];
-
-// ─── Impact Angle Thresholds (degrees from normal) ───────────────────────────
-
 /// Impacts shallower than this angle are considered favorable (green).
 pub const SHALLOW_ANGLE_DEG: f32 = 30.0;
 
@@ -47,9 +40,6 @@ pub const IMPACT_COLOR_MEDIUM: [f32; 3] = [0.9, 0.7, 0.2];
 
 /// Color for steep/ricochet-zone impacts (>= STEEP_ANGLE_DEG). Red.
 pub const IMPACT_COLOR_STEEP: [f32; 3] = [0.9, 0.3, 0.3];
-
-// ─── Plate Boundary Edge Rendering ───────────────────────────────────────────
-
 /// Half-width of plate boundary edge quads in world-space units.
 pub const PLATE_EDGE_HALF_WIDTH: f32 = 0.003;
 
@@ -58,9 +48,6 @@ pub const PLATE_EDGE_NORMAL_OFFSET: f32 = 0.005;
 
 /// Color for plate boundary edges. Black, fully opaque.
 pub const EDGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-
-// ─── Gap Edge Rendering ─────────────────────────────────────────────────────
-
 /// Half-width of gap indicator edge quads (wider than plate edges).
 pub const GAP_EDGE_HALF_WIDTH: f32 = 0.006;
 
@@ -76,9 +63,6 @@ pub const MAX_GAP_EDGE_LENGTH: f32 = 5.0;
 /// Minimum gap width to display. Gaps narrower than this are filtered out.
 /// Based on Småland's 120mm shell diameter (0.12 model units).
 pub const MIN_GAP_WIDTH: f32 = 0.12;
-
-// ─── Trajectory Overlay ─────────────────────────────────────────────────────
-
 /// Normal offset for trajectory visualization overlays (z-fighting prevention).
 pub const TRAJECTORY_NORMAL_OFFSET: f32 = 0.01;
 

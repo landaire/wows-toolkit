@@ -270,15 +270,15 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
 /// Lookup maps for a grouped tree view, bundling leaf and group ID mappings.
 #[derive(Clone)]
 struct GroupedTreeMaps {
-    /// Leaf node ID → replay (weak ref)
+    /// Leaf node ID -> replay (weak ref)
     leaf_replays: HashMap<egui::Id, Weak<RwLock<Replay>>>,
-    /// Leaf node ID → file path
+    /// Leaf node ID -> file path
     leaf_paths: HashMap<egui::Id, std::path::PathBuf>,
-    /// Group node ID → child replays (weak refs)
+    /// Group node ID -> child replays (weak refs)
     group_replays: HashMap<egui::Id, Vec<Weak<RwLock<Replay>>>>,
-    /// Group node ID → child node IDs
+    /// Group node ID -> child node IDs
     group_child_ids: HashMap<egui::Id, Vec<egui::Id>>,
-    /// Group node ID → child file paths
+    /// Group node ID -> child file paths
     group_paths: HashMap<egui::Id, Vec<std::path::PathBuf>>,
 }
 
@@ -369,14 +369,14 @@ impl GroupedTreeMaps {
 /// Output shape:
 ///   `{ "commonList": { "winner_team_id": v, ... }, "playersPublicInfo": { "db_id": { "exp": v, ..., "interactions": { "victim_id": { "fires": v, ... } } } } }`
 fn resolve_battle_results(mut results: serde_json::Value, constants: &serde_json::Value) -> serde_json::Value {
-    // Resolve commonList: array → object using COMMON_RESULTS names
+    // Resolve commonList: array -> object using COMMON_RESULTS names
     if let Some(common_names) = constants.pointer("/COMMON_RESULTS").and_then(|v| v.as_array())
         && let Some(common_arr) = results.get("commonList").and_then(|v| v.as_array())
     {
         results["commonList"] = serde_json::Value::Object(resolve_array(common_names, common_arr));
     }
 
-    // Resolve each player in playersPublicInfo: array → object using CLIENT_PUBLIC_RESULTS_INDICES
+    // Resolve each player in playersPublicInfo: array -> object using CLIENT_PUBLIC_RESULTS_INDICES
     let indices = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES").and_then(|v| v.as_object()).cloned();
     let interaction_fields = constants.pointer("/CLIENT_VEH_INTERACTION_DETAILS").and_then(|v| v.as_array()).cloned();
 
@@ -394,7 +394,7 @@ fn resolve_battle_results(mut results: serde_json::Value, constants: &serde_json
                     }
                 }
 
-                // Resolve interactions: each victim's array → object
+                // Resolve interactions: each victim's array -> object
                 if let Some(fields) = interaction_fields.as_ref()
                     && let Some(interactions) = obj.get_mut("interactions").and_then(|v| v.as_object_mut())
                 {
@@ -3773,7 +3773,7 @@ impl ToolkitTabViewer<'_> {
                     ui.label(RichText::new("Join a Session").strong());
                     ui.add_space(2.0);
 
-                    // Paste token → validate → auto-join
+                    // Paste token -> validate -> auto-join
                     if ui.button(icon_str!(icons::CLIPBOARD, "Paste token & join")).clicked()
                         && let Ok(mut clipboard) = arboard::Clipboard::new()
                         && let Ok(text) = clipboard.get_text()

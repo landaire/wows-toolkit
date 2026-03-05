@@ -8,9 +8,6 @@ use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::models::geometry::SplashBox;
 
 use crate::viewport_3d::types::Vertex;
-
-// ─── Model-Space Unit ────────────────────────────────────────────────────────
-
 /// A scalar distance in the 3D model's local coordinate system.
 ///
 /// Model-space coordinates are used by armor meshes, splash boxes, and the
@@ -54,9 +51,6 @@ impl std::ops::Div<f32> for ModelUnit {
         ModelUnit(self.0 / rhs)
     }
 }
-
-// ─── Transform Helpers ───────────────────────────────────────────────────────
-
 /// Apply a column-major 4x4 transform to a position.
 fn transform_point(t: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
     [
@@ -77,9 +71,6 @@ fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
     }
     [x / len, y / len, z / len]
 }
-
-// ─── Splash Colors ───────────────────────────────────────────────────────────
-
 /// Color for armor triangles the HE shell can penetrate (green, semi-transparent).
 pub const SPLASH_PEN_COLOR: [f32; 4] = [0.2, 0.9, 0.2, 0.55];
 
@@ -91,17 +82,14 @@ pub const SPLASH_CUBE_COLOR: [f32; 4] = [1.0, 0.7, 0.1, 0.7];
 
 /// Half-width of wireframe cube edges in world-space units.
 const CUBE_EDGE_HALF_WIDTH: f32 = 0.003;
-
-// ─── Data Structures ─────────────────────────────────────────────────────────
-
 /// Parsed splash box data for a loaded ship.
 #[allow(dead_code)]
 pub struct ShipSplashData {
     /// Named AABBs from the `.splash` file.
     pub boxes: Vec<SplashBox>,
-    /// Zone name → list of splash box names that belong to it.
+    /// Zone name -> list of splash box names that belong to it.
     pub zone_box_mapping: HashMap<String, Vec<String>>,
-    /// Reverse: splash box name → zone name.
+    /// Reverse: splash box name -> zone name.
     pub box_to_zone: HashMap<String, String>,
 }
 
@@ -139,9 +127,6 @@ pub struct SplashZoneHit {
     /// Whether this is the box that directly contains the impact point.
     pub is_direct_hit: bool,
 }
-
-// ─── Splash Data Loading ─────────────────────────────────────────────────────
-
 /// Parse splash box data from a ShipModelContext during ship loading.
 ///
 /// Returns `None` if no splash file is available.
@@ -179,9 +164,6 @@ pub fn parse_ship_splash_data(
 
     Some(ShipSplashData { boxes, zone_box_mapping, box_to_zone })
 }
-
-// ─── Splash Computation ──────────────────────────────────────────────────────
-
 /// Compute the HE splash cube half-extent from shell caliber.
 ///
 /// The game passes `bulletDiametr / 6.0` (in meters) as the splash half-extent
@@ -197,7 +179,7 @@ pub fn splash_half_extent(caliber: Millimeters) -> ModelUnit {
 /// Game box names follow the pattern `XX_SB_<type>_<index>_<sub>`.
 /// We strip the prefix and map known abbreviations to readable names.
 pub fn prettify_box_name(box_name: &str) -> String {
-    // Strip the "XX_SB_" prefix (e.g. "CM_SB_gk_3_1" → "gk_3_1")
+    // Strip the "XX_SB_" prefix (e.g. "CM_SB_gk_3_1" -> "gk_3_1")
     let stripped = box_name.find("_SB_").map(|i| &box_name[i + 4..]).unwrap_or(box_name);
 
     // Extract the type part (before the first digit segment)
@@ -335,9 +317,6 @@ pub fn shell_pen_mm(shell: &ShellInfo, ifhe: bool) -> f32 {
         _ => 0.0,
     }
 }
-
-// ─── Mesh Generation ─────────────────────────────────────────────────────────
-
 /// Build a wireframe cube mesh for the splash volume visualization.
 ///
 /// Generates 12 edges as thin quads (24 triangles total).

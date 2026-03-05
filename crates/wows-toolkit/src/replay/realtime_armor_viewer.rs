@@ -1,9 +1,3 @@
-//! Realtime Armor Viewer — a secondary viewport window driven by replay salvo data.
-//!
-//! Opened from the replay renderer context menu ("Show in Armor Viewer").
-//! Shows the 3D armor model of a specific ship and visualizes incoming shell
-//! trajectories as the replay plays.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -93,7 +87,7 @@ pub struct RealtimeArmorViewer {
     /// Salvo groups for the side panel (shells grouped by salvo firing event).
     salvo_groups: Vec<SalvoGroup>,
 
-    /// Fast lookup: SalvoKey → index in `salvo_groups`.
+    /// Fast lookup: SalvoKey -> index in `salvo_groups`.
     salvo_group_index: HashMap<SalvoKey, usize>,
 
     /// Counter for `SalvoKey::Unmatched` (monotonically increasing).
@@ -398,9 +392,9 @@ impl RealtimeArmorViewer {
     /// GLTF mesh (model-local, bow along +Z):
     ///   bow = +Z, starboard = +X, up = +Y
     ///
-    /// This rotation maps body_x → mesh_z, body_z → −mesh_x.
+    /// This rotation maps body_x -> mesh_z, body_z -> −mesh_x.
     /// For directions, a subsequent Z-negation is needed to account for the
-    /// GLTF exporter's left→right-handed conversion (`positions.push([x, y, -z])`).
+    /// GLTF exporter's left->right-handed conversion (`positions.push([x, y, -z])`).
     fn axis_remap() -> Rotation3<f32> {
         Rotation3::from_axis_angle(&Vec3::y_axis(), -std::f32::consts::FRAC_PI_2)
     }
@@ -1262,7 +1256,7 @@ impl RealtimeArmorViewer {
         let (sa, ca) = az.sin_cos();
 
         let project_world_dir = |world_x: f32, world_z: f32| -> (f32, f32) {
-            // BigWorld → mesh: mesh_x = -world_z, mesh_z = +world_x
+            // BigWorld -> mesh: mesh_x = -world_z, mesh_z = +world_x
             let mx = -world_z;
             let mz = world_x;
             // Project onto screen using camera azimuth

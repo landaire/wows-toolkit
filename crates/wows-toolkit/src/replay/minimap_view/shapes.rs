@@ -1,15 +1,3 @@
-//! Annotation rendering, hit testing, and geometry helpers.
-//!
-//! These functions are used by both the replay renderer and the tactics board.
-//! Ship icon textures are optional — when absent, ships are rendered as simple
-//! colored circles.
-//!
-//! Core rendering, hit testing, geometry, tool interaction, toolbar, and
-//! selection/move functions are provided by `wt_collab_egui` (shared with the
-//! WASM web client) and re-exported here. Desktop-only UI code (shortcut
-//! overlay, edit popup with km conversion, font registration) lives in this
-//! module.
-
 use std::sync::Arc;
 use std::sync::mpsc;
 

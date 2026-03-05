@@ -1,19 +1,8 @@
-//! Cap layout cache: extraction from replays and persistent storage.
-//!
-//! Capture point positions are server-side only (the `scenario_templates` XML
-//! files are never shipped to the client). We build a local cache by extracting
-//! cap data from InteractiveZone EntityCreate packets in replay files. The
-//! cache is keyed by `(mapId, scenarioConfigId)` and persisted to disk with
-//! rkyv for fast load/save.
-//!
-//! ## Forward compatibility
-//!
-//! All rkyv-serialized structs use **append-only field ordering** — new fields
-//! may only be added at the end, never reordered or removed. The database is
-//! wrapped in [`Versioned<T>`] which serializes the inner value out-of-line via
-//! `AsBox`, allowing newer versions (with appended fields) to be read by older
-//! code. A file-level version constant provides a final safety net: if
-//! validation fails the cache is simply discarded and rebuilt from replays.
+// Forward compatibility: all rkyv-serialized structs use append-only field
+// ordering -- new fields may only be added at the end, never reordered or
+// removed. The database is wrapped in `Versioned<T>` which serializes the
+// inner value out-of-line via `AsBox`. A file-level version constant provides
+// a final safety net: if validation fails the cache is discarded and rebuilt.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -42,9 +31,7 @@ const CAP_LAYOUT_DB_VERSION: u32 = 2;
 /// starts at the alignment required by archived types.
 const HEADER_SIZE: usize = 8;
 
-// ---------------------------------------------------------------------------
 // Data structures
-// ---------------------------------------------------------------------------
 
 /// Key for the cap layout cache.
 #[derive(Clone, Debug, Hash, Eq, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -110,9 +97,7 @@ pub struct CapLayoutDb {
 #[repr(transparent)]
 struct Versioned<T>(#[rkyv(with = rkyv::with::AsBox)] pub T);
 
-// ---------------------------------------------------------------------------
 // Extraction
-// ---------------------------------------------------------------------------
 
 /// Extract a [`CapLayout`] from an already-parsed controller's capture point
 /// state. Returns `None` if there are no capture points.
@@ -195,9 +180,7 @@ pub fn extract_cap_layout_from_replay<G: ResourceLoader>(
     extract_cap_layout_from_controller(&replay_file.meta, controller.capture_points())
 }
 
-// ---------------------------------------------------------------------------
 // CapLayoutDb methods
-// ---------------------------------------------------------------------------
 
 impl CapLayoutDb {
     /// Check if a layout for this key is already cached.
@@ -308,9 +291,7 @@ fn layouts_have_same_caps(a: &CapLayout, b: &CapLayout) -> bool {
     })
 }
 
-// ---------------------------------------------------------------------------
 // Persistence (rkyv)
-// ---------------------------------------------------------------------------
 
 /// Return the on-disk path for the cap layout cache, or `None` if no storage
 /// directory is available.

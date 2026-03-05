@@ -736,7 +736,7 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // Handle trajectory/splash mode activation → open panel and switch tab
+        // Handle trajectory/splash mode activation -> open panel and switch tab
         if let Some(tab) = analysis_tab_cell.get() {
             state.show_comparison_panel = true;
             focus_analysis_tab(&mut state.analysis_dock_state, tab);

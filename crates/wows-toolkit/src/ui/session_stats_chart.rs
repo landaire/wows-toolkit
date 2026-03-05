@@ -1,5 +1,3 @@
-//! Session statistics chart window and rendering functions
-
 use egui::Color32;
 use egui::RichText;
 use egui_plot::Bar;

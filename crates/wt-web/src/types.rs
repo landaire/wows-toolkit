@@ -6,11 +6,7 @@
 
 // Re-export shared types so existing `crate::types::*` imports keep working.
 pub use wt_collab_egui::types::Annotation;
-pub use wt_collab_egui::types::AnnotationSnapshot;
 pub use wt_collab_egui::types::AnnotationState;
-pub use wt_collab_egui::types::ENEMY_COLOR;
-pub use wt_collab_egui::types::FRIENDLY_COLOR;
 pub use wt_collab_egui::types::PaintTool;
-pub use wt_collab_egui::types::SHIP_SPECIES;
 pub use wt_collab_egui::types::local_to_wire;
 pub use wt_collab_egui::types::wire_to_local;

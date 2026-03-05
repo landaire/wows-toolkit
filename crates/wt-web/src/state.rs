@@ -22,6 +22,7 @@ pub struct ConnectedUser {
 }
 
 /// State for an open tactics board.
+#[allow(dead_code)]
 pub struct TacticsBoard {
     pub board_id: u64,
     pub map_name: String,
@@ -38,6 +39,7 @@ pub struct TacticsBoard {
 }
 
 /// State for an open replay.
+#[allow(dead_code)]
 pub struct ReplayView {
     pub replay_id: u64,
     pub replay_name: String,
@@ -52,6 +54,7 @@ pub struct ReplayView {
 }
 
 /// Current replay frame data.
+#[allow(dead_code)]
 pub struct FrameState {
     pub clock: f32,
     pub frame_index: u32,

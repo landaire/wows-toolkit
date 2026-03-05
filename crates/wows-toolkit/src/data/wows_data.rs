@@ -205,11 +205,6 @@ impl WorldOfWarshipsData {
         Some(asset)
     }
 
-    /// Returns a display-friendly version string (e.g., "15.0.0" or "build 11791718").
-    pub fn version_label(&self) -> String {
-        if let Some(v) = &self.full_version { v.to_path() } else { format!("build {}", self.build_number) }
-    }
-
     /// Rebuild this data from scratch after constants have changed.
     /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
     /// full_version, patch_version, build_number.

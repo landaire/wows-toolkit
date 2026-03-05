@@ -1,8 +1,3 @@
-//! Tactics board: an interactive map planner with editable capture points.
-//!
-//! Uses the shared [`MinimapView`](super) types for zoom/pan, coordinate
-//! transforms, and (eventually) annotations.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -73,9 +68,6 @@ use super::shapes::render_cap_point;
 use super::shapes::render_selection_highlight;
 use super::shapes::render_tool_preview;
 use super::shapes::tool_label;
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 /// Selection highlight color for cap points (desktop-only).
 const CAP_SELECTED_COLOR: Color32 = Color32::from_rgb(255, 220, 50);
 
@@ -84,9 +76,6 @@ const RESIZE_HANDLE_TOLERANCE: f32 = 8.0;
 /// Default radius for newly added cap points (in BigWorld units).
 /// Typical cap circles are ~5km = ~167 BW units; 150 is a sensible default.
 const DEFAULT_CAP_RADIUS: f32 = 150.0;
-
-// ─── Serializable preset types ──────────────────────────────────────────────
-
 /// A serializable annotation (mirrors [`Annotation`] but with plain types).
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum PresetAnnotation {
@@ -287,17 +276,11 @@ fn delete_preset(name: &str) {
         let _ = std::fs::remove_file(dir.join(format!("{name}.json")));
     }
 }
-
-// ─── Drag mode ──────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, Debug)]
 enum CapDragMode {
     Move,
     Resize,
 }
-
-// ─── Editable cap point ─────────────────────────────────────────────────────
-
 /// A capture point on the tactics board (editable copy of [`CapPointLayout`]).
 #[derive(Clone, Debug)]
 pub struct TacticsCapPoint {
@@ -353,9 +336,6 @@ impl TacticsCapPoint {
         }
     }
 }
-
-// ─── Tactics board state ────────────────────────────────────────────────────
-
 /// Per-viewport state for the tactics board.
 pub struct TacticsBoardState {
     /// Currently selected map (map_id, map_name).
@@ -467,9 +447,6 @@ impl TacticsBoardState {
         self.map_info.as_ref()
     }
 }
-
-// ─── Tactics board viewer ───────────────────────────────────────────────────
-
 /// A tactics board viewport. Created from the session popover or standalone.
 pub struct TacticsBoardViewer {
     /// Unique board identifier (random u64).
@@ -689,7 +666,7 @@ impl TacticsBoardViewer {
                         let s = ss.lock();
                         s.role.is_host() || s.role.is_co_host()
                     })
-                    .unwrap_or(true); // No session → standalone, show everything.
+                    .unwrap_or(true); // No session -> standalone, show everything.
 
                 if is_authority {
                     egui::TopBottomPanel::bottom("tactics_bottom_panel").show(ctx, |ui| {
@@ -1752,7 +1729,7 @@ impl TacticsBoardViewer {
             send_annotation_update(collab_local_tx, &ann, idx, board_id);
         }
 
-        // Click on empty space → ping
+        // Click on empty space -> ping
         if result.selected_by_click
             && !ann.has_selection()
             && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p))
@@ -1964,9 +1941,6 @@ fn send_tactics_map_opened(
         });
     }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 /// Load the map image for the given map name.
 fn load_map_image(
     state: &mut TacticsBoardState,
@@ -2086,10 +2060,10 @@ fn cap_screen_radius(cap: &TacticsCapPoint, transform: &MapTransform, map_info: 
 /// Convert a screen-space drag delta to world-space delta (BigWorld units).
 /// Returns (world_dx, world_dz) where positive Y means southward on the map.
 fn screen_delta_to_world(screen_delta: Vec2, transform: &MapTransform, map_info: &MapInfo) -> Vec2 {
-    // Screen → minimap pixels
+    // Screen -> minimap pixels
     let minimap_dx = screen_delta.x / (transform.zoom * transform.window_scale);
     let minimap_dy = screen_delta.y / (transform.zoom * transform.window_scale);
-    // Minimap pixels → world (BigWorld) units
+    // Minimap pixels -> world (BigWorld) units
     let world_dx = map_info.minimap_distance_to_world(minimap_dx, MINIMAP_SIZE);
     let world_dy = map_info.minimap_distance_to_world(minimap_dy, MINIMAP_SIZE);
     Vec2::new(world_dx, world_dy)

@@ -1,6 +1,3 @@
-//! Shared orchestration functions used by both the armor viewer tab
-//! (`ui/armor_viewer.rs`) and the realtime armor viewer (`realtime_armor_viewer.rs`).
-
 use crate::viewport_3d::Vec3;
 
 use std::collections::HashMap;
@@ -46,9 +43,7 @@ pub(crate) fn handle_undo_redo(ui: &egui::Ui, pane: &mut ArmorPane) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------------
 // Ship loading helpers
-// ---------------------------------------------------------------------------
 
 /// Build sorted hull upgrade labels with diff-based suffixes.
 ///
@@ -314,9 +309,7 @@ pub(crate) fn load_ship_armor(
     Ok(armor)
 }
 
-// ---------------------------------------------------------------------------
 // Sidebar highlight lifecycle
-// ---------------------------------------------------------------------------
 
 /// Update the sidebar hover highlight overlay mesh.
 ///
@@ -366,9 +359,7 @@ pub(crate) fn update_sidebar_highlight(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Poll load receivers
-// ---------------------------------------------------------------------------
 
 /// Poll `load_receiver` and `hull_load_receiver` on a single pane.
 /// Returns `true` if the ship load completed (caller may want to set
@@ -415,9 +406,7 @@ pub(crate) fn poll_pane_load_receivers(
     ship_loaded
 }
 
-// ---------------------------------------------------------------------------
 // Trajectory building helpers
-// ---------------------------------------------------------------------------
 
 /// Build [`TrajectoryHit`] entries from ray-cast results against the armor mesh.
 ///
@@ -512,9 +501,7 @@ pub(crate) fn approach_xz_from_shell_dir(shell_dir: &Vec3) -> Vec3 {
     if len > 0.001 { xz / len } else { Vec3::x() }
 }
 
-// ---------------------------------------------------------------------------
 // Trajectory re-upload helpers
-// ---------------------------------------------------------------------------
 
 /// Per-trajectory display parameters for re-upload.
 pub(crate) struct TrajectoryDisplayParams {
@@ -570,9 +557,7 @@ pub(crate) fn reupload_trajectory_meshes(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Splash overlay re-upload
-// ---------------------------------------------------------------------------
 
 /// Re-upload splash visualization overlays (cube + penetration highlight).
 ///

@@ -291,14 +291,14 @@ pub struct LoadedShipArmor {
     pub dock_y_offset: Option<f32>,
     /// Parsed splash box data for HE splash visualization.
     pub splash_data: Option<crate::armor_viewer::splash::ShipSplashData>,
-    /// Splash box names grouped by prefix (e.g. "Bow" → ["CM_SB_Bow_01", "CM_SB_Bow_02"]).
+    /// Splash box names grouped by prefix (e.g. "Bow" -> ["CM_SB_Bow_01", "CM_SB_Bow_02"]).
     pub splash_box_groups: Vec<(String, Vec<String>)>,
-    /// Hit location data from GameParams (zone name → HitLocation).
+    /// Hit location data from GameParams (zone name -> HitLocation).
     pub hit_locations: Option<std::collections::HashMap<String, wowsunpack::game_params::types::HitLocation>>,
     /// Vertical offset applied by `apply_waterline_offset()`. World-space Y positions
     /// must be shifted by this amount to align with the shifted model coordinates.
     pub waterline_dy: f32,
-    /// Decoded hull textures: mfm_path → (width, height, RGBA8 pixels).
+    /// Decoded hull textures: mfm_path -> (width, height, RGBA8 pixels).
     /// Loaded on background thread, uploaded to GPU during `upload_armor_to_viewport`.
     pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
     /// Number of LOD levels available for hull meshes.
@@ -418,7 +418,7 @@ pub struct ArmorPane {
     pub hovered_info: Option<ArmorTriangleTooltip>,
     /// Per-part visibility toggles, keyed by (zone, material_name).
     pub part_visibility: HashMap<(String, String), bool>,
-    /// Per hull render set visibility (name → visible). Defaults to all false.
+    /// Per hull render set visibility (name -> visible). Defaults to all false.
     pub hull_visibility: HashMap<String, bool>,
     /// When true, hull renders fully opaque with depth writes (like armor plates).
     pub hull_opaque: bool,

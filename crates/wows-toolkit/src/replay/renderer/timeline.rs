@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use egui::Color32;
 
@@ -70,9 +69,6 @@ pub(crate) struct TimelineEvent {
     pub(crate) clock: ElapsedClock,
     pub(crate) kind: TimelineEventKind,
 }
-
-// ── Shot Timeline Data Structures ───────────────────────────────────────────
-
 /// Health snapshot for a ship entity at a point in time.
 #[derive(Clone, Debug)]
 pub struct HealthSnapshot {
@@ -92,19 +88,15 @@ pub struct PreExtractedHit {
 pub struct ShotCountHints {
     /// Number of individual shell impacts against this ship.
     pub shell_count: usize,
-    /// Number of distinct salvos that hit this ship.
-    pub salvo_count: usize,
 }
 
 /// Per-ship shot timeline, pre-computed from the full replay.
 #[derive(Clone, Debug)]
 pub struct ShipShotTimeline {
-    pub target_entity_id: EntityId,
     pub hits: Vec<PreExtractedHit>,
     /// Health over time, keyed by GameClock. BTreeMap allows efficient
     /// lookup of health at any game clock via range queries.
     pub health_history: std::collections::BTreeMap<GameClock, HealthSnapshot>,
-    pub salvo_count: usize,
 }
 
 pub(crate) fn event_color(is_friendly: bool) -> Color32 {
@@ -176,12 +168,11 @@ pub(super) fn extract_timeline_events(
     let mut viewer_team_id: Option<i64> = None;
     let mut players_populated = false;
 
-    // Health tracking: entity → (window_start_clock, health_at_window_start)
+    // Health tracking: entity -> (window_start_clock, health_at_window_start)
     let mut health_windows: HashMap<EntityId, (GameClock, f32)> = HashMap::new();
 
     // Shot counting for pre-allocation hints
     let mut shot_counts: HashMap<EntityId, ShotCountHints> = HashMap::new();
-    let mut seen_salvos: HashSet<(EntityId, u32)> = HashSet::new();
 
     // Health history: per-entity health snapshots on every change
     let mut health_histories: HashMap<EntityId, std::collections::BTreeMap<GameClock, HealthSnapshot>> = HashMap::new();
@@ -190,12 +181,12 @@ pub(super) fn extract_timeline_events(
     // Kill tracking
     let mut last_kill_count: usize = 0;
 
-    // Cap tracking: cap_index → (previous has_invaders, previous team_id)
+    // Cap tracking: cap_index -> (previous has_invaders, previous team_id)
     let mut cap_prev_contested: HashMap<usize, bool> = HashMap::new();
     let mut cap_prev_team: HashMap<usize, i64> = HashMap::new();
     let mut cap_prev_invader_team: HashMap<usize, i64> = HashMap::new();
 
-    // Radar tracking: entity → number of radar activations seen so far
+    // Radar tracking: entity -> number of radar activations seen so far
     let mut radar_counts: HashMap<EntityId, usize> = HashMap::new();
 
     // Advantage tracking
@@ -324,7 +315,7 @@ pub(super) fn extract_timeline_events(
                         let cap_label =
                             if is_base { "\u{2691}".to_string() } else { ((b'A' + cap_idx as u8) as char).to_string() };
 
-                        // Cap contested: both_inside transitions false → true
+                        // Cap contested: both_inside transitions false -> true
                         let prev_contested = cap_prev_contested.get(&cap_idx).copied().unwrap_or(false);
                         if cap.both_inside && !prev_contested {
                             events.push(TimelineEvent {
@@ -565,11 +556,6 @@ pub(super) fn extract_timeline_events(
                 for hit in controller.shot_hits() {
                     let counts = shot_counts.entry(hit.victim_entity_id).or_default();
                     counts.shell_count += 1;
-                    if let Some(ref salvo) = hit.salvo
-                        && seen_salvos.insert((salvo.owner_id, salvo.salvo_id))
-                    {
-                        counts.salvo_count += 1;
-                    }
                 }
 
                 // --- Health history snapshots (on every change) ---
@@ -634,9 +620,6 @@ pub(super) fn extract_timeline_events(
     events.sort_by(|a, b| a.clock.cmp(&b.clock));
     TimelineExtractionResult { events, battle_start, shot_counts, health_histories }
 }
-
-// ─── Shot Extraction (Pass 3) ────────────────────────────────────────────────
-
 /// Parse the entire replay and extract all `ResolvedShotHit`s per ship.
 /// Uses `shot_count_hints` from pass 2 to pre-allocate buffers.
 /// Health histories from pass 2 are merged into the returned timelines.
@@ -668,10 +651,8 @@ pub(super) fn extract_all_shots(
             (
                 eid,
                 ShipShotTimeline {
-                    target_entity_id: eid,
                     hits: Vec::with_capacity(hints.shell_count),
                     health_history: health_histories.get(&eid).cloned().unwrap_or_default(),
-                    salvo_count: hints.salvo_count,
                 },
             )
         })
@@ -680,10 +661,8 @@ pub(super) fn extract_all_shots(
     // Also create timelines for ships that had health changes but no shot hits
     for (eid, hh) in health_histories {
         timelines.entry(eid).or_insert_with(|| ShipShotTimeline {
-            target_entity_id: eid,
             hits: Vec::new(),
             health_history: hh,
-            salvo_count: 0,
         });
     }
 
@@ -700,10 +679,8 @@ pub(super) fn extract_all_shots(
                     } else {
                         // Ship not in hints (e.g. friendly fire) — create on demand
                         let mut tl = ShipShotTimeline {
-                            target_entity_id: hit.victim_entity_id,
                             hits: Vec::with_capacity(100),
                             health_history: std::collections::BTreeMap::new(),
-                            salvo_count: 0,
                         };
                         tl.hits.push(PreExtractedHit { clock: hit.clock, hit: hit.clone() });
                         timelines.insert(hit.victim_entity_id, tl);

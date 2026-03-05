@@ -32,7 +32,6 @@ use wows_minimap_renderer::renderer::RenderOptions;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
-use wowsunpack::game_types::WorldPos;
 use wowsunpack::vfs::VfsPath;
 
 use egui_taffy::AsTuiBuilder as _;
@@ -48,16 +47,10 @@ use crate::data::settings::SavedRenderOptions;
 use crate::data::wows_data::SharedWoWsData;
 
 use crate::util::controls::CommandGroup;
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 /// Approximate number of frame snapshots per second of game time.
 /// Controls the granularity of seeking in the replay.
 const SNAPSHOTS_PER_SECOND: f32 = 1.5;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
-
-// ─── Shared types (from minimap_view) ────────────────────────────────────────
-
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;
 use crate::replay::minimap_view::ENEMY_COLOR;
@@ -73,9 +66,6 @@ use crate::replay::minimap_view::send_annotation_clear;
 use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
-
-// ─── Asset Cache ─────────────────────────────────────────────────────────────
-
 /// RGBA image data with dimensions.
 pub struct RgbaAsset {
     pub data: Vec<u8>,
@@ -210,9 +200,6 @@ impl RendererAssetCache {
         (map_image, map_info)
     }
 }
-
-// ─── RenderOptions conversion ────────────────────────────────────────────────
-
 pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
     RenderOptions {
         show_hp_bars: saved.show_hp_bars,
@@ -305,9 +292,6 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
     }
 }
-
-// ─── Commands & Shared State ─────────────────────────────────────────────────
-
 /// Commands sent from the UI thread to the background playback thread.
 pub enum PlaybackCommand {
     Play,
@@ -327,32 +311,6 @@ pub struct PlaybackFrame {
     pub total_frames: usize,
     pub game_duration: f32,
 }
-
-// ─── Realtime Armor Bridge ───────────────────────────────────────────────────
-
-/// A salvo event extracted from the replay for the realtime armor viewer.
-#[derive(Clone, Debug)]
-pub struct ReplaySalvoEvent {
-    pub clock: GameClock,
-    /// Estimated time the shells reach the target (fire time + flight time).
-    pub estimated_impact_clock: GameClock,
-    pub target_entity_id: EntityId,
-    pub attacker_entity_id: EntityId,
-    pub params_id: wowsunpack::game_types::GameParamId,
-    pub shots: Vec<ReplayShotData>,
-    /// Target ship's yaw (radians) at the time this salvo was created.
-    pub target_ship_yaw: f32,
-    /// Target ship's world position at the time this salvo was created.
-    pub target_ship_position: WorldPos,
-}
-
-/// Per-shell origin/target in world space (BigWorld coordinates).
-#[derive(Clone, Debug)]
-pub struct ReplayShotData {
-    pub origin: WorldPos,
-    pub target: WorldPos,
-}
-
 /// Player info snapshot captured from BattleController for the armor viewer.
 #[derive(Clone, Debug)]
 pub struct ReplayPlayerInfo {
@@ -361,7 +319,6 @@ pub struct ReplayPlayerInfo {
     pub team_id: i64,
     pub vehicle: Arc<wowsunpack::game_params::types::Param>,
     pub ship_display_name: String,
-    pub is_friendly: bool,
     /// Equipped hull GameParamId from the replay's ShipConfig.
     pub hull_param_id: Option<wowsunpack::game_types::GameParamId>,
 }
@@ -369,14 +326,13 @@ pub struct ReplayPlayerInfo {
 /// Shared bridge between replay thread and realtime armor viewer windows.
 pub struct RealtimeArmorBridge {
     pub players: Vec<ReplayPlayerInfo>,
-    pub salvos: Vec<ReplaySalvoEvent>,
     /// Resolved shot hits from ShotKills packets, matched to originating salvos.
     pub shot_hits: Vec<ResolvedShotHit>,
     pub last_clock: GameClock,
     /// The entity this bridge tracks (the ship whose armor viewer is open).
     pub target_entity_id: EntityId,
-    /// Incremented each time salvos are cleared (seek/rebuild). Consumers use
-    /// this to detect that their cursor into `salvos` is stale.
+    /// Incremented each time data is cleared (seek/rebuild). Consumers use
+    /// this to detect stale state.
     pub generation: u64,
     /// Pre-computed shot timeline for this target ship (entire replay).
     /// Set after the shot extraction pass completes.
@@ -387,7 +343,6 @@ impl RealtimeArmorBridge {
     pub fn new(target_entity_id: EntityId) -> Self {
         Self {
             players: Vec::new(),
-            salvos: Vec::new(),
             shot_hits: Vec::new(),
             last_clock: GameClock(0.0),
             target_entity_id,
@@ -396,18 +351,11 @@ impl RealtimeArmorBridge {
         }
     }
 
-    pub fn clear_salvos(&mut self) {
-        self.salvos.clear();
-        self.shot_hits.clear();
-        self.last_clock = GameClock(0.0);
-        self.generation += 1;
-    }
 }
 
 /// A request from the context menu to open a realtime armor viewer.
 pub struct ArmorViewerRequest {
     pub target_entity_id: EntityId,
-    pub target_ship_name: String,
     pub bridge: Arc<Mutex<RealtimeArmorBridge>>,
     /// Sender for playback commands (seek, etc.) back to the replay thread.
     pub command_tx: mpsc::Sender<PlaybackCommand>,
@@ -508,7 +456,7 @@ pub struct SharedRendererState {
     pub collab_replay_name: Option<String>,
     /// Raw map name for collab announcements (e.g. "spaces/16_OC_bees_to_honey").
     pub collab_map_name: Option<String>,
-    /// Map space size in BigWorld units (from MapInfo), used for px→km conversion.
+    /// Map space size in BigWorld units (from MapInfo), used for px->km conversion.
     pub map_space_size: Option<f32>,
 }
 
@@ -572,9 +520,6 @@ struct VideoExportData {
     wows_data: SharedWoWsData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
 }
-
-// ─── Launch ──────────────────────────────────────────────────────────────────
-
 /// Create and launch a replay renderer in a background thread.
 ///
 /// Returns a `ReplayRendererViewer` that can be drawn from the UI thread.
@@ -814,10 +759,8 @@ mod playback;
 use playback::playback_thread;
 
 mod timeline;
-pub use timeline::HealthSnapshot;
 pub use timeline::PreExtractedHit;
 pub use timeline::ShipShotTimeline;
-pub use timeline::ShotCountHints;
 pub(crate) use timeline::TimelineEvent;
 pub(crate) use timeline::TimelineEventKind;
 pub(crate) use timeline::event_color;
@@ -831,9 +774,6 @@ use shapes::*;
 
 mod textures;
 use textures::upload_textures;
-
-// ─── Viewport Rendering ─────────────────────────────────────────────────────
-
 impl ReplayRendererViewer {
     /// Access the shared renderer state (for polling pending requests, etc.).
     pub fn shared_state(&self) -> &Arc<Mutex<SharedRendererState>> {
@@ -885,7 +825,7 @@ impl ReplayRendererViewer {
                 let mut state = shared_state.lock();
 
                 // Pull latest frame from collab channel before any status checks
-                // so the Loading→Ready transition sees the first frame immediately.
+                // so the Loading->Ready transition sees the first frame immediately.
                 if let Some(rx) = state.collab_frame_rx.take() {
                     while let Ok(frame) = rx.try_recv() {
                         state.frame = Some(frame);
@@ -906,13 +846,13 @@ impl ReplayRendererViewer {
                     fonts_just_registered = true;
                 }
 
-                // For client renderers: transition Loading→Ready once fonts are
+                // For client renderers: transition Loading->Ready once fonts are
                 // effective (registered on a prior frame) and a frame has arrived.
                 if matches!(state.status, RendererStatus::Loading)
                     && state.frame.is_some()
                     && !fonts_just_registered
                 {
-                    tracing::debug!("Renderer: Loading→Ready (fonts effective, frame available)");
+                    tracing::debug!("Renderer: Loading->Ready (fonts effective, frame available)");
                     state.status = RendererStatus::Ready;
                 }
 
@@ -1584,7 +1524,7 @@ impl ReplayRendererViewer {
                                 send_annotation_update(&shared_state.lock().collab_local_tx, &ann, idx, None);
                             }
 
-                            // Click on empty space → ping
+                            // Click on empty space -> ping
                             if sm.selected_by_click && !ann.has_selection()
                                 && let Some(click_pos) = response.hover_pos().map(|p| transform.screen_to_minimap(p)) {
                                     let state = shared_state.lock();
@@ -1871,7 +1811,6 @@ impl ReplayRendererViewer {
                                                 state.armor_bridges.push(bridge.clone());
                                                 state.pending_armor_viewers.push(ArmorViewerRequest {
                                                     target_entity_id: ship_eid,
-                                                    target_ship_name: ship_name.clone(),
                                                     bridge,
                                                     command_tx: command_tx.clone(),
                                                 });
@@ -2230,8 +2169,6 @@ impl ReplayRendererViewer {
                                                 egui::RichText::new(icons::LIST_BULLETS).size(18.0),
                                             ));
                                             timeline_btn_opt = Some(btn);
-
-
                                             // Save as Video / Clipboard buttons — hidden for client
                                             // viewers and while a collab session is active.
                                             let session_is_active = shared_state.lock().collab_session_state.as_ref()
@@ -2710,8 +2647,6 @@ impl ReplayRendererViewer {
                         }
                     }
 
-
-
                     toasts.lock().show(ctx);
                 });
 
@@ -2728,7 +2663,7 @@ impl ReplayRendererViewer {
                     ctx.request_repaint();
                 } else if status_is_loading {
                     // Keep the viewport alive while loading so it notices the
-                    // Loading→Ready transition. Only repaint this viewport —
+                    // Loading->Ready transition. Only repaint this viewport —
                     // do NOT wake the parent, which causes event-loop starvation.
                     ctx.request_repaint();
                 } else if playing || repaint {

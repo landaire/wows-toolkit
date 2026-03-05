@@ -1,5 +1,3 @@
-//! Persistent application state and game data management.
-
 pub mod cap_layout;
 pub(crate) mod session_stats;
 pub(crate) mod settings;

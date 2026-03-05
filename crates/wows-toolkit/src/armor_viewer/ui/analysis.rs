@@ -1,8 +1,3 @@
-//! Unified analysis window with dockable tabs: Ships, Trajectory, Splash.
-//!
-//! Uses `egui_dock` so the user can split, rearrange, and dock sub-panels
-//! freely within the Analysis floating window.
-
 use std::cell::Cell;
 use std::cell::RefCell;
 
@@ -21,9 +16,6 @@ use crate::armor_viewer::state::ArmorViewerState;
 use crate::armor_viewer::state::StoredTrajectory;
 use crate::icons;
 use crate::data::wows_data::SharedWoWsData;
-
-// ─── Deferred Actions ────────────────────────────────────────────────────────
-
 /// Actions collected from the trajectory tab that must be applied to the active
 /// pane after the window has been drawn (because the window borrows state immutably).
 #[derive(Default)]
@@ -37,9 +29,6 @@ pub struct TrajectoryActions {
     pub show_all_hit_plates: bool,
     pub show_all_hit_zones: bool,
 }
-
-// ─── Focus Helper ────────────────────────────────────────────────────────────
-
 /// Programmatically focus a specific analysis tab in the dock.
 pub fn focus_analysis_tab(dock_state: &mut DockState<AnalysisTab>, tab: AnalysisTab) {
     if let Some((surface, node, tab_idx)) = dock_state.find_tab(&tab) {
@@ -47,9 +36,6 @@ pub fn focus_analysis_tab(dock_state: &mut DockState<AnalysisTab>, tab: Analysis
         dock_state.set_focused_node_and_surface((surface, node));
     }
 }
-
-// ─── TabViewer ───────────────────────────────────────────────────────────────
-
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for analysis tabs.
 #[allow(dead_code)]
 struct AnalysisPaneViewer<'a> {
@@ -104,9 +90,6 @@ impl TabViewer for AnalysisPaneViewer<'_> {
         false
     }
 }
-
-// ─── Main Entry Point ────────────────────────────────────────────────────────
-
 /// Draw the unified analysis window. Returns deferred trajectory actions
 /// that the caller must apply to the active pane.
 pub fn show_analysis_window(
@@ -196,9 +179,6 @@ pub fn show_analysis_window(
 
     trajectory_actions.into_inner()
 }
-
-// ─── Ships Tab ───────────────────────────────────────────────────────────────
-
 impl AnalysisPaneViewer<'_> {
     fn show_ships_tab(&self, ui: &mut egui::Ui) {
         // IFHE toggle

@@ -1,5 +1,3 @@
-//! Utility types, helpers, and pure-data modules.
-
 pub(crate) mod build_tracker;
 pub(crate) mod consts;
 pub(crate) mod controls;

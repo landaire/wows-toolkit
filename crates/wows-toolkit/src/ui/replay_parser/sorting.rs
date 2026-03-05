@@ -1,5 +1,3 @@
-//! Sorting infrastructure for replay player lists.
-
 use serde::Deserialize;
 use serde::Serialize;
 use wowsunpack::game_params::types::Species;
