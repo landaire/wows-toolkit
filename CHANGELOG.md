@@ -2,6 +2,86 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.57] - 2026-03-05
+
+### 🚀 Features
+
+- Add replay sessions for group replay reviews
+- Add tactics board
+- Add tactics web page
+
+### 🐛 Bug Fixes
+
+- Ensure native windows do not depend on each other for repainting
+
+### Armor_viewer
+
+- Fix armor checkboxes not working when in a partial state + fix splash zone labels
+
+### Collab
+
+- Change token format
+- Fix annotation syncing
+- Add cursor click effect + refactor channels
+- Ensure that annotation movements, clearing, etc. are properly synchronized
+- Improvements to session popover/joining
+- Add unit tests
+- Show IP address warning when a user starts a session
+- Add heartbeats to the protocol
+- Use name-derived color instead of fixed color palette
+- Ensure that pre-session annotations are synced properly
+- Improvements to freehand line smoothing / arrow heads
+- Fix pre-existing cap points not syncing
+- Rework forced window sharing/multiple tactics boards
+- Fix state synchronization issues
+- Refactor into separate crate
+
+### Minimap
+
+- Add arrow + measurement tools, add keyboard shortcuts and multiselect
+- Ensure arrow head scales with zoom
+
+### Networking
+
+- Fix rustls conflict
+
+### Player_tracker
+
+- Fix twitch timestamps showing 0 minutes
+
+### Renderer
+
+- Show centerpoint of shapes when moving them
+
+### Replay_inspector
+
+- Fix file listing not being resizable to smaller than default
+- Add context menu action to add replay to session stats
+- Fix depth charge damage not properly surfacing
+
+### Site
+
+- Add networking info
+- Update color palette
+
+### Stats
+
+- Fix dialog showing up on replay inspector tab
+
+### Web
+
+- De-dupe names
+
+### Wows_minimap_renderer
+
+- Add option to use extracted game assets
+
+## [0.1.56] - 2026-03-02
+
+### Stats
+
+- Fix issue with popover immediately closing when trying to change chart stat
+
 ## [0.1.55] - 2026-03-02
 
 ### 🚀 Features
