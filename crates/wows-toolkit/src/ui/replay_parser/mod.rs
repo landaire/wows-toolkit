@@ -704,7 +704,7 @@ impl UiReport {
             let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) =
                 player_results
                     .map(|pr| {
-                        let longest_width = DAMAGE_DESCRIPTIONS
+                        let longest_width = RECEIVED_DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
                                 let num = pr.get(format!("received_{key}"))?.as_u64()?;
@@ -714,7 +714,7 @@ impl UiReport {
                             .unwrap_or_default()
                             + 1;
 
-                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = DAMAGE_DESCRIPTIONS
+                        let (all_damage, breakdowns): (Vec<(String, u64)>, Vec<String>) = RECEIVED_DAMAGE_DESCRIPTIONS
                             .iter()
                             .filter_map(|(key, description)| {
                                 let num = pr.get(format!("received_{key}"))?.as_u64()?;
@@ -866,15 +866,34 @@ impl UiReport {
 
                         let mut damage_interaction = DamageInteraction::default();
 
-                        let all_damage: u64 = DAMAGE_DESCRIPTIONS
+                        let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
-                            .map(|(key, _)| victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0))
-                            .sum();
+                            .filter(|(key, _)| {
+                                victim_data.get(*key).and_then(|v| v.as_u64()).is_some_and(|n| n > 0)
+                            })
+                            .map(|(_, desc)| desc.len())
+                            .max()
+                            .unwrap_or_default()
+                            + 1;
+
+                        let mut per_type = Vec::new();
+                        let (all_damage, breakdowns): (u64, Vec<String>) = DAMAGE_DESCRIPTIONS
+                            .iter()
+                            .fold((0u64, Vec::new()), |(sum, mut lines), (key, description)| {
+                                let num = victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0);
+                                if num > 0 {
+                                    per_type.push((key.to_string(), num));
+                                    let num_str = separate_number(num, Some(locale));
+                                    lines.push(format!("{description:<longest_width$}: {num_str}"));
+                                }
+                                (sum + num, lines)
+                            });
 
                         damage_interaction.damage_dealt = all_damage;
                         if damage_interaction.damage_dealt > 0 {
                             damage_interaction.damage_dealt_text =
                                 separate_number(damage_interaction.damage_dealt, Some(locale));
+                            damage_interaction.damage_dealt_hover_text = breakdowns.join("\n");
 
                             if let Some(total_damage) = damage {
                                 damage_interaction.damage_dealt_percentage =
@@ -1078,6 +1097,7 @@ impl UiReport {
                         (
                             interaction_with_this_player.damage_dealt,
                             interaction_with_this_player.damage_dealt_text.clone(),
+                            interaction_with_this_player.damage_dealt_hover_text.clone(),
                         ),
                     );
                 }
@@ -1087,7 +1107,6 @@ impl UiReport {
         }
 
         for report in &mut player_reports {
-            let total_received_damage = report.received_damage().unwrap_or_default();
             let this_player = report.player();
             let this_player_state = this_player.initial_state();
 
@@ -1099,12 +1118,18 @@ impl UiReport {
                 continue;
             };
 
-            for (interacted_player_id, (received_damage, received_damage_text)) in this_player_received_damages {
+            // Sum from per-interaction attacker data so all damage types (including
+            // depth charges) are consistently counted in both numerator and denominator.
+            let total_received_damage: u64 = this_player_received_damages.values().map(|(dmg, _, _)| *dmg).sum();
+
+            for (interacted_player_id, (received_damage, received_damage_text, received_damage_hover_text)) in
+                this_player_received_damages
+            {
                 let interacted_player = interaction_report.entry(interacted_player_id).or_default();
                 interacted_player.damage_received = received_damage;
                 interacted_player.damage_received_text = received_damage_text;
+                interacted_player.damage_received_hover_text = received_damage_hover_text;
 
-                // This should never happen I think?
                 if total_received_damage > 0 {
                     interacted_player.damage_received_percentage =
                         (received_damage as f64 / total_received_damage as f64) * 100.0;
@@ -1118,13 +1143,19 @@ impl UiReport {
         // dealt_inverse = damage_dealt / victim's total received damage
         // received_inverse = damage_received / attacker's total dealt damage
         {
-            // Collect totals first to avoid borrow issues
+            // Collect totals first to avoid borrow issues.
+            // For received damage, sum per-interaction values so all damage types
+            // (including depth charges) are counted consistently.
             let totals: HashMap<AccountId, (u64, u64)> = player_reports
                 .iter()
                 .map(|r| {
                     let id = r.player().initial_state().db_id();
                     let dealt = r.actual_damage().unwrap_or_default();
-                    let received = r.received_damage().unwrap_or_default();
+                    let received: u64 = r
+                        .damage_interactions
+                        .as_ref()
+                        .map(|interactions| interactions.values().map(|i| i.damage_received).sum())
+                        .unwrap_or_default();
                     (id, (dealt, received))
                 })
                 .collect();
@@ -1374,13 +1405,24 @@ impl UiReport {
                         &interaction.1.damage_received_percentage_text
                     };
 
-                    ui.label(format!(
+                    let resp = ui.label(format!(
                         "{}: {} ({})",
                         interaction_player.ship_name(),
                         interaction.1.damage_received_text,
                         pct_text
-                    ))
-                    .on_hover_text(hover_layout);
+                    ));
+                    if interaction.1.damage_received_hover_text.is_empty() {
+                        resp.on_hover_text(hover_layout);
+                    } else {
+                        resp.on_hover_ui(|ui| {
+                            ui.label(hover_layout);
+                            ui.separator();
+                            ui.label(
+                                RichText::new(&interaction.1.damage_received_hover_text)
+                                    .font(FontId::monospace(12.0)),
+                            );
+                        });
+                    }
                 }
             };
         });
@@ -1441,13 +1483,24 @@ impl UiReport {
                         &interaction.1.damage_dealt_percentage_text
                     };
 
-                    ui.label(format!(
+                    let resp = ui.label(format!(
                         "{}: {} ({})",
                         interaction_player.ship_name(),
                         interaction.1.damage_dealt_text,
                         pct_text
-                    ))
-                    .on_hover_text(hover_layout);
+                    ));
+                    if interaction.1.damage_dealt_hover_text.is_empty() {
+                        resp.on_hover_text(hover_layout);
+                    } else {
+                        resp.on_hover_ui(|ui| {
+                            ui.label(hover_layout);
+                            ui.separator();
+                            ui.label(
+                                RichText::new(&interaction.1.damage_dealt_hover_text)
+                                    .font(FontId::monospace(12.0)),
+                            );
+                        });
+                    }
                 }
             };
         });

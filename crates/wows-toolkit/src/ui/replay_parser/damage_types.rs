@@ -14,20 +14,23 @@ pub const DAMAGE_TPD_DEEP: &str = "damage_tpd_deep";
 pub const DAMAGE_TPD_ALTER: &str = "damage_tpd_alter";
 pub const DAMAGE_TPD_PHOTON: &str = "damage_tpd_photon";
 pub const DAMAGE_BOMB: &str = "damage_bomb";
-// pub const DAMAGE_BOMB_AVIA: &str = "damage_bomb_avia";
 pub const DAMAGE_BOMB_ALT: &str = "damage_bomb_alt";
-// pub const DAMAGE_BOMB_AIRSUPPORT: &str = "damage_bomb_airsupport";
 pub const DAMAGE_DBOMB_AIRSUPPORT: &str = "damage_dbomb_airsupport";
+pub const DAMAGE_ADBOMB: &str = "damage_adbomb";
 pub const DAMAGE_TBOMB: &str = "damage_tbomb";
 pub const DAMAGE_TBOMB_ALT: &str = "damage_tbomb_alt";
+// pub const DAMAGE_TBOMB_AVIA: &str = "damage_tbomb_avia";
 pub const DAMAGE_TBOMB_AIRSUPPORT: &str = "damage_tbomb_airsupport";
 pub const DAMAGE_FIRE: &str = "damage_fire";
 pub const DAMAGE_RAM: &str = "damage_ram";
 pub const DAMAGE_FLOOD: &str = "damage_flood";
+pub const DAMAGE_DBOMB: &str = "damage_dbomb";
 pub const DAMAGE_DBOMB_DIRECT: &str = "damage_dbomb_direct";
 pub const DAMAGE_DBOMB_SPLASH: &str = "damage_dbomb_splash";
 pub const DAMAGE_SEA_MINE: &str = "damage_sea_mine";
 pub const DAMAGE_ROCKET: &str = "damage_rocket";
+// pub const DAMAGE_ROCKET_ALT: &str = "damage_rocket_alt";
+// pub const DAMAGE_ROCKET_AVIA: &str = "damage_rocket_avia";
 pub const DAMAGE_ROCKET_AIRSUPPORT: &str = "damage_rocket_airsupport";
 pub const DAMAGE_SKIP: &str = "damage_skip";
 pub const DAMAGE_SKIP_ALT: &str = "damage_skip_alt";
@@ -71,7 +74,7 @@ pub const HITS_PULSE_LASER: &str = "hits_pulse_laser";
 pub const HITS_AXIS_LASER: &str = "hits_axis_laser";
 pub const HITS_PHASER_LASER: &str = "hits_phaser_laser";
 
-pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 35] = [
+pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 36] = [
     (DAMAGE_MAIN_AP, "AP"),
     (DAMAGE_MAIN_CS, "SAP"),
     (DAMAGE_MAIN_HE, "HE"),
@@ -96,6 +99,7 @@ pub static DAMAGE_DESCRIPTIONS: [(&str, &str); 35] = [
     (DAMAGE_FIRE, "Fire"),
     (DAMAGE_RAM, "Ram"),
     (DAMAGE_FLOOD, "Flood"),
+    (DAMAGE_DBOMB, "Depth Charge"),
     (DAMAGE_DBOMB_DIRECT, "Depth Charge (Direct)"),
     (DAMAGE_DBOMB_SPLASH, "Depth Charge (Splash)"),
     (DAMAGE_SEA_MINE, "Sea Mine"),
@@ -144,6 +148,41 @@ pub static HITS_DESCRIPTIONS: [(&str, &str); 31] = [
     (HITS_PULSE_LASER, "Pulse Laser"),
     (HITS_AXIS_LASER, "Axis Laser"),
     (HITS_PHASER_LASER, "Phaser Laser"),
+];
+
+/// Keys for received damage lookups. The server uses slightly different key names
+/// on the received side (e.g. combined `damage_dbomb` instead of split direct/splash,
+/// `_avia` variants instead of base keys for some plane types).
+/// Keys for received damage lookups. The server uses different key names on the
+/// received side (e.g. combined `damage_dbomb` instead of split direct/splash).
+pub static RECEIVED_DAMAGE_DESCRIPTIONS: [(&str, &str); 27] = [
+    (DAMAGE_MAIN_AP, "AP"),
+    (DAMAGE_MAIN_CS, "SAP"),
+    (DAMAGE_MAIN_HE, "HE"),
+    (DAMAGE_ATBA_AP, "AP Sec"),
+    (DAMAGE_ATBA_AP_MANUAL, "AP Sec (Manual)"),
+    (DAMAGE_ATBA_CS, "SAP Sec"),
+    (DAMAGE_ATBA_CS_MANUAL, "SAP Sec (Manual)"),
+    (DAMAGE_ATBA_HE, "HE Sec"),
+    (DAMAGE_ATBA_HE_MANUAL, "HE Sec (Manual)"),
+    (DAMAGE_TPD_NORMAL, "Torps"),
+    (DAMAGE_TPD_DEEP, "Deep Water Torps"),
+    (DAMAGE_TPD_ALTER, "Alt Torps"),
+    (DAMAGE_BOMB, "HE Bomb"),
+    (DAMAGE_BOMB_ALT, "Alt Bomb"),
+    (DAMAGE_DBOMB, "Depth Charge"),
+    (DAMAGE_DBOMB_AIRSUPPORT, "Air Support Depth Charge"),
+    (DAMAGE_ADBOMB, "Airstrike Depth Charge"),
+    (DAMAGE_TBOMB, "Torpedo Bomber"),
+    (DAMAGE_TBOMB_ALT, "Torpedo Bomber (Alt)"),
+    (DAMAGE_TBOMB_AIRSUPPORT, "Torpedo Bomber Air Support"),
+    (DAMAGE_FIRE, "Fire"),
+    (DAMAGE_RAM, "Ram"),
+    (DAMAGE_FLOOD, "Flood"),
+    (DAMAGE_SEA_MINE, "Sea Mine"),
+    (DAMAGE_ROCKET, "Rocket"),
+    (DAMAGE_ROCKET_AIRSUPPORT, "Air Supp Rocket"),
+    (DAMAGE_SKIP, "Skip Bomb"),
 ];
 
 pub static POTENTIAL_DAMAGE_DESCRIPTIONS: [(&str, &str); 4] =
