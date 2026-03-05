@@ -119,6 +119,8 @@ pub struct WebApp {
     /// Tabs queued to be added after the current frame's dock rendering completes.
     /// Needed because `dock_state` is temporarily swapped out during `DockArea::show`.
     pending_tabs: Vec<WebTab>,
+    /// Tabs the user has explicitly closed. Used to show re-open buttons in the lobby.
+    closed_tabs: Vec<WebTab>,
 }
 
 enum ConnectionStatus {
@@ -164,6 +166,7 @@ impl WebApp {
             last_asset_request: None,
             dock_state: DockState::new(vec![WebTab::Lobby]),
             pending_tabs: Vec::new(),
+            closed_tabs: Vec::new(),
         }
     }
 
@@ -365,6 +368,7 @@ impl WebApp {
             PeerMessage::ReplayClosed { replay_id } => {
                 self.session.replay_views.remove(&replay_id);
                 self.dock_remove_tab(&WebTab::Replay(replay_id));
+                self.closed_tabs.retain(|t| t != &WebTab::Replay(replay_id));
             }
             PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, commands } => {
                 if let Some(view) = self.session.replay_views.get_mut(&replay_id) {
@@ -395,6 +399,7 @@ impl WebApp {
             PeerMessage::TacticsMapClosed { board_id } => {
                 self.session.tactics_boards.remove(&board_id);
                 self.dock_remove_tab(&WebTab::TacticsBoard(board_id));
+                self.closed_tabs.retain(|t| t != &WebTab::TacticsBoard(board_id));
             }
             PeerMessage::SetCapPoint { board_id, cap_point } => {
                 if let Some(board) = self.session.tactics_boards.get_mut(&board_id) {
@@ -504,6 +509,7 @@ impl WebApp {
 
     fn render_lobby(&mut self, ui: &mut egui::Ui) {
         let mut disconnect = false;
+        let mut reopen_tab = None;
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
             ui.heading("WoWs Toolkit - Tactics Board");
@@ -546,65 +552,52 @@ impl WebApp {
                     ui.label("Connecting to host...");
                 }
                 ConnectionStatus::Connected => {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Connected \u{2014} {} user(s)", self.session.connected_users.len()));
-                        if ui.small_button("Disconnect").clicked() {
-                            disconnect = true;
-                        }
-                    });
-
-                    // Show asset loading status
-                    if self.assets.is_empty() {
-                        ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            if self.asset_request_count >= 5 {
-                                ui.label("Failed to receive assets from host.");
-                            } else {
-                                ui.label(format!(
-                                    "Receiving map data from host... (attempt {}/5)",
-                                    self.asset_request_count.max(1)
-                                ));
-                            }
-                        });
+                    let other_count = self.session.connected_users.iter().filter(|u| u.id != self.session.my_user_id).count();
+                    ui.label(format!("Connected \u{2014} {other_count} other user(s)"));
+                    if ui.small_button("Disconnect").clicked() {
+                        disconnect = true;
                     }
 
-                    // Show closeable windows that can be re-opened.
-                    let closed_boards: Vec<(u64, String)> = self
-                        .session
-                        .tactics_boards
-                        .iter()
-                        .filter(|(id, _)| !self.dock_has_tab(&WebTab::TacticsBoard(**id)))
-                        .map(|(id, b)| {
-                            let name =
-                                if b.display_name.is_empty() { b.map_name.clone() } else { b.display_name.clone() };
-                            (*id, name)
-                        })
-                        .collect();
+                    // User list sorted by role (host first, then peers).
+                    if !self.session.connected_users.is_empty() {
+                        ui.add_space(10.0);
+                        let host_id = self.session.host_user_id;
+                        let my_id = self.session.my_user_id;
+                        let mut users: Vec<_> = self.session.connected_users.iter().collect();
+                        users.sort_by_key(|u| if u.id == host_id { 0 } else { 1 });
 
-                    let closed_replays: Vec<(u64, String)> = self
-                        .session
-                        .replay_views
-                        .iter()
-                        .filter(|(id, _)| !self.dock_has_tab(&WebTab::Replay(**id)))
-                        .map(|(id, v)| {
-                            let name =
-                                if v.display_name.is_empty() { v.replay_name.clone() } else { v.display_name.clone() };
-                            (*id, name)
-                        })
-                        .collect();
+                        for user in &users {
+                            let role = if user.id == host_id { "Host" } else { "Peer" };
+                            let [r, g, b] = user.color;
+                            let color = egui::Color32::from_rgb(r, g, b);
+                            let suffix = if user.id == my_id { " (you)" } else { "" };
+                            ui.colored_label(color, format!("{} \u{2014} {role}{suffix}", user.name));
+                        }
+                    }
 
-                    if !closed_boards.is_empty() || !closed_replays.is_empty() {
+                    // Show tabs the user explicitly closed so they can re-open them.
+                    let closed: Vec<_> = self.closed_tabs.iter().filter_map(|tab| {
+                        match tab {
+                            WebTab::TacticsBoard(id) => {
+                                let b = self.session.tactics_boards.get(id)?;
+                                let name = if b.display_name.is_empty() { &b.map_name } else { &b.display_name };
+                                Some((tab.clone(), format!("Tactics Board \u{2014} {name}")))
+                            }
+                            WebTab::Replay(id) => {
+                                let v = self.session.replay_views.get(id)?;
+                                let name = if v.display_name.is_empty() { &v.replay_name } else { &v.display_name };
+                                Some((tab.clone(), format!("Replay \u{2014} {name}")))
+                            }
+                            _ => None,
+                        }
+                    }).collect();
+
+                    if !closed.is_empty() {
                         ui.add_space(16.0);
                         ui.label("Closed windows:");
-                        for (id, name) in &closed_boards {
-                            if ui.button(format!("Tactics Board \u{2014} {name}")).clicked() {
-                                self.dock_push_tab(WebTab::TacticsBoard(*id));
-                            }
-                        }
-                        for (id, name) in &closed_replays {
-                            if ui.button(format!("Replay \u{2014} {name}")).clicked() {
-                                self.dock_push_tab(WebTab::Replay(*id));
+                        for (tab, label) in &closed {
+                            if ui.button(label).clicked() {
+                                reopen_tab = Some(tab.clone());
                             }
                         }
                     }
@@ -628,6 +621,10 @@ impl WebApp {
         });
         if disconnect {
             self.disconnect();
+        }
+        if let Some(tab) = reopen_tab {
+            self.closed_tabs.retain(|t| t != &tab);
+            self.dock_push_tab(tab);
         }
     }
 
@@ -975,12 +972,15 @@ impl WebApp {
             // View name
             match &self.session.active_view {
                 ActiveView::TacticsBoard(id) => {
-                    let name =
-                        self.session.tactics_boards.get(id).map(|b| b.map_name.as_str()).unwrap_or("Tactics Board");
+                    let name = self.session.tactics_boards.get(id).map(|b| {
+                        if b.display_name.is_empty() { b.map_name.as_str() } else { b.display_name.as_str() }
+                    }).unwrap_or("Tactics Board");
                     ui.label(format!("Tactics: {name}"));
                 }
                 ActiveView::Replay(id) => {
-                    let name = self.session.replay_views.get(id).map(|v| v.replay_name.as_str()).unwrap_or("Replay");
+                    let name = self.session.replay_views.get(id).map(|v| {
+                        if v.display_name.is_empty() { v.replay_name.as_str() } else { v.display_name.as_str() }
+                    }).unwrap_or("Replay");
                     ui.label(format!("Replay: {name}"));
                 }
                 ActiveView::Lobby => {
@@ -991,7 +991,6 @@ impl WebApp {
             ui.separator();
 
             // Connected users
-            ui.label(format!("{} users", self.session.connected_users.len() + 1)); // +1 for self
             for user in &self.session.connected_users {
                 let c = Color32::from_rgb(user.color[0], user.color[1], user.color[2]);
                 ui.colored_label(c, &user.name);
@@ -1125,7 +1124,10 @@ impl TabViewer for WebTabViewer<'_> {
         // handle actual data cleanup.
         match tab {
             WebTab::Lobby => egui_dock::tab_viewer::OnCloseResponse::Ignore,
-            WebTab::Replay(_) | WebTab::TacticsBoard(_) => egui_dock::tab_viewer::OnCloseResponse::Close,
+            WebTab::Replay(_) | WebTab::TacticsBoard(_) => {
+                self.app.closed_tabs.push(tab.clone());
+                egui_dock::tab_viewer::OnCloseResponse::Close
+            }
         }
     }
 }
@@ -1146,8 +1148,10 @@ impl eframe::App for WebApp {
         // Poll connection events
         self.poll_events(ctx);
 
-        // Request assets if connected but none received yet (retry up to 5 times).
+        // Request assets if connected, a board/replay is open, but none received yet.
+        let needs_assets = !self.session.tactics_boards.is_empty() || !self.session.replay_views.is_empty();
         if matches!(self.connection_status, ConnectionStatus::Connected)
+            && needs_assets
             && self.assets.is_empty()
             && self.asset_request_count < 5
         {

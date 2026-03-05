@@ -66,8 +66,8 @@ pub struct HostParams {
     pub display_name: String,
     pub initial_render_options: CollabRenderOptions,
     /// Pre-serialized `PeerMessage::AssetBundle` bytes (length-prefixed rkyv).
-    /// Built once on the UI thread and sent to each web client on connect.
-    pub web_asset_bundle: Option<Arc<Vec<u8>>>,
+    /// Shared so the UI thread can lazily populate it after game data loads.
+    pub web_asset_bundle: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 /// Parameters for joining a session.
@@ -398,7 +398,7 @@ async fn host_main(
                 }).collect();
                 debug!("Peer {user_id} joining: {} open replay(s) in SessionInfo", open_replays.len());
                 let last_frame_for_peer = Arc::clone(&last_frame_bytes);
-                let web_asset_bundle = params.web_asset_bundle.clone();
+                let web_asset_bundle = params.web_asset_bundle.lock().clone();
 
                 tokio::spawn(async move {
                     host_accept_peer(
@@ -424,7 +424,8 @@ async fn host_main(
             Some((sender_id, msg)) = peer_msg_rx.recv() => {
                 // Handle asset requests directly here where web_asset_bundle is in scope.
                 if matches!(&msg, PeerMessage::RequestAssets) {
-                    if let Some(ref bundle_bytes) = params.web_asset_bundle {
+                    let bundle = params.web_asset_bundle.lock().clone();
+                    if let Some(bundle_bytes) = bundle {
                         let mut m = mesh.lock();
                         if let Some(peer) = m.peers.get_mut(&sender_id) {
                             if peer.asset_request_count < 5 {
@@ -433,7 +434,7 @@ async fn host_main(
                                     "Sending AssetBundle to peer {sender_id} on request ({}/5)",
                                     peer.asset_request_count
                                 );
-                                let _ = peer.msg_tx.try_send(Arc::clone(bundle_bytes));
+                                let _ = peer.msg_tx.try_send(Arc::new(bundle_bytes));
                             } else {
                                 debug!("Ignoring RequestAssets from {sender_id}: limit reached");
                             }
@@ -758,7 +759,7 @@ async fn host_accept_peer(
     peer_msg_tx: tokio::sync::mpsc::Sender<(u64, PeerMessage)>,
     mut frame_rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
     last_frame_bytes: Arc<Mutex<Option<Arc<Vec<u8>>>>>,
-    web_asset_bundle: Option<Arc<Vec<u8>>>,
+    web_asset_bundle: Option<Vec<u8>>,
 ) {
     let (mut send, mut recv) = match conn.accept_bi().await {
         Ok(s) => s,

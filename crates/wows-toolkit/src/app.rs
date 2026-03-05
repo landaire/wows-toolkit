@@ -1970,7 +1970,8 @@ impl WowsToolkitApp {
     }
 
     fn do_host_session(&mut self) {
-        let web_asset_bundle = self.build_web_asset_bundle();
+        let web_asset_bundle = Arc::new(parking_lot::Mutex::new(self.build_web_asset_bundle()));
+        self.tab_state.web_asset_bundle = Some(Arc::clone(&web_asset_bundle));
 
         let params = crate::collab::peer::HostParams {
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1993,7 +1994,7 @@ impl WowsToolkitApp {
 
     /// Build a pre-serialized `PeerMessage::AssetBundle` for web clients.
     /// Returns `None` if game data isn't loaded yet.
-    fn build_web_asset_bundle(&self) -> Option<Arc<Vec<u8>>> {
+    fn build_web_asset_bundle(&self) -> Option<Vec<u8>> {
         use crate::collab::protocol::GameFontsWire;
         use crate::collab::protocol::PeerMessage;
         use crate::collab::protocol::RgbaAssetWire;
@@ -2033,7 +2034,7 @@ impl WowsToolkitApp {
         };
 
         match frame_peer_message(&msg) {
-            Ok(bytes) => Some(Arc::new(bytes)),
+            Ok(bytes) => Some(bytes),
             Err(e) => {
                 tracing::warn!("Failed to serialize AssetBundle: {e}");
                 None
@@ -2045,6 +2046,14 @@ impl WowsToolkitApp {
         let Some(ref session) = self.tab_state.host_session else {
             return;
         };
+
+        // Lazily build the asset bundle once game data becomes available.
+        if let Some(ref bundle_slot) = self.tab_state.web_asset_bundle
+            && bundle_slot.lock().is_none()
+            && let Some(bundle) = self.build_web_asset_bundle()
+        {
+            *bundle_slot.lock() = Some(bundle);
+        }
 
         let mut session_ended = false;
         while let Ok(event) = session.event_rx.try_recv() {
@@ -2096,6 +2105,7 @@ impl WowsToolkitApp {
                 b.state_arc().lock().reset_applied_sync_versions();
             }
             self.tab_state.host_session = None;
+            self.tab_state.web_asset_bundle = None;
             self.tab_state.session_state.lock().clear_session_data();
         }
     }

@@ -387,6 +387,11 @@ pub struct TabState {
     #[serde(skip)]
     pub host_session: Option<crate::collab::peer::PeerSessionHandle>,
 
+    /// Shared asset bundle reference (host only). The UI thread can lazily populate
+    /// this once game data is loaded, and the host task reads it on `RequestAssets`.
+    #[serde(skip)]
+    pub web_asset_bundle: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+
     /// Shared session state for both host and client sessions.
     #[serde(skip)]
     pub session_state: Arc<Mutex<crate::collab::SessionState>>,
@@ -480,6 +485,7 @@ impl Default for TabState {
             pending_host: false,
             client_session: None,
             host_session: None,
+            web_asset_bundle: None,
             session_state: Arc::new(Mutex::new(crate::collab::SessionState::default())),
             session_token_visible: false,
             show_display_name_error: false,
