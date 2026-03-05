@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.56"
+version = "0.1.57"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -23,9 +23,9 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (version + path for publishable crates)
-wowsunpack = { version = "0.24.0", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.25.0", path = "crates/wows-replays", default-features = false }
-wows_minimap_renderer = { version = "0.17.0", path = "crates/minimap-renderer", default-features = false }
+wowsunpack = { version = "0.25.0", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.26.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.18.0", path = "crates/minimap-renderer", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 # Shared UI dependencies
