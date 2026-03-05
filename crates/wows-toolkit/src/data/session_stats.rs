@@ -7,11 +7,11 @@ use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use crate::tab_state::ChartableStat;
+use crate::ui::replay_parser::Replay;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::personal_rating::PersonalRatingResult;
 use crate::util::personal_rating::ShipBattleStats;
-use crate::tab_state::ChartableStat;
-use crate::ui::replay_parser::Replay;
 
 /// Division filter for session stats.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

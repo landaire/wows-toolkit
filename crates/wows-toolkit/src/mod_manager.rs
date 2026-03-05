@@ -11,12 +11,12 @@ use rootcause::report;
 use tokio::runtime::Runtime;
 use tracing::error;
 
+use crate::data::wows_data::SharedWoWsData;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::DownloadProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerIndex;
-use crate::data::wows_data::SharedWoWsData;
 
 #[derive(Debug)]
 #[allow(dead_code)]

@@ -660,10 +660,7 @@ pub(super) fn extract_all_shots(
 
     // Also create timelines for ships that had health changes but no shot hits
     for (eid, hh) in health_histories {
-        timelines.entry(eid).or_insert_with(|| ShipShotTimeline {
-            hits: Vec::new(),
-            health_history: hh,
-        });
+        timelines.entry(eid).or_insert_with(|| ShipShotTimeline { hits: Vec::new(), health_history: hh });
     }
 
     let mut remaining = &replay_file.packet_data[..];

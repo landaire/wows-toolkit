@@ -37,19 +37,19 @@ use wowsunpack::game_params::types::ParamData;
 use crate::collab::Permissions;
 use crate::collab::SessionCommand;
 use crate::collab::SessionStatus;
-use crate::icons;
-use crate::util::replay_export::FlattenedVehicle;
-use crate::util::replay_export::Match;
 use crate::data::settings::ReplayGrouping;
 use crate::data::settings::ReplaySettings;
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::SharedWoWsData;
+use crate::icons;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::task::ReplaySource;
 use crate::task::ToastMessage;
 use crate::update_background_task;
-use crate::data::wows_data::GameAsset;
-use crate::data::wows_data::SharedWoWsData;
+use crate::util::replay_export::FlattenedVehicle;
+use crate::util::replay_export::Match;
 
 use damage_types::*;
 use egui::Color32;
@@ -99,13 +99,13 @@ use wowsunpack::game_params::types::Species;
 
 use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
-use crate::util::error::ToolkitError;
 use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
 use crate::util;
 use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
 use crate::util::build_wows_numbers_url;
+use crate::util::error::ToolkitError;
 use crate::util::player_color_for_team_relation;
 use crate::util::separate_number;
 
@@ -868,18 +868,16 @@ impl UiReport {
 
                         let longest_width = DAMAGE_DESCRIPTIONS
                             .iter()
-                            .filter(|(key, _)| {
-                                victim_data.get(*key).and_then(|v| v.as_u64()).is_some_and(|n| n > 0)
-                            })
+                            .filter(|(key, _)| victim_data.get(*key).and_then(|v| v.as_u64()).is_some_and(|n| n > 0))
                             .map(|(_, desc)| desc.len())
                             .max()
                             .unwrap_or_default()
                             + 1;
 
                         let mut per_type = Vec::new();
-                        let (all_damage, breakdowns): (u64, Vec<String>) = DAMAGE_DESCRIPTIONS
-                            .iter()
-                            .fold((0u64, Vec::new()), |(sum, mut lines), (key, description)| {
+                        let (all_damage, breakdowns): (u64, Vec<String>) = DAMAGE_DESCRIPTIONS.iter().fold(
+                            (0u64, Vec::new()),
+                            |(sum, mut lines), (key, description)| {
                                 let num = victim_data.get(*key).and_then(|v| v.as_u64()).unwrap_or(0);
                                 if num > 0 {
                                     per_type.push((key.to_string(), num));
@@ -887,7 +885,8 @@ impl UiReport {
                                     lines.push(format!("{description:<longest_width$}: {num_str}"));
                                 }
                                 (sum + num, lines)
-                            });
+                            },
+                        );
 
                         damage_interaction.damage_dealt = all_damage;
                         if damage_interaction.damage_dealt > 0 {
@@ -1418,8 +1417,7 @@ impl UiReport {
                             ui.label(hover_layout);
                             ui.separator();
                             ui.label(
-                                RichText::new(&interaction.1.damage_received_hover_text)
-                                    .font(FontId::monospace(12.0)),
+                                RichText::new(&interaction.1.damage_received_hover_text).font(FontId::monospace(12.0)),
                             );
                         });
                     }
@@ -1496,8 +1494,7 @@ impl UiReport {
                             ui.label(hover_layout);
                             ui.separator();
                             ui.label(
-                                RichText::new(&interaction.1.damage_dealt_hover_text)
-                                    .font(FontId::monospace(12.0)),
+                                RichText::new(&interaction.1.damage_dealt_hover_text).font(FontId::monospace(12.0)),
                             );
                         });
                     }

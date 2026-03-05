@@ -34,17 +34,17 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::WorldOfWarshipsData;
+use crate::twitch::TwitchState;
+use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::replay_parser::Replay;
+use crate::ui::replay_parser::SortOrder;
 use crate::util::build_tracker;
 use crate::util::error::ToolkitError;
 use crate::util::game_params::load_game_params;
 use crate::util::replay_export::FlattenedVehicle;
 use crate::util::replay_export::Match;
-use crate::twitch::TwitchState;
-use crate::ui::player_tracker::PlayerTracker;
-use crate::ui::replay_parser::Replay;
-use crate::ui::replay_parser::SortOrder;
-use crate::data::wows_data::GameAsset;
-use crate::data::wows_data::WorldOfWarshipsData;
 
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;

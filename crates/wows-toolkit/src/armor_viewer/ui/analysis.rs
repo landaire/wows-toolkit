@@ -14,8 +14,8 @@ use crate::armor_viewer::state::AnalysisTab;
 use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::ArmorViewerState;
 use crate::armor_viewer::state::StoredTrajectory;
-use crate::icons;
 use crate::data::wows_data::SharedWoWsData;
+use crate::icons;
 /// Actions collected from the trajectory tab that must be applied to the active
 /// pane after the window has been drawn (because the window borrows state immutably).
 #[derive(Default)]

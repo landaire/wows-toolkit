@@ -21,14 +21,15 @@ use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_types::WorldPos;
 
-use crate::data::cap_layout::CapLayout;
-use crate::data::cap_layout::CapLayoutDb;
-use crate::data::cap_layout::CapLayoutKey;
-use crate::data::cap_layout::CapPointLayout;
 use crate::collab;
 use crate::collab::peer::LocalCapPointEvent;
 use crate::collab::peer::LocalEvent;
 use crate::collab::protocol::WireCapPoint;
+use crate::data::cap_layout::CapLayout;
+use crate::data::cap_layout::CapLayoutDb;
+use crate::data::cap_layout::CapLayoutKey;
+use crate::data::cap_layout::CapPointLayout;
+use crate::data::wows_data::SharedWoWsData;
 use crate::replay::minimap_view::collab_annotation_to_local;
 use crate::replay::minimap_view::get_my_user_id;
 use crate::replay::minimap_view::handle_map_click_ping;
@@ -37,7 +38,6 @@ use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
 use crate::replay::renderer::RendererAssetCache;
-use crate::data::wows_data::SharedWoWsData;
 
 use super::Annotation;
 use super::AnnotationState;

@@ -8,7 +8,8 @@
 //! - Retries initial connection with exponential backoff
 //! - Auto-reconnects on disconnect (up to `MAX_RECONNECT_ATTEMPTS`)
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -126,15 +127,7 @@ async fn run_connection(
         }
 
         // Connect + handshake with retries.
-        let (send, recv) = match connect_with_retries(
-            &endpoint,
-            &addr,
-            &display_name,
-            &events,
-            &egui_ctx,
-        )
-        .await
-        {
+        let (send, recv) = match connect_with_retries(&endpoint, &addr, &display_name, &events, &egui_ctx).await {
             Ok(pair) => pair,
             Err(e) => {
                 events.borrow_mut().push_back(ConnectionEvent::Error(e));
@@ -161,9 +154,7 @@ async fn run_connection(
                     break;
                 }
 
-                tracing::info!(
-                    "Connection lost ({msg}), reconnecting ({reconnect_count}/{MAX_RECONNECT_ATTEMPTS})..."
-                );
+                tracing::info!("Connection lost ({msg}), reconnecting ({reconnect_count}/{MAX_RECONNECT_ATTEMPTS})...");
                 events.borrow_mut().push_back(ConnectionEvent::Reconnecting {
                     attempt: reconnect_count,
                     max_attempts: MAX_RECONNECT_ATTEMPTS,
@@ -214,9 +205,7 @@ async fn connect_with_retries(
         }
     }
 
-    Err(format!(
-        "Failed to connect after {MAX_CONNECT_RETRIES} attempts: {last_err}"
-    ))
+    Err(format!("Failed to connect after {MAX_CONNECT_RETRIES} attempts: {last_err}"))
 }
 
 enum ConnectError {
@@ -242,16 +231,11 @@ async fn try_connect_and_handshake(
         .await
         .map_err(|e| ConnectError::Transient(format!("Failed to connect: {e}")))?;
 
-    let (mut send, mut recv) = conn
-        .open_bi()
-        .await
-        .map_err(|e| ConnectError::Transient(format!("Failed to open bi stream: {e}")))?;
+    let (mut send, mut recv) =
+        conn.open_bi().await.map_err(|e| ConnectError::Transient(format!("Failed to open bi stream: {e}")))?;
 
     // Send Join message.
-    let join_msg = PeerMessage::Join {
-        name: display_name.to_string(),
-        client_type: ClientType::Web,
-    };
+    let join_msg = PeerMessage::Join { name: display_name.to_string(), client_type: ClientType::Web };
     write_peer_message(&mut send, &join_msg)
         .await
         .map_err(|e| ConnectError::Transient(format!("Failed to send Join: {e}")))?;
@@ -263,12 +247,7 @@ async fn try_connect_and_handshake(
         .ok_or_else(|| ConnectError::Transient("Host closed connection before sending SessionInfo".to_string()))?;
 
     match session_info {
-        PeerMessage::SessionInfo {
-            peers,
-            assigned_identity,
-            frame_source_id,
-            ..
-        } => {
+        PeerMessage::SessionInfo { peers, assigned_identity, frame_source_id, .. } => {
             let host_user_id = peers.first().map(|p| p.user_id).unwrap_or(0);
             events.borrow_mut().push_back(ConnectionEvent::Connected {
                 my_user_id: assigned_identity.user_id,
@@ -291,9 +270,7 @@ async fn try_connect_and_handshake(
             Ok((send, recv))
         }
         PeerMessage::Rejected { reason } => Err(ConnectError::Rejected(reason)),
-        other => Err(ConnectError::Transient(format!(
-            "Expected SessionInfo, got: {other:?}"
-        ))),
+        other => Err(ConnectError::Transient(format!("Expected SessionInfo, got: {other:?}"))),
     }
 }
 
@@ -410,9 +387,7 @@ async fn run_message_loop(
         // Check for host timeout.
         if last_received.get().elapsed().as_secs() >= HEARTBEAT_TIMEOUT_SECS {
             tracing::warn!("Host heartbeat timeout");
-            *disconnect_reason.borrow_mut() = Some(format!(
-                "No response from host for {HEARTBEAT_TIMEOUT_SECS}s"
-            ));
+            *disconnect_reason.borrow_mut() = Some(format!("No response from host for {HEARTBEAT_TIMEOUT_SECS}s"));
             done.set(true);
             break;
         }

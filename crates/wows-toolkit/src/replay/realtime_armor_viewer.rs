@@ -1372,8 +1372,11 @@ impl RealtimeArmorViewer {
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let hull_result =
-                                    crate::armor_viewer::ui::tab::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
+                                let hull_result = crate::armor_viewer::ui::tab::draw_hull_visibility_popover(
+                                    ui,
+                                    &mut self.pane,
+                                    &armor,
+                                );
                                 if hull_result.zone_changed {
                                     zone_changed = true;
                                 }
@@ -1451,7 +1454,12 @@ impl RealtimeArmorViewer {
         if let Some(new_lod) = lod_change_signal.into_inner()
             && let Some(param_index) = self.pane.selected_ship.clone()
         {
-            crate::armor_viewer::ui::tab::start_hull_lod_reload(&mut self.pane, &self.ship_assets, &param_index, new_lod);
+            crate::armor_viewer::ui::tab::start_hull_lod_reload(
+                &mut self.pane,
+                &self.ship_assets,
+                &param_index,
+                new_lod,
+            );
         }
 
         // Sidebar hover highlight lifecycle

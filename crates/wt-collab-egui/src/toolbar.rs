@@ -79,20 +79,14 @@ fn ship_species_button(
 /// `horizontal_wrapped` see the correct size for wrapping decisions.
 /// On the first frame (no cached width), uses `f32::INFINITY` so items get
 /// full space; from the second frame onward the tight width is used.
-fn toolbar_group(
-    ui: &mut egui::Ui,
-    id_salt: impl std::hash::Hash,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
+fn toolbar_group(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, add_contents: impl FnOnce(&mut egui::Ui)) {
     let id = ui.id().with(id_salt);
     let prev_width = ui.data(|d| d.get_temp::<f32>(id));
     let height = ui.spacing().interact_size.y;
     // Use cached width (with a small margin) so the outer wrapping layout
     // sees the real size. First frame: use INFINITY so nothing is clipped.
     let alloc_width = prev_width.map_or(f32::INFINITY, |w| w + 1.0);
-    let r = ui.allocate_ui(egui::vec2(alloc_width, height), |ui| {
-        ui.horizontal(|ui| add_contents(ui))
-    });
+    let r = ui.allocate_ui(egui::vec2(alloc_width, height), |ui| ui.horizontal(|ui| add_contents(ui)));
     // Cache the inner horizontal's actual width for next frame.
     let inner_width = r.inner.response.rect.width();
     ui.data_mut(|d| d.insert_temp(id, inner_width));
@@ -164,8 +158,11 @@ pub fn draw_annotation_toolbar(
                         ui.horizontal(|ui| {
                             for species in &SHIP_SPECIES {
                                 if ship_species_button(ui, species, FRIENDLY_COLOR, ship_icons) {
-                                    ann.active_tool =
-                                        PaintTool::PlacingShip { species: species.to_string(), friendly: true, yaw: 0.0 };
+                                    ann.active_tool = PaintTool::PlacingShip {
+                                        species: species.to_string(),
+                                        friendly: true,
+                                        yaw: 0.0,
+                                    };
                                 }
                             }
                         });
@@ -180,8 +177,11 @@ pub fn draw_annotation_toolbar(
                         ui.horizontal(|ui| {
                             for species in &SHIP_SPECIES {
                                 if ship_species_button(ui, species, ENEMY_COLOR, ship_icons) {
-                                    ann.active_tool =
-                                        PaintTool::PlacingShip { species: species.to_string(), friendly: false, yaw: 0.0 };
+                                    ann.active_tool = PaintTool::PlacingShip {
+                                        species: species.to_string(),
+                                        friendly: false,
+                                        yaw: 0.0,
+                                    };
                                 }
                             }
                         });
@@ -248,7 +248,11 @@ pub fn draw_annotation_toolbar(
 
             // ── Color picker + presets ──
             toolbar_group(ui, "colors", |ui| {
-                egui::color_picker::color_edit_button_srgba(ui, &mut ann.paint_color, egui::color_picker::Alpha::Opaque);
+                egui::color_picker::color_edit_button_srgba(
+                    ui,
+                    &mut ann.paint_color,
+                    egui::color_picker::Alpha::Opaque,
+                );
                 let swatch_size = egui::vec2(16.0, 16.0);
                 for &(color, name) in PRESET_COLORS {
                     let selected = ann.paint_color == color;
@@ -304,9 +308,8 @@ pub fn draw_annotation_toolbar(
             // Lock icon should remain visible even though the rest is disabled.
             // Use add_enabled() so this single widget is interactive.
             ui.separator();
-            ui.add_enabled(true, egui::Label::new(
-                egui::RichText::new(icons::LOCK).color(Color32::YELLOW),
-            )).on_hover_text("Annotations locked by host");
+            ui.add_enabled(true, egui::Label::new(egui::RichText::new(icons::LOCK).color(Color32::YELLOW)))
+                .on_hover_text("Annotations locked by host");
         }
     });
 

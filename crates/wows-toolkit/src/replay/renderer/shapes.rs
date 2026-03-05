@@ -80,7 +80,13 @@ pub(super) fn render_annotation(
     painter: &egui::Painter,
     map_space_size: Option<f32>,
 ) {
-    crate::replay::minimap_view::shapes::render_annotation(ann, transform, Some(&textures.ship_icons), painter, map_space_size);
+    crate::replay::minimap_view::shapes::render_annotation(
+        ann,
+        transform,
+        Some(&textures.ship_icons),
+        painter,
+        map_space_size,
+    );
 }
 
 /// Render a preview of the active tool at the cursor position.

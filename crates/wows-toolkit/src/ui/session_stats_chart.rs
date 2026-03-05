@@ -15,11 +15,11 @@ use std::collections::HashMap;
 
 use wows_replays::types::GameParamId;
 
-use crate::util::personal_rating::PersonalRatingData;
-use crate::util::personal_rating::ShipBattleStats;
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::PerformanceInfo;
 use crate::tab_state::ChartableStat;
+use crate::util::personal_rating::PersonalRatingData;
+use crate::util::personal_rating::ShipBattleStats;
 
 /// Generate a consistent color from a ship name using its hash.
 /// Uses HSV with fixed saturation and value for good contrast.

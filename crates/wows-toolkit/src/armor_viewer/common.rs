@@ -174,8 +174,11 @@ pub(crate) fn load_ship_armor(
     let mut max = [f32::MIN; 3];
     for mesh in &meshes {
         for pos in &mesh.positions {
-            let p =
-                if let Some(t) = &mesh.transform { crate::armor_viewer::ui::tab::transform_point(t, *pos) } else { *pos };
+            let p = if let Some(t) = &mesh.transform {
+                crate::armor_viewer::ui::tab::transform_point(t, *pos)
+            } else {
+                *pos
+            };
             for i in 0..3 {
                 min[i] = min[i].min(p[i]);
                 max[i] = max[i].max(p[i]);
@@ -238,8 +241,11 @@ pub(crate) fn load_ship_armor(
     // Extend bounding box with hull meshes
     for mesh in &hull_meshes {
         for pos in &mesh.positions {
-            let p =
-                if let Some(t) = &mesh.transform { crate::armor_viewer::ui::tab::transform_point(t, *pos) } else { *pos };
+            let p = if let Some(t) = &mesh.transform {
+                crate::armor_viewer::ui::tab::transform_point(t, *pos)
+            } else {
+                *pos
+            };
             for i in 0..3 {
                 min[i] = min[i].min(p[i]);
                 max[i] = max[i].max(p[i]);

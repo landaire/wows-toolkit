@@ -41,7 +41,6 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 use wows_replays::analyzer::battle_controller::GameMessage;
 
-use crate::util::error::ToolkitError;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task;
@@ -51,6 +50,7 @@ use crate::task::NetworkJob;
 use crate::task::NetworkResult;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::ui::file_unpacker::UNPACKER_STOP;
+use crate::util::error::ToolkitError;
 
 #[macro_export]
 macro_rules! update_background_task {
@@ -418,10 +418,7 @@ impl WowsToolkitApp {
 
         if constants_path.exists() {
             if let Ok(constants_data) = std::fs::read(&constants_path) {
-                update_background_task!(
-                    self.tab_state.background_tasks,
-                    Some(task::load_constants(constants_data))
-                );
+                update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_data)));
             } else {
                 tracing::error!("failed to read constants file");
             }
@@ -810,9 +807,10 @@ impl WowsToolkitApp {
 
                     if track_session_stats {
                         let replay_guard = replay.read();
-                        if let Some(stat) =
-                            crate::data::session_stats::PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
-                        {
+                        if let Some(stat) = crate::data::session_stats::PerGameStat::from_replay(
+                            &replay_guard,
+                            &replay_guard.resource_loader,
+                        ) {
                             self.tab_state.settings.session_stats.add_game(stat);
                         }
                         drop(replay_guard);

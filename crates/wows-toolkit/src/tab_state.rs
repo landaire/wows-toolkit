@@ -21,11 +21,13 @@ use tracing::debug;
 use wows_replays::ReplayFile;
 use wowsunpack::vfs::VfsPath;
 
-use crate::util::personal_rating::PersonalRatingData;
-use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::data::session_stats::PerGameStat;
 use crate::data::settings::Settings;
 use crate::data::settings::default_bool;
+use crate::data::wows_data::ReplayDependencies;
+use crate::data::wows_data::ReplayLoader;
+use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::WoWsDataMap;
 use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
@@ -38,15 +40,13 @@ use crate::ui::file_unpacker::ResourceBrowserState;
 use crate::ui::file_unpacker::UnpackerProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerInfo;
+use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::ReplayTab;
 use crate::ui::replay_parser::SharedReplayParserTabState;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
-use crate::data::wows_data::ReplayDependencies;
-use crate::data::wows_data::ReplayLoader;
-use crate::data::wows_data::SharedWoWsData;
-use crate::data::wows_data::WoWsDataMap;
+use crate::util::personal_rating::PersonalRatingData;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 

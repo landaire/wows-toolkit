@@ -42,9 +42,9 @@ use egui_taffy::taffy::prelude::length;
 
 use crate::collab::SessionStatus;
 use crate::collab::peer::FrameBroadcast;
-use crate::icons;
 use crate::data::settings::SavedRenderOptions;
 use crate::data::wows_data::SharedWoWsData;
+use crate::icons;
 
 use crate::util::controls::CommandGroup;
 /// Approximate number of frame snapshots per second of game time.
@@ -350,7 +350,6 @@ impl RealtimeArmorBridge {
             shot_timeline: None,
         }
     }
-
 }
 
 /// A request from the context menu to open a realtime armor viewer.

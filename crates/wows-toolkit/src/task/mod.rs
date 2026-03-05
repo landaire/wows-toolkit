@@ -10,12 +10,12 @@ use std::sync::mpsc::TryRecvError;
 use parking_lot::RwLock;
 use rootcause::Report;
 
-use crate::util::error::ToolkitError;
+use crate::data::wows_data::WorldOfWarshipsData;
 #[cfg(feature = "mod_manager")]
 use crate::mod_manager::ModTaskCompletion;
 use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::ui::replay_parser::Replay;
-use crate::data::wows_data::WorldOfWarshipsData;
+use crate::util::error::ToolkitError;
 
 /// Describes where a replay load request originated from.
 /// This determines what UI actions to take when the replay finishes loading.
@@ -313,4 +313,3 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
         }
     }
 }
-

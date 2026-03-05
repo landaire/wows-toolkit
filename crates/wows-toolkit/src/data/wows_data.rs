@@ -18,7 +18,6 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
-use crate::util::error::ToolkitError;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
@@ -27,6 +26,7 @@ use crate::task::ReplaySource;
 use crate::task::load_wows_data_for_build;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
+use crate::util::error::ToolkitError;
 
 pub struct GameAsset {
     pub path: String,

@@ -7,17 +7,17 @@ use egui_dock::TabViewer;
 use egui_dock::tab_viewer::OnCloseResponse;
 
 use crate::app::ToolkitTabViewer;
-use crate::icon_str;
-use crate::icons;
 use crate::data::session_stats::DivisionFilter;
 use crate::data::session_stats::PerformanceInfo;
+use crate::data::wows_data::GameAsset;
+use crate::icon_str;
+use crate::icons;
 use crate::tab_state::ChartMode;
 use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::util::separate_number;
-use crate::data::wows_data::GameAsset;
 use std::cmp::Reverse;
 use std::sync::Arc;
 

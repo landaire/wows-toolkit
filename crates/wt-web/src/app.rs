@@ -552,7 +552,8 @@ impl WebApp {
                     ui.label("Connecting to host...");
                 }
                 ConnectionStatus::Connected => {
-                    let other_count = self.session.connected_users.iter().filter(|u| u.id != self.session.my_user_id).count();
+                    let other_count =
+                        self.session.connected_users.iter().filter(|u| u.id != self.session.my_user_id).count();
                     ui.label(format!("Connected \u{2014} {other_count} other user(s)"));
                     if ui.small_button("Disconnect").clicked() {
                         disconnect = true;
@@ -576,8 +577,10 @@ impl WebApp {
                     }
 
                     // Show tabs the user explicitly closed so they can re-open them.
-                    let closed: Vec<_> = self.closed_tabs.iter().filter_map(|tab| {
-                        match tab {
+                    let closed: Vec<_> = self
+                        .closed_tabs
+                        .iter()
+                        .filter_map(|tab| match tab {
                             WebTab::TacticsBoard(id) => {
                                 let b = self.session.tactics_boards.get(id)?;
                                 let name = if b.display_name.is_empty() { &b.map_name } else { &b.display_name };
@@ -589,8 +592,8 @@ impl WebApp {
                                 Some((tab.clone(), format!("Replay \u{2014} {name}")))
                             }
                             _ => None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     if !closed.is_empty() {
                         ui.add_space(16.0);
@@ -605,9 +608,7 @@ impl WebApp {
                 ConnectionStatus::Reconnecting { attempt, max_attempts } => {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(format!(
-                            "Connection lost. Reconnecting ({attempt}/{max_attempts})..."
-                        ));
+                        ui.label(format!("Connection lost. Reconnecting ({attempt}/{max_attempts})..."));
                     });
                 }
                 ConnectionStatus::Error(msg) => {
@@ -972,15 +973,23 @@ impl WebApp {
             // View name
             match &self.session.active_view {
                 ActiveView::TacticsBoard(id) => {
-                    let name = self.session.tactics_boards.get(id).map(|b| {
-                        if b.display_name.is_empty() { b.map_name.as_str() } else { b.display_name.as_str() }
-                    }).unwrap_or("Tactics Board");
+                    let name = self
+                        .session
+                        .tactics_boards
+                        .get(id)
+                        .map(|b| if b.display_name.is_empty() { b.map_name.as_str() } else { b.display_name.as_str() })
+                        .unwrap_or("Tactics Board");
                     ui.label(format!("Tactics: {name}"));
                 }
                 ActiveView::Replay(id) => {
-                    let name = self.session.replay_views.get(id).map(|v| {
-                        if v.display_name.is_empty() { v.replay_name.as_str() } else { v.display_name.as_str() }
-                    }).unwrap_or("Replay");
+                    let name =
+                        self.session
+                            .replay_views
+                            .get(id)
+                            .map(|v| {
+                                if v.display_name.is_empty() { v.replay_name.as_str() } else { v.display_name.as_str() }
+                            })
+                            .unwrap_or("Replay");
                     ui.label(format!("Replay: {name}"));
                 }
                 ActiveView::Lobby => {
