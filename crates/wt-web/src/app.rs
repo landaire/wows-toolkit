@@ -128,6 +128,8 @@ enum ConnectionStatus {
     Connecting,
     /// Connected and receiving data.
     Connected,
+    /// Auto-reconnecting after a drop.
+    Reconnecting { attempt: u32, max_attempts: u32 },
     /// Connection failed or was rejected.
     Error(String),
 }
@@ -179,6 +181,19 @@ impl WebApp {
         self.commands = Some(commands);
     }
 
+    fn disconnect(&mut self) {
+        if let Some(ref commands) = self.commands {
+            commands.borrow_mut().push_back(ConnectionCommand::Disconnect);
+        }
+        self.events = None;
+        self.commands = None;
+        self.connection_status = ConnectionStatus::NotConnected;
+        self.session = Default::default();
+        self.assets = Default::default();
+        self.asset_request_count = 0;
+        self.last_asset_request = None;
+    }
+
     fn send_message(&self, msg: PeerMessage) {
         if let Some(ref commands) = self.commands {
             commands.borrow_mut().push_back(ConnectionCommand::Send(Box::new(msg)));
@@ -208,7 +223,11 @@ impl WebApp {
                     self.asset_request_count = 0;
                     self.last_asset_request = None;
 
-                    // Add self cursor
+                    // Clear old session state (handles reconnect case).
+                    self.session.connected_users.clear();
+                    self.session.cursors.clear();
+
+                    // Add self cursor.
                     self.session.cursors.push(UserCursor {
                         user_id: my_user_id,
                         name: my_name,
@@ -225,6 +244,11 @@ impl WebApp {
                 }
                 ConnectionEvent::Error(msg) => {
                     tracing::warn!("Connection error: {msg}");
+                    self.connection_status = ConnectionStatus::Error(msg);
+                }
+                ConnectionEvent::Reconnecting { attempt, max_attempts } => {
+                    tracing::info!("Reconnecting ({attempt}/{max_attempts})...");
+                    self.connection_status = ConnectionStatus::Reconnecting { attempt, max_attempts };
                 }
                 ConnectionEvent::Disconnected => {
                     self.connection_status = ConnectionStatus::Error("Disconnected".to_string());
@@ -479,6 +503,7 @@ impl WebApp {
     }
 
     fn render_lobby(&mut self, ui: &mut egui::Ui) {
+        let mut disconnect = false;
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
             ui.heading("WoWs Toolkit - Tactics Board");
@@ -521,7 +546,28 @@ impl WebApp {
                     ui.label("Connecting to host...");
                 }
                 ConnectionStatus::Connected => {
-                    ui.label(format!("Connected \u{2014} {} user(s)", self.session.connected_users.len()));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Connected \u{2014} {} user(s)", self.session.connected_users.len()));
+                        if ui.small_button("Disconnect").clicked() {
+                            disconnect = true;
+                        }
+                    });
+
+                    // Show asset loading status
+                    if self.assets.is_empty() {
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            if self.asset_request_count >= 5 {
+                                ui.label("Failed to receive assets from host.");
+                            } else {
+                                ui.label(format!(
+                                    "Receiving map data from host... (attempt {}/5)",
+                                    self.asset_request_count.max(1)
+                                ));
+                            }
+                        });
+                    }
 
                     // Show closeable windows that can be re-opened.
                     let closed_boards: Vec<(u64, String)> = self
@@ -563,6 +609,14 @@ impl WebApp {
                         }
                     }
                 }
+                ConnectionStatus::Reconnecting { attempt, max_attempts } => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!(
+                            "Connection lost. Reconnecting ({attempt}/{max_attempts})..."
+                        ));
+                    });
+                }
                 ConnectionStatus::Error(msg) => {
                     ui.colored_label(Color32::RED, msg);
                     ui.add_space(10.0);
@@ -572,6 +626,9 @@ impl WebApp {
                 }
             }
         });
+        if disconnect {
+            self.disconnect();
+        }
     }
 
     fn render_map_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1038,9 +1095,21 @@ impl TabViewer for WebTabViewer<'_> {
                 self.app.render_lobby(ui);
             }
             WebTab::TacticsBoard(_) | WebTab::Replay(_) => {
-                self.app.render_annotation_toolbar(ui);
-                ui.separator();
-                self.app.render_map_view(ui, self.ctx);
+                if self.app.assets.is_empty() {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 3.0);
+                        ui.spinner();
+                        if self.app.asset_request_count >= 5 {
+                            ui.label("Failed to receive map data from host.");
+                        } else {
+                            ui.label("Waiting for map data from host...");
+                        }
+                    });
+                } else {
+                    self.app.render_annotation_toolbar(ui);
+                    ui.separator();
+                    self.app.render_map_view(ui, self.ctx);
+                }
             }
         }
     }

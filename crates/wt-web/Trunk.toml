@@ -1,0 +1,4 @@
+[build]
+# Append content hashes to output filenames (e.g., ui-a1b2c3d4.js)
+# so browsers automatically fetch new versions without stale caches.
+filehash = true

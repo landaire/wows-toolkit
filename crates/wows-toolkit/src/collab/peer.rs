@@ -846,119 +846,8 @@ async fn host_accept_peer(
         return;
     }
 
-    // Send asset bundle to web clients (pre-serialized bytes, written directly).
-    if matches!(&client_type, ClientType::Web) {
-        if let Some(ref bundle_bytes) = web_asset_bundle {
-            debug!("Sending AssetBundle ({} bytes) to web peer {user_id}", bundle_bytes.len());
-            if send.write_all(bundle_bytes).await.is_err() {
-                warn!("Failed to send AssetBundle to peer {user_id}");
-                return;
-            }
-        } else {
-            debug!("No AssetBundle available for web peer {user_id}");
-        }
-    }
-
-    // Send current permissions.
-    let perm_msg = PeerMessage::Permissions {
-        annotations_locked: current_perms.annotations_locked,
-        settings_locked: current_perms.settings_locked,
-    };
-    if write_peer_message(&mut send, &perm_msg).await.is_err() {
-        return;
-    }
-
-    // Send current render options.
-    let opts_msg = PeerMessage::RenderOptions(initial_render_options.clone());
-    if write_peer_message(&mut send, &opts_msg).await.is_err() {
-        return;
-    }
-
-    // Send current replay-context annotations if any.
-    let ann_msg = {
-        let s = ui_state.lock();
-        s.current_annotation_sync.as_ref().and_then(|sync| {
-            if sync.annotations.is_empty() {
-                None
-            } else {
-                Some(PeerMessage::AnnotationSync {
-                    board_id: None,
-                    annotations: sync.annotations.clone(),
-                    owners: sync.owners.clone(),
-                    ids: sync.ids.clone(),
-                })
-            }
-        })
-    };
-    if let Some(msg) = ann_msg
-        && write_peer_message(&mut send, &msg).await.is_err()
-    {
-        return;
-    }
-
-    // Send all open tactics boards (map + cap points + annotations per board).
-    let board_msgs: Vec<_> = {
-        let s = ui_state.lock();
-        s.tactics_boards
-            .iter()
-            .map(|(&bid, board)| {
-                let tmap = PeerMessage::TacticsMapOpened {
-                    board_id: bid,
-                    owner_user_id: board.owner_user_id,
-                    map_name: board.tactics_map.map_name.clone(),
-                    display_name: board.tactics_map.display_name.clone(),
-                    map_id: board.tactics_map.map_id,
-                    map_image_png: board.tactics_map.map_image_png.clone(),
-                    map_info: board.tactics_map.map_info.clone(),
-                };
-                let cap = if board.cap_point_sync.cap_points.is_empty() {
-                    None
-                } else {
-                    Some(PeerMessage::CapPointSync {
-                        board_id: bid,
-                        cap_points: board.cap_point_sync.cap_points.clone(),
-                    })
-                };
-                let ann = if board.annotation_sync.annotations.is_empty() {
-                    None
-                } else {
-                    Some(PeerMessage::AnnotationSync {
-                        board_id: Some(bid),
-                        annotations: board.annotation_sync.annotations.clone(),
-                        owners: board.annotation_sync.owners.clone(),
-                        ids: board.annotation_sync.ids.clone(),
-                    })
-                };
-                (tmap, cap, ann)
-            })
-            .collect()
-    };
-    for (tmap_msg, cap_msg, ann_msg) in board_msgs {
-        if write_peer_message(&mut send, &tmap_msg).await.is_err() {
-            return;
-        }
-        if let Some(msg) = cap_msg
-            && write_peer_message(&mut send, &msg).await.is_err()
-        {
-            return;
-        }
-        if let Some(msg) = ann_msg
-            && write_peer_message(&mut send, &msg).await.is_err()
-        {
-            return;
-        }
-    }
-
-    // Announce to all existing peers.
-    // Since we don't have the new joiner's endpoint addr, existing peers can't
-    // connect to them. Instead the new joiner won't try to connect to peers
-    // (since the peer list only has the host). The host will relay messages.
-    // For true mesh, we'd need the joiner to share their endpoint addr.
-    // BUT: since all connections go through iroh's relay anyway, and the host
-    // handles fan-out, this simplified model works. Each "peer" connection is
-    // actually a host-mediated link using per-peer channels.
-    //
-    // Notify all existing peers about the new user.
+    // Announce the new peer to UI and existing peers immediately after handshake,
+    // before sending large payloads (AssetBundle etc.) that may take a while.
     let join_notify = PeerMessage::UserJoined { user_id, name: client_name.clone(), color };
     broadcast_to_mesh(&mesh, &join_notify);
 
@@ -1000,6 +889,130 @@ async fn host_accept_peer(
     }
     let _ = event_tx.send(SessionEvent::UserJoined(user));
     info!("Peer {user_id} ({client_name}) joined session");
+
+    // Send setup data (asset bundle, permissions, render options, annotations,
+    // tactics boards). If any send fails, we fall through to cleanup below.
+    let setup_ok = async {
+        // Send asset bundle to web clients (pre-serialized bytes, written directly).
+        if matches!(&client_type, ClientType::Web) {
+            if let Some(ref bundle_bytes) = web_asset_bundle {
+                debug!("Sending AssetBundle ({} bytes) to web peer {user_id}", bundle_bytes.len());
+                if send.write_all(bundle_bytes).await.is_err() {
+                    warn!("Failed to send AssetBundle to peer {user_id}");
+                    return false;
+                }
+            } else {
+                debug!("No AssetBundle available for web peer {user_id}");
+            }
+        }
+
+        // Send current permissions.
+        let perm_msg = PeerMessage::Permissions {
+            annotations_locked: current_perms.annotations_locked,
+            settings_locked: current_perms.settings_locked,
+        };
+        if write_peer_message(&mut send, &perm_msg).await.is_err() {
+            return false;
+        }
+
+        // Send current render options.
+        let opts_msg = PeerMessage::RenderOptions(initial_render_options.clone());
+        if write_peer_message(&mut send, &opts_msg).await.is_err() {
+            return false;
+        }
+
+        // Send current replay-context annotations if any.
+        let ann_msg = {
+            let s = ui_state.lock();
+            s.current_annotation_sync.as_ref().and_then(|sync| {
+                if sync.annotations.is_empty() {
+                    None
+                } else {
+                    Some(PeerMessage::AnnotationSync {
+                        board_id: None,
+                        annotations: sync.annotations.clone(),
+                        owners: sync.owners.clone(),
+                        ids: sync.ids.clone(),
+                    })
+                }
+            })
+        };
+        if let Some(msg) = ann_msg
+            && write_peer_message(&mut send, &msg).await.is_err()
+        {
+            return false;
+        }
+
+        // Send all open tactics boards (map + cap points + annotations per board).
+        let board_msgs: Vec<_> = {
+            let s = ui_state.lock();
+            s.tactics_boards
+                .iter()
+                .map(|(&bid, board)| {
+                    let tmap = PeerMessage::TacticsMapOpened {
+                        board_id: bid,
+                        owner_user_id: board.owner_user_id,
+                        map_name: board.tactics_map.map_name.clone(),
+                        display_name: board.tactics_map.display_name.clone(),
+                        map_id: board.tactics_map.map_id,
+                        map_image_png: board.tactics_map.map_image_png.clone(),
+                        map_info: board.tactics_map.map_info.clone(),
+                    };
+                    let cap = if board.cap_point_sync.cap_points.is_empty() {
+                        None
+                    } else {
+                        Some(PeerMessage::CapPointSync {
+                            board_id: bid,
+                            cap_points: board.cap_point_sync.cap_points.clone(),
+                        })
+                    };
+                    let ann = if board.annotation_sync.annotations.is_empty() {
+                        None
+                    } else {
+                        Some(PeerMessage::AnnotationSync {
+                            board_id: Some(bid),
+                            annotations: board.annotation_sync.annotations.clone(),
+                            owners: board.annotation_sync.owners.clone(),
+                            ids: board.annotation_sync.ids.clone(),
+                        })
+                    };
+                    (tmap, cap, ann)
+                })
+                .collect()
+        };
+        for (tmap_msg, cap_msg, ann_msg) in board_msgs {
+            if write_peer_message(&mut send, &tmap_msg).await.is_err() {
+                return false;
+            }
+            if let Some(msg) = cap_msg
+                && write_peer_message(&mut send, &msg).await.is_err()
+            {
+                return false;
+            }
+            if let Some(msg) = ann_msg
+                && write_peer_message(&mut send, &msg).await.is_err()
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+    .await;
+
+    if !setup_ok {
+        // Clean up the mesh/UI registration we did above.
+        mesh.lock().peers.remove(&user_id);
+        {
+            let mut s = ui_state.lock();
+            s.connected_users.retain(|u| u.id != user_id);
+            s.cursors.retain(|c| c.user_id != user_id);
+        }
+        let leave_msg = PeerMessage::UserLeft { user_id };
+        broadcast_to_mesh(&mesh, &leave_msg);
+        let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: client_name, timed_out: false });
+        return;
+    }
 
     // Spawn a dedicated reader task so that read_peer_message is never
     // cancelled mid-read by a tokio::select! branch (cancelling a read_exact
