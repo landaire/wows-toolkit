@@ -568,7 +568,7 @@ impl TacticsBoardViewer {
                 .with_inner_size([800.0, 850.0])
                 .with_min_inner_size([400.0, 450.0]),
             move |ctx, _class| {
-                if !open.load(Ordering::Relaxed) {
+                if !open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
                     return;
                 }
 

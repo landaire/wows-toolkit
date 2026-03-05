@@ -70,6 +70,34 @@ fn ship_species_button(
     }
 }
 
+// ─── Toolbar Group Helper ──────────────────────────────────────────────────
+
+/// Draw a group of toolbar items that stay together when wrapping.
+///
+/// Uses the group's width from the previous frame (cached in egui temp storage)
+/// to allocate a fixed-width sub-Ui via `allocate_ui`. This lets the outer
+/// `horizontal_wrapped` see the correct size for wrapping decisions.
+/// On the first frame (no cached width), uses `f32::INFINITY` so items get
+/// full space; from the second frame onward the tight width is used.
+fn toolbar_group(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let id = ui.id().with(id_salt);
+    let prev_width = ui.data(|d| d.get_temp::<f32>(id));
+    let height = ui.spacing().interact_size.y;
+    // Use cached width (with a small margin) so the outer wrapping layout
+    // sees the real size. First frame: use INFINITY so nothing is clipped.
+    let alloc_width = prev_width.map_or(f32::INFINITY, |w| w + 1.0);
+    let r = ui.allocate_ui(egui::vec2(alloc_width, height), |ui| {
+        ui.horizontal(|ui| add_contents(ui))
+    });
+    // Cache the inner horizontal's actual width for next frame.
+    let inner_width = r.inner.response.rect.width();
+    ui.data_mut(|d| d.insert_temp(id, inner_width));
+}
+
 // ─── Annotation Toolbar (always-visible) ───────────────────────────────────
 
 /// Result of drawing the annotation toolbar or context menu.
@@ -111,153 +139,174 @@ pub fn draw_annotation_toolbar(
     let is_eraser = matches!(ann.active_tool, PaintTool::Eraser);
 
     ui.horizontal_wrapped(|ui| {
-        ui.add_enabled_ui(!locked, |ui| {
+        if locked {
+            ui.disable();
+        }
+        {
             // ── Select ──
-            if ui.selectable_label(is_none, icons::CURSOR).on_hover_text("Select").clicked() {
-                ann.active_tool = PaintTool::None;
-            }
+            toolbar_group(ui, "select", |ui| {
+                if ui.selectable_label(is_none, icons::CURSOR).on_hover_text("Select").clicked() {
+                    ann.active_tool = PaintTool::None;
+                }
+            });
 
             ui.separator();
 
             // ── Ship placement popups ──
-            let friendly_btn = ui
-                .button(egui::RichText::new(icons::ANCHOR).color(FRIENDLY_COLOR))
-                .on_hover_text("Place friendly ship");
-            egui::Popup::from_toggle_button_response(&friendly_btn)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.label(egui::RichText::new("Friendly Ships").color(FRIENDLY_COLOR).small());
-                    ui.horizontal(|ui| {
-                        for species in &SHIP_SPECIES {
-                            if ship_species_button(ui, species, FRIENDLY_COLOR, ship_icons) {
-                                ann.active_tool =
-                                    PaintTool::PlacingShip { species: species.to_string(), friendly: true, yaw: 0.0 };
+            toolbar_group(ui, "ships", |ui| {
+                let friendly_btn = ui
+                    .button(egui::RichText::new(icons::ANCHOR).color(FRIENDLY_COLOR))
+                    .on_hover_text("Place friendly ship");
+                egui::Popup::from_toggle_button_response(&friendly_btn)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        ui.label(egui::RichText::new("Friendly Ships").color(FRIENDLY_COLOR).small());
+                        ui.horizontal(|ui| {
+                            for species in &SHIP_SPECIES {
+                                if ship_species_button(ui, species, FRIENDLY_COLOR, ship_icons) {
+                                    ann.active_tool =
+                                        PaintTool::PlacingShip { species: species.to_string(), friendly: true, yaw: 0.0 };
+                                }
                             }
-                        }
+                        });
                     });
-                });
 
-            let enemy_btn =
-                ui.button(egui::RichText::new(icons::ANCHOR).color(ENEMY_COLOR)).on_hover_text("Place enemy ship");
-            egui::Popup::from_toggle_button_response(&enemy_btn)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.label(egui::RichText::new("Enemy Ships").color(ENEMY_COLOR).small());
-                    ui.horizontal(|ui| {
-                        for species in &SHIP_SPECIES {
-                            if ship_species_button(ui, species, ENEMY_COLOR, ship_icons) {
-                                ann.active_tool =
-                                    PaintTool::PlacingShip { species: species.to_string(), friendly: false, yaw: 0.0 };
+                let enemy_btn =
+                    ui.button(egui::RichText::new(icons::ANCHOR).color(ENEMY_COLOR)).on_hover_text("Place enemy ship");
+                egui::Popup::from_toggle_button_response(&enemy_btn)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        ui.label(egui::RichText::new("Enemy Ships").color(ENEMY_COLOR).small());
+                        ui.horizontal(|ui| {
+                            for species in &SHIP_SPECIES {
+                                if ship_species_button(ui, species, ENEMY_COLOR, ship_icons) {
+                                    ann.active_tool =
+                                        PaintTool::PlacingShip { species: species.to_string(), friendly: false, yaw: 0.0 };
+                                }
                             }
-                        }
+                        });
                     });
-                });
+            });
 
             ui.separator();
 
             // ── Drawing tools ──
-            if ui.selectable_label(is_arrow, icons::ARROW_BEND_UP_RIGHT).on_hover_text("Arrow").clicked() {
-                ann.active_tool = PaintTool::DrawingArrow { current_stroke: None };
-            }
-            if ui.selectable_label(is_freehand, icons::PAINT_BRUSH).on_hover_text("Freehand").clicked() {
-                ann.active_tool = PaintTool::Freehand { current_stroke: None };
-            }
-            if ui.selectable_label(is_line, icons::LINE_SEGMENT).on_hover_text("Line").clicked() {
-                ann.active_tool = PaintTool::DrawingLine { start: None };
-            }
-            {
-                let hover = if is_circle { "Circle (click to toggle fill)" } else { "Circle" };
-                if ui.selectable_label(is_circle, icons::CIRCLE).on_hover_text(hover).clicked() {
-                    if is_circle {
-                        ann.active_tool = PaintTool::DrawingCircle { filled: !circle_filled, center: None };
-                    } else {
-                        ann.active_tool = PaintTool::DrawingCircle { filled: false, center: None };
+            toolbar_group(ui, "draw_tools", |ui| {
+                if ui.selectable_label(is_arrow, icons::ARROW_BEND_UP_RIGHT).on_hover_text("Arrow").clicked() {
+                    ann.active_tool = PaintTool::DrawingArrow { current_stroke: None };
+                }
+                if ui.selectable_label(is_freehand, icons::PAINT_BRUSH).on_hover_text("Freehand").clicked() {
+                    ann.active_tool = PaintTool::Freehand { current_stroke: None };
+                }
+                if ui.selectable_label(is_line, icons::LINE_SEGMENT).on_hover_text("Line").clicked() {
+                    ann.active_tool = PaintTool::DrawingLine { start: None };
+                }
+                {
+                    let hover = if is_circle { "Circle (click to toggle fill)" } else { "Circle" };
+                    if ui.selectable_label(is_circle, icons::CIRCLE).on_hover_text(hover).clicked() {
+                        if is_circle {
+                            ann.active_tool = PaintTool::DrawingCircle { filled: !circle_filled, center: None };
+                        } else {
+                            ann.active_tool = PaintTool::DrawingCircle { filled: false, center: None };
+                        }
                     }
                 }
-            }
-            {
-                let hover = if is_rect { "Rectangle (click to toggle fill)" } else { "Rectangle" };
-                if ui.selectable_label(is_rect, icons::SQUARE).on_hover_text(hover).clicked() {
-                    if is_rect {
-                        ann.active_tool = PaintTool::DrawingRect { filled: !rect_filled, center: None };
-                    } else {
-                        ann.active_tool = PaintTool::DrawingRect { filled: false, center: None };
+                {
+                    let hover = if is_rect { "Rectangle (click to toggle fill)" } else { "Rectangle" };
+                    if ui.selectable_label(is_rect, icons::SQUARE).on_hover_text(hover).clicked() {
+                        if is_rect {
+                            ann.active_tool = PaintTool::DrawingRect { filled: !rect_filled, center: None };
+                        } else {
+                            ann.active_tool = PaintTool::DrawingRect { filled: false, center: None };
+                        }
                     }
                 }
-            }
-            {
-                let hover = if is_triangle { "Triangle (click to toggle fill)" } else { "Triangle" };
-                if ui.selectable_label(is_triangle, icons::TRIANGLE).on_hover_text(hover).clicked() {
-                    if is_triangle {
-                        ann.active_tool = PaintTool::DrawingTriangle { filled: !triangle_filled, center: None };
-                    } else {
-                        ann.active_tool = PaintTool::DrawingTriangle { filled: false, center: None };
+                {
+                    let hover = if is_triangle { "Triangle (click to toggle fill)" } else { "Triangle" };
+                    if ui.selectable_label(is_triangle, icons::TRIANGLE).on_hover_text(hover).clicked() {
+                        if is_triangle {
+                            ann.active_tool = PaintTool::DrawingTriangle { filled: !triangle_filled, center: None };
+                        } else {
+                            ann.active_tool = PaintTool::DrawingTriangle { filled: false, center: None };
+                        }
                     }
                 }
-            }
-            if ui.selectable_label(is_measure, icons::RULER).on_hover_text("Measurement").clicked() {
-                ann.active_tool = PaintTool::DrawingMeasurement { start: None };
-            }
+                if ui.selectable_label(is_measure, icons::RULER).on_hover_text("Measurement").clicked() {
+                    ann.active_tool = PaintTool::DrawingMeasurement { start: None };
+                }
+            });
 
             ui.separator();
 
-            if ui.selectable_label(is_eraser, icons::ERASER).on_hover_text("Eraser").clicked() {
-                ann.active_tool = PaintTool::Eraser;
-            }
+            toolbar_group(ui, "eraser", |ui| {
+                if ui.selectable_label(is_eraser, icons::ERASER).on_hover_text("Eraser").clicked() {
+                    ann.active_tool = PaintTool::Eraser;
+                }
+            });
 
             ui.separator();
 
             // ── Color picker + presets ──
-            egui::color_picker::color_edit_button_srgba(ui, &mut ann.paint_color, egui::color_picker::Alpha::Opaque);
-            let swatch_size = egui::vec2(16.0, 16.0);
-            for &(color, name) in PRESET_COLORS {
-                let selected = ann.paint_color == color;
-                let (rect, resp) = ui.allocate_exact_size(swatch_size, egui::Sense::click());
-                ui.painter().rect_filled(rect, egui::CornerRadius::same(3), color);
-                if selected {
-                    ui.painter().rect_stroke(
-                        rect,
-                        egui::CornerRadius::same(3),
-                        Stroke::new(2.0, Color32::WHITE),
-                        egui::StrokeKind::Outside,
-                    );
+            toolbar_group(ui, "colors", |ui| {
+                egui::color_picker::color_edit_button_srgba(ui, &mut ann.paint_color, egui::color_picker::Alpha::Opaque);
+                let swatch_size = egui::vec2(16.0, 16.0);
+                for &(color, name) in PRESET_COLORS {
+                    let selected = ann.paint_color == color;
+                    let (rect, resp) = ui.allocate_exact_size(swatch_size, egui::Sense::click());
+                    ui.painter().rect_filled(rect, egui::CornerRadius::same(3), color);
+                    if selected {
+                        ui.painter().rect_stroke(
+                            rect,
+                            egui::CornerRadius::same(3),
+                            Stroke::new(2.0, Color32::WHITE),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    if resp.on_hover_text(name).clicked() {
+                        ann.paint_color = color;
+                    }
                 }
-                if resp.on_hover_text(name).clicked() {
-                    ann.paint_color = color;
-                }
-            }
+            });
 
             ui.separator();
 
             // ── Stroke width ──
-            ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1).show_value(false))
-                .on_hover_text(format!("Stroke width: {:.1}", ann.stroke_width));
+            toolbar_group(ui, "stroke", |ui| {
+                ui.label(egui::RichText::new(icons::LINE_SEGMENT).weak());
+                ui.add(egui::Slider::new(&mut ann.stroke_width, 1.0..=8.0).max_decimals(1).show_value(false))
+                    .on_hover_text(format!("Stroke width: {:.1}", ann.stroke_width));
+            });
 
             ui.separator();
 
             // ── Undo / Clear ──
-            if ui.button(icons::ARROW_COUNTER_CLOCKWISE).on_hover_text("Undo").clicked() {
-                ann.undo();
-                did_undo = true;
-            }
-            if ui
-                .button(egui::RichText::new(icons::TRASH).color(Color32::from_rgb(255, 100, 100)))
-                .on_hover_text("Clear All")
-                .clicked()
-            {
-                ann.save_undo();
-                ann.annotations.clear();
-                ann.annotation_ids.clear();
-                ann.annotation_owners.clear();
-                ann.clear_selection();
-                did_clear = true;
-            }
-        });
+            toolbar_group(ui, "undo_clear", |ui| {
+                if ui.button(icons::ARROW_COUNTER_CLOCKWISE).on_hover_text("Undo").clicked() {
+                    ann.undo();
+                    did_undo = true;
+                }
+                if ui
+                    .button(egui::RichText::new(icons::TRASH).color(Color32::from_rgb(255, 100, 100)))
+                    .on_hover_text("Clear All")
+                    .clicked()
+                {
+                    ann.save_undo();
+                    ann.annotations.clear();
+                    ann.annotation_ids.clear();
+                    ann.annotation_owners.clear();
+                    ann.clear_selection();
+                    did_clear = true;
+                }
+            });
+        }
 
         if locked {
+            // Lock icon should remain visible even though the rest is disabled.
+            // Use add_enabled() so this single widget is interactive.
             ui.separator();
-            ui.label(egui::RichText::new(icons::LOCK).color(Color32::YELLOW))
-                .on_hover_text("Annotations locked by host");
+            ui.add_enabled(true, egui::Label::new(
+                egui::RichText::new(icons::LOCK).color(Color32::YELLOW),
+            )).on_hover_text("Annotations locked by host");
         }
     });
 
