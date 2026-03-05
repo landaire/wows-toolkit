@@ -50,7 +50,7 @@ use crate::collab::types::color_from_name;
 use crate::collab::validation::validate_annotation;
 use crate::collab::validation::validate_frame_commands_count;
 use crate::collab::validation::validate_peer_message;
-use crate::replay_renderer::PlaybackFrame;
+use crate::replay::renderer::PlaybackFrame;
 
 // ─── Public types ───────────────────────────────────────────────────────────
 

@@ -40,8 +40,8 @@ use crate::armor_viewer::state::SidebarHighlightKey;
 use crate::armor_viewer::state::StoredTrajectory;
 use crate::icon_str;
 use crate::icons;
-use crate::replay_renderer::RealtimeArmorBridge;
-use crate::replay_renderer::ReplayPlayerInfo;
+use crate::replay::renderer::RealtimeArmorBridge;
+use crate::replay::renderer::ReplayPlayerInfo;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::Vec3;
 
@@ -123,10 +123,10 @@ pub struct RealtimeArmorViewer {
     needs_repaint: bool,
 
     /// Sender for playback commands (seek) back to the replay thread.
-    command_tx: Option<std::sync::mpsc::Sender<crate::replay_renderer::PlaybackCommand>>,
+    command_tx: Option<std::sync::mpsc::Sender<crate::replay::renderer::PlaybackCommand>>,
 
     /// Pre-computed shot timeline for this target ship (entire replay).
-    shot_timeline: Option<Arc<crate::replay_renderer::ShipShotTimeline>>,
+    shot_timeline: Option<Arc<crate::replay::renderer::ShipShotTimeline>>,
 
     /// Whether the pre-computed timeline has been ingested into salvo_groups.
     timeline_ingested: bool,
@@ -221,7 +221,7 @@ impl RealtimeArmorViewer {
         ship_assets: Arc<ShipAssets>,
         gpu_pipeline: Arc<GpuPipeline>,
         render_state: eframe::egui_wgpu::RenderState,
-        command_tx: Option<std::sync::mpsc::Sender<crate::replay_renderer::PlaybackCommand>>,
+        command_tx: Option<std::sync::mpsc::Sender<crate::replay::renderer::PlaybackCommand>>,
     ) -> Self {
         let title =
             Arc::new(format!("Armor Viewer — {} ({})", target_player.username, target_player.ship_display_name));
@@ -725,7 +725,7 @@ impl RealtimeArmorViewer {
 
         let cam_dist = self.pane.viewport.camera.distance;
         let (upload_color, upload_lw) = self.trajectory_display_params(traj_id, traj_color);
-        let mesh_id = crate::ui::armor_viewer::upload_trajectory_visualization(
+        let mesh_id = crate::armor_viewer::ui::tab::upload_trajectory_visualization(
             &mut self.pane.viewport,
             &result,
             &self.render_state.device,
@@ -1124,7 +1124,7 @@ impl RealtimeArmorViewer {
             needs_sim.iter().map(|&i| self.salvo_groups[group_idx].shells[i].shot_id).collect();
 
         // Find matching PreExtractedHits from the timeline
-        let mut hit_map: HashMap<ShotId, &crate::replay_renderer::PreExtractedHit> = HashMap::new();
+        let mut hit_map: HashMap<ShotId, &crate::replay::renderer::PreExtractedHit> = HashMap::new();
         for pre_hit in &timeline.hits {
             if shot_ids_to_sim.contains(&pre_hit.hit.hit.shot_id) {
                 hit_map.insert(pre_hit.hit.hit.shot_id, pre_hit);
@@ -1356,7 +1356,7 @@ impl RealtimeArmorViewer {
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            let (changed, hkey) = crate::ui::armor_viewer::draw_armor_visibility_popover(
+                            let (changed, hkey) = crate::armor_viewer::ui::tab::draw_armor_visibility_popover(
                                 ui,
                                 &mut self.pane,
                                 &armor,
@@ -1379,7 +1379,7 @@ impl RealtimeArmorViewer {
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
                                 let hull_result =
-                                    crate::ui::armor_viewer::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
+                                    crate::armor_viewer::ui::tab::draw_hull_visibility_popover(ui, &mut self.pane, &armor);
                                 if hull_result.zone_changed {
                                     zone_changed = true;
                                 }
@@ -1406,7 +1406,7 @@ impl RealtimeArmorViewer {
                         egui::Popup::from_toggle_button_response(&splash_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
-                                let (changed, hkey) = crate::ui::armor_viewer::draw_splash_box_visibility_popover(
+                                let (changed, hkey) = crate::armor_viewer::ui::tab::draw_splash_box_visibility_popover(
                                     ui,
                                     &mut self.pane,
                                     &armor,
@@ -1426,7 +1426,7 @@ impl RealtimeArmorViewer {
                     egui::Popup::from_toggle_button_response(&display_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if crate::ui::armor_viewer::draw_display_settings_popover(ui, &mut self.pane, &armor) {
+                            if crate::armor_viewer::ui::tab::draw_display_settings_popover(ui, &mut self.pane, &armor) {
                                 zone_changed = true;
                             }
                             if !self.pane.trajectories.is_empty() {
@@ -1441,7 +1441,7 @@ impl RealtimeArmorViewer {
 
                     // ── Roll slider ──
                     ui.separator();
-                    crate::ui::armor_viewer::draw_roll_slider(ui, &mut self.pane.viewport);
+                    crate::armor_viewer::ui::tab::draw_roll_slider(ui, &mut self.pane.viewport);
                 });
                 ui.separator();
             }
@@ -1457,7 +1457,7 @@ impl RealtimeArmorViewer {
         if let Some(new_lod) = lod_change_signal.into_inner()
             && let Some(param_index) = self.pane.selected_ship.clone()
         {
-            crate::ui::armor_viewer::start_hull_lod_reload(&mut self.pane, &self.ship_assets, &param_index, new_lod);
+            crate::armor_viewer::ui::tab::start_hull_lod_reload(&mut self.pane, &self.ship_assets, &param_index, new_lod);
         }
 
         // Sidebar hover highlight lifecycle
@@ -1490,7 +1490,7 @@ impl RealtimeArmorViewer {
             }
 
             // Plate interaction: hover tooltip, click-to-hide, right-click context menu, highlight
-            if crate::ui::armor_viewer::handle_plate_interaction(
+            if crate::armor_viewer::ui::tab::handle_plate_interaction(
                 ui,
                 &response,
                 &mut self.pane,
@@ -1504,10 +1504,10 @@ impl RealtimeArmorViewer {
             }
 
             // Draw splash box labels on top of the viewport
-            crate::ui::armor_viewer::draw_splash_box_labels(&self.pane, ui.painter(), response.rect);
+            crate::armor_viewer::ui::tab::draw_splash_box_labels(&self.pane, ui.painter(), response.rect);
 
             // Draw disclaimer watermark
-            crate::ui::armor_viewer::draw_viewport_watermark(ui.painter(), response.rect);
+            crate::armor_viewer::ui::tab::draw_viewport_watermark(ui.painter(), response.rect);
 
             // Draw compass rose overlay
             self.draw_compass(ui.painter(), response.rect);
@@ -1659,7 +1659,7 @@ impl RealtimeArmorViewer {
         if let Some(seek_clock) = self.draw_health_timeline(ui)
             && let Some(ref tx) = self.command_tx
         {
-            let _ = tx.send(crate::replay_renderer::PlaybackCommand::Seek(seek_clock));
+            let _ = tx.send(crate::replay::renderer::PlaybackCommand::Seek(seek_clock));
         }
         ui.separator();
 
@@ -1955,7 +1955,7 @@ impl RealtimeArmorViewer {
                 }
                 ClickAction::SeekTo(clock) => {
                     if let Some(ref tx) = self.command_tx {
-                        let _ = tx.send(crate::replay_renderer::PlaybackCommand::Seek(clock));
+                        let _ = tx.send(crate::replay::renderer::PlaybackCommand::Seek(clock));
                     }
                 }
             }

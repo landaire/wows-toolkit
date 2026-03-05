@@ -16,7 +16,7 @@ use crate::task::BackgroundTaskCompletion;
 use crate::task::DownloadProgress;
 use crate::ui::mod_manager::ModInfo;
 use crate::ui::mod_manager::ModManagerIndex;
-use crate::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedWoWsData;
 
 #[derive(Debug)]
 #[allow(dead_code)]

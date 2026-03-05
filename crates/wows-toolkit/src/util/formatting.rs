@@ -185,10 +185,10 @@ pub fn colorize_captain_points(
     let mut has_dazzle = false;
     let mut has_ifa = false;
     if let Some(raw_skills) = &raw_skills {
-        if raw_skills.iter().any(|skill| skill.skill_type() == crate::consts::DAZZLE_SKILL_ID) {
+        if raw_skills.iter().any(|skill| skill.skill_type() == crate::util::consts::DAZZLE_SKILL_ID) {
             has_dazzle = true;
         }
-        if raw_skills.iter().any(|skill| skill.skill_type() == crate::consts::IFA_SKILL_ID) {
+        if raw_skills.iter().any(|skill| skill.skill_type() == crate::util::consts::IFA_SKILL_ID) {
             has_ifa = true;
         }
     }

@@ -12,28 +12,28 @@ use super::PaintTool;
 use super::RendererTextures;
 
 // Re-export shared annotation helpers so `use shapes::*` in mod.rs still works.
-pub(super) use crate::minimap_view::shapes::GridStyle;
-pub(super) use crate::minimap_view::shapes::MapPing;
-pub(super) use crate::minimap_view::shapes::PING_DURATION;
-pub(super) use crate::minimap_view::shapes::ZoomPanConfig;
-pub(super) use crate::minimap_view::shapes::annotation_cursor_icon;
-pub(super) use crate::minimap_view::shapes::annotation_screen_bounds;
-pub(super) use crate::minimap_view::shapes::compute_canvas_layout;
-pub(super) use crate::minimap_view::shapes::compute_map_clip_rect;
-pub(super) use crate::minimap_view::shapes::draw_annotation_edit_popup;
-pub(super) use crate::minimap_view::shapes::draw_grid;
-pub(super) use crate::minimap_view::shapes::draw_map_background;
-pub(super) use crate::minimap_view::shapes::draw_pings;
-pub(super) use crate::minimap_view::shapes::draw_remote_cursors;
-pub(super) use crate::minimap_view::shapes::draw_shortcut_overlay;
-pub(super) use crate::minimap_view::shapes::game_font;
-pub(super) use crate::minimap_view::shapes::handle_annotation_select_move;
-pub(super) use crate::minimap_view::shapes::handle_tool_interaction;
-pub(super) use crate::minimap_view::shapes::handle_tool_shortcuts;
-pub(super) use crate::minimap_view::shapes::handle_viewport_zoom_pan;
-pub(super) use crate::minimap_view::shapes::register_game_fonts;
-pub(super) use crate::minimap_view::shapes::render_selection_highlight;
-pub(super) use crate::minimap_view::shapes::tool_label;
+pub(super) use crate::replay::minimap_view::shapes::GridStyle;
+pub(super) use crate::replay::minimap_view::shapes::MapPing;
+pub(super) use crate::replay::minimap_view::shapes::PING_DURATION;
+pub(super) use crate::replay::minimap_view::shapes::ZoomPanConfig;
+pub(super) use crate::replay::minimap_view::shapes::annotation_cursor_icon;
+pub(super) use crate::replay::minimap_view::shapes::annotation_screen_bounds;
+pub(super) use crate::replay::minimap_view::shapes::compute_canvas_layout;
+pub(super) use crate::replay::minimap_view::shapes::compute_map_clip_rect;
+pub(super) use crate::replay::minimap_view::shapes::draw_annotation_edit_popup;
+pub(super) use crate::replay::minimap_view::shapes::draw_grid;
+pub(super) use crate::replay::minimap_view::shapes::draw_map_background;
+pub(super) use crate::replay::minimap_view::shapes::draw_pings;
+pub(super) use crate::replay::minimap_view::shapes::draw_remote_cursors;
+pub(super) use crate::replay::minimap_view::shapes::draw_shortcut_overlay;
+pub(super) use crate::replay::minimap_view::shapes::game_font;
+pub(super) use crate::replay::minimap_view::shapes::handle_annotation_select_move;
+pub(super) use crate::replay::minimap_view::shapes::handle_tool_interaction;
+pub(super) use crate::replay::minimap_view::shapes::handle_tool_shortcuts;
+pub(super) use crate::replay::minimap_view::shapes::handle_viewport_zoom_pan;
+pub(super) use crate::replay::minimap_view::shapes::register_game_fonts;
+pub(super) use crate::replay::minimap_view::shapes::render_selection_highlight;
+pub(super) use crate::replay::minimap_view::shapes::tool_label;
 
 // Re-export shared draw-command helpers.
 pub(super) use wt_collab_egui::draw_commands::color_from_rgb;
@@ -80,7 +80,7 @@ pub(super) fn render_annotation(
     painter: &egui::Painter,
     map_space_size: Option<f32>,
 ) {
-    crate::minimap_view::shapes::render_annotation(ann, transform, Some(&textures.ship_icons), painter, map_space_size);
+    crate::replay::minimap_view::shapes::render_annotation(ann, transform, Some(&textures.ship_icons), painter, map_space_size);
 }
 
 /// Render a preview of the active tool at the cursor position.
@@ -97,7 +97,7 @@ pub(super) fn render_tool_preview(
     painter: &egui::Painter,
     map_space_size: Option<f32>,
 ) {
-    crate::minimap_view::shapes::render_tool_preview(
+    crate::replay::minimap_view::shapes::render_tool_preview(
         tool,
         minimap_pos,
         color,

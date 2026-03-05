@@ -35,8 +35,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::vfs::VfsPath;
 
 use crate::app::ToolkitTabViewer;
-use crate::plaintext_viewer;
-use crate::plaintext_viewer::FileType;
+use crate::ui::plaintext_viewer;
+use crate::ui::plaintext_viewer::FileType;
 type FilteredFileList = Arc<Vec<(Arc<PathBuf>, VfsPath)>>;
 
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
@@ -1652,7 +1652,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     /// Returns the SharedWoWsData for the currently selected browser build.
-    fn selected_browser_data(&self) -> Option<crate::wows_data::SharedWoWsData> {
+    fn selected_browser_data(&self) -> Option<crate::data::wows_data::SharedWoWsData> {
         let map = self.tab_state.wows_data_map.as_ref()?;
         map.get(self.tab_state.selected_browser_build)
     }
@@ -1846,7 +1846,7 @@ impl ToolkitTabViewer<'_> {
                                                 }
                                                 None => {
                                                     let report: rootcause::Report =
-                                                        crate::error::ToolkitError::ReplayBuildUnavailable {
+                                                        crate::util::error::ToolkitError::ReplayBuildUnavailable {
                                                             build,
                                                             version: format!("{}", build),
                                                         }

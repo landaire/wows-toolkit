@@ -190,7 +190,7 @@ pub struct ArmorViewerState {
     /// Counter for generating unique pane IDs.
     pub next_pane_id: u64,
     /// Cached nation flag assets (raw PNG bytes), keyed by nation name.
-    pub nation_flag_textures: HashMap<String, Arc<crate::wows_data::GameAsset>>,
+    pub nation_flag_textures: HashMap<String, Arc<crate::data::wows_data::GameAsset>>,
     /// Pending export confirmation dialog.
     pub export_confirm: Option<ExportRequest>,
     /// When true, all split panes share the same camera.

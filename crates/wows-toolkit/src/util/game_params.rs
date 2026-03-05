@@ -10,7 +10,7 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
-use crate::error::ToolkitError;
+use crate::util::error::ToolkitError;
 
 /// Path to the old unversioned game_params.bin cache (for migration cleanup).
 #[allow(dead_code)]

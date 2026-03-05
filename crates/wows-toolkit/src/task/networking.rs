@@ -21,7 +21,7 @@ use tracing::error;
 use tracing::instrument;
 use zip::ZipArchive;
 
-use crate::error::ToolkitError;
+use crate::util::error::ToolkitError;
 
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
@@ -231,7 +231,7 @@ impl NetworkingThread {
 
     #[instrument(skip(self))]
     fn fetch_personal_rating_data(&mut self) {
-        let result = self.runtime.block_on(crate::personal_rating::fetch_expected_values());
+        let result = self.runtime.block_on(crate::util::personal_rating::fetch_expected_values());
 
         match result {
             Ok(data) => {

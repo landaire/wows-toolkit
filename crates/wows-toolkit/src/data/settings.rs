@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use wows_minimap_renderer::ShipConfigFilter;
 
-use crate::session_stats::DivisionFilter;
-use crate::session_stats::SessionStats;
+use crate::data::session_stats::DivisionFilter;
+use crate::data::session_stats::SessionStats;
 use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::ui::player_tracker::PlayerTracker;

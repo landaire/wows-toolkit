@@ -9,21 +9,13 @@ use std::sync::mpsc::TryRecvError;
 
 use parking_lot::RwLock;
 use rootcause::Report;
-use tracing::error;
 
-use tracing::instrument;
-
-use crate::WowsToolkitApp;
-use crate::error::ToolkitError;
+use crate::util::error::ToolkitError;
 #[cfg(feature = "mod_manager")]
 use crate::mod_manager::ModTaskCompletion;
-#[cfg(feature = "mod_manager")]
-use crate::mod_manager::load_mods_db;
-use crate::plaintext_viewer::PlaintextFileViewer;
-use crate::twitch::TwitchUpdate;
+use crate::ui::plaintext_viewer::PlaintextFileViewer;
 use crate::ui::replay_parser::Replay;
-use crate::update_background_task;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::WorldOfWarshipsData;
 
 /// Describes where a replay load request originated from.
 /// This determines what UI actions to take when the replay finishes loading.
@@ -282,7 +274,7 @@ pub enum BackgroundTaskCompletion {
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
     ConstantsLoaded(serde_json::Value),
-    PersonalRatingDataLoaded(crate::personal_rating::ExpectedValuesData),
+    PersonalRatingDataLoaded(crate::util::personal_rating::ExpectedValuesData),
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
     NoReceiver,
@@ -322,44 +314,3 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
     }
 }
 
-#[instrument(skip_all)]
-pub fn begin_startup_tasks(toolkit: &mut WowsToolkitApp, token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>) {
-    // Start the networking thread
-    let (network_job_tx, network_result_rx) = start_networking_thread();
-    toolkit.tab_state.network_job_tx = Some(network_job_tx);
-    toolkit.network_result_rx = Some(network_result_rx);
-
-    start_twitch_task(
-        &toolkit.runtime,
-        Arc::clone(&toolkit.tab_state.twitch_state),
-        toolkit.tab_state.settings.twitch_monitored_channel.clone(),
-        toolkit.tab_state.settings.twitch_token.clone(),
-        token_rx,
-    );
-
-    #[cfg(feature = "mod_manager")]
-    update_background_task!(toolkit.tab_state.background_tasks, Some(load_mods_db()));
-
-    let mut constants_path = PathBuf::from("constants.json");
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-        constants_path = storage_dir.join(constants_path)
-    }
-
-    if constants_path.exists() {
-        if let Ok(constants_data) = std::fs::read(&constants_path) {
-            update_background_task!(toolkit.tab_state.background_tasks, Some(load_constants(constants_data)));
-        } else {
-            error!("failed to read constants file");
-        }
-    }
-
-    // Load PR expected values from disk if available
-    let pr_path = crate::personal_rating::get_expected_values_path();
-    if pr_path.exists() {
-        if let Ok(pr_data) = std::fs::read(&pr_path) {
-            update_background_task!(toolkit.tab_state.background_tasks, Some(load_personal_rating_data(pr_data)));
-        } else {
-            error!("failed to read PR expected values file");
-        }
-    }
-}

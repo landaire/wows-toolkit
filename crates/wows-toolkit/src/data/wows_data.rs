@@ -18,7 +18,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
-use crate::error::ToolkitError;
+use crate::util::error::ToolkitError;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
@@ -384,7 +384,7 @@ impl ReplayLoader {
                             let client = reqwest::blocking::Client::new();
                             client
                                 .post("http://shipbuilds.com/api/ship_builds")
-                                .json(&crate::build_tracker::BuildTrackerPayload::build_from(
+                                .json(&crate::util::build_tracker::BuildTrackerPayload::build_from(
                                     player,
                                     player.initial_state().realm().unwrap_or_default().to_owned(),
                                     report.version(),

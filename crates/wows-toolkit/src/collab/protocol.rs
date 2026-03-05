@@ -9,7 +9,7 @@ pub use wt_collab_protocol::protocol::*;
 // ─── CollabRenderOptions desktop-specific conversion functions ──────────────
 
 /// Convert from the persisted settings format.
-pub fn collab_render_options_from_saved(s: &crate::settings::SavedRenderOptions) -> CollabRenderOptions {
+pub fn collab_render_options_from_saved(s: &crate::data::settings::SavedRenderOptions) -> CollabRenderOptions {
     CollabRenderOptions {
         show_hp_bars: s.show_hp_bars,
         show_tracers: s.show_tracers,

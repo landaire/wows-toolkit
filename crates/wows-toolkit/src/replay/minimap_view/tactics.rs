@@ -26,23 +26,23 @@ use wowsunpack::game_params::types::BigWorldDistance;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_types::WorldPos;
 
-use crate::cap_layout::CapLayout;
-use crate::cap_layout::CapLayoutDb;
-use crate::cap_layout::CapLayoutKey;
-use crate::cap_layout::CapPointLayout;
+use crate::data::cap_layout::CapLayout;
+use crate::data::cap_layout::CapLayoutDb;
+use crate::data::cap_layout::CapLayoutKey;
+use crate::data::cap_layout::CapPointLayout;
 use crate::collab;
 use crate::collab::peer::LocalCapPointEvent;
 use crate::collab::peer::LocalEvent;
 use crate::collab::protocol::WireCapPoint;
-use crate::minimap_view::collab_annotation_to_local;
-use crate::minimap_view::get_my_user_id;
-use crate::minimap_view::handle_map_click_ping;
-use crate::minimap_view::send_annotation_clear;
-use crate::minimap_view::send_annotation_full_sync;
-use crate::minimap_view::send_annotation_remove;
-use crate::minimap_view::send_annotation_update;
-use crate::replay_renderer::RendererAssetCache;
-use crate::wows_data::SharedWoWsData;
+use crate::replay::minimap_view::collab_annotation_to_local;
+use crate::replay::minimap_view::get_my_user_id;
+use crate::replay::minimap_view::handle_map_click_ping;
+use crate::replay::minimap_view::send_annotation_clear;
+use crate::replay::minimap_view::send_annotation_full_sync;
+use crate::replay::minimap_view::send_annotation_remove;
+use crate::replay::minimap_view::send_annotation_update;
+use crate::replay::renderer::RendererAssetCache;
+use crate::data::wows_data::SharedWoWsData;
 
 use super::Annotation;
 use super::AnnotationState;
@@ -369,7 +369,7 @@ pub struct TacticsBoardState {
     /// Next unique ID for new cap points.
     next_cap_id: u64,
     /// Loaded map image RGBA data.
-    map_image: Option<Arc<crate::replay_renderer::RgbaAsset>>,
+    map_image: Option<Arc<crate::replay::renderer::RgbaAsset>>,
     /// MapInfo for coordinate transforms.
     map_info: Option<MapInfo>,
     /// Uploaded map texture (egui handle).
@@ -453,7 +453,7 @@ impl TacticsBoardState {
     }
 
     /// Access raw map image data for PNG encoding.
-    pub fn map_image_raw(&self) -> Option<&crate::replay_renderer::RgbaAsset> {
+    pub fn map_image_raw(&self) -> Option<&crate::replay::renderer::RgbaAsset> {
         self.map_image.as_deref()
     }
 
@@ -644,7 +644,7 @@ impl TacticsBoardViewer {
                                 {
                                     let rgba = img.into_rgba8();
                                     let (w, h) = (rgba.width(), rgba.height());
-                                    state.map_image = Some(Arc::new(crate::replay_renderer::RgbaAsset {
+                                    state.map_image = Some(Arc::new(crate::replay::renderer::RgbaAsset {
                                         data: rgba.into_raw(),
                                         width: w,
                                         height: h,
@@ -1135,12 +1135,12 @@ impl TacticsBoardViewer {
                     for (i, path) in files.iter().enumerate() {
                         // Quick check: parse the meta JSON to get the key without a full parse.
                         if let Ok(replay_file) = wows_replays::ReplayFile::from_file(path) {
-                            let key = crate::cap_layout::CapLayoutKey {
+                            let key = crate::data::cap_layout::CapLayoutKey {
                                 map_id: replay_file.meta.mapId,
                                 scenario_config_id: replay_file.meta.scenarioConfigId,
                             };
                             if !db.lock().contains(&key)
-                                && let Some(layout) = crate::cap_layout::extract_cap_layout_from_replay(
+                                && let Some(layout) = crate::data::cap_layout::extract_cap_layout_from_replay(
                                     path,
                                     gm.as_ref(),
                                     Some(&game_constants),
@@ -1154,7 +1154,7 @@ impl TacticsBoardViewer {
                     }
 
                     if inserted > 0 {
-                        if let Some(cache_path) = crate::cap_layout::cache_path() {
+                        if let Some(cache_path) = crate::data::cap_layout::cache_path() {
                             if let Err(e) = db.lock().save(&cache_path) {
                                 tracing::warn!("failed to save cap layout db: {e}");
                             } else {
@@ -1938,7 +1938,7 @@ fn send_tactics_map_opened(
     map_id: u32,
     map_name: &str,
     display_name: &str,
-    map_image: &Option<Arc<crate::replay_renderer::RgbaAsset>>,
+    map_image: &Option<Arc<crate::replay::renderer::RgbaAsset>>,
     map_info: &Option<MapInfo>,
 ) {
     if let Some(tx) = collab_local_tx {

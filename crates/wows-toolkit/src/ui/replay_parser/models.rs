@@ -16,8 +16,8 @@ use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
-use crate::wows_data::GameAsset;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::WorldOfWarshipsData;
 
 /// Returns the ship class icon for a given species.
 pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<GameAsset>> {
@@ -285,7 +285,7 @@ pub struct PlayerReport {
     pub translated_build: Option<TranslatedBuild>,
     pub achievements: Vec<Achievement>,
     pub ribbons: HashMap<String, Ribbon>,
-    pub personal_rating: Option<crate::personal_rating::PersonalRatingResult>,
+    pub personal_rating: Option<crate::util::personal_rating::PersonalRatingResult>,
     pub has_vehicle_entity: bool,
 }
 
@@ -485,7 +485,7 @@ impl PlayerReport {
         self.damage_interactions.as_ref()
     }
 
-    pub fn personal_rating(&self) -> Option<&crate::personal_rating::PersonalRatingResult> {
+    pub fn personal_rating(&self) -> Option<&crate::util::personal_rating::PersonalRatingResult> {
         self.personal_rating.as_ref()
     }
 

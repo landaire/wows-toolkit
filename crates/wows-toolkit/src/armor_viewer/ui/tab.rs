@@ -11,7 +11,7 @@ use egui_dock::TabViewer;
 
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::constants::*;
-use crate::armor_viewer::legend::show_armor_legend;
+use crate::armor_viewer::ui::legend::show_armor_legend;
 use crate::armor_viewer::ship_selector::ShipCatalog;
 use crate::armor_viewer::ship_selector::species_name;
 use crate::armor_viewer::ship_selector::tier_roman;
@@ -33,7 +33,7 @@ use crate::armor_viewer::state::VisibilitySnapshot;
 use crate::armor_viewer::state::ZonePart;
 use crate::icon_str;
 use crate::icons;
-use crate::ui::analysis_panel::focus_analysis_tab;
+use crate::armor_viewer::ui::analysis::focus_analysis_tab;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::LAYER_DEFAULT;
 use crate::viewport_3d::LAYER_HULL;
@@ -745,7 +745,7 @@ impl ToolkitTabViewer<'_> {
         // ── Unified analysis window (Ships / Trajectory / Splash tabs) ──
         {
             let catalog_clone = state.ship_catalog.clone();
-            let traj_actions = crate::ui::analysis_panel::show_analysis_window(
+            let traj_actions = crate::armor_viewer::ui::analysis::show_analysis_window(
                 ui.ctx(),
                 state,
                 translate_part_ref,
@@ -2184,7 +2184,7 @@ pub(crate) fn start_hull_lod_reload(
                 }
             }
 
-            let hull_part_groups = crate::ui::armor_viewer::build_hull_part_groups(&hull_meshes);
+            let hull_part_groups = crate::armor_viewer::ui::tab::build_hull_part_groups(&hull_meshes);
             let hull_lod_count = ctx.hull_lod_count();
 
             // Load hull albedo textures

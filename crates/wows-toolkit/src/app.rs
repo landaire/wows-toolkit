@@ -41,7 +41,7 @@ use serde::Serialize;
 use tokio::runtime::Runtime;
 use wows_replays::analyzer::battle_controller::GameMessage;
 
-use crate::error::ToolkitError;
+use crate::util::error::ToolkitError;
 use crate::icons;
 use crate::tab_state::TabState;
 use crate::task;
@@ -190,7 +190,7 @@ pub struct WowsToolkitApp {
 
     /// Active realtime armor viewer windows spawned from replay renderers.
     #[serde(skip)]
-    realtime_armor_viewers: Vec<Arc<parking_lot::Mutex<crate::realtime_armor_viewer::RealtimeArmorViewer>>>,
+    realtime_armor_viewers: Vec<Arc<parking_lot::Mutex<crate::replay::realtime_armor_viewer::RealtimeArmorViewer>>>,
 }
 
 impl Default for WowsToolkitApp {
@@ -257,7 +257,7 @@ impl WowsToolkitApp {
 
         // Register "GameFont" as a proportional fallback so game_font() never panics.
         // Upgraded to real game fonts once WoWs data is loaded.
-        crate::minimap_view::shapes::register_game_fonts(&mut fonts, None);
+        crate::replay::minimap_view::shapes::register_game_fonts(&mut fonts, None);
 
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_theme(egui::Theme::Dark);
@@ -291,7 +291,7 @@ impl WowsToolkitApp {
 
             if !saved_state.tab_state.settings.has_052_game_params_fix {
                 saved_state.tab_state.settings.has_052_game_params_fix = true;
-                crate::game_params::clear_all_game_params_caches();
+                crate::util::game_params::clear_all_game_params_caches();
             }
 
             // Apply persisted armor viewer defaults to the initial pane
@@ -371,8 +371,8 @@ impl WowsToolkitApp {
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
 
         // Load persisted cap layout cache from disk.
-        if let Some(cache_path) = crate::cap_layout::cache_path()
-            && let Some(mut db) = crate::cap_layout::CapLayoutDb::load(&cache_path)
+        if let Some(cache_path) = crate::data::cap_layout::cache_path()
+            && let Some(mut db) = crate::data::cap_layout::CapLayoutDb::load(&cache_path)
         {
             let removed = db.dedup();
             if removed > 0 {
@@ -385,9 +385,60 @@ impl WowsToolkitApp {
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
-        task::begin_startup_tasks(&mut state, rx);
+        state.begin_startup_tasks(rx);
 
         state
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn begin_startup_tasks(&mut self, token_rx: tokio::sync::mpsc::Receiver<crate::twitch::TwitchUpdate>) {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        // Start the networking thread
+        let (network_job_tx, network_result_rx) = task::start_networking_thread();
+        self.tab_state.network_job_tx = Some(network_job_tx);
+        self.network_result_rx = Some(network_result_rx);
+
+        task::start_twitch_task(
+            &self.runtime,
+            Arc::clone(&self.tab_state.twitch_state),
+            self.tab_state.settings.twitch_monitored_channel.clone(),
+            self.tab_state.settings.twitch_token.clone(),
+            token_rx,
+        );
+
+        #[cfg(feature = "mod_manager")]
+        update_background_task!(self.tab_state.background_tasks, Some(crate::mod_manager::load_mods_db()));
+
+        let mut constants_path = PathBuf::from("constants.json");
+        if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+            constants_path = storage_dir.join(constants_path)
+        }
+
+        if constants_path.exists() {
+            if let Ok(constants_data) = std::fs::read(&constants_path) {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    Some(task::load_constants(constants_data))
+                );
+            } else {
+                tracing::error!("failed to read constants file");
+            }
+        }
+
+        // Load PR expected values from disk if available
+        let pr_path = crate::util::personal_rating::get_expected_values_path();
+        if pr_path.exists() {
+            if let Ok(pr_data) = std::fs::read(&pr_path) {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    Some(task::load_personal_rating_data(pr_data))
+                );
+            } else {
+                tracing::error!("failed to read PR expected values file");
+            }
+        }
     }
 
     /// Initialize the tracing subscriber with file logging.
@@ -572,7 +623,7 @@ impl WowsToolkitApp {
         self.tab_state.send_network_job(NetworkJob::FetchLatestConstants {
             current_commit: self.tab_state.settings.constants_file_commit.clone(),
         });
-        if crate::personal_rating::needs_update() {
+        if crate::util::personal_rating::needs_update() {
             self.tab_state.send_network_job(NetworkJob::FetchPersonalRatingData);
         }
         self.checked_for_updates = true;
@@ -620,7 +671,7 @@ impl WowsToolkitApp {
                     }
                 }
                 NetworkResult::PersonalRatingDataFetched(data) => {
-                    if crate::personal_rating::save_expected_values(&data).is_ok() {
+                    if crate::util::personal_rating::save_expected_values(&data).is_ok() {
                         update_background_task!(
                             self.tab_state.background_tasks,
                             Some(task::load_personal_rating_data(data))
@@ -692,7 +743,7 @@ impl WowsToolkitApp {
                         let wdata = self.tab_state.world_of_warships_data.as_ref().unwrap().read();
                         let gf = self.tab_state.renderer_asset_cache.lock().get_or_load_game_fonts(&wdata.vfs);
                         let mut font_defs = ctx.fonts(|r| r.definitions().clone());
-                        crate::minimap_view::shapes::register_game_fonts(&mut font_defs, Some(&gf));
+                        crate::replay::minimap_view::shapes::register_game_fonts(&mut font_defs, Some(&gf));
                         ctx.set_fonts(font_defs);
                     }
 
@@ -703,7 +754,7 @@ impl WowsToolkitApp {
                     if let Some(map) = &self.tab_state.wows_data_map {
                         map.insert(build_number, Arc::clone(wows_data_ref));
                     } else {
-                        let mut map = crate::wows_data::WoWsDataMap::new(
+                        let mut map = crate::data::wows_data::WoWsDataMap::new(
                             PathBuf::from(&new_dir),
                             self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
                         );
@@ -760,7 +811,7 @@ impl WowsToolkitApp {
                     if track_session_stats {
                         let replay_guard = replay.read();
                         if let Some(stat) =
-                            crate::session_stats::PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
+                            crate::data::session_stats::PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
                         {
                             self.tab_state.settings.session_stats.add_game(stat);
                         }
@@ -1032,7 +1083,7 @@ impl WowsToolkitApp {
                             // Push pre-existing annotations into the session.
                             let ann = board.annotation_state_arc().lock();
                             if !ann.annotations.is_empty() {
-                                crate::minimap_view::send_annotation_full_sync(
+                                crate::replay::minimap_view::send_annotation_full_sync(
                                     &Some(handle.command_tx.clone()),
                                     &ann,
                                     Some(board.board_id),
@@ -1104,7 +1155,7 @@ impl WowsToolkitApp {
                             });
                             let ann = board.annotation_state_arc().lock();
                             if !ann.annotations.is_empty() {
-                                crate::minimap_view::send_annotation_full_sync(
+                                crate::replay::minimap_view::send_annotation_full_sync(
                                     &Some(handle.command_tx.clone()),
                                     &ann,
                                     Some(board.board_id),
@@ -1140,7 +1191,7 @@ impl WowsToolkitApp {
                     break;
                 }
                 self.tab_state.tactics_auto_opened_board_ids.insert(bid);
-                let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
                     bid,
                     owner,
                     std::sync::Arc::clone(&self.tab_state.cap_layout_db),
@@ -1174,7 +1225,7 @@ impl WowsToolkitApp {
                     break;
                 }
                 self.tab_state.tactics_auto_opened_board_ids.insert(bid);
-                let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
                     bid,
                     owner,
                     std::sync::Arc::clone(&self.tab_state.cap_layout_db),
@@ -1271,7 +1322,7 @@ impl WowsToolkitApp {
         let replay_renderers = self.tab_state.replay_renderers.lock();
         for renderer in replay_renderers.iter() {
             let mut state = renderer.shared_state().lock();
-            let requests: Vec<crate::replay_renderer::ArmorViewerRequest> =
+            let requests: Vec<crate::replay::renderer::ArmorViewerRequest> =
                 state.pending_armor_viewers.drain(..).collect();
             drop(state);
 
@@ -1291,7 +1342,7 @@ impl WowsToolkitApp {
                     let bridge = request.bridge.lock();
                     let target_player = bridge.players.iter().find(|p| p.entity_id == request.target_entity_id);
                     if let Some(player) = target_player {
-                        let viewer = crate::realtime_armor_viewer::RealtimeArmorViewer::new(
+                        let viewer = crate::replay::realtime_armor_viewer::RealtimeArmorViewer::new(
                             player,
                             request.bridge.clone(),
                             ship_assets,
@@ -1425,7 +1476,7 @@ impl WowsToolkitApp {
         // Draw realtime armor viewer windows
         self.realtime_armor_viewers.retain(|v| v.lock().open.load(Ordering::Relaxed));
         for viewer in &self.realtime_armor_viewers {
-            crate::realtime_armor_viewer::draw_realtime_armor_viewer(viewer, ctx);
+            crate::replay::realtime_armor_viewer::draw_realtime_armor_viewer(viewer, ctx);
         }
 
         if ctx
@@ -1977,7 +2028,7 @@ impl WowsToolkitApp {
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
             display_name: self.tab_state.settings.collab_display_name.clone(),
             initial_render_options: crate::collab::protocol::collab_render_options_from_saved(
-                &crate::settings::SavedRenderOptions::default(),
+                &crate::data::settings::SavedRenderOptions::default(),
             ),
             web_asset_bundle,
         };
@@ -2004,7 +2055,7 @@ impl WowsToolkitApp {
         let wd = wows_data.read();
         let mut cache = self.tab_state.renderer_asset_cache.lock();
 
-        let convert_icons = |icons: &std::collections::HashMap<String, crate::replay_renderer::RgbaAsset>| -> Vec<(String, RgbaAssetWire)> {
+        let convert_icons = |icons: &std::collections::HashMap<String, crate::replay::renderer::RgbaAsset>| -> Vec<(String, RgbaAssetWire)> {
             icons.iter().map(|(k, a)| {
                 (k.clone(), RgbaAssetWire { data: a.data.clone(), width: a.width, height: a.height })
             }).collect()
@@ -2161,7 +2212,7 @@ impl WowsToolkitApp {
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     for replay in open_replays.into_iter().take(2) {
                         self.tab_state.toasts.lock().info(format!("Joined session: {}", &replay.replay_name));
-                        let viewer = crate::replay_renderer::launch_client_renderer(
+                        let viewer = crate::replay::renderer::launch_client_renderer(
                             replay.replay_name,
                             replay.map_image_png,
                             replay.game_version,
@@ -2232,7 +2283,7 @@ impl WowsToolkitApp {
                     let saved_options = &self.tab_state.settings.renderer_options;
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     self.tab_state.toasts.lock().info(format!("Host opened replay: {replay_name}"));
-                    let viewer = crate::replay_renderer::launch_client_renderer(
+                    let viewer = crate::replay::renderer::launch_client_renderer(
                         replay_name,
                         map_image_png,
                         game_version,
@@ -2306,7 +2357,7 @@ impl eframe::App for WowsToolkitApp {
 /// Translate a map name to a human-readable display name using game metadata.
 ///
 /// Falls back to a prettified version of the raw name if game data is unavailable.
-fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::wows_data::SharedWoWsData>) -> String {
+fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::data::wows_data::SharedWoWsData>) -> String {
     if let Some(wd) = wows_data {
         let wd = wd.read();
         if let Some(ref gm) = wd.game_metadata {

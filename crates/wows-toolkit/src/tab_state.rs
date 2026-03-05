@@ -21,11 +21,11 @@ use tracing::debug;
 use wows_replays::ReplayFile;
 use wowsunpack::vfs::VfsPath;
 
-use crate::personal_rating::PersonalRatingData;
-use crate::plaintext_viewer::PlaintextFileViewer;
-use crate::session_stats::PerGameStat;
-use crate::settings::Settings;
-use crate::settings::default_bool;
+use crate::util::personal_rating::PersonalRatingData;
+use crate::ui::plaintext_viewer::PlaintextFileViewer;
+use crate::data::session_stats::PerGameStat;
+use crate::data::settings::Settings;
+use crate::data::settings::default_bool;
 use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
@@ -43,10 +43,10 @@ use crate::ui::replay_parser::ReplayTab;
 use crate::ui::replay_parser::SharedReplayParserTabState;
 use crate::ui::replay_parser::SortOrder;
 use crate::update_background_task;
-use crate::wows_data::ReplayDependencies;
-use crate::wows_data::ReplayLoader;
-use crate::wows_data::SharedWoWsData;
-use crate::wows_data::WoWsDataMap;
+use crate::data::wows_data::ReplayDependencies;
+use crate::data::wows_data::ReplayLoader;
+use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::WoWsDataMap;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
 
@@ -212,13 +212,13 @@ pub struct TabState {
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
 
     #[serde(skip)]
-    pub replay_renderers: Mutex<Vec<crate::replay_renderer::ReplayRendererViewer>>,
+    pub replay_renderers: Mutex<Vec<crate::replay::renderer::ReplayRendererViewer>>,
 
     #[serde(skip)]
-    pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay_renderer::RendererAssetCache>>,
+    pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay::renderer::RendererAssetCache>>,
 
     #[serde(skip)]
-    pub tactics_boards: Mutex<Vec<crate::minimap_view::tactics::TacticsBoardViewer>>,
+    pub tactics_boards: Mutex<Vec<crate::replay::minimap_view::tactics::TacticsBoardViewer>>,
     /// Board IDs we've already auto-opened (prevents re-open after user closes them).
     #[serde(skip)]
     pub tactics_auto_opened_board_ids: std::collections::HashSet<u64>,
@@ -360,7 +360,7 @@ pub struct TabState {
 
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
     #[serde(skip)]
-    pub replay_controls_cache: Option<Vec<crate::controls::CommandGroup>>,
+    pub replay_controls_cache: Option<Vec<crate::util::controls::CommandGroup>>,
 
     // ─── Collaborative session ─────────────────────────────────────────────
     /// Session token text input for joining.
@@ -416,7 +416,7 @@ pub struct TabState {
     /// via rkyv, loaded on startup, and updated incrementally when new
     /// `(mapId, scenarioConfigId)` combinations are encountered.
     #[serde(skip)]
-    pub cap_layout_db: Arc<Mutex<crate::cap_layout::CapLayoutDb>>,
+    pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
 }
 
 impl Default for TabState {

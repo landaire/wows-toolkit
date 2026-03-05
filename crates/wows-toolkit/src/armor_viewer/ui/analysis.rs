@@ -20,7 +20,7 @@ use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::ArmorViewerState;
 use crate::armor_viewer::state::StoredTrajectory;
 use crate::icons;
-use crate::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedWoWsData;
 
 // ─── Deferred Actions ────────────────────────────────────────────────────────
 

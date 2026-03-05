@@ -19,7 +19,7 @@ use wowsunpack::data::Version;
 use super::PendingVideoExport;
 use super::RendererAssetCache;
 use super::VideoExportData;
-use crate::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedWoWsData;
 
 /// Execute a pending video export action.
 pub(super) fn execute_video_export(

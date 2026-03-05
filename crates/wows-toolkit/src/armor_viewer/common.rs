@@ -139,7 +139,7 @@ pub(crate) fn reupload_after_zone_change(
 ) {
     // 1. Re-upload armor meshes (calls viewport.clear() internally)
     if let Some(armor) = pane.loaded_armor.take() {
-        crate::ui::armor_viewer::upload_armor_to_viewport(pane, &armor, device, queue, pipeline);
+        crate::armor_viewer::ui::tab::upload_armor_to_viewport(pane, &armor, device, queue, pipeline);
         pane.loaded_armor = Some(armor);
     }
 
@@ -150,7 +150,7 @@ pub(crate) fn reupload_after_zone_change(
     reupload_splash_overlays(pane, device, comparison_ships, ifhe_enabled);
 
     // 4. Re-upload splash box wireframes if enabled
-    crate::ui::armor_viewer::upload_splash_box_wireframes(pane, device, None);
+    crate::armor_viewer::ui::tab::upload_splash_box_wireframes(pane, device, None);
 }
 
 /// Load a ship's armor model on the current thread (intended to run inside
@@ -180,7 +180,7 @@ pub(crate) fn load_ship_armor(
     for mesh in &meshes {
         for pos in &mesh.positions {
             let p =
-                if let Some(t) = &mesh.transform { crate::ui::armor_viewer::transform_point(t, *pos) } else { *pos };
+                if let Some(t) = &mesh.transform { crate::armor_viewer::ui::tab::transform_point(t, *pos) } else { *pos };
             for i in 0..3 {
                 min[i] = min[i].min(p[i]);
                 max[i] = max[i].max(p[i]);
@@ -244,7 +244,7 @@ pub(crate) fn load_ship_armor(
     for mesh in &hull_meshes {
         for pos in &mesh.positions {
             let p =
-                if let Some(t) = &mesh.transform { crate::ui::armor_viewer::transform_point(t, *pos) } else { *pos };
+                if let Some(t) = &mesh.transform { crate::armor_viewer::ui::tab::transform_point(t, *pos) } else { *pos };
             for i in 0..3 {
                 min[i] = min[i].min(p[i]);
                 max[i] = max[i].max(p[i]);
@@ -252,7 +252,7 @@ pub(crate) fn load_ship_armor(
         }
     }
 
-    let hull_part_groups = crate::ui::armor_viewer::build_hull_part_groups(&hull_meshes);
+    let hull_part_groups = crate::armor_viewer::ui::tab::build_hull_part_groups(&hull_meshes);
 
     // --- Splash data (optional) ---
     let (splash_data, splash_box_groups, hit_locations) = if options.include_splash_data {
@@ -342,23 +342,23 @@ pub(crate) fn update_sidebar_highlight(
     }
     if let Some(key) = new_key {
         let mesh_id = match &key {
-            SidebarHighlightKey::Zone(z) => crate::ui::armor_viewer::upload_zone_highlight(pane, armor, z, device),
+            SidebarHighlightKey::Zone(z) => crate::armor_viewer::ui::tab::upload_zone_highlight(pane, armor, z, device),
             SidebarHighlightKey::Part(z, p) => {
-                crate::ui::armor_viewer::upload_part_highlight(pane, armor, z, p, device)
+                crate::armor_viewer::ui::tab::upload_part_highlight(pane, armor, z, p, device)
             }
-            SidebarHighlightKey::Plate(pk) => crate::ui::armor_viewer::upload_plate_highlight(
+            SidebarHighlightKey::Plate(pk) => crate::armor_viewer::ui::tab::upload_plate_highlight(
                 pane,
                 armor,
                 pk,
                 device,
-                crate::ui::armor_viewer::SIDEBAR_HIGHLIGHT_COLOR,
+                crate::armor_viewer::ui::tab::SIDEBAR_HIGHLIGHT_COLOR,
             ),
             SidebarHighlightKey::HullMeshes(names) => {
                 let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-                crate::ui::armor_viewer::upload_hull_highlight(pane, armor, &name_refs, device)
+                crate::armor_viewer::ui::tab::upload_hull_highlight(pane, armor, &name_refs, device)
             }
             SidebarHighlightKey::SplashBoxes(names) => {
-                crate::ui::armor_viewer::upload_splash_box_highlight(pane, armor, names, device)
+                crate::armor_viewer::ui::tab::upload_splash_box_highlight(pane, armor, names, device)
             }
         };
         pane.sidebar_highlight = Some((key, mesh_id));
@@ -386,7 +386,7 @@ pub(crate) fn poll_pane_load_receivers(
     {
         match result {
             Ok(armor) => {
-                crate::ui::armor_viewer::init_armor_viewport(pane, &armor, device, queue, pipeline);
+                crate::armor_viewer::ui::tab::init_armor_viewport(pane, &armor, device, queue, pipeline);
                 pane.loaded_armor = Some(armor);
                 ship_loaded = true;
             }
@@ -403,7 +403,7 @@ pub(crate) fn poll_pane_load_receivers(
     {
         match result {
             Ok(data) => {
-                crate::ui::armor_viewer::apply_hull_reload(pane, data, device, queue, pipeline);
+                crate::armor_viewer::ui::tab::apply_hull_reload(pane, data, device, queue, pipeline);
             }
             Err(e) => {
                 tracing::error!("Failed to reload hull LOD: {e}");
@@ -555,7 +555,7 @@ pub(crate) fn reupload_trajectory_meshes(
             pane.viewport.remove_mesh(old_mid);
         }
         let dp = &display_params[i];
-        traj.mesh_id = Some(crate::ui::armor_viewer::upload_trajectory_visualization(
+        traj.mesh_id = Some(crate::armor_viewer::ui::tab::upload_trajectory_visualization(
             &mut pane.viewport,
             &traj.result,
             device,

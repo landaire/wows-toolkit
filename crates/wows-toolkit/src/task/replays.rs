@@ -34,17 +34,17 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
-use crate::build_tracker;
-use crate::error::ToolkitError;
-use crate::game_params::load_game_params;
-use crate::replay_export::FlattenedVehicle;
-use crate::replay_export::Match;
+use crate::util::build_tracker;
+use crate::util::error::ToolkitError;
+use crate::util::game_params::load_game_params;
+use crate::util::replay_export::FlattenedVehicle;
+use crate::util::replay_export::Match;
 use crate::twitch::TwitchState;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
-use crate::wows_data::GameAsset;
-use crate::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::WorldOfWarshipsData;
 
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
@@ -207,7 +207,7 @@ pub fn load_wows_data_for_build(
 
     let pkgs_path = wows_directory.join("res_packages");
     if !pkgs_path.exists() {
-        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
             .context("res_packages directory not found")?;
     }
 
@@ -303,7 +303,7 @@ pub fn load_wows_files(
 ) -> Result<BackgroundTaskCompletion, Report> {
     if !wows_directory.exists() {
         debug!("WoWs directory does not exist: {:?}", wows_directory);
-        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
             .context("World of Warships directory does not exist")?;
     }
 
@@ -314,13 +314,13 @@ pub fn load_wows_files(
 
     if !has_exe && !has_bin && !has_replays {
         debug!("WoWs directory missing expected contents: {:?}", wows_directory);
-        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
             .context("Invalid World of Warships directory. Make sure it's set to the game's root directory (containing WorldOfWarships.exe).")?;
     }
 
     if !has_bin {
         debug!("WoWs bin directory does not exist");
-        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
             .context("World of Warships directory is missing the bin/ folder")?;
     }
 
@@ -329,7 +329,7 @@ pub fn load_wows_files(
         game_data::list_available_builds(&wows_directory).context("failed to list available game builds")?;
 
     if available_builds.is_empty() {
-        Err(crate::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
+        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
             .context("no game builds found in bin/ directory")?;
     }
 
@@ -389,7 +389,7 @@ pub fn load_wows_files(
     });
 
     // Clean up stale caches for builds that no longer exist
-    crate::game_params::cleanup_stale_caches(&available_builds);
+    crate::util::game_params::cleanup_stale_caches(&available_builds);
 
     debug!("Sending background task completion");
 
@@ -437,13 +437,13 @@ fn parse_replay_data_in_background(
                     // Try to populate cap layout cache from this replay (lightweight
                     // parse of first ~50 packets only).
                     {
-                        let key = crate::cap_layout::CapLayoutKey {
+                        let key = crate::data::cap_layout::CapLayoutKey {
                             map_id: replay_file.meta.mapId,
                             scenario_config_id: replay_file.meta.scenarioConfigId,
                         };
                         let needs_extract = !data.cap_layout_db.lock().contains(&key);
                         if needs_extract
-                            && let Some(layout) = crate::cap_layout::extract_cap_layout_from_replay(
+                            && let Some(layout) = crate::data::cap_layout::extract_cap_layout_from_replay(
                                 path,
                                 metadata_provider.as_ref(),
                                 Some(gc.as_ref()),
@@ -453,7 +453,7 @@ fn parse_replay_data_in_background(
                             if db.insert(layout) {
                                 debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
                                 // Save is best-effort; ignore errors.
-                                if let Some(cache_path) = crate::cap_layout::cache_path() {
+                                if let Some(cache_path) = crate::data::cap_layout::cache_path() {
                                     let _ = db.save(&cache_path);
                                 }
                             }
@@ -536,7 +536,7 @@ fn parse_replay_data_in_background(
                         if battle_report.battle_results().is_some() {
                             // Create a dummy sender since we don't need to send background tasks from here
                             let (dummy_sender, _) = mpsc::channel();
-                            let deps = crate::wows_data::ReplayDependencies {
+                            let deps = crate::data::wows_data::ReplayDependencies {
                                 wows_data_map: data.wows_data_map.clone(),
                                 twitch_state: Arc::clone(&data.twitch_state),
                                 replay_sort: Arc::new(Mutex::new(SortOrder::default())),
@@ -657,14 +657,14 @@ pub enum ReplayBackgroundParserThreadMessage {
 pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
-    pub wows_data_map: crate::wows_data::WoWsDataMap,
+    pub wows_data_map: crate::data::wows_data::WoWsDataMap,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub should_send_replays: bool,
     pub data_export_settings: DataExportSettings,
     pub player_tracker: Arc<RwLock<PlayerTracker>>,
     pub is_debug: bool,
     pub parser_lock: Arc<Mutex<()>>,
-    pub cap_layout_db: Arc<Mutex<crate::cap_layout::CapLayoutDb>>,
+    pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
@@ -765,7 +765,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
 #[instrument(skip_all, fields(replay_count = replays.len()))]
 pub fn start_populating_player_inspector(
     replays: Vec<PathBuf>,
-    wows_data_map: crate::wows_data::WoWsDataMap,
+    wows_data_map: crate::data::wows_data::WoWsDataMap,
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();

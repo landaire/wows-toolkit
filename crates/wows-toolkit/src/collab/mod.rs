@@ -128,7 +128,7 @@ pub struct TacticsBoardSessionState {
 pub struct ViewportSink {
     /// Channel sender for pushing frames to this viewport's renderer.
     /// `None` for viewports that don't receive frames (e.g. tactics boards).
-    pub frame_tx: Option<std::sync::mpsc::SyncSender<crate::replay_renderer::PlaybackFrame>>,
+    pub frame_tx: Option<std::sync::mpsc::SyncSender<crate::replay::renderer::PlaybackFrame>>,
     /// The egui ViewportId, used to repaint just this viewport.
     pub viewport_id: egui::ViewportId,
 }
@@ -196,7 +196,7 @@ pub struct SessionState {
     pub viewport_sinks: HashMap<u64, ViewportSink>,
     /// Frames that arrived before the viewport sink was registered.
     /// Drained when the sink is inserted via `register_viewport_sink`.
-    pending_first_frames: HashMap<u64, crate::replay_renderer::PlaybackFrame>,
+    pending_first_frames: HashMap<u64, crate::replay::renderer::PlaybackFrame>,
     /// Window IDs the host has requested all peers to open (consumed by UI thread).
     pub force_open_window_ids: HashSet<u64>,
     /// Main window egui context, used by the peer task to wake the UI
@@ -267,7 +267,7 @@ impl SessionState {
     /// (replay_id) and request a repaint of that specific viewport.
     /// If no sink is registered yet, buffers the frame so it can be
     /// delivered when the sink is created via `register_viewport_sink`.
-    pub fn push_frame(&mut self, window_id: u64, frame: crate::replay_renderer::PlaybackFrame) {
+    pub fn push_frame(&mut self, window_id: u64, frame: crate::replay::renderer::PlaybackFrame) {
         if let Some(sink) = self.viewport_sinks.get(&window_id) {
             if let Some(ref tx) = sink.frame_tx {
                 let _ = tx.try_send(frame);

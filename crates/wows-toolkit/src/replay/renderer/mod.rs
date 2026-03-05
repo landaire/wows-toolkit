@@ -44,10 +44,10 @@ use egui_taffy::taffy::prelude::length;
 use crate::collab::SessionStatus;
 use crate::collab::peer::FrameBroadcast;
 use crate::icons;
-use crate::settings::SavedRenderOptions;
-use crate::wows_data::SharedWoWsData;
+use crate::data::settings::SavedRenderOptions;
+use crate::data::wows_data::SharedWoWsData;
 
-use crate::controls::CommandGroup;
+use crate::util::controls::CommandGroup;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -58,21 +58,21 @@ const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 
 // ─── Shared types (from minimap_view) ────────────────────────────────────────
 
-use crate::minimap_view::Annotation;
-use crate::minimap_view::AnnotationState;
-use crate::minimap_view::ENEMY_COLOR;
-use crate::minimap_view::FRIENDLY_COLOR;
-use crate::minimap_view::MapTransform;
-use crate::minimap_view::OverlayState;
-use crate::minimap_view::PaintTool;
-use crate::minimap_view::ViewportZoomPan;
-use crate::minimap_view::collab_annotation_to_local;
-use crate::minimap_view::get_my_user_id;
-use crate::minimap_view::handle_map_click_ping;
-use crate::minimap_view::send_annotation_clear;
-use crate::minimap_view::send_annotation_full_sync;
-use crate::minimap_view::send_annotation_remove;
-use crate::minimap_view::send_annotation_update;
+use crate::replay::minimap_view::Annotation;
+use crate::replay::minimap_view::AnnotationState;
+use crate::replay::minimap_view::ENEMY_COLOR;
+use crate::replay::minimap_view::FRIENDLY_COLOR;
+use crate::replay::minimap_view::MapTransform;
+use crate::replay::minimap_view::OverlayState;
+use crate::replay::minimap_view::PaintTool;
+use crate::replay::minimap_view::ViewportZoomPan;
+use crate::replay::minimap_view::collab_annotation_to_local;
+use crate::replay::minimap_view::get_my_user_id;
+use crate::replay::minimap_view::handle_map_click_ping;
+use crate::replay::minimap_view::send_annotation_clear;
+use crate::replay::minimap_view::send_annotation_full_sync;
+use crate::replay::minimap_view::send_annotation_remove;
+use crate::replay::minimap_view::send_annotation_update;
 
 // ─── Asset Cache ─────────────────────────────────────────────────────────────
 

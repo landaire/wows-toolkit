@@ -38,18 +38,18 @@ use crate::collab::Permissions;
 use crate::collab::SessionCommand;
 use crate::collab::SessionStatus;
 use crate::icons;
-use crate::replay_export::FlattenedVehicle;
-use crate::replay_export::Match;
-use crate::settings::ReplayGrouping;
-use crate::settings::ReplaySettings;
+use crate::util::replay_export::FlattenedVehicle;
+use crate::util::replay_export::Match;
+use crate::data::settings::ReplayGrouping;
+use crate::data::settings::ReplaySettings;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::ReplayExportFormat;
 use crate::task::ReplaySource;
 use crate::task::ToastMessage;
 use crate::update_background_task;
-use crate::wows_data::GameAsset;
-use crate::wows_data::SharedWoWsData;
+use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::SharedWoWsData;
 
 use damage_types::*;
 use egui::Color32;
@@ -99,9 +99,9 @@ use wowsunpack::game_params::types::Species;
 
 use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
-use crate::error::ToolkitError;
-use crate::plaintext_viewer;
-use crate::plaintext_viewer::FileType;
+use crate::util::error::ToolkitError;
+use crate::ui::plaintext_viewer;
+use crate::ui::plaintext_viewer::FileType;
 use crate::util;
 use crate::util::build_ship_config_url;
 use crate::util::build_short_ship_config_url;
@@ -454,7 +454,7 @@ impl UiReport {
         replay_file: &ReplayFile,
         report: &BattleReport,
         wows_data: &SharedWoWsData,
-        deps: &crate::wows_data::ReplayDependencies,
+        deps: &crate::data::wows_data::ReplayDependencies,
     ) -> Self {
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
@@ -2168,7 +2168,7 @@ impl UiReport {
     }
 
     /// Populate Personal Rating for all players using the provided PR data
-    pub fn populate_personal_ratings(&mut self, pr_data: &crate::personal_rating::PersonalRatingData) {
+    pub fn populate_personal_ratings(&mut self, pr_data: &crate::util::personal_rating::PersonalRatingData) {
         for report in &mut self.player_reports {
             if report.personal_rating.is_some() {
                 continue;
@@ -2189,7 +2189,7 @@ impl UiReport {
             let is_win = matches!(battle_result, Some(BattleResult::Win(_)));
             let frags = report.kills.unwrap_or(0);
 
-            let stats = crate::personal_rating::ShipBattleStats {
+            let stats = crate::util::personal_rating::ShipBattleStats {
                 ship_id,
                 battles: 1,
                 damage: actual_damage,
@@ -2646,7 +2646,7 @@ impl Replay {
         Ok(controller.build_report())
     }
 
-    pub fn build_ui_report(&mut self, deps: &crate::wows_data::ReplayDependencies) {
+    pub fn build_ui_report(&mut self, deps: &crate::data::wows_data::ReplayDependencies) {
         if let Some(battle_report) = &self.battle_report {
             let replay_version =
                 wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
@@ -2678,7 +2678,7 @@ impl Replay {
     }
 
     /// Convert this replay's player stats to ShipBattleStats for PR calculation
-    pub fn to_battle_stats(&self) -> Option<crate::personal_rating::ShipBattleStats> {
+    pub fn to_battle_stats(&self) -> Option<crate::util::personal_rating::ShipBattleStats> {
         let vehicle = self.player_vehicle()?;
         let battle_result = self.battle_result()?;
         let ui_report = self.ui_report.as_ref()?;
@@ -2686,7 +2686,7 @@ impl Replay {
 
         let is_win = matches!(battle_result, BattleResult::Win(_));
 
-        Some(crate::personal_rating::ShipBattleStats {
+        Some(crate::util::personal_rating::ShipBattleStats {
             ship_id: vehicle.shipId,
             battles: 1,
             damage: self_report.actual_damage().unwrap_or_default(),
@@ -2995,7 +2995,7 @@ impl ToolkitTabViewer<'_> {
                         return;
                     };
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
-                    let viewer = crate::replay_renderer::launch_replay_renderer(
+                    let viewer = crate::replay::renderer::launch_replay_renderer(
                         raw_meta,
                         pkt_data,
                         map_name,
@@ -3447,7 +3447,7 @@ impl ToolkitTabViewer<'_> {
                         self.tab_state.host_session.as_ref().or(self.tab_state.client_session.as_ref());
                     let owner_user_id =
                         session_handle.map(|_| self.tab_state.session_state.lock().my_user_id).unwrap_or(0);
-                    let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                    let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
                         rand::random(),
                         owner_user_id,
                         std::sync::Arc::clone(&self.tab_state.cap_layout_db),
@@ -3878,7 +3878,7 @@ impl ToolkitTabViewer<'_> {
                             drop(renderers);
                             let saved_options = &self.tab_state.settings.renderer_options;
                             let suppress = std::sync::Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
-                            let viewer = crate::replay_renderer::launch_client_renderer(
+                            let viewer = crate::replay::renderer::launch_client_renderer(
                                 replay.replay_name.clone(),
                                 replay.map_image_png.clone(),
                                 replay.game_version.clone(),
@@ -3930,7 +3930,7 @@ impl ToolkitTabViewer<'_> {
                     {
                         let board_count = self.tab_state.tactics_boards.lock().len();
                         if board_count < crate::collab::protocol::MAX_TACTICS_BOARDS {
-                            let mut board = crate::minimap_view::tactics::TacticsBoardViewer::new(
+                            let mut board = crate::replay::minimap_view::tactics::TacticsBoardViewer::new(
                                 *bid,
                                 *owner_uid,
                                 std::sync::Arc::clone(&self.tab_state.cap_layout_db),
@@ -4195,7 +4195,7 @@ impl ToolkitTabViewer<'_> {
                 return;
             };
             let asset_cache = self.tab_state.renderer_asset_cache.clone();
-            let viewer = crate::replay_renderer::launch_replay_renderer(
+            let viewer = crate::replay::renderer::launch_replay_renderer(
                 raw_meta,
                 pkt_data,
                 map_name,
@@ -4224,7 +4224,7 @@ impl ToolkitTabViewer<'_> {
                     if let Ok(mut file) = data.vfs.join(path).and_then(|p| p.open_file()) {
                         use std::io::Read;
                         if file.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
-                            let groups = crate::controls::parse_commands_scheme(&buf);
+                            let groups = crate::util::controls::parse_commands_scheme(&buf);
                             if !groups.is_empty() {
                                 return Some(groups);
                             }

@@ -9,15 +9,15 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use crate::app::ToolkitTabViewer;
 use crate::icon_str;
 use crate::icons;
-use crate::session_stats::DivisionFilter;
-use crate::session_stats::PerformanceInfo;
+use crate::data::session_stats::DivisionFilter;
+use crate::data::session_stats::PerformanceInfo;
 use crate::tab_state::ChartMode;
 use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::util::separate_number;
-use crate::wows_data::GameAsset;
+use crate::data::wows_data::GameAsset;
 use std::cmp::Reverse;
 use std::sync::Arc;
 
@@ -150,7 +150,7 @@ impl ToolkitTabViewer<'_> {
                     self.tab_state.settings.session_stats_game_mode_filter.clear();
                 }
                 for mode in &all_modes {
-                    let display = crate::session_stats::match_group_display_name(mode);
+                    let display = crate::data::session_stats::match_group_display_name(mode);
                     let mut is_selected = self.tab_state.settings.session_stats_game_mode_filter.contains(mode);
                     if ui.selectable_label(is_selected, display).clicked() {
                         is_selected = !is_selected;
@@ -271,7 +271,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
     });
 
     // ── Achievements ──
-    let mut all_achievements: Vec<crate::session_stats::SerializableAchievement> = Vec::new();
+    let mut all_achievements: Vec<crate::data::session_stats::SerializableAchievement> = Vec::new();
     for game in tab_state.settings.session_stats.filtered_games() {
         for achievement in &game.achievements {
             match all_achievements.iter_mut().find(|existing| existing.game_param_id == achievement.game_param_id) {
@@ -337,9 +337,9 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
     ScrollArea::vertical().show(ui, |ui| {
         // Collect per-ship PR stats (min/max/avg) before entering the mutable loop
-        let pr_stats_by_ship: std::collections::HashMap<String, crate::session_stats::PrStats> = {
+        let pr_stats_by_ship: std::collections::HashMap<String, crate::data::session_stats::PrStats> = {
             let per_ship_games = tab_state.settings.session_stats.per_ship_limited_games();
-            let mut games_by_ship: std::collections::HashMap<&str, Vec<&crate::session_stats::PerGameStat>> =
+            let mut games_by_ship: std::collections::HashMap<&str, Vec<&crate::data::session_stats::PerGameStat>> =
                 std::collections::HashMap::new();
             for game in &per_ship_games {
                 games_by_ship.entry(game.ship_name.as_str()).or_default().push(game);
@@ -348,7 +348,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             games_by_ship
                 .into_iter()
                 .filter_map(|(name, games)| {
-                    crate::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (name.to_string(), pr))
+                    crate::data::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (name.to_string(), pr))
                 })
                 .collect()
         };
@@ -469,7 +469,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                 })
                 .body(|ui| {
                     egui::Grid::new(format!("ship_stats_{ship_name}")).num_columns(5).striped(true).show(ui, |ui| {
-                        use crate::personal_rating::PersonalRatingCategory;
+                        use crate::util::personal_rating::PersonalRatingCategory;
 
                         ui.strong("");
                         ui.strong("Min");
@@ -546,7 +546,7 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
         .filter(|(_, perf)| perf.win_rate().is_some())
         .collect();
 
-    let per_game_data: Vec<crate::session_stats::PerGameStat> =
+    let per_game_data: Vec<crate::data::session_stats::PerGameStat> =
         tab_state.settings.session_stats.per_ship_limited_games().into_iter().cloned().collect();
 
     // Clone Arc so the read guard doesn't borrow tab_state
@@ -707,7 +707,7 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
     match mode {
         ChartMode::Line => {
-            let filtered_data: Vec<&crate::session_stats::PerGameStat> =
+            let filtered_data: Vec<&crate::data::session_stats::PerGameStat> =
                 per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
 
             if !filtered_data.is_empty() {

@@ -24,7 +24,7 @@ use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_types::WorldPos;
 
 use crate::collab::peer::FrameBroadcast;
-use crate::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedWoWsData;
 
 use super::PlaybackCommand;
 use super::PlaybackFrame;
@@ -40,7 +40,7 @@ use super::SharedRendererState;
 use super::timeline::ShipShotTimeline;
 use super::timeline::extract_all_shots;
 use super::timeline::extract_timeline_events;
-use crate::controls::parse_commands_scheme;
+use crate::util::controls::parse_commands_scheme;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn playback_thread(

@@ -2,30 +2,17 @@
 #![allow(clippy::blocks_in_conditions)]
 mod app;
 mod armor_viewer;
-mod build_tracker;
-pub mod cap_layout;
 pub mod collab;
-mod consts;
-pub(crate) mod controls;
-mod error;
-mod game_params;
-pub(crate) mod minimap_view;
+pub(crate) mod data;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
-mod personal_rating;
-mod plaintext_viewer;
-pub mod realtime_armor_viewer;
-mod replay_export;
-pub mod replay_renderer;
-mod session_stats;
-mod settings;
+pub(crate) mod replay;
 mod tab_state;
 mod task;
 mod twitch;
 mod ui;
-mod util;
+pub(crate) mod util;
 pub mod viewport_3d;
-mod wows_data;
 pub use app::WowsToolkitApp;
 pub const APP_NAME: &str = "WoWs Toolkit";
 pub(crate) use egui_phosphor::regular as icons;
