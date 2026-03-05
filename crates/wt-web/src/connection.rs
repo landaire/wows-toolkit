@@ -3,7 +3,7 @@
 //! Handles connecting via the iroh relay, handshaking (Join → SessionInfo),
 //! receiving messages, and sending local events.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 

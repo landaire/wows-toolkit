@@ -3,8 +3,11 @@ description = "Runs rust-nightly fmt"
 run = "cargo +nightly fmt"
 
 [tasks.check]
-description = "Runs cargo-check against all features"
-run = "cargo check --all-features"
+description = "Runs cargo-check against all features and WASM target"
+run = """
+cargo check --all-features
+cargo check -p wt-web --target wasm32-unknown-unknown
+"""
 
 [tasks.fix]
 description = "Runs cargo-fix against all features"
@@ -15,5 +18,9 @@ description = "Runs cargo-clippy-fix against all features"
 run = "cargo clippy --fix --all-features --allow-dirty"
 
 [tasks.fix-all]
-description = "Runs cargo-clippy-fix against all features"
-run = "cargo clippy --fix --all-features --allow-dirty && cargo +nightly fmt"
+description = "Runs clippy fix, fmt, and checks WASM target"
+run = """
+cargo clippy --fix --all-features --allow-dirty
+cargo +nightly fmt
+cargo check -p wt-web --target wasm32-unknown-unknown
+"""
