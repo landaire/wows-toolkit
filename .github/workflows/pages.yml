@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
-      - 'crates/wt-web/**'
-      - 'crates/wt-collab-egui/**'
-      - 'crates/wt-collab-protocol/**'
-      - 'crates/minimap-renderer/**'
-      - '.github/workflows/pages.yml'
+      - "site/**"
+      - "crates/wt-web/**"
+      - "crates/wt-collab-egui/**"
+      - "crates/wt-collab-protocol/**"
+      - "crates/minimap-renderer/**"
+      - ".github/workflows/pages.yml"
   # Allow manual trigger
   workflow_dispatch:
 
@@ -39,6 +39,8 @@ jobs:
 
       - name: Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v8
+        with:
+          use-flakehub: false
 
       - name: Build wt-web WASM app
         run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/

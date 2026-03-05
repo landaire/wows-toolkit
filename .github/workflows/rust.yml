@@ -81,6 +81,8 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: DeterminateSystems/magic-nix-cache-action@v8
+        with:
+          use-flakehub: false
       - name: Check wt-web for wasm32
         run: nix develop --command cargo check -p wt-web --target wasm32-unknown-unknown
         env:
