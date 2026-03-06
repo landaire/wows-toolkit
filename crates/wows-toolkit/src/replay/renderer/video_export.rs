@@ -207,6 +207,7 @@ pub(super) fn render_video_blocking(
         map_image_rgb,
         ship_icons_rgba,
         plane_icons_rgba,
+        building_icons_rgba,
         consumable_icons_rgba,
         death_cause_icons,
         powerup_icons,
@@ -216,6 +217,7 @@ pub(super) fn render_video_blocking(
         let mut cache = asset_cache.lock();
         let ship_raw = cache.get_or_load_ship_icons(&vfs);
         let plane_raw = cache.get_or_load_plane_icons(&vfs);
+        let building_raw = cache.get_or_load_building_icons(&vfs);
         let consumable_raw = cache.get_or_load_consumable_icons(&vfs);
         let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs);
         let powerup_raw = cache.get_or_load_powerup_icons(&vfs);
@@ -228,6 +230,8 @@ pub(super) fn render_video_blocking(
             ship_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
         let plane_icons: HashMap<String, image::RgbaImage> =
             plane_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
+        let building_icons: HashMap<String, image::RgbaImage> =
+            building_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
         let consumable_icons: HashMap<String, image::RgbaImage> =
             consumable_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
@@ -242,7 +246,7 @@ pub(super) fn render_video_blocking(
         let powerup_icons: HashMap<String, image::RgbaImage> =
             powerup_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
-        (map_image, ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, map_info, game_fonts)
+        (map_image, ship_icons, plane_icons, building_icons, consumable_icons, death_cause_icons, powerup_icons, map_info, game_fonts)
     };
 
     // Build replay parser components
@@ -259,6 +263,7 @@ pub(super) fn render_video_blocking(
         game_fonts,
         ship_icons_rgba,
         plane_icons_rgba,
+        building_icons_rgba,
         consumable_icons_rgba,
         death_cause_icons,
         powerup_icons,

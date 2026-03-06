@@ -34,6 +34,8 @@ use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::ShipConfigCircleKind;
+use crate::draw_command::BuildingIconType;
+use crate::draw_command::BuildingRelation;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
 
@@ -365,21 +367,24 @@ impl<'a> MinimapRenderer<'a> {
             }
             let param = GameParamProvider::game_param_by_id(self.game_params, plane.params_id);
             let aircraft = param.as_ref().and_then(|p| p.aircraft());
-            let category = aircraft.map(|a| a.category()).unwrap_or(&PlaneCategory::Controllable);
-            let is_consumable = matches!(category, PlaneCategory::Consumable | PlaneCategory::Airsupport);
-            let ammo_type = aircraft.map(|a| a.ammo_type()).unwrap_or("");
-            let icon_base = param
+            let species = param
                 .as_ref()
                 .and_then(|p| p.species())
-                .and_then(|sp| sp.known().cloned())
+                .and_then(|sp| sp.known().cloned());
+            let ammo_type = aircraft.map(|a| a.ammo_type()).unwrap_or("");
+            let category = aircraft
+                .map(|a| a.effective_category(species.as_ref()))
+                .unwrap_or(PlaneCategory::Consumable);
+            let is_consumable = matches!(category, PlaneCategory::Consumable);
+            let icon_base = species
                 .map(|sp| species_to_icon_base(sp, is_consumable, ammo_type))
                 .unwrap_or_else(|| "fighter".to_string());
-            let icon_dir = match category {
-                PlaneCategory::Consumable => "consumables",
+            let icon_dir = match &category {
                 PlaneCategory::Airsupport => "airsupport",
+                PlaneCategory::Consumable => "consumables",
                 PlaneCategory::Controllable => "controllable",
             };
-            let is_consumable = matches!(category, PlaneCategory::Consumable);
+            let is_consumable = is_consumable && !matches!(category, PlaneCategory::Airsupport);
             self.squadron_info.insert(*plane_id, SquadronInfo { icon_base, icon_dir, is_consumable });
         }
     }
@@ -932,12 +937,43 @@ impl<'a> MinimapRenderer<'a> {
                         continue;
                     }
                     let px = map_info.world_to_minimap(building.position, MINIMAP_SIZE);
+
+                    // Determine relation (ally/enemy/neutral) relative to recording player
+                    let team = building.team_id as i64;
+                    let is_ally = self.self_team_id.is_some_and(|t| t == team);
+                    let is_neutral = team < 0;
+
+                    let relation = if !building.is_alive {
+                        BuildingRelation::Dead
+                    } else if building.is_suppressed {
+                        if is_neutral {
+                            BuildingRelation::SuppressedNeutral
+                        } else if is_ally {
+                            BuildingRelation::SuppressedAlly
+                        } else {
+                            BuildingRelation::SuppressedEnemy
+                        }
+                    } else if is_neutral {
+                        BuildingRelation::Neutral
+                    } else if is_ally {
+                        BuildingRelation::Ally
+                    } else {
+                        BuildingRelation::Enemy
+                    };
+
                     let color = if building.is_alive {
                         cap_point_color(building.team_id as i64, self.self_team_id)
                     } else {
                         [40, 40, 40]
                     };
-                    commands.push(DrawCommand::Building { pos: px, color, is_alive: building.is_alive });
+
+                    // Look up building species from GameParams
+                    let icon_type = GameParamProvider::game_param_by_id(self.game_params, building.params_id)
+                        .and_then(|p| p.species().cloned())
+                        .and_then(|s| s.known().cloned())
+                        .and_then(|s| species_to_building_icon_type(&s));
+
+                    commands.push(DrawCommand::Building { pos: px, color, is_alive: building.is_alive, icon_type, relation });
                 }
             }
         }
@@ -971,6 +1007,17 @@ impl<'a> MinimapRenderer<'a> {
         }
 
         for entity_id in &all_ship_ids {
+            // Render any entity that we know is a ship (from arena state, vehicle
+            // entity, or previously resolved species) OR that has a minimap position
+            // (e.g. reinforcement wave bots in Operations that never entered the AOI).
+            let is_known_ship = self.player_relations.contains_key(entity_id)
+                || self.player_species.contains_key(entity_id)
+                || entities.get(entity_id).and_then(|e| e.vehicle_ref()).is_some()
+                || minimap_positions.contains_key(entity_id);
+            if !is_known_ship {
+                continue;
+            }
+
             // Skip dead ships (they get an X marker below)
             if let Some(dead) = dead_ships.get(entity_id)
                 && clock >= dead.clock
@@ -1134,7 +1181,13 @@ impl<'a> MinimapRenderer<'a> {
         // 7. Dead ship markers
         for (entity_id, dead) in dead_ships {
             if clock >= dead.clock {
-                let px = map_info.world_to_minimap(dead.position, MINIMAP_SIZE);
+                let px = if let Some(world_pos) = dead.position {
+                    map_info.world_to_minimap(world_pos, MINIMAP_SIZE)
+                } else if let Some(mm_pos) = &dead.minimap_position {
+                    map_info.normalized_to_minimap(mm_pos, MINIMAP_SIZE)
+                } else {
+                    continue;
+                };
                 let species = self.player_species.get(entity_id).cloned();
                 // Use last known heading from minimap positions
                 let yaw = minimap_positions
@@ -1536,6 +1589,10 @@ impl<'a> MinimapRenderer<'a> {
             let kills = controller.kills();
             let mut recent_kills = Vec::new();
             for kill in kills.iter().rev() {
+                // Skip kills where the victim isn't a known player (e.g. buildings in Operations)
+                if !self.player_names.contains_key(&kill.victim) {
+                    continue;
+                }
                 if clock >= kill.clock && clock <= kill.clock + KILL_FEED_DURATION {
                     let killer_name =
                         self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
@@ -1840,13 +1897,14 @@ fn species_to_icon_base(species: Species, is_consumable: bool, ammo_type: &str) 
 
     let snake = ammo_type.to_case(Case::Snake);
     let ammo = match snake.as_str() {
-        "sea_mine" => "mine".to_string(),
-        "depthcharge" => "depth_charge".to_string(),
-        other => other.to_string(),
+        "sea_mine" => "mine",
+        "depthcharge" => "depth_charge",
+        other => other,
     };
     if is_consumable {
         match species {
-            Species::Dive => format!("bomber_{ammo}"),
+            Species::Dive if !ammo.is_empty() => format!("bomber_{ammo}"),
+            Species::Dive => "bomber".to_string(),
             _ => {
                 let species_name = species.name();
                 species_name.to_case(Case::Snake)
@@ -1854,16 +1912,35 @@ fn species_to_icon_base(species: Species, is_consumable: bool, ammo_type: &str) 
         }
     } else {
         match species {
-            Species::Fighter => format!("fighter_{ammo}"),
-            Species::Dive => format!("bomber_{ammo}"),
-            Species::Bomber => match ammo.as_str() {
+            Species::Fighter if !ammo.is_empty() => format!("fighter_{ammo}"),
+            Species::Fighter => "fighter".to_string(),
+            Species::Dive if !ammo.is_empty() => format!("bomber_{ammo}"),
+            Species::Dive => "bomber".to_string(),
+            Species::Bomber => match ammo {
                 "torpedo_deepwater" => "torpedo_deepwater".to_string(),
                 _ => "torpedo_regular".to_string(),
             },
-            Species::Skip => format!("skip_{ammo}"),
-            Species::Airship => "auxiliary".to_string(),
-            _ => format!("fighter_{ammo}"),
+            Species::Skip if !ammo.is_empty() => format!("skip_{ammo}"),
+            Species::Skip => "skip".to_string(),
+            Species::Airship | Species::Auxiliary => "auxiliary".to_string(),
+            _ if !ammo.is_empty() => format!("fighter_{ammo}"),
+            _ => "fighter".to_string(),
         }
+    }
+}
+
+/// Map a Building species to its icon type.
+fn species_to_building_icon_type(species: &Species) -> Option<BuildingIconType> {
+    match species {
+        Species::AirBase => Some(BuildingIconType::Airbase),
+        Species::AntiAircraft => Some(BuildingIconType::AirDefence),
+        Species::CoastalArtillery | Species::Complex => Some(BuildingIconType::Artillery),
+        Species::Generator => Some(BuildingIconType::Generator),
+        Species::SensorTower => Some(BuildingIconType::Radar),
+        Species::SpaceStation => Some(BuildingIconType::Station),
+        Species::Military => Some(BuildingIconType::Supply),
+        Species::RayTower => Some(BuildingIconType::Tower),
+        _ => None,
     }
 }
 

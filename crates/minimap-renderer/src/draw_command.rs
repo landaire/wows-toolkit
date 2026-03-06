@@ -11,6 +11,66 @@ use wows_replays::types::PlaneId;
 
 use crate::map_data::MinimapPos;
 
+/// The type of building icon to display on the minimap.
+///
+/// Derived from the building's Species in GameParams.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum BuildingIconType {
+    Airbase,
+    AirDefence,
+    Artillery,
+    Generator,
+    Radar,
+    Station,
+    Supply,
+    Tower,
+}
+
+impl BuildingIconType {
+    /// Icon file base name (e.g. `"airbase"`, `"air_defence"`).
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            Self::Airbase => "airbase",
+            Self::AirDefence => "air_defence",
+            Self::Artillery => "artillery",
+            Self::Generator => "generator",
+            Self::Radar => "radar",
+            Self::Station => "station",
+            Self::Supply => "supply",
+            Self::Tower => "tower",
+        }
+    }
+}
+
+/// The relation/state of a building for icon selection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum BuildingRelation {
+    Ally,
+    Enemy,
+    Neutral,
+    Dead,
+    SuppressedAlly,
+    SuppressedEnemy,
+    SuppressedNeutral,
+}
+
+impl BuildingRelation {
+    /// Icon file suffix (e.g. `"ally"`, `"suppressed_enemy"`).
+    pub fn icon_suffix(&self) -> &'static str {
+        match self {
+            Self::Ally => "ally",
+            Self::Enemy => "enemy",
+            Self::Neutral => "neutral",
+            Self::Dead => "dead",
+            Self::SuppressedAlly => "suppressed_ally",
+            Self::SuppressedEnemy => "suppressed_enemy",
+            Self::SuppressedNeutral => "suppressed_neutral",
+        }
+    }
+}
+
 /// How a ship should be rendered based on its visibility state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -289,8 +349,14 @@ pub enum DrawCommand {
         /// Line length in pixels
         length: i32,
     },
-    /// Building dot on the minimap
-    Building { pos: MinimapPos, color: [u8; 3], is_alive: bool },
+    /// Building marker on the minimap (fort, AA battery, airbase, etc.)
+    Building {
+        pos: MinimapPos,
+        color: [u8; 3],
+        is_alive: bool,
+        icon_type: Option<BuildingIconType>,
+        relation: BuildingRelation,
+    },
     /// Local weather zone (squall/storm) — semi-transparent gray circle
     WeatherZone {
         pos: MinimapPos,

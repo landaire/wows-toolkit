@@ -68,6 +68,7 @@ pub(super) fn playback_thread(
         let mut cache = asset_cache.lock();
         let ship_icons = cache.get_or_load_ship_icons(&vfs);
         let plane_icons = cache.get_or_load_plane_icons(&vfs);
+        let building_icons = cache.get_or_load_building_icons(&vfs);
         let consumable_icons = cache.get_or_load_consumable_icons(&vfs);
         let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs);
         let powerup_icons = cache.get_or_load_powerup_icons(&vfs);
@@ -79,6 +80,7 @@ pub(super) fn playback_thread(
             map_image,
             ship_icons,
             plane_icons,
+            building_icons,
             consumable_icons,
             death_cause_icons,
             powerup_icons,

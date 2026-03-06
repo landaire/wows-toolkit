@@ -32,6 +32,7 @@ pub struct DrawCommandTextures<'a> {
     /// Gold icon-shaped outlines for detected-teammate highlight (desktop only).
     pub ship_icon_outlines: Option<&'a HashMap<String, TextureHandle>>,
     pub plane_icons: &'a HashMap<String, TextureHandle>,
+    pub building_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub consumable_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub death_cause_icons: Option<&'a HashMap<String, TextureHandle>>,
     pub powerup_icons: Option<&'a HashMap<String, TextureHandle>>,
@@ -310,27 +311,38 @@ pub fn draw_command_to_shapes(
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
 
-            if let Some(sp) = species {
-                let variant_key = match (*visibility, *is_self) {
-                    (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
-                    (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
-                    (wows_minimap_renderer::ShipVisibility::MinimapOnly, _) => {
-                        format!("{}_invisible", sp)
-                    }
-                    (wows_minimap_renderer::ShipVisibility::Undetected, _) => {
-                        format!("{}_invisible", sp)
-                    }
+            {
+                let fallback_key = match (*visibility, *is_self) {
+                    (wows_minimap_renderer::ShipVisibility::Visible, true) => "Auxiliary_self",
+                    (wows_minimap_renderer::ShipVisibility::Visible, false) => "Auxiliary",
+                    (wows_minimap_renderer::ShipVisibility::MinimapOnly | wows_minimap_renderer::ShipVisibility::Undetected, _) => "Auxiliary_invisible",
+                };
+
+                let (variant_key, texture) = if let Some(sp) = species {
+                    let variant_key = match (*visibility, *is_self) {
+                        (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
+                        (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
+                        (wows_minimap_renderer::ShipVisibility::MinimapOnly | wows_minimap_renderer::ShipVisibility::Undetected, _) => {
+                            format!("{}_invisible", sp)
+                        }
+                    };
+                    let tex = textures.ship_icons.get(&variant_key)
+                        .or_else(|| textures.ship_icons.get(sp))
+                        .or_else(|| textures.ship_icons.get(fallback_key));
+                    (Some(variant_key), tex)
+                } else {
+                    (None, textures.ship_icons.get(fallback_key))
                 };
 
                 // Gold icon-shaped outline for detected teammates (drawn before icon)
                 if *is_detected_teammate && let Some(outlines) = textures.ship_icon_outlines {
-                    let outline_tex = outlines.get(&variant_key).or_else(|| outlines.get(sp));
+                    let outline_tex = variant_key.as_ref()
+                        .and_then(|vk| outlines.get(vk))
+                        .or_else(|| species.as_ref().and_then(|sp| outlines.get(sp)));
                     if let Some(otex) = outline_tex {
                         shapes.push(make_rotated_icon_mesh(otex.id(), center, icon_size, *yaw, Color32::WHITE));
                     }
                 }
-
-                let texture = textures.ship_icons.get(&variant_key).or_else(|| textures.ship_icons.get(sp));
 
                 if let Some(tex) = texture {
                     let tint = if let Some(c) = color {
@@ -339,14 +351,6 @@ pub fn draw_command_to_shapes(
                         Color32::from_rgba_unmultiplied(255, 255, 255, (*opacity * 255.0) as u8)
                     };
                     shapes.push(make_rotated_icon_mesh(tex.id(), center, icon_size, *yaw, tint));
-                } else {
-                    let c = color.map(|c| color_from_rgba(c, *opacity)).unwrap_or(Color32::from_rgba_unmultiplied(
-                        128,
-                        128,
-                        128,
-                        (*opacity * 255.0) as u8,
-                    ));
-                    shapes.push(Shape::circle_filled(center, transform.scale_distance(5.0), c));
                 }
             }
             let pname = if label_opts.show_player_names { player_name.as_deref() } else { None };
@@ -383,10 +387,17 @@ pub fn draw_command_to_shapes(
         DrawCommand::DeadShip { pos, yaw, species, color, is_self, player_name, ship_name, .. } => {
             let center = transform.minimap_to_screen(pos);
             let icon_size = transform.scale_distance(ICON_SIZE);
-            if let Some(sp) = species {
-                let variant_key = if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) };
+            {
+                let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
+                let variant_key = species.as_ref().map(|sp| {
+                    if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) }
+                });
 
-                let texture = textures.ship_icons.get(&variant_key).or_else(|| textures.ship_icons.get(sp));
+                let texture = variant_key
+                    .as_ref()
+                    .and_then(|vk| textures.ship_icons.get(vk))
+                    .or_else(|| species.as_ref().and_then(|sp| textures.ship_icons.get(sp)))
+                    .or_else(|| textures.ship_icons.get(fallback_key));
 
                 if let Some(tex) = texture {
                     let tint = if let Some(c) = color { Color32::from_rgb(c[0], c[1], c[2]) } else { Color32::WHITE };
@@ -951,10 +962,19 @@ pub fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::Building { pos, color, is_alive } => {
+        DrawCommand::Building { pos, color, is_alive, icon_type, relation } => {
             let center = transform.minimap_to_screen(pos);
-            let r = if *is_alive { transform.scale_distance(2.0) } else { transform.scale_distance(1.5) };
-            shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
+            let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
+            let icon = icon_key
+                .as_ref()
+                .and_then(|k| textures.building_icons.and_then(|icons| icons.get(k)));
+            if let Some(tex) = icon {
+                let size = transform.scale_distance(ICON_SIZE);
+                shapes.push(make_icon_mesh(tex.id(), center, size, size));
+            } else {
+                let r = if *is_alive { transform.scale_distance(2.0) } else { transform.scale_distance(1.5) };
+                shapes.push(Shape::circle_filled(center, r, color_from_rgb(*color)));
+            }
         }
 
         DrawCommand::TurretDirection { pos, yaw, color, length, .. } => {

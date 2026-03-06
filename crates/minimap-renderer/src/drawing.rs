@@ -1294,6 +1294,7 @@ pub struct ImageTarget {
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
     plane_icons: HashMap<String, RgbaImage>,
+    building_icons: HashMap<String, RgbaImage>,
     consumable_icons: HashMap<String, RgbaImage>,
     death_cause_icons: HashMap<String, RgbaImage>,
     powerup_icons: HashMap<String, RgbaImage>,
@@ -1309,6 +1310,7 @@ impl ImageTarget {
         fonts: GameFonts,
         ship_icons: HashMap<String, ShipIcon>,
         plane_icons: HashMap<String, RgbaImage>,
+        building_icons: HashMap<String, RgbaImage>,
         consumable_icons: HashMap<String, RgbaImage>,
         death_cause_icons: HashMap<String, RgbaImage>,
         powerup_icons: HashMap<String, RgbaImage>,
@@ -1331,6 +1333,7 @@ impl ImageTarget {
             fonts,
             ship_icons,
             plane_icons,
+            building_icons,
             consumable_icons,
             death_cause_icons,
             powerup_icons,
@@ -1426,8 +1429,15 @@ impl RenderTarget for ImageTarget {
                 let dy = -*length as f32 * yaw.sin();
                 draw_line(&mut self.canvas, x, y, x + dx, y + dy, *color, 0.7, 1.0);
             }
-            DrawCommand::Building { pos, color, .. } => {
-                draw_filled_circle(&mut self.canvas, pos.x as f32, pos.y as f32 + y_off, 2.5, *color, 1.0);
+            DrawCommand::Building { pos, color, icon_type, relation, .. } => {
+                // Try to render an icon; fall back to a dot if no icon is available
+                let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
+                let icon = icon_key.as_ref().and_then(|k| self.building_icons.get(k));
+                if let Some(icon) = icon {
+                    draw_icon(&mut self.canvas, icon, pos.x, pos.y + y_off as i32);
+                } else {
+                    draw_filled_circle(&mut self.canvas, pos.x as f32, pos.y as f32 + y_off, 2.5, *color, 1.0);
+                }
             }
             DrawCommand::WeatherZone { pos, radius } => {
                 // Semi-transparent light gray circle for weather zones (squalls/storms)
@@ -1457,25 +1467,25 @@ impl RenderTarget for ImageTarget {
                 let x = pos.x;
                 let y = pos.y + y_off as i32;
 
-                let Some(sp) = species.as_ref() else {
-                    return;
-                };
-                let variant_key = match (*visibility, *is_self) {
-                    (ShipVisibility::Visible, true) => format!("{}_self", sp),
-                    (ShipVisibility::Visible, false) => sp.clone(),
-                    (ShipVisibility::MinimapOnly, _) => format!("{}_invisible", sp),
-                    (ShipVisibility::Undetected, _) => format!("{}_invisible", sp),
-                };
                 let fallback_key = match (*visibility, *is_self) {
                     (ShipVisibility::Visible, true) => "Auxiliary_self",
                     (ShipVisibility::Visible, false) => "Auxiliary",
                     (ShipVisibility::MinimapOnly | ShipVisibility::Undetected, _) => "Auxiliary_invisible",
                 };
-                let icon = self
-                    .ship_icons
-                    .get(&variant_key)
-                    .or_else(|| self.ship_icons.get(sp))
-                    .or_else(|| self.ship_icons.get(fallback_key));
+                let icon = if let Some(sp) = species.as_ref() {
+                    let variant_key = match (*visibility, *is_self) {
+                        (ShipVisibility::Visible, true) => format!("{}_self", sp),
+                        (ShipVisibility::Visible, false) => sp.clone(),
+                        (ShipVisibility::MinimapOnly, _) => format!("{}_invisible", sp),
+                        (ShipVisibility::Undetected, _) => format!("{}_invisible", sp),
+                    };
+                    self.ship_icons
+                        .get(&variant_key)
+                        .or_else(|| self.ship_icons.get(sp))
+                        .or_else(|| self.ship_icons.get(fallback_key))
+                } else {
+                    self.ship_icons.get(fallback_key)
+                };
 
                 let Some(icon) = icon else {
                     return;
@@ -1512,16 +1522,16 @@ impl RenderTarget for ImageTarget {
                 let x = pos.x;
                 let y = pos.y + y_off as i32;
 
-                let Some(sp) = species.as_ref() else {
-                    return;
-                };
-                let variant_key = if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) };
                 let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
-                let icon = self
-                    .ship_icons
-                    .get(&variant_key)
-                    .or_else(|| self.ship_icons.get(sp))
-                    .or_else(|| self.ship_icons.get(fallback_key));
+                let icon = if let Some(sp) = species.as_ref() {
+                    let variant_key = if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) };
+                    self.ship_icons
+                        .get(&variant_key)
+                        .or_else(|| self.ship_icons.get(sp))
+                        .or_else(|| self.ship_icons.get(fallback_key))
+                } else {
+                    self.ship_icons.get(fallback_key)
+                };
 
                 let Some(icon) = icon else {
                     return;
@@ -1532,8 +1542,10 @@ impl RenderTarget for ImageTarget {
             DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
                 let x = pos.x;
                 let y = pos.y + y_off as i32;
-                let icon =
-                    self.plane_icons.get(icon_key).unwrap_or_else(|| panic!("missing plane icon for '{}'", icon_key));
+                let Some(icon) = self.plane_icons.get(icon_key) else {
+                    tracing::warn!(icon_key, "Missing plane icon, skipping");
+                    return;
+                };
                 draw_icon(&mut self.canvas, icon, x, y);
                 draw_ship_labels(
                     &mut self.canvas,

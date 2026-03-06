@@ -81,6 +81,17 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
         })
         .collect();
 
+    let building_icons: HashMap<String, TextureHandle> = assets
+        .building_icons
+        .iter()
+        .map(|(key, asset)| {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
+            let handle = ctx.load_texture(format!("building_{}", key), image, egui::TextureOptions::LINEAR);
+            (key.clone(), handle)
+        })
+        .collect();
+
     let consumable_icons: HashMap<String, TextureHandle> = assets
         .consumable_icons
         .iter()
@@ -119,6 +130,7 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
         ship_icons,
         ship_icon_outlines,
         plane_icons,
+        building_icons,
         consumable_icons,
         death_cause_icons,
         powerup_icons,

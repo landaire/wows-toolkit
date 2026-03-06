@@ -688,6 +688,7 @@ impl WebApp {
                 ship_icons: &self.assets.ship_icons,
                 ship_icon_outlines: None,
                 plane_icons: &self.assets.plane_icons,
+                building_icons: None,
                 consumable_icons: Some(&self.assets.consumable_icons),
                 death_cause_icons: Some(&self.assets.death_cause_icons),
                 powerup_icons: Some(&self.assets.powerup_icons),

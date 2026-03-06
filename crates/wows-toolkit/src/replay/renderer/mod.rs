@@ -80,6 +80,7 @@ pub struct RgbaAsset {
 pub struct RendererAssetCache {
     ship_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     plane_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    building_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     consumable_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     death_cause_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     powerup_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
@@ -124,6 +125,23 @@ impl RendererAssetCache {
             .collect();
         let arc = Arc::new(converted);
         self.plane_icons = Some(Arc::clone(&arc));
+        arc
+    }
+
+    pub fn get_or_load_building_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+        if let Some(ref cached) = self.building_icons {
+            return Arc::clone(cached);
+        }
+        let raw = assets::load_building_icons(vfs);
+        let converted: HashMap<String, RgbaAsset> = raw
+            .into_iter()
+            .map(|(k, img)| {
+                let (w, h) = (img.width(), img.height());
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
+            })
+            .collect();
+        let arc = Arc::new(converted);
+        self.building_icons = Some(Arc::clone(&arc));
         arc
     }
 
@@ -367,6 +385,7 @@ pub struct ReplayRendererAssets {
     pub map_image: Option<Arc<RgbaAsset>>,
     pub ship_icons: Arc<HashMap<String, RgbaAsset>>,
     pub plane_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub building_icons: Arc<HashMap<String, RgbaAsset>>,
     pub consumable_icons: Arc<HashMap<String, RgbaAsset>>,
     pub death_cause_icons: Arc<HashMap<String, RgbaAsset>>,
     pub powerup_icons: Arc<HashMap<String, RgbaAsset>>,
@@ -379,6 +398,7 @@ struct RendererTextures {
     /// Gold outline textures for detected-teammate highlight, keyed by the same variant keys as ship_icons.
     ship_icon_outlines: HashMap<String, TextureHandle>,
     plane_icons: HashMap<String, TextureHandle>,
+    building_icons: HashMap<String, TextureHandle>,
     consumable_icons: HashMap<String, TextureHandle>,
     death_cause_icons: HashMap<String, TextureHandle>,
     powerup_icons: HashMap<String, TextureHandle>,
@@ -660,18 +680,20 @@ pub fn launch_client_renderer(
     });
 
     // Load icons and fonts from VFS via the shared asset cache.
-    let (ship_icons, plane_icons, consumable_icons, death_cause_icons, powerup_icons, game_fonts) =
+    let (ship_icons, plane_icons, building_icons, consumable_icons, death_cause_icons, powerup_icons, game_fonts) =
         if let Some(vfs) = wows_data.map(|d| d.read().vfs.clone()) {
             let mut cache = asset_cache.lock();
             let si = cache.get_or_load_ship_icons(&vfs);
             let pi = cache.get_or_load_plane_icons(&vfs);
+            let bi = cache.get_or_load_building_icons(&vfs);
             let ci = cache.get_or_load_consumable_icons(&vfs);
             let di = cache.get_or_load_death_cause_icons(&vfs);
             let pwi = cache.get_or_load_powerup_icons(&vfs);
             let gf = cache.get_or_load_game_fonts(&vfs);
-            (si, pi, ci, di, pwi, Some(gf))
+            (si, pi, bi, ci, di, pwi, Some(gf))
         } else {
             (
+                Arc::new(HashMap::new()),
                 Arc::new(HashMap::new()),
                 Arc::new(HashMap::new()),
                 Arc::new(HashMap::new()),
@@ -688,6 +710,7 @@ pub fn launch_client_renderer(
             map_image,
             ship_icons,
             plane_icons,
+            building_icons,
             consumable_icons,
             death_cause_icons,
             powerup_icons,

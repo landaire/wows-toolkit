@@ -1196,6 +1196,22 @@ impl GameMetadataProvider {
                                         .build(),
                                 ))
                             }
+                            ParamType::Building => {
+                                let level = game_param_to_type!(param_data, "level", u32);
+                                let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_ref());
+                                let health = hull
+                                    .as_ref()
+                                    .and_then(|h| {
+                                        let inner = h.inner();
+                                        inner.get(&pk("health")).and_then(|v| {
+                                            v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
+                                        })
+                                    })
+                                    .unwrap_or(0.0);
+                                Some(ParamData::Building(
+                                    super::types::Building::builder().level(level).health(health).build(),
+                                ))
+                            }
                             _ => {
                                 // Some params (e.g. Drops) have typeinfo.type = "Other"
                                 // but contain Drop-specific fields

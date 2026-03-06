@@ -259,6 +259,30 @@ pub fn load_plane_icons(vfs: &VfsPath) -> HashMap<String, RgbaImage> {
     icons
 }
 
+/// Load building icons from game files into a HashMap keyed by `"{type}_{relation}"`.
+///
+/// Icons are at `gui/battle_hud/markers/building_icons/normal/icon_ground_{type}_{relation}.png`.
+/// Keys use the format `"artillery_enemy"`, `"airbase_dead"`, `"air_defence_suppressed_ally"`, etc.
+pub fn load_building_icons(vfs: &VfsPath) -> HashMap<String, RgbaImage> {
+    let types = ["airbase", "air_defence", "artillery", "generator", "radar", "station", "supply", "tower"];
+    let relations = ["ally", "enemy", "neutral", "dead", "suppressed_ally", "suppressed_enemy", "suppressed_neutral"];
+
+    let mut icons = HashMap::new();
+    for btype in &types {
+        for relation in &relations {
+            let filename = format!("icon_ground_{}_{}.png", btype, relation);
+            let path = format!("gui/battle_hud/markers/building_icons/normal/{}", filename);
+            if let Some(img) = load_packed_image(&path, vfs) {
+                let resized = image::imageops::resize(&img, ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
+                let key = format!("{}_{}", btype, relation);
+                icons.insert(key, resized);
+            }
+        }
+    }
+    debug!(count = icons.len(), "Loaded building icons");
+    icons
+}
+
 /// Load consumable icons from game files into a HashMap keyed by PCY name.
 ///
 /// Discovers all `consumable_PCY*.png` files in `gui/consumables/` to support

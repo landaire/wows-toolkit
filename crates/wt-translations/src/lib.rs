@@ -1,13 +1,12 @@
-//! Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit.
-//!
-//! This crate does NOT own the translation machinery (that's `rust-i18n` in each
-//! consumer crate). It provides:
-//!
-//! - **Const fn key mappings**: enum variants -> dotted translation key strings
-//! - **`TextResolver` trait**: for consumers that need translated text without
-//!   depending on `rust-i18n` (e.g. minimap renderer's `ImageTarget`)
-//! - **Language metadata**: supported locales, native names, system locale mapping
-
+/// Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit.
+///
+/// This crate does NOT own the translation machinery (that's `rust-i18n` in each
+/// consumer crate). It provides:
+///
+/// - **Const fn key mappings**: enum variants -> dotted translation key strings
+/// - **`TextResolver` trait**: for consumers that need translated text without
+///   depending on `rust-i18n` (e.g. minimap renderer's `ImageTarget`)
+/// - **Language metadata**: supported locales, native names, system locale mapping
 pub mod keys;
 mod text_resolver;
 
@@ -198,14 +197,9 @@ mod tests {
 
         let resolver = DefaultTextResolver;
 
+        assert_eq!(resolver.resolve(&TranslatableText::BattleResult(BattleResult::Victory)), "VICTORY");
         assert_eq!(
-            resolver.resolve(&TranslatableText::BattleResult(BattleResult::Victory)),
-            "VICTORY"
-        );
-        assert_eq!(
-            resolver.resolve(&TranslatableText::FinishType(Recognized::Known(
-                FinishType::Extermination
-            ))),
+            resolver.resolve(&TranslatableText::FinishType(Recognized::Known(FinishType::Extermination))),
             "All enemy ships destroyed"
         );
         assert_eq!(resolver.resolve(&TranslatableText::PreBattleLabel), "BATTLE STARTS IN");

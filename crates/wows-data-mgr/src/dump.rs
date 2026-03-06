@@ -19,6 +19,7 @@ const REQUIRED_VFS_DIRS: &[&str] = &[
     "gui/battle_hud/markers_minimap",
     "gui/battle_hud/icon_frag",
     "gui/battle_hud/markers/capture_point",
+    "gui/battle_hud/markers/building_icons",
     "gui/consumables",
     "gui/powerups/drops",
     "gui/fonts",

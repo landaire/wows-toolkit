@@ -206,7 +206,12 @@ pub struct KillRecord {
 #[derive(Debug, Clone, Serialize)]
 pub struct DeadShip {
     pub clock: GameClock,
-    pub position: WorldPos,
+    /// World-space position (from ship_positions). `None` if the ship was only
+    /// tracked via minimap updates (e.g. PVE bots outside the player's AOI).
+    pub position: Option<WorldPos>,
+    /// Normalized minimap position (from minimap_positions). Available as
+    /// fallback when world position is not known.
+    pub minimap_position: Option<NormalizedPos>,
 }
 
 /// A local weather zone (squall/storm) on the map.

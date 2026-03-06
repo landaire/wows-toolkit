@@ -122,6 +122,7 @@ fn make_shared_textures<'a>(textures: &'a RendererTextures) -> wt_collab_egui::d
         ship_icons: &textures.ship_icons,
         ship_icon_outlines: Some(&textures.ship_icon_outlines),
         plane_icons: &textures.plane_icons,
+        building_icons: Some(&textures.building_icons),
         consumable_icons: Some(&textures.consumable_icons),
         death_cause_icons: Some(&textures.death_cause_icons),
         powerup_icons: Some(&textures.powerup_icons),

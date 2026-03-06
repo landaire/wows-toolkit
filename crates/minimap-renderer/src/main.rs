@@ -18,6 +18,7 @@ use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::game_constants::GameConstants;
 
+use wows_minimap_renderer::assets::load_building_icons;
 use wows_minimap_renderer::assets::load_consumable_icons;
 use wows_minimap_renderer::assets::load_death_cause_icons;
 use wows_minimap_renderer::assets::load_flag_icons;
@@ -165,6 +166,7 @@ fn main() -> Result<(), Report> {
     let game_fonts = load_game_fonts(vfs);
     let ship_icons = load_ship_icons(vfs);
     let plane_icons = load_plane_icons(vfs);
+    let building_icons = load_building_icons(vfs);
     let consumable_icons = load_consumable_icons(vfs);
     let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE);
     let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE);
@@ -189,6 +191,7 @@ fn main() -> Result<(), Report> {
         game_fonts.clone(),
         ship_icons,
         plane_icons,
+        building_icons,
         consumable_icons,
         death_cause_icons,
         powerup_icons,

@@ -797,6 +797,14 @@ impl Param {
             _ => None,
         }
     }
+
+    /// Returns the Building data if this param is a Building type.
+    pub fn building(&self) -> Option<&Building> {
+        match &self.data {
+            ParamData::Building(b) => Some(b),
+            _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Variantly)]
@@ -1818,6 +1826,24 @@ impl Aircraft {
     pub fn ammo_type(&self) -> &str {
         &self.ammo_type
     }
+
+    /// Determine the effective plane category for display/icon purposes.
+    ///
+    /// The raw `category` from `planeSubtype` isn't always sufficient:
+    /// - Airship/Auxiliary species are event airships that always use controllable-style icons,
+    ///   even though their `planeSubtype` is empty (which defaults to `Controllable`).
+    /// - Controllable CV planes always have an ammo type; if ammo is empty and the plane isn't
+    ///   an airship, it's actually a consumable (catapult fighter/spotter).
+    pub fn effective_category(&self, species: Option<&Species>) -> PlaneCategory {
+        let is_airship = matches!(species, Some(Species::Airship | Species::Auxiliary));
+        if is_airship {
+            return PlaneCategory::Controllable;
+        }
+        if matches!(self.category, PlaneCategory::Controllable) && self.ammo_type.is_empty() {
+            return PlaneCategory::Consumable;
+        }
+        self.category.clone()
+    }
 }
 
 // ─── Shell / Ammo Types ─────────────────────────────────────────────────────────────
@@ -2100,6 +2126,29 @@ impl Modernization {
         &self.modifiers
     }
 }
+
+/// A building/structure game parameter (Operations forts, AA batteries, airbases, etc.).
+///
+/// The species (AntiAircraft, Complex, AirBase, CoastalArtillery, etc.) is stored
+/// in the parent [`Param`]'s `species` field.
+#[derive(Builder, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct Building {
+    level: u32,
+    health: f32,
+}
+
+impl Building {
+    pub fn level(&self) -> u32 {
+        self.level
+    }
+
+    pub fn health(&self) -> f32 {
+        self.health
+    }
+}
+
 #[derive(Clone, Debug, Variantly)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -2114,6 +2163,7 @@ pub enum ParamData {
     Aircraft(Aircraft),
     Projectile(Projectile),
     Drop(BuffDrop),
+    Building(Building),
 }
 
 pub trait GameParamProvider {

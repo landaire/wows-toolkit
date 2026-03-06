@@ -281,6 +281,23 @@ impl Player {
         }
     }
 
+    /// Create a Player from a mid-battle spawn (e.g. Operations reinforcement wave).
+    /// Uses the ship_params_id from the PlayerStateData directly since these players
+    /// are not in the replay's JSON metadata.
+    fn from_spawned_player<G: ResourceLoader>(player: &PlayerStateData, resources: &G) -> Option<Player> {
+        let ship_params_id = player.ship_params_id()?;
+        let vehicle = resources.game_param_by_id(ship_params_id)?;
+        let relation = Relation::new(player.team_id() as u32);
+        Some(Player {
+            initial_state: player.clone(),
+            end_state: crate::RwCell::new(player.clone()),
+            vehicle_entity: None,
+            connection_change_info: crate::RwCell::new(Vec::new()),
+            vehicle,
+            relation,
+        })
+    }
+
     /// A list of events for when this player connected or disconnected
     /// from the match.
     pub fn connection_change_info(&self) -> crate::RwCellReadGuard<'_, Vec<ConnectionChangeInfo>> {
@@ -2563,10 +2580,25 @@ where
                     cause: cause.clone(),
                 });
                 self.kills.push(KillRecord { clock: packet.clock, killer, victim, cause });
-                // Record dead ship position from last known ship position
-                if let Some(ship_pos) = self.ship_positions.get(&victim) {
-                    self.dead_ships.insert(victim, DeadShip { clock: packet.clock, position: ship_pos.position });
-                }
+                // Record dead ship position from both sources when available.
+                let world_pos = self.ship_positions.get(&victim).map(|sp| sp.position);
+                let minimap_pos = self.minimap_positions.get(&victim).map(|mm| mm.position);
+                let is_known_player = self.player_entities.values().any(|p| p.initial_state.entity_id() == victim);
+                let has_vehicle = self.entities_by_id.get(&victim).and_then(|e| e.vehicle_ref()).is_some();
+                debug!(
+                    ?victim,
+                    ?killer,
+                    has_world_pos = world_pos.is_some(),
+                    has_minimap_pos = minimap_pos.is_some(),
+                    is_known_player,
+                    has_vehicle,
+                    clock = %packet.clock,
+                    "ShipDestroyed"
+                );
+                self.dead_ships.insert(
+                    victim,
+                    DeadShip { clock: packet.clock, position: world_pos, minimap_position: minimap_pos },
+                );
             }
             crate::analyzer::decoder::DecodedPacketPayload::EntityMethod(method) => {
                 debug!("ENTITY METHOD, {:#?}", method)
@@ -2647,6 +2679,10 @@ where
                 }
                 // Remove buff zones on EntityLeave (arms race: zone consumed)
                 self.buff_zones.remove(&entity_id);
+                // Remove world position so the ship stops rendering at a stale location.
+                // The minimap entry is kept (if any) so undetected ships can still
+                // be drawn with a different icon.
+                self.ship_positions.remove(&entity_id);
             }
             crate::analyzer::decoder::DecodedPacketPayload::EntityCreate(entity_create) => {
                 self.handle_entity_create(packet.clock, entity_create);
@@ -2694,6 +2730,27 @@ where
                     let battle_player = Rc::new(battle_player);
 
                     self.player_entities.insert(battle_player.initial_state.entity_id(), battle_player);
+                }
+            }
+            crate::analyzer::decoder::DecodedPacketPayload::NewPlayerSpawnedInBattle {
+                player_states: players,
+                bot_states: bots,
+            } => {
+                debug!("NewPlayerSpawnedInBattle: {} players, {} bots", players.len(), bots.len());
+                for player in players.iter().chain(bots.iter()) {
+                    if let Some(battle_player) = Player::from_spawned_player(player, self.game_resources) {
+                        let entity_id = player.entity_id();
+                        // Add to metadata_players so future OnArenaStateReceived/OnGameRoomStateChanged
+                        // can find this player.
+                        self.metadata_players.push(Rc::new(MetadataPlayer {
+                            id: player.meta_ship_id(),
+                            name: player.username().to_string(),
+                            relation: battle_player.relation(),
+                            vehicle: Rc::clone(&battle_player.vehicle),
+                        }));
+                        let battle_player = Rc::new(battle_player);
+                        self.player_entities.insert(entity_id, battle_player);
+                    }
                 }
             }
             crate::analyzer::decoder::DecodedPacketPayload::CheckPing(_) => trace!("CHECK PING"),

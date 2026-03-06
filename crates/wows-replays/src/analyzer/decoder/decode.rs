@@ -335,11 +335,15 @@ impl PlayerStateData {
         let db_id =
             mapped_values.get(Self::KEY_ACCOUNT_DBID).unwrap().i64_ref().cloned().expect("accountDBID is not an i64");
 
-        let is_abuser =
-            mapped_values.get(Self::KEY_IS_ABUSER).unwrap().bool_ref().cloned().expect("isAbuser is not a bool");
+        let is_abuser = mapped_values
+            .get(Self::KEY_IS_ABUSER)
+            .and_then(|v| v.bool_ref().cloned().or_else(|| v.i64_ref().map(|i| *i != 0)))
+            .unwrap_or(false);
 
-        let is_hidden =
-            mapped_values.get(Self::KEY_IS_HIDDEN).unwrap().bool_ref().cloned().expect("isHidden is not a bool");
+        let is_hidden = mapped_values
+            .get(Self::KEY_IS_HIDDEN)
+            .and_then(|v| v.bool_ref().cloned().or_else(|| v.i64_ref().map(|i| *i != 0)))
+            .unwrap_or(false);
 
         let is_bot = mapped_values.get(Self::KEY_IS_BOT).and_then(|v| v.bool_ref().cloned()).unwrap_or(false);
 
@@ -562,6 +566,14 @@ impl PlayerStateData {
 
     pub fn is_bot(&self) -> bool {
         self.is_bot
+    }
+
+    /// The ship's GameParamId, if present in the decoded data.
+    pub fn ship_params_id(&self) -> Option<GameParamId> {
+        self.raw_with_names
+            .get(Self::KEY_SHIP_PARAMS_ID)
+            .and_then(|v| v.as_u64())
+            .map(|id| GameParamId::from(id as u32))
     }
 
     pub fn raw(&self) -> &HashMap<i64, String> {
@@ -914,6 +926,14 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     OnGameRoomStateChanged {
         /// Updated player states
         player_states: Vec<HashMap<&'static str, pickled::Value>>,
+    },
+    /// Sent when new players/bots spawn mid-battle (e.g. reinforcement waves in Operations).
+    /// Same format as OnArenaStateReceived player/bot lists.
+    NewPlayerSpawnedInBattle {
+        /// Human players that spawned
+        player_states: Vec<PlayerStateData>,
+        /// Bot players that spawned
+        bot_states: Vec<PlayerStateData>,
     },
     CheckPing(u64),
     /// Indicates that the given victim has received damage from one or more attackers.
@@ -1544,6 +1564,37 @@ where
                 }
             }
             DecodedPacketPayload::OnGameRoomStateChanged { player_states: players_out }
+        } else if *method == "onNewPlayerSpawnedInBattle" {
+            // Args: playersData (BLOB), botsData (BLOB), observersData (BLOB)
+            // Same pickle format as onArenaStateReceived player/bot lists.
+            let mut players_out = vec![];
+            if let Some(ArgValue::Blob(blob)) = args.first()
+                && let Ok(value) = pickled::de::value_from_slice(blob, pickled::de::DeOptions::new())
+            {
+                let value = try_convert_pickle_to_string(value);
+                if let pickled::value::Value::List(players) = &value {
+                    for player in players.inner().iter() {
+                        players_out.push(PlayerStateData::from_pickle(player, version, false));
+                    }
+                }
+            }
+
+            let mut bots_out = vec![];
+            if let Some(ArgValue::Blob(blob)) = args.get(1)
+                && let Ok(value) = pickled::de::value_from_slice(blob, pickled::de::DeOptions::new())
+            {
+                let value = try_convert_pickle_to_string(value);
+                if let pickled::value::Value::List(bots) = &value {
+                    for bot in bots.inner().iter() {
+                        bots_out.push(PlayerStateData::from_pickle(bot, version, true));
+                    }
+                }
+            }
+
+            DecodedPacketPayload::NewPlayerSpawnedInBattle {
+                player_states: players_out,
+                bot_states: bots_out,
+            }
         } else if *method == "onArenaStateReceived" {
             let (arg0, arg1) = unpack_rpc_args!(args, i64, i8);
 
