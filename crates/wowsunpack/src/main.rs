@@ -1836,7 +1836,7 @@ fn run_export_ship(
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::export::ship::ShipExportOptions;
 
-    let mut assets = ShipAssets::load(vfs)?;
+    let assets = ShipAssets::load(vfs)?;
 
     // Load translations if available.
     if let Some(version) = game_version {
@@ -1935,7 +1935,7 @@ fn run_armor(
     use wowsunpack::export::ship::ShipExportOptions;
     use wowsunpack::models::geometry;
 
-    let mut assets = ShipAssets::load(vfs)?;
+    let assets = ShipAssets::load(vfs)?;
 
     // Load translations if available.
     if let Some(version) = game_version {

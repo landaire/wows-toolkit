@@ -1,0 +1,688 @@
+[meta]
+language_name = "ไทย"
+
+# -- กล่องเลือกภาษา --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "ดำเนินการต่อเป็นภาษาไทย"
+select_language = "เลือกภาษา"
+machine_translation_warning = "การแปลส่วนใหญ่สร้างขึ้นด้วยเครื่องและอาจไม่ถูกต้อง"
+
+# -- ชื่อแท็บ --
+
+[ui.tabs]
+unpacker = "ตัวแกะไฟล์ทรัพยากร"
+settings = "ตั้งค่า"
+replay_parser = "ตัวตรวจสอบรีเพลย์"
+player_tracker = "ติดตามผู้เล่น"
+mod_manager = "จัดการม็อด"
+armor_viewer = "ดูเกราะ"
+stats = "สถิติ"
+
+# -- ปุ่มทั่วไป --
+
+[ui.buttons]
+yes = "ใช่"
+no = "ไม่"
+stop = "หยุด"
+copy = "คัดลอก"
+cancel = "ยกเลิก"
+continue_ = "ดำเนินการต่อ"
+install_update = "ติดตั้งอัปเดต"
+view_release = "ดูรุ่นที่เผยแพร่"
+clear_settings = "ล้างการตั้งค่า"
+more_options = "ตัวเลือกเพิ่มเติม"
+create_issue = "สร้าง Issue"
+discord = "Discord"
+github = "GitHub"
+view_github = "ดูโปรเจกต์บน GitHub"
+choose = "เลือก..."
+reset = "รีเซ็ต"
+
+# -- รายการเมนู --
+
+[ui.menu]
+file = "ไฟล์"
+check_updates = "ตรวจสอบอัปเดต"
+about = "เกี่ยวกับ"
+quit = "ออก"
+
+# -- ชื่อหน้าต่าง --
+
+[ui.windows]
+build_consent = "ความยินยอมในการเก็บข้อมูลบิลด์"
+crash_detected = "ตรวจพบแอปพลิเคชันขัดข้อง"
+update_available = "มีอัปเดตใหม่"
+confirm = "ยืนยัน"
+network_warning = "คำเตือนเครือข่าย"
+error = "ข้อผิดพลาด"
+about = "เกี่ยวกับ"
+
+# -- ข้อความในกล่องโต้ตอบ --
+
+[ui.dialogs]
+build_consent_message = "คุณต้องการส่งข้อมูลบิลด์ผู้เล่นจากการรบจัดอันดับและการรบสุ่มให้ผู้พัฒนาหรือไม่? การเก็บข้อมูลนี้ช่วยให้ชุมชนวิเคราะห์บิลด์ผู้เล่นจำนวนมากได้ คุณสามารถยกเลิกได้ตลอดเวลาในการตั้งค่า"
+crash_message = "ดูเหมือนว่า WoWs Toolkit ขัดข้องในครั้งก่อนที่รัน หากคุณต้องการรายงานปัญหานี้ กรุณาโพสต์ Issue บน GitHub หรือเข้าร่วมเซิร์ฟเวอร์ Discord และให้ข้อมูลด้านล่าง"
+crash_clear_settings = "หากข้อมูลที่แอปพลิเคชันเก็บไว้อาจเป็นสาเหตุ คุณสามารถลองล้างการตั้งค่าโดยกดปุ่มด้านล่าง การดำเนินการนี้จะล้างการตั้งค่าทั้งหมด รวมถึงผู้เล่นที่ติดตาม รีเพลย์และข้อมูล WoWs ของคุณจะปลอดภัย"
+update_message = "WoWs Toolkit เวอร์ชัน %{tag} พร้อมใช้งาน"
+update_windows_only = "มีอัปเดตใหม่ แต่ขณะนี้รองรับเฉพาะ Windows เท่านั้น"
+p2p_warning = "เซสชันร่วมใช้เครือข่ายแบบ P2P ผู้ใช้อื่นในเซสชันอาจสามารถเห็นที่อยู่ IP ของคุณได้"
+
+# -- ป้ายกำกับ --
+
+[ui.labels]
+debug_build = "⚠ Debug build ⚠"
+error_occurred = "เกิดข้อผิดพลาด:"
+made_by = "สร้างโดย landaire"
+credits = "ขอบคุณ Trackpad, TTaro, lkolbly สำหรับการมีส่วนร่วม"
+pr_credits = "ข้อมูลและสูตรคำนวณ Personal rating (PR) จัดทำโดย WoWs Numbers"
+powered_by = "ขับเคลื่อนโดย "
+and = " และ "
+suppress_warning = "ไม่ต้องแสดงอีก"
+more_info = "ข้อมูลเพิ่มเติม"
+loading_replays = "กำลังโหลดรีเพลย์ %{count} รายการ..."
+
+# -- ข้อความแจ้งเตือน --
+
+[ui.messages]
+app_up_to_date = "แอปพลิเคชันเป็นเวอร์ชันล่าสุดแล้ว"
+update_check_failed = "ตรวจสอบอัปเดตไม่สำเร็จ"
+constants_fetch_failed = "ไม่สามารถดึงข้อมูลแมปปิ้งรีเพลย์ที่อัปเดตได้ จะลองใหม่ภายหลัง"
+game_data_loaded = "โหลดข้อมูลเกมสำเร็จ"
+no_replays_detected = "ไม่พบรีเพลย์ — ตั้งค่าไดเรกทอรี WoWs ถูกต้องหรือไม่?"
+build_loaded = "โหลดบิลด์ %{build} แล้ว"
+replay_loaded = "โหลดรีเพลย์สำเร็จ"
+twitch_token_invalid = "โทเค็น Twitch ไม่ถูกต้องหรือหมดอายุ กรุณาอัปเดตในการตั้งค่า"
+twitch_token_expired = "โทเค็น Twitch ไม่ถูกต้องหรือหมดอายุ"
+versioned_constants_rebuild_failed = "ไม่สามารถดึงค่าคงที่เวอร์ชันระหว่างการสร้างใหม่ จะลองใหม่ภายหลัง"
+constants_version_mismatch = "เวอร์ชันไฟล์แมปปิ้งข้อมูลรีเพลย์ไม่ตรงกับเวอร์ชันเกม\nผลลัพธ์หลังการรบอาจไม่ถูกต้อง กรุณารอให้ผู้ดูแลโปรเจกต์อัปเดตแมปปิ้งบนเซิร์ฟเวอร์"
+constants_updated = "อัปเดตไฟล์แมปปิ้งข้อมูลรีเพลย์สำเร็จ"
+session_started = "เริ่มเซสชันแล้ว"
+user_joined = "%{name} เข้าร่วมแล้ว"
+user_timeout = "%{name} หมดเวลา"
+user_left = "%{name} ออกไปแล้ว"
+session_ended = "เซสชันสิ้นสุดแล้ว"
+session_error = "ข้อผิดพลาดเซสชัน: %{msg}"
+connected_to_session = "เชื่อมต่อกับเซสชันแล้ว"
+joined_session = "เข้าร่วมเซสชัน: %{name}"
+replay_spam_protection = "ตัดการเชื่อมต่อ: โฮสต์เปิดรีเพลย์เร็วเกินไป"
+host_opened_replay = "โฮสต์เปิดรีเพลย์: %{name}"
+host_closed_replay = "โฮสต์ปิดรีเพลย์แล้ว"
+session_error_generic = "เซสชัน: %{msg}"
+session_rejected = "เซสชันถูกปฏิเสธ: %{reason}"
+
+# -- ชื่อสถิติ --
+
+[stat]
+damage = "ความเสียหาย"
+spotting_damage = "ความเสียหายจากการตรวจจับ"
+frags = "สังหาร"
+raw_xp = "Raw XP"
+base_xp = "Base XP"
+win_rate = "อัตราชนะ"
+win_rate_pct = "อัตราชนะ (%)"
+personal_rating = "เรตติ้งส่วนบุคคล"
+avg_damage = "ความเสียหายเฉลี่ย"
+avg_spotting_damage = "ความเสียหายจากการตรวจจับเฉลี่ย"
+avg_frags = "สังหารเฉลี่ย"
+avg_raw_xp = "Raw XP เฉลี่ย"
+avg_base_xp = "Base XP เฉลี่ย"
+avg_pr = "PR เฉลี่ย"
+avg_prefix = "เฉลี่ย %{name}"
+
+[chart]
+game_number = "เกม #"
+combined = "รวม"
+combined_suffix = "(รวม)"
+rolling_average_suffix = "(ค่าเฉลี่ยเคลื่อนที่)"
+no_data = "ไม่มีข้อมูลสำหรับเรือที่เลือก"
+win_rate_unavailable = "อัตราชนะไม่สามารถแสดงในกราฟเส้นต่อเกมได้ (เปิดค่าเฉลี่ยเคลื่อนที่หรือใช้กราฟแท่ง)"
+
+# -- กล่องยืนยัน --
+
+[confirm]
+open_in_game = "การดำเนินการนี้จะเปิด World of Warships ดำเนินการต่อหรือไม่?"
+clear_all_session_stats = "การดำเนินการนี้จะล้างสถิติเซสชันทั้งหมด ดำเนินการต่อหรือไม่?"
+clear_ship_session_stats = "การดำเนินการนี้จะลบเกมทั้งหมดของเรือนี้ออกจากสถิติเซสชัน ดำเนินการต่อหรือไม่?"
+set_as_session_stats = "การดำเนินการนี้จะแทนที่สถิติเซสชันปัจจุบันของคุณ ดำเนินการต่อหรือไม่?"
+
+# -- ข้อความผิดพลาด --
+
+[error]
+file_watcher_creation = "สร้างตัวเฝ้าดูไฟล์ไม่สำเร็จ: %{error}"
+replay_dir_watch = "เฝ้าดูไดเรกทอรีรีเพลย์ไม่สำเร็จ: %{error}"
+
+# -- การตั้งค่า --
+
+[ui.settings.app]
+heading = "การตั้งค่าแอปพลิเคชัน"
+description = "พฤติกรรมและรูปลักษณ์ทั่วไปของแอปพลิเคชัน"
+check_for_updates = "ตรวจสอบอัปเดตเมื่อเริ่มต้น"
+enable_logging = "เปิดใช้งานบันทึก (มีผลเมื่อรีสตาร์ท)"
+enable_logging_tooltip = "เขียนบันทึกดีบักลงไฟล์ในไดเรกทอรีข้อมูลแอปพลิเคชัน มีประโยชน์สำหรับการแก้ไขปัญหา"
+send_replay_data = "ส่งบิลด์จากรีเพลย์การรบจัดอันดับและการรบสุ่มไปยัง ShipBuilds.com"
+zoom_factor = "ระดับการซูม (Ctrl + และ Ctrl - สามารถเปลี่ยนได้เช่นกัน)"
+language = "ภาษา"
+
+[ui.settings.wows]
+heading = "การตั้งค่า World of Warships"
+description = "เส้นทางไปยังการติดตั้ง World of Warships ของคุณ"
+directory_hint = "ไดเรกทอรี World of Warships"
+
+[ui.settings.replay]
+heading = "การตั้งค่ารีเพลย์"
+description = "กำหนดค่าคอลัมน์ที่จะแสดงในตารางผลลัพธ์รีเพลย์"
+show_raw_xp = "แสดง Raw XP"
+show_entity_id = "แสดง Entity ID"
+show_observed_damage = "แสดงความเสียหายที่สังเกต"
+show_fires = "แสดงไฟ"
+show_floods = "แสดงน้ำท่วม"
+show_citadels = "แสดงป้อมปืน"
+show_crits = "แสดงการโจมตีโมดูลวิกฤต"
+auto_export_data = "ส่งออกข้อมูลอัตโนมัติ"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "ไดเรกทอรีส่งออกข้อมูลอัตโนมัติ"
+
+[ui.settings.session]
+heading = "การตั้งค่าเซสชัน"
+description = "การตั้งค่าเซสชันรีเพลย์ร่วม"
+display_name = "ชื่อที่แสดง"
+suppress_ip_warning = "ไม่ต้องแสดงคำเตือนที่อยู่ IP แบบ P2P"
+ip_warning_tooltip = "เซสชันร่วมใช้เครือข่ายแบบ P2P ผู้ใช้อื่นในเซสชันอาจสามารถเห็นที่อยู่ IP ของคุณได้"
+disable_auto_open = "ปิดการเปิดหน้าต่างเซสชันอัตโนมัติ"
+auto_open_tooltip = "เมื่อเปิดใช้งาน หน้าต่างเซสชัน (รีเพลย์ กระดานยุทธวิธี) จะไม่เปิดอัตโนมัติ คุณยังสามารถเปิดได้จากป๊อปอัพเซสชัน"
+
+[ui.settings.twitch]
+heading = "การตั้งค่า Twitch"
+description = "เชื่อมต่อกับ Twitch สำหรับการรวมแชทและติดตามผู้เล่น"
+get_token = "รับโทเค็นเข้าสู่ระบบ"
+get_token_tooltip = "เราใช้หน้าเข้าสู่ระบบของ Chatterino เนื่องจากให้โทเค็นที่มีสิทธิ์ที่จำเป็น (โทเค็นผู้ดูแลพร้อมสิทธิ์แชท) และไม่จำเป็นต้องให้ผู้พัฒนา WoWs Toolkit โฮสต์หน้าเว็บเข้าสู่ระบบของตัวเองซึ่งจะให้ผลลัพธ์เดียวกัน"
+paste_token_no_token = "วางโทเค็น (ยังไม่มีโทเค็น)"
+paste_token_valid = "วางโทเค็น (โทเค็นถูกต้อง)"
+paste_token_invalid = "วางโทเค็น (โทเค็นไม่ถูกต้อง / หมดอายุ)"
+monitored_channel = "ช่องที่ติดตาม (ค่าเริ่มต้นเป็นตัวเอง)"
+
+# -- ตัวตรวจสอบรีเพลย์ --
+
+[ui.replay]
+spectator = "ผู้ชม"
+loading = "กำลังโหลด..."
+no_selection = "คลิกรีเพลย์เพื่อดู หรือดับเบิลคลิกเพื่อเปิดในแท็บใหม่"
+incomplete_results = "ผลการแข่งขันไม่สมบูรณ์"
+incomplete_results_tooltip = "รีเพลย์ยังไม่มีผลลัพธ์สิ้นสุดการแข่งขัน ข้อมูลจะถูกโหลดใหม่อัตโนมัติเมื่อการแข่งขันสิ้นสุดและเพิ่มผลลัพธ์ลงในรีเพลย์"
+no_chat = "ไม่มีข้อความแชทในรีเพลย์นี้"
+team_damage = "ความเสียหายต่อทีม: "
+hide_my_stats = "ซ่อนสถิติเรือทดสอบของฉัน"
+open_manually = "เปิดไฟล์รีเพลย์ด้วยตนเอง..."
+autoload_latest = "โหลดรีเพลย์ล่าสุดอัตโนมัติ"
+column_filters = "ตัวกรองคอลัมน์"
+nda = "NDA"
+export = "ส่งออก"
+render = "เรนเดอร์"
+chat = "แชท"
+game_chat = "แชทในเกม"
+copy_all = "คัดลอกทั้งหมด"
+save_to_file = "บันทึกเป็นไฟล์"
+chat_copied = "คัดลอกแชทแล้ว"
+copy_message = "คัดลอกข้อความ"
+export_results = "ผลลัพธ์"
+
+[ui.replay.context]
+open_in_new_tab = "เปิดในแท็บใหม่"
+copy_path = "คัดลอกเส้นทาง"
+copy_replay = "คัดลอกรีเพลย์"
+copy_replays = "คัดลอก %{count} รีเพลย์"
+show_in_explorer = "แสดงในตัวจัดการไฟล์"
+show_replay_controls = "แสดงตัวควบคุมรีเพลย์"
+open_in_game = "เปิดในเกม"
+render_replay = "เรนเดอร์รีเพลย์"
+set_session_stats_one = "ตั้งเป็นสถิติเซสชัน (1 รีเพลย์)"
+set_session_stats_many = "ตั้งเป็นสถิติเซสชัน (%{count} รีเพลย์)"
+add_session_stats_one = "เพิ่มในสถิติเซสชัน (1 รีเพลย์)"
+add_session_stats_many = "เพิ่มในสถิติเซสชัน (%{count} รีเพลย์)"
+
+[ui.replay.column]
+actions = "การดำเนินการ"
+player_name = "ชื่อผู้เล่น"
+base_xp = "Base XP"
+raw_xp = "Raw XP"
+ship_name = "ชื่อเรือ"
+hits = "โดน"
+kills = "สังหาร"
+observed_damage = "ความเสียหายที่สังเกต"
+actual_damage = "ความเสียหายจริง"
+spotting_damage = "ความเสียหายจากการตรวจจับ"
+potential_damage = "ความเสียหายที่อาจเกิดขึ้น"
+time_lived = "เวลาที่มีชีวิต"
+fires = "ไฟ"
+floods = "น้ำท่วม"
+citadels = "ป้อมปืน"
+crits = "วิกฤต"
+received_damage = "ความเสียหายที่ได้รับ"
+distance_traveled = "ระยะทางที่เดินทาง"
+skills = "ทักษะ"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Raw XP"
+entity_id = "Entity ID"
+observed_damage = "ความเสียหายที่สังเกต"
+fires = "ไฟ"
+floods = "น้ำท่วม"
+citadels = "ป้อมปืน"
+crits = "การโจมตีโมดูลวิกฤต"
+
+[ui.replay.group]
+date = "วันที่"
+ship = "เรือ"
+none = "ไม่มี"
+prefix = "กลุ่ม: %{label}"
+
+[ui.replay.player]
+hidden_profile = "ผู้เล่นซ่อนโปรไฟล์"
+never_connected = "ผู้เล่นไม่ได้เชื่อมต่อเข้าร่วมการแข่งขัน"
+
+[ui.replay.build]
+open_in_browser = "เปิดบิลด์ในเบราว์เซอร์"
+copy_link = "คัดลอกลิงก์บิลด์"
+copy_short_link = "คัดลอกลิงก์บิลด์แบบสั้น"
+link_copied = "คัดลอกลิงก์บิลด์แล้ว"
+open_wows_numbers = "เปิดหน้า WoWs Numbers"
+not_spotted = "เรือนี้ไม่เคยถูกตรวจจับ ข้อมูลบิลด์ไม่พร้อมใช้งาน"
+
+[ui.replay.sections]
+achievements = "ความสำเร็จ"
+ribbons = "ริบบิ้น"
+modules = "โมดูล:"
+modules_none = "ไม่มีโมดูล"
+abilities = "ความสามารถ:"
+abilities_none = "ไม่มีความสามารถ"
+captain_skills = "ทักษะกัปตัน:"
+captain_skills_none = "ไม่มีทักษะกัปตัน"
+
+[ui.replay.debug]
+view_raw_metadata = "ดูข้อมูลเมตาดิบของผู้เล่น"
+raw_metadata = "เมตาดาต้าดิบ"
+view_results = "ดูผลลัพธ์"
+raw_json = "JSON ดิบ"
+raw_json_tooltip = "ผลการรบดิบตามที่ WG ซีเรียลไลซ์"
+mapped_json = "JSON ที่แมปแล้ว"
+mapped_json_tooltip = "ผลการรบที่แปลงอาร์เรย์ตำแหน่งเป็นฟิลด์ที่มีชื่อ"
+
+[ui.replay.results]
+victory = "ชนะ"
+defeat = "แพ้"
+draw = "เสมอ"
+
+[ui.replay.controls]
+window_title = "ตัวควบคุมรีเพลย์"
+unavailable = "ตัวควบคุมไม่พร้อมใช้งาน (ไม่พบ commands.scheme.xml ในไฟล์เกม)"
+
+# -- เซสชันร่วม --
+
+[ui.collab]
+session = "เซสชัน"
+starting = "กำลังเริ่มเซสชัน…"
+session_active = "เซสชันใช้งานอยู่"
+connected_to_session = "เชื่อมต่อกับเซสชันแล้ว"
+session_token = "โทเค็นเซสชัน:"
+toggle_visibility = "สลับการแสดงโทเค็น"
+copy_token = "คัดลอกโทเค็น"
+token_copied = "คัดลอกโทเค็นไปยังคลิปบอร์ดแล้ว"
+copy_web_link = "คัดลอกลิงก์เว็บ"
+copy_web_link_tooltip = "คัดลอกลิงก์สำหรับเว็บไคลเอนต์"
+web_link_copied = "คัดลอกลิงก์เว็บไปยังคลิปบอร์ดแล้ว"
+copy_localhost_link = "คัดลอกลิงก์ Localhost"
+copy_localhost_tooltip = "คัดลอกลิงก์ localhost (dev)"
+localhost_copied = "คัดลอกลิงก์ localhost ไปยังคลิปบอร์ดแล้ว"
+connected_count = "%{count} เชื่อมต่อแล้ว"
+promote_cohost = "เลื่อนเป็นผู้ร่วมโฮสต์"
+promoted_cohost = "เลื่อน %{name} เป็นผู้ร่วมโฮสต์แล้ว"
+permissions = "สิทธิ์"
+lock_annotations = "ล็อกคำอธิบายประกอบ"
+lock_settings = "ล็อกการตั้งค่า"
+reset_overrides = "รีเซ็ตการแทนที่ไคลเอนต์"
+reset_overrides_tooltip = "รีเซ็ตการเปลี่ยนแปลงการตั้งค่าการแสดงผลของไคลเอนต์ทั้งหมด"
+leave = "ออก"
+role_host = "โฮสต์"
+role_cohost = "ผู้ร่วมโฮสต์"
+you = "(คุณ)"
+display_name = "ชื่อที่แสดง:"
+display_name_hint = "ชื่อของคุณ..."
+display_name_error = "กรุณาใส่ชื่อที่แสดง"
+enter_display_name = "ใส่ชื่อที่แสดงก่อน"
+host_session = "โฮสต์เซสชัน"
+start_session = "เริ่มเซสชัน"
+join_session = "เข้าร่วมเซสชัน"
+paste_and_join = "วางโทเค็นและเข้าร่วม"
+clipboard_empty = "คลิปบอร์ดว่างเปล่า"
+invalid_token = "โทเค็นไม่ถูกต้อง: %{error}"
+shared_windows = "หน้าต่างที่แชร์"
+open = "เปิด"
+open_for_everyone = "เปิดให้ทุกคน"
+tactics_board = "กระดานยุทธวิธี"
+max_boards = "เปิดกระดานยุทธวิธีได้สูงสุด %{count} กระดาน"
+waiting_for_data = "กำลังรอข้อมูลเกมโหลด…"
+
+# -- ข้อความผลการรบ --
+
+[battle]
+victory = "ชัยชนะ"
+defeat = "พ่ายแพ้"
+draw = "เสมอ"
+battle_starts_in = "การรบเริ่มใน"
+
+# -- ประเภทการจบ --
+
+[finish_type]
+unknown = "การรบสิ้นสุด"
+extermination = "ทำลายเรือศัตรูทั้งหมด"
+base_captured = "ยึดฐานแล้ว"
+timeout = "หมดเวลา"
+failure = "ภารกิจล้มเหลว"
+technical = "จบทางเทคนิค"
+score = "ถึงขีดจำกัดคะแนน"
+score_on_timeout = "นำคะแนนเมื่อหมดเวลา"
+pve_success = "ภารกิจสำเร็จ"
+pve_failed = "ภารกิจล้มเหลว"
+score_zero = "คะแนนหมด"
+score_excess = "เกินขีดจำกัดคะแนน"
+
+# -- แท็บสถิติ --
+
+[ui.stats]
+overview = "ภาพรวม"
+limit = "จำกัด"
+division = "Div:"
+div_all = "ทั้งหมด"
+div_solo = "เดี่ยว"
+div_div = "Div"
+mode_label = "โหมด:"
+clear = "ล้าง"
+pr = "PR:"
+frags_count = "%{count} สังหาร"
+best_frags = "ดีที่สุด: %{ship} (%{count} สังหาร)"
+max_damage = "ความเสียหายสูงสุด: %{ship} (%{damage})"
+copy_markdown = "คัดลอกเป็น Markdown"
+copy_csv = "คัดลอกเป็น CSV"
+remove_games_hint = "ลบเกมทั้งหมดของ %{ship} (Ctrl+Click เพื่อข้ามการยืนยัน)"
+no_stats = "ไม่มีสถิติเซสชัน เล่นเกมก่อน!"
+settings = "ตั้งค่า"
+chart_type = "ประเภทกราฟ"
+stat_label = "สถิติ:"
+chart_line = "เส้น"
+chart_bar = "แท่ง"
+options = "ตัวเลือก"
+combined = "รวม"
+rolling_avg = "ค่าเฉลี่ยเคลื่อนที่"
+labels = "ป้ายกำกับ"
+ships = "เรือ"
+all_ships = "ทั้งหมด"
+no_ships = "ไม่มี"
+copy_as_image = "คัดลอกเป็นรูปภาพ"
+
+[ui.stats.table]
+min = "ต่ำสุด"
+max = "สูงสุด"
+total = "รวม"
+average = "เฉลี่ย"
+
+# -- ติดตามผู้เล่น --
+
+[ui.player_tracker]
+clear_stats = "ล้างสถิติ"
+player_filter = "กรองผู้เล่น"
+populate_from_replays = "เติมข้อมูลจากรีเพลย์"
+current_match = "ผู้เล่นในแมตช์ปัจจุบัน"
+historical = "แมตช์ย้อนหลัง"
+seen_minutes = "พบเมื่อ %{minutes} นาทีหลังเริ่มแมตช์"
+
+[ui.player_tracker.column]
+clan = "แคลน"
+player_name = "ชื่อผู้เล่น"
+twitch_names = "ชื่อ Twitch ที่เป็นไปได้"
+wg_id = "WG ID"
+total_encounters = "พบทั้งหมด"
+encounters_in_range = "พบในช่วงเวลา"
+last_encountered = "พบล่าสุด"
+aliases = "นามแฝง"
+notes = "หมายเหตุ"
+
+[ui.player_tracker.period]
+past_hour = "ชั่วโมงที่ผ่านมา"
+past_six_hours = "6 ชั่วโมงที่ผ่านมา"
+past_day = "24 ชั่วโมงที่ผ่านมา"
+past_week = "สัปดาห์ที่ผ่านมา"
+past_month = "เดือนที่ผ่านมา"
+all_time = "ทั้งหมด"
+
+# -- จัดการม็อด --
+
+[ui.mod_manager]
+category_filters = "ตัวกรองหมวดหมู่"
+enabled = "เปิดใช้งาน"
+mod_home = "หน้าหลักม็อด"
+discord_thread = "เธรดอนุมัติ Discord"
+save_config = "บันทึกค่าม็อด"
+load_config = "โหลดค่าม็อด"
+filter = "กรอง"
+
+[ui.mod_manager.column]
+enabled = "เปิดใช้งาน"
+name = "ชื่อ"
+author = "ผู้เขียน"
+category = "หมวดหมู่"
+
+# -- ตัวเรนเดอร์รีเพลย์ --
+
+[ui.renderer]
+loading = "กำลังโหลดข้อมูลรีเพลย์..."
+preparing_export = "กำลังเตรียมการส่งออก..."
+encoding = "กำลังเข้ารหัส"
+muxing = "กำลัง Mux"
+
+[ui.renderer.advantage]
+breakdown = "รายละเอียดข้อได้เปรียบ"
+team_eliminated = "ทีมหนึ่งถูกทำลาย"
+score_projection = "การคาดการณ์คะแนน"
+fleet_power = "กำลังกองเรือ"
+strategic_threat = "ภัยคุกคามเชิงยุทธศาสตร์"
+total = "รวม"
+hp_incomplete = "ข้อมูล HP/เรือไม่สมบูรณ์ — แสดงเฉพาะปัจจัยคะแนน"
+
+[ui.renderer.context]
+show_trail = "แสดงเส้นทาง"
+disable_other_trails = "ปิดเส้นทางอื่นทั้งหมด"
+ranges = "ระยะ"
+detection = "การตรวจจับ"
+main_battery = "ปืนใหญ่หลัก"
+secondary = "ปืนรอง"
+torpedo = "ตอร์ปิโด"
+radar = "เรดาร์"
+hydro = "ไฮโดร"
+enable_all = "เปิดทั้งหมด"
+disable_all = "ปิดทั้งหมด"
+disable_other_ranges = "ปิดระยะอื่นทั้งหมด"
+enable_all_ranges = "เปิดระยะของเรือทุกลำ"
+show_armor = "แสดงเกราะแบบเรียลไทม์"
+
+[ui.renderer.controls]
+jump_to_start = "ข้ามไปจุดเริ่มต้น"
+previous_event = "เหตุการณ์ก่อนหน้า (Shift+Left)"
+back_10s = "ย้อนกลับ 10 วินาที (Left)"
+pause = "หยุดชั่วคราว (Space)"
+play = "เล่น (Space)"
+forward_10s = "เดินหน้า 10 วินาที (Right)"
+next_event = "เหตุการณ์ถัดไป (Shift+Right)"
+jump_to_end = "ข้ามไปจุดสิ้นสุด"
+save_as_video = "บันทึกเป็นวิดีโอ"
+copy_to_clipboard = "เรนเดอร์วิดีโอไปยังคลิปบอร์ด"
+
+[ui.renderer.settings]
+ship_settings = "ตั้งค่าเรือ"
+armament = "อาวุธยุทโธปกรณ์"
+dead_ships = "เรือที่จม"
+dead_ship_names = "ชื่อเรือที่จม"
+player_names = "ชื่อผู้เล่น"
+ship_ranges = "ระยะเรือ"
+self_ship_ranges = "ระยะเรือตัวเอง"
+ship_names = "ชื่อเรือ"
+turret_direction = "ทิศทางป้อมปืน"
+trail_settings = "ตั้งค่าเส้นทาง"
+heat_trail = "เส้นทางความร้อน"
+speed_trails = "เส้นทางความเร็ว"
+dead_ship_trails = "เส้นทางเรือที่จม"
+map_settings = "ตั้งค่าแผนที่"
+buildings = "อาคาร"
+capture_points = "จุดยึด"
+consumables = "อุปกรณ์สิ้นเปลือง"
+planes = "เครื่องบิน"
+smoke = "ควัน"
+torpedoes = "ตอร์ปิโด"
+tracers = "กระสุนเรืองแสง"
+hud_settings = "ตั้งค่า HUD"
+battle_result = "ผลการรบ"
+buff_counters = "ตัวนับบัฟ"
+chat_label = "แชท"
+kill_feed = "ฟีดสังหาร"
+score_label = "คะแนน"
+score_timers = "ตัวจับเวลาคะแนน"
+team_advantage = "ข้อได้เปรียบทีม"
+timer = "ตัวจับเวลา"
+export_settings = "ตั้งค่าส่งออก"
+prefer_cpu = "ใช้ตัวเข้ารหัส CPU"
+prefer_cpu_tooltip = "ใช้ตัวเข้ารหัสซอฟต์แวร์ (CPU) แทน GPU สำหรับการส่งออกวิดีโอ"
+save_defaults = "บันทึกค่าเริ่มต้น"
+event_timeline = "ไทม์ไลน์เหตุการณ์"
+
+# -- ตัวแกะไฟล์ --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "กำลังโหลด assets.bin..."
+load_failed = "โหลดไม่สำเร็จ: %{error}"
+no_game_data = "ไม่มีข้อมูลเกมที่โหลด ตั้งค่าไดเรกทอรี World of Warships ในการตั้งค่า"
+filter_files = "กรองไฟล์..."
+search_in_files = "ค้นหาในไฟล์"
+search_hint = "ค้นหาในไฟล์..."
+path_filter_hint = "กรองเส้นทาง (เช่น *.xml)"
+queue_all = "เข้าคิวทั้งหมด"
+queue_all_files = "เข้าคิวไฟล์ทั้งหมด"
+empty_directory = "ไดเรกทอรีว่าง"
+stop_search_tooltip = "หยุดค้นหา"
+no_matches = "ไม่พบผลลัพธ์"
+view_as_json = "ดูเป็น JSON"
+extract_as_json = "แยกเป็น JSON"
+view_contents = "ดูเนื้อหา"
+version = "เวอร์ชัน:"
+game_params = "GameParams"
+base_as_json = "ฐานเป็น JSON"
+as_json = "เป็น JSON"
+as_cbor = "เป็น CBOR"
+as_json_minimal = "เป็น JSON (ย่อ / แปลง)"
+as_cbor_minimal = "เป็น CBOR (ย่อ / แปลง)"
+decode_prototypes = "ถอดรหัสโปรโตไทป์เป็น JSON"
+decode_prototypes_tooltip = "ถอดรหัสโปรโตไทป์ Assets.bin ที่รองรับ (.visual, .model, .mfm) เป็น JSON เมื่อแยก"
+extraction_queue = "คิวการแยก"
+clear_all = "ล้างทั้งหมด"
+browse = "เรียกดู"
+output_dir_hint = "ไดเรกทอรีปลายทาง..."
+go_to_directory = "ไปยังไดเรกทอรี"
+remove_from_queue = "ลบออกจากคิว"
+queue_folder = "เข้าคิวทั้งโฟลเดอร์"
+double_click_open = "ดับเบิลคลิกเพื่อเปิด"
+
+[ui.unpacker.column]
+name = "ชื่อ"
+size = "ขนาด"
+type_col = "ประเภท"
+path = "เส้นทาง"
+file = "ไฟล์"
+offset = "ออฟเซ็ต"
+context = "บริบท"
+
+# -- ดูเกราะ --
+
+[ui.armor]
+load_settings = "โหลดข้อมูลเกมในการตั้งค่าเพื่อใช้ตัวดูเกราะ"
+gpu_unavailable = "สถานะการเรนเดอร์ GPU ไม่พร้อมใช้งาน"
+loading_ship = "กำลังโหลดข้อมูลเรือ..."
+load_failed = "โหลดข้อมูลเรือไม่สำเร็จ: %{error}"
+empty = "ว่าง"
+mirror_cameras = "กล้องสะท้อน"
+sync_options = "ตัวเลือกซิงค์"
+sync_tooltip = "รักษาการแสดงเกราะ/ตัวเรือให้ซิงค์กันในทุกแผง"
+compare_split = "เปรียบเทียบในส่วนแยกใหม่"
+export_model = "ส่งออกโมเดลเรือ"
+armor_thickness = "ความหนาเกราะ"
+export_disclaimer = "โมเดล 3D และเท็กซ์เจอร์เหล่านี้เป็นทรัพย์สินทางปัญญาของ Wargaming และการใช้งานโมเดลเหล่านี้ควรเป็นไปตามกฎหมายท้องถิ่นของคุณ"
+export_button = "ส่งออก"
+armor_toggle = "เกราะ"
+armor_tooltip = "สลับการแสดงโซนเกราะ"
+hull_toggle = "ตัวเรือ"
+hull_tooltip = "สลับการแสดงชิ้นส่วนโมเดลตัวเรือ"
+splash_toggle = "สแปลช"
+splash_tooltip = "สลับการแสดงกล่องสแปลช"
+show_hidden = "แสดงที่ซ่อน"
+show_hidden_tooltip = "สลับการแสดงแผงที่ (อาจ) ซ่อนอยู่"
+gaps = "ช่องว่าง"
+gaps_tooltip = "เน้นขอบเขตที่แผ่นเกราะไม่เชื่อมต่อกัน (ช่องว่างที่อาจเกิดขึ้น)"
+display = "แสดงผล"
+display_tooltip = "การตั้งค่าการแสดงผล (Ctrl+S)"
+marker_opacity = "ความทึบของเครื่องหมาย"
+save_defaults = "บันทึกเป็นค่าเริ่มต้น"
+export_tab = "ส่งออก"
+export_tooltip = "ส่งออกโมเดลเรือเป็นไฟล์ OBJ"
+pen_check = "ตรวจสอบการเจาะ"
+pen_check_tooltip = "กำหนดค่ากระสุนสำหรับการเปรียบเทียบการเจาะทะลุ"
+trajectory = "วิถีกระสุน"
+trajectory_on = "วิถีกระสุน [เปิด]"
+trajectory_tooltip = "คลิกเกราะเพื่อจำลองวิถีกระสุน (Ctrl+T)"
+continue_ricochet = "ดำเนินการต่อหลังกระสุนสะท้อน"
+splash_mode = "สแปลช"
+splash_on = "สแปลช [เปิด]"
+splash_no_data = "ไม่มีข้อมูลสแปลชสำหรับเรือนี้"
+splash_no_shells = "เพิ่มเรือที่มีกระสุน HE/SAP ลงในรายการเปรียบเทียบ"
+splash_tooltip_mode = "คลิกเกราะเพื่อแสดงปริมาตรความเสียหายสแปลช HE"
+loading_armor = "กำลังโหลดเรือ..."
+select_ship = "เลือกเรือจากรายการ"
+pen_check_label = "ตรวจสอบการเจาะทะลุ"
+all_btn = "ทั้งหมด"
+none_btn = "ไม่มี"
+opaque = "ทึบแสง"
+upgrade = "อัปเกรด:"
+plate_edges = "ขอบแผ่น"
+waterline = "แนวน้ำ"
+opacity = "ความทึบ"
+ship_hull = "ตัวเรือ"
+opaque_hull = "ตัวเรือทึบแสง"
+ballistic_disclaimer = "ผลลัพธ์กระสุนวิถีอิงจากการวิศวกรรมย้อนกลับ/การประมาณการทำงานของระบบจำลอง"
+roll = "การโคลง"
+ctrl_click_solo = "Ctrl+click เพื่อแสดงเดี่ยว"
+reset_plates = "รีเซ็ตแผ่นเกราะ"
+
+[ui.armor.realtime]
+loading = "กำลังโหลดเกราะเรือ..."
+waiting = "กำลังรอข้อมูลเรือ..."
+incoming_fire = "การยิงเข้า"
+attacker_filter = "กรองผู้โจมตี"
+all_enemies = "ศัตรูทั้งหมด"
+show_secondaries = "แสดงอาวุธรอง"
+auto_scroll = "เลื่อนอัตโนมัติ"
+seek_to_salvo = "ไปยังชุดกระสุน"
+deselect = "ยกเลิกการเลือก"
+select_all = "เลือกทั้งหมด"
+no_data = "ข้อมูลกระสุนไม่พร้อมใช้งานแล้ว"
+sim_agrees = "ผลจำลองตรงกัน"
+no_armor_hit = "ไม่มีแผ่นเกราะที่ถูกโจมตี"
+
+# -- ระดับข้อได้เปรียบ --
+
+[advantage]
+absolute = "สมบูรณ์"
+strong = "แข็งแกร่ง"
+moderate = "ปานกลาง"
+weak = "อ่อน"

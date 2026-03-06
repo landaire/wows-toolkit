@@ -163,14 +163,8 @@ impl ShipAssets {
     }
 
     /// Set translations for display name resolution.
-    ///
-    /// # Panics
-    /// Panics if the inner metadata Arc has been cloned (i.e. there are other owners).
-    /// Call this before sharing the assets.
-    pub fn set_translations(&mut self, catalog: gettext::Catalog) {
-        Arc::get_mut(&mut self.metadata)
-            .expect("cannot set translations: GameMetadataProvider is shared")
-            .set_translations(catalog);
+    pub fn set_translations(&self, catalog: gettext::Catalog) {
+        self.metadata.set_translations(catalog);
     }
 
     /// Access the underlying `GameMetadataProvider`.
@@ -211,7 +205,7 @@ impl ShipAssets {
             return Ok(ShipInfo {
                 model_dir: name.to_string(),
                 display_name: param
-                    .and_then(|p| self.metadata.localized_name_from_param(p).map(|s: &str| s.to_string())),
+                    .and_then(|p| self.metadata.localized_name_from_param(p)),
                 param_index: param.map(|p| p.index().to_string()).unwrap_or_default(),
             });
         }
@@ -225,7 +219,7 @@ impl ShipAssets {
             let model_dir = dir.rsplit('/').next().unwrap_or(dir);
             return Ok(ShipInfo {
                 model_dir: model_dir.to_string(),
-                display_name: self.metadata.localized_name_from_param(&param).map(|s: &str| s.to_string()),
+                display_name: self.metadata.localized_name_from_param(&param),
                 param_index: param.index().to_string(),
             });
         }
@@ -247,7 +241,6 @@ impl ShipAssets {
             let display_name = self
                 .metadata
                 .localized_name_from_param(param)
-                .map(|s: &str| s.to_string())
                 .unwrap_or_else(|| param.index().to_string());
 
             let normalized_display = unidecode::unidecode(&display_name).to_lowercase();
@@ -395,7 +388,7 @@ impl ShipAssets {
 
         let info = ShipInfo {
             model_dir: model_dir.to_string(),
-            display_name: param.and_then(|p| self.metadata.localized_name_from_param(p).map(|s: &str| s.to_string())),
+            display_name: param.and_then(|p| self.metadata.localized_name_from_param(p)),
             param_index: param.map(|p| p.index().to_string()).unwrap_or_default(),
         };
 
@@ -505,13 +498,9 @@ impl ShipAssets {
             let display_name = self
                 .metadata
                 .localized_name_from_id(&ids_key)
-                .filter(|s| s != &ids_key) // gettext returns key as-is when not found
                 .or_else(|| {
                     // Fallback: try IDS_{index}
-                    self.metadata
-                        .localized_name_from_param(&param)
-                        .filter(|s| !s.starts_with("IDS_"))
-                        .map(|s| s.to_string())
+                    self.metadata.localized_name_from_param(&param)
                 })
                 .unwrap_or_else(|| camo_name.to_string());
 
@@ -578,11 +567,9 @@ impl ShipAssets {
                 continue;
             }
 
-            let ids_key = format!("IDS_{}", name.to_uppercase());
             let display_name = self
                 .metadata
-                .localized_name_from_id(&ids_key)
-                .filter(|s| s != &ids_key)
+                .localized_name_from_id(&format!("IDS_{}", name.to_uppercase()))
                 .unwrap_or_else(|| camo_name.to_string());
 
             let color_scheme_colors = if entry.tiled {

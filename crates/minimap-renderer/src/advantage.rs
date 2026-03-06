@@ -69,25 +69,8 @@ impl TeamState {
     }
 }
 
-/// How strong the advantage is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdvantageLevel {
-    Absolute,
-    Strong,
-    Moderate,
-    Weak,
-}
-
-impl AdvantageLevel {
-    pub fn label(&self) -> &'static str {
-        match self {
-            AdvantageLevel::Absolute => "Absolute",
-            AdvantageLevel::Strong => "Strong",
-            AdvantageLevel::Moderate => "Moderate",
-            AdvantageLevel::Weak => "Weak",
-        }
-    }
-}
+// Re-export from wowsunpack so existing `crate::advantage::AdvantageLevel` paths keep working.
+pub use wowsunpack::game_types::AdvantageLevel;
 
 /// Which team has the advantage, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::tab_state::ChartableStat;
@@ -30,6 +31,34 @@ pub struct SerializableAchievement {
     pub description: String,
     pub icon_key: String,
     pub count: usize,
+}
+
+impl SerializableAchievement {
+    /// Resolve display name dynamically from the current locale, falling back
+    /// to the persisted `display_name`.
+    pub fn resolved_name(&self, provider: Option<&dyn ResourceLoader>) -> String {
+        if let Some(provider) = provider {
+            if let Some(name) =
+                wowsunpack::game_params::translations::translate_achievement_name(&self.icon_key, provider)
+            {
+                return name;
+            }
+        }
+        self.display_name.clone()
+    }
+
+    /// Resolve description dynamically from the current locale, falling back
+    /// to the persisted `description`.
+    pub fn resolved_description(&self, provider: Option<&dyn ResourceLoader>) -> String {
+        if let Some(provider) = provider {
+            if let Some(desc) =
+                wowsunpack::game_params::translations::translate_achievement_description(&self.icon_key, provider)
+            {
+                return desc;
+            }
+        }
+        self.description.clone()
+    }
 }
 
 /// Human-readable display name for a match group string.
@@ -256,6 +285,10 @@ impl PerformanceInfo {
         info
     }
 
+    pub fn ship_id(&self) -> Option<GameParamId> {
+        self.ship_id
+    }
+
     pub fn wins(&self) -> usize {
         self.wins
     }
@@ -422,6 +455,18 @@ impl PrStats {
     }
 }
 
+/// Resolve a ship's display name from the provider, falling back to ID.
+pub fn resolve_ship_name(ship_id: GameParamId, provider: Option<&GameMetadataProvider>) -> String {
+    if let Some(provider) = provider {
+        if let Some(param) = provider.game_param_by_id(ship_id) {
+            if let Some(name) = provider.localized_name_from_param(&param) {
+                return name;
+            }
+        }
+    }
+    format!("[{ship_id}]")
+}
+
 /// Aggregated session statistics across multiple replays
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct SessionStats {
@@ -443,9 +488,9 @@ impl SessionStats {
         self.games.clear();
     }
 
-    /// Remove all games for a specific ship by name.
-    pub fn clear_ship(&mut self, ship_name: &str) {
-        self.games.retain(|g| g.ship_name != ship_name);
+    /// Remove all games for a specific ship by ID.
+    pub fn clear_ship(&mut self, ship_id: GameParamId) {
+        self.games.retain(|g| g.ship_id != ship_id);
     }
 
     /// Get all unique match group strings from the session's games.
@@ -531,9 +576,9 @@ impl SessionStats {
         };
 
         // Group by ship, take last N per ship, then merge back in chronological order
-        let mut by_ship: HashMap<&str, Vec<&PerGameStat>> = HashMap::new();
+        let mut by_ship: HashMap<GameParamId, Vec<&PerGameStat>> = HashMap::new();
         for game in &all_filtered {
-            by_ship.entry(game.ship_name.as_str()).or_default().push(game);
+            by_ship.entry(game.ship_id).or_default().push(game);
         }
 
         // Each ship's games are already in chronological order; take the tail
@@ -550,15 +595,15 @@ impl SessionStats {
     }
 
     /// Get aggregated ship statistics using per-ship count limits.
-    pub fn ship_stats_per_ship_limited(&self) -> HashMap<String, PerformanceInfo> {
+    pub fn ship_stats_per_ship_limited(&self) -> HashMap<GameParamId, PerformanceInfo> {
         let per_game = self.per_ship_limited_games();
 
-        let mut by_ship: HashMap<String, Vec<&PerGameStat>> = HashMap::new();
+        let mut by_ship: HashMap<GameParamId, Vec<&PerGameStat>> = HashMap::new();
         for game in &per_game {
-            by_ship.entry(game.ship_name.clone()).or_default().push(game);
+            by_ship.entry(game.ship_id).or_default().push(game);
         }
 
-        by_ship.into_iter().map(|(name, games)| (name, PerformanceInfo::from_games(&games))).collect()
+        by_ship.into_iter().map(|(id, games)| (id, PerformanceInfo::from_games(&games))).collect()
     }
 
     /// Returns the win rate percentage for this session. Will return `None`
@@ -592,12 +637,12 @@ impl SessionStats {
         self.filtered_games().iter().filter(|g| g.is_draw).count()
     }
 
-    pub fn max_damage(&self) -> Option<(String, u64)> {
-        self.filtered_games().into_iter().map(|g| (g.ship_name.clone(), g.damage)).max_by_key(|r| r.1)
+    pub fn max_damage(&self) -> Option<(GameParamId, u64)> {
+        self.filtered_games().into_iter().map(|g| (g.ship_id, g.damage)).max_by_key(|r| r.1)
     }
 
-    pub fn max_frags(&self) -> Option<(String, i64)> {
-        self.filtered_games().into_iter().map(|g| (g.ship_name.clone(), g.frags)).max_by_key(|r| r.1)
+    pub fn max_frags(&self) -> Option<(GameParamId, i64)> {
+        self.filtered_games().into_iter().map(|g| (g.ship_id, g.frags)).max_by_key(|r| r.1)
     }
 
     pub fn total_frags(&self) -> i64 {
@@ -926,7 +971,7 @@ mod tests {
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 2, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 200000, 1, 1500));
         let (ship, dmg) = ss.max_damage().unwrap();
-        assert_eq!(ship, "Marceau");
+        assert_eq!(ship, GameParamId::from(2u64));
         assert_eq!(dmg, 200000);
     }
 
@@ -936,7 +981,7 @@ mod tests {
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 5, 2000));
         ss.add_game(pvp_loss("Marceau", 2, "13.02.2026 15:00:00", 80000, 2, 1000));
         let (ship, frags) = ss.max_frags().unwrap();
-        assert_eq!(ship, "Vermont");
+        assert_eq!(ship, GameParamId::from(1u64));
         assert_eq!(frags, 5);
     }
 
@@ -1068,7 +1113,7 @@ mod tests {
         ss.add_game(pvp_win("Marceau", 2, "13.02.2026 15:00:00", 80000, 1, 1500));
         ss.add_game(pvp_win("Vermont", 1, "13.02.2026 16:00:00", 120000, 3, 2500));
 
-        ss.clear_ship("Vermont");
+        ss.clear_ship(GameParamId::from(1u64));
         assert_eq!(ss.games.len(), 1);
         assert_eq!(ss.games[0].ship_name, "Marceau");
     }
@@ -1129,10 +1174,12 @@ mod tests {
 
         let stats = ss.ship_stats_per_ship_limited();
         assert_eq!(stats.len(), 2);
-        assert!(stats.contains_key("Vermont"));
-        assert!(stats.contains_key("Marceau"));
+        let vermont_id = GameParamId::from(1u64);
+        let marceau_id = GameParamId::from(2u64);
+        assert!(stats.contains_key(&vermont_id));
+        assert!(stats.contains_key(&marceau_id));
 
-        let vermont = &stats["Vermont"];
+        let vermont = &stats[&vermont_id];
         assert_eq!(vermont.wins(), 1);
         assert_eq!(vermont.losses(), 1);
         assert_eq!(vermont.total_damage(), 150000);

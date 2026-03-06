@@ -9,6 +9,7 @@ description = "Shared egui types, transforms, and rendering for WoWs Toolkit col
 [dependencies]
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wows_minimap_renderer = { workspace = true, default-features = false, features = ["rkyv"] }
+wt-translations = { workspace = true }
 wows_replays = { workspace = true, default-features = false }
 egui = { workspace = true }
 egui-phosphor = { workspace = true }

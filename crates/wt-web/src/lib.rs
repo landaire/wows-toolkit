@@ -7,6 +7,8 @@
 // compiled for the host target (e.g. during `cargo check --workspace`).
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code, unused_imports))]
 
+rust_i18n::i18n!("../wt-translations/translations", fallback = "en");
+
 mod app;
 mod assets;
 mod connection;

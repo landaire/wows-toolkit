@@ -90,6 +90,52 @@ impl WoWsDataMap {
         all_ok
     }
 
+    /// Swap the gettext translation catalog for all loaded builds.
+    ///
+    /// Loads the `.mo` file for the given locale from each build's `res/texts/`
+    /// directory and calls `set_translations()` on the provider. Falls back through
+    /// the language tag's primary language, then "en".
+    #[instrument(skip(self))]
+    pub fn reload_translations(&self, locale: &str) {
+        // WoWs locale codes use underscores (e.g. "zh_tw") but BCP 47 uses hyphens.
+        let bcp47 = locale.replace('_', "-");
+        let primary_lang = bcp47
+            .parse::<language_tags::LanguageTag>()
+            .map(|tag| tag.primary_language().to_string())
+            .unwrap_or_else(|_| locale.to_string());
+        let attempted_dirs = [locale, &primary_lang, "en"];
+
+        let builds = self.builds.read();
+        for (build, data) in builds.iter() {
+            let data = data.read();
+            let provider = match data.game_metadata.as_ref() {
+                Some(p) => p,
+                None => continue,
+            };
+
+            for dir in &attempted_dirs {
+                let mo_path =
+                    self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
+                if !mo_path.exists() {
+                    continue;
+                }
+                match std::fs::File::open(&mo_path).and_then(|f| {
+                    gettext::Catalog::parse(f)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                }) {
+                    Ok(catalog) => {
+                        debug!(build, locale = dir, "Reloaded translations");
+                        provider.set_translations(catalog);
+                    }
+                    Err(e) => {
+                        warn!(build, path = ?mo_path, error = %e, "Failed to reload translations");
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /// Resolve the correct game data for a replay's version.
     /// Checks the map first, then tries to lazy-load from disk.
     /// Returns None if the version's build data is unavailable.

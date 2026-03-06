@@ -263,6 +263,7 @@ pub(super) fn render_video_blocking(
         death_cause_icons,
         powerup_icons,
     );
+    target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
     let mut encoder = VideoEncoder::new(output_path, None, game_duration);
     encoder.set_prefer_cpu(prefer_cpu);
     if let Some(duration) = actual_game_duration {

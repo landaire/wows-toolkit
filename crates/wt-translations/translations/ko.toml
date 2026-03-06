@@ -1,0 +1,688 @@
+[meta]
+language_name = "한국어"
+
+# -- 언어 선택 대화상자 --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "한국어로 계속"
+select_language = "언어 선택"
+machine_translation_warning = "대부분의 번역은 기계 번역으로 생성되었으며 부정확할 수 있습니다."
+
+# -- 탭 제목 --
+
+[ui.tabs]
+unpacker = "리소스 언패커"
+settings = "설정"
+replay_parser = "리플레이 검사기"
+player_tracker = "플레이어 추적기"
+mod_manager = "모드 관리자"
+armor_viewer = "장갑 뷰어"
+stats = "통계"
+
+# -- 공통 버튼 --
+
+[ui.buttons]
+yes = "예"
+no = "아니오"
+stop = "중지"
+copy = "복사"
+cancel = "취소"
+continue_ = "계속"
+install_update = "업데이트 설치"
+view_release = "릴리스 보기"
+clear_settings = "설정 초기화"
+more_options = "더 많은 옵션"
+create_issue = "이슈 생성"
+discord = "Discord"
+github = "GitHub"
+view_github = "GitHub에서 프로젝트 보기"
+choose = "선택..."
+reset = "초기화"
+
+# -- 메뉴 항목 --
+
+[ui.menu]
+file = "파일"
+check_updates = "업데이트 확인"
+about = "정보"
+quit = "종료"
+
+# -- 창 제목 --
+
+[ui.windows]
+build_consent = "빌드 수집 동의"
+crash_detected = "애플리케이션 충돌 감지됨"
+update_available = "업데이트 가능"
+confirm = "확인"
+network_warning = "네트워크 경고"
+error = "오류"
+about = "정보"
+
+# -- 대화상자 메시지 --
+
+[ui.dialogs]
+build_consent_message = "랭크전 및 랜덤 전투의 플레이어 빌드 정보를 개발자에게 보내시겠습니까? 이 데이터 수집은 커뮤니티가 플레이어 빌드를 대량 분석하는 데 도움이 됩니다. 설정에서 언제든지 거부할 수 있습니다."
+crash_message = "WoWs Toolkit이 지난 실행에서 충돌한 것 같습니다. 이 문제를 보고하려면 GitHub에 이슈를 올리거나 Discord 서버에 참여하여 아래 정보를 제공해 주세요."
+crash_clear_settings = "애플리케이션이 저장한 데이터가 원인일 수 있는 경우, 아래 버튼을 눌러 설정을 초기화할 수 있습니다. 이렇게 하면 추적 중인 플레이어를 포함한 모든 설정이 초기화됩니다. 리플레이 및 WoWs 데이터는 안전합니다."
+update_message = "WoWs Toolkit 버전 %{tag}을(를) 사용할 수 있습니다"
+update_windows_only = "업데이트가 가능하지만 현재 Windows만 지원됩니다."
+p2p_warning = "협업 세션은 P2P 네트워킹을 사용합니다. 세션의 다른 사용자가 귀하의 IP 주소를 볼 수 있습니다."
+
+# -- 레이블 --
+
+[ui.labels]
+debug_build = "⚠ Debug build ⚠"
+error_occurred = "오류가 발생했습니다:"
+made_by = "landaire 제작."
+credits = "Trackpad, TTaro, lkolbly의 기여에 감사합니다."
+pr_credits = "개인 평점 (PR) 계산 데이터 및 공식은 WoWs Numbers에서 제공합니다."
+powered_by = "제공: "
+and = " 및 "
+suppress_warning = "다시 표시하지 않음"
+more_info = "더 보기"
+loading_replays = "%{count}개의 리플레이 로딩 중..."
+
+# -- 알림 메시지 --
+
+[ui.messages]
+app_up_to_date = "애플리케이션이 최신 버전입니다"
+update_check_failed = "앱 업데이트 확인 실패"
+constants_fetch_failed = "업데이트된 리플레이 데이터 매핑을 가져오지 못했습니다. 나중에 다시 시도합니다."
+game_data_loaded = "게임 데이터를 성공적으로 로드했습니다"
+no_replays_detected = "리플레이가 감지되지 않았습니다 — WoWs 디렉토리가 올바르게 설정되어 있습니까?"
+build_loaded = "빌드 %{build} 로드됨"
+replay_loaded = "리플레이를 성공적으로 로드했습니다"
+twitch_token_invalid = "Twitch 토큰이 유효하지 않거나 만료되었습니다. 설정에서 업데이트해 주세요."
+twitch_token_expired = "Twitch 토큰이 유효하지 않거나 만료되었습니다"
+versioned_constants_rebuild_failed = "재빌드 중 버전 상수를 가져오지 못했습니다. 나중에 다시 시도합니다."
+constants_version_mismatch = "리플레이 데이터 매핑 파일 버전이 게임 버전과 일치하지 않습니다.\n전투 후 결과가 정확하지 않을 수 있습니다. 프로젝트 관리자가 서버의 매핑을 업데이트할 때까지 기다려 주세요."
+constants_updated = "리플레이 데이터 매핑 파일이 성공적으로 업데이트되었습니다"
+session_started = "세션이 시작되었습니다"
+user_joined = "%{name}님이 참여했습니다"
+user_timeout = "%{name}님의 연결이 시간 초과되었습니다"
+user_left = "%{name}님이 나갔습니다"
+session_ended = "세션이 종료되었습니다"
+session_error = "세션 오류: %{msg}"
+connected_to_session = "세션에 연결되었습니다"
+joined_session = "세션에 참여함: %{name}"
+replay_spam_protection = "연결 끊김: 호스트가 리플레이를 너무 빠르게 열고 있습니다"
+host_opened_replay = "호스트가 리플레이를 열었습니다: %{name}"
+host_closed_replay = "호스트가 리플레이를 닫았습니다"
+session_error_generic = "세션: %{msg}"
+session_rejected = "세션 거부됨: %{reason}"
+
+# -- 통계 이름 --
+
+[stat]
+damage = "피해량"
+spotting_damage = "탐지 피해량"
+frags = "격침"
+raw_xp = "Raw XP"
+base_xp = "Base XP"
+win_rate = "승률"
+win_rate_pct = "승률 (%)"
+personal_rating = "개인 평점"
+avg_damage = "평균 피해량"
+avg_spotting_damage = "평균 탐지 피해량"
+avg_frags = "평균 격침"
+avg_raw_xp = "평균 Raw XP"
+avg_base_xp = "평균 Base XP"
+avg_pr = "평균 PR"
+avg_prefix = "평균 %{name}"
+
+[chart]
+game_number = "게임 #"
+combined = "통합"
+combined_suffix = "(통합)"
+rolling_average_suffix = "(이동 평균)"
+no_data = "선택한 함선에 대한 데이터가 없습니다"
+win_rate_unavailable = "승률은 게임별 꺾은선 그래프에서 사용할 수 없습니다 (이동 평균을 활성화하거나 막대 그래프를 사용하세요)"
+
+# -- 확인 대화상자 --
+
+[confirm]
+open_in_game = "World of Warships를 실행합니다. 계속하시겠습니까?"
+clear_all_session_stats = "모든 세션 통계가 초기화됩니다. 계속하시겠습니까?"
+clear_ship_session_stats = "이 함선의 모든 게임이 세션 통계에서 삭제됩니다. 계속하시겠습니까?"
+set_as_session_stats = "현재 세션 통계가 대체됩니다. 계속하시겠습니까?"
+
+# -- 오류 메시지 --
+
+[error]
+file_watcher_creation = "파일 감시자 생성 실패: %{error}"
+replay_dir_watch = "리플레이 디렉토리 감시 실패: %{error}"
+
+# -- 설정 --
+
+[ui.settings.app]
+heading = "애플리케이션 설정"
+description = "일반 애플리케이션 동작 및 외관"
+check_for_updates = "시작 시 업데이트 확인"
+enable_logging = "로깅 활성화 (재시작 후 적용)"
+enable_logging_tooltip = "애플리케이션 데이터 디렉토리의 파일에 디버그 로그를 기록합니다. 문제 해결에 유용합니다."
+send_replay_data = "랭크전 및 랜덤 전투 리플레이의 빌드를 ShipBuilds.com으로 전송"
+zoom_factor = "확대 배율 (Ctrl + 및 Ctrl -로도 변경 가능)"
+language = "언어"
+
+[ui.settings.wows]
+heading = "World of Warships 설정"
+description = "World of Warships 설치 경로"
+directory_hint = "World of Warships 디렉토리"
+
+[ui.settings.replay]
+heading = "리플레이 설정"
+description = "리플레이 결과 테이블에 표시할 열 설정"
+show_raw_xp = "Raw XP 표시"
+show_entity_id = "Entity ID 표시"
+show_observed_damage = "관측 피해량 표시"
+show_fires = "화재 표시"
+show_floods = "침수 표시"
+show_citadels = "시타델 표시"
+show_crits = "치명적 모듈 피격 표시"
+auto_export_data = "데이터 자동 내보내기"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "데이터 자동 내보내기 디렉토리"
+
+[ui.settings.session]
+heading = "세션 설정"
+description = "협업 리플레이 세션 기본 설정"
+display_name = "표시 이름"
+suppress_ip_warning = "P2P IP 주소 경고 표시 안 함"
+ip_warning_tooltip = "협업 세션은 P2P 네트워킹을 사용합니다. 세션의 다른 사용자가 귀하의 IP 주소를 볼 수 있습니다."
+disable_auto_open = "세션 창 자동 열기 비활성화"
+auto_open_tooltip = "활성화하면 세션 창(리플레이, 전술 보드)이 자동으로 열리지 않습니다. 세션 팝오버에서 수동으로 열 수 있습니다."
+
+[ui.settings.twitch]
+heading = "Twitch 설정"
+description = "채팅 통합 및 플레이어 추적을 위해 Twitch에 연결"
+get_token = "로그인 토큰 받기"
+get_token_tooltip = "Chatterino의 로그인 페이지를 사용합니다. 필요한 권한(기본적으로 채팅 권한이 있는 모더레이터 토큰)을 제공하며, WoWs Toolkit 개발자가 동일한 결과를 가진 자체 로그인 페이지를 호스팅할 필요가 없습니다."
+paste_token_no_token = "토큰 붙여넣기 (토큰 없음)"
+paste_token_valid = "토큰 붙여넣기 (토큰 유효)"
+paste_token_invalid = "토큰 붙여넣기 (토큰 무효 / 만료)"
+monitored_channel = "모니터링 채널 (기본값: 본인)"
+
+# -- 리플레이 검사기 --
+
+[ui.replay]
+spectator = "관전자"
+loading = "로딩 중..."
+no_selection = "리플레이를 클릭하여 보거나, 더블 클릭하여 새 탭에서 열기"
+incomplete_results = "불완전한 전투 결과"
+incomplete_results_tooltip = "리플레이에 아직 전투 종료 결과가 없습니다. 전투가 끝나고 결과가 리플레이에 추가되면 데이터가 자동으로 다시 로드됩니다."
+no_chat = "이 리플레이에서 채팅 메시지가 전송되지 않았습니다"
+team_damage = "팀 피해량: "
+hide_my_stats = "내 테스트 함선 통계 숨기기"
+open_manually = "리플레이 파일 수동 열기..."
+autoload_latest = "최신 리플레이 자동 로드"
+column_filters = "열 필터"
+nda = "NDA"
+export = "내보내기"
+render = "렌더"
+chat = "채팅"
+game_chat = "게임 채팅"
+copy_all = "모두 복사"
+save_to_file = "파일로 저장"
+chat_copied = "채팅이 복사되었습니다"
+copy_message = "메시지 복사"
+export_results = "결과"
+
+[ui.replay.context]
+open_in_new_tab = "새 탭에서 열기"
+copy_path = "경로 복사"
+copy_replay = "리플레이 복사"
+copy_replays = "%{count}개 리플레이 복사"
+show_in_explorer = "파일 탐색기에서 보기"
+show_replay_controls = "리플레이 컨트롤 표시"
+open_in_game = "게임에서 열기"
+render_replay = "리플레이 렌더링"
+set_session_stats_one = "세션 통계로 설정 (리플레이 1개)"
+set_session_stats_many = "세션 통계로 설정 (%{count}개 리플레이)"
+add_session_stats_one = "세션 통계에 추가 (리플레이 1개)"
+add_session_stats_many = "세션 통계에 추가 (%{count}개 리플레이)"
+
+[ui.replay.column]
+actions = "작업"
+player_name = "플레이어 이름"
+base_xp = "Base XP"
+raw_xp = "Raw XP"
+ship_name = "함선 이름"
+hits = "명중"
+kills = "격침"
+observed_damage = "관측 피해량"
+actual_damage = "실제 피해량"
+spotting_damage = "탐지 피해량"
+potential_damage = "잠재 피해량"
+time_lived = "생존 시간"
+fires = "화재"
+floods = "침수"
+citadels = "시타델"
+crits = "치명타"
+received_damage = "받은 피해량"
+distance_traveled = "이동 거리"
+skills = "기술"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Raw XP"
+entity_id = "Entity ID"
+observed_damage = "관측 피해량"
+fires = "화재"
+floods = "침수"
+citadels = "시타델"
+crits = "치명적 모듈 피격"
+
+[ui.replay.group]
+date = "날짜"
+ship = "함선"
+none = "없음"
+prefix = "그룹: %{label}"
+
+[ui.replay.player]
+hidden_profile = "비공개 프로필 플레이어"
+never_connected = "플레이어가 전투에 접속하지 않았습니다"
+
+[ui.replay.build]
+open_in_browser = "브라우저에서 빌드 열기"
+copy_link = "빌드 링크 복사"
+copy_short_link = "짧은 빌드 링크 복사"
+link_copied = "빌드 링크가 복사되었습니다"
+open_wows_numbers = "WoWs Numbers 페이지 열기"
+not_spotted = "이 함선은 탐지된 적이 없습니다. 빌드 정보를 사용할 수 없습니다."
+
+[ui.replay.sections]
+achievements = "업적"
+ribbons = "리본"
+modules = "모듈:"
+modules_none = "모듈 없음"
+abilities = "능력:"
+abilities_none = "능력 없음"
+captain_skills = "함장 기술:"
+captain_skills_none = "함장 기술 없음"
+
+[ui.replay.debug]
+view_raw_metadata = "플레이어 원본 메타데이터 보기"
+raw_metadata = "원본 메타데이터"
+view_results = "결과 보기"
+raw_json = "원본 JSON"
+raw_json_tooltip = "WG에서 직렬화한 원본 전투 결과."
+mapped_json = "매핑된 JSON"
+mapped_json_tooltip = "위치 배열이 명명된 필드로 변환된 전투 결과."
+
+[ui.replay.results]
+victory = "승리"
+defeat = "패배"
+draw = "무승부"
+
+[ui.replay.controls]
+window_title = "리플레이 컨트롤"
+unavailable = "컨트롤을 사용할 수 없습니다 (게임 파일에서 commands.scheme.xml을 찾을 수 없음)."
+
+# -- 협업 / 세션 --
+
+[ui.collab]
+session = "세션"
+starting = "세션 시작 중…"
+session_active = "세션 활성"
+connected_to_session = "세션에 연결됨"
+session_token = "세션 토큰:"
+toggle_visibility = "토큰 표시 전환"
+copy_token = "토큰 복사"
+token_copied = "토큰이 클립보드에 복사되었습니다"
+copy_web_link = "웹 링크 복사"
+copy_web_link_tooltip = "웹 클라이언트용 링크 복사"
+web_link_copied = "웹 링크가 클립보드에 복사되었습니다"
+copy_localhost_link = "Localhost 링크 복사"
+copy_localhost_tooltip = "localhost 링크 복사 (dev)"
+localhost_copied = "Localhost 링크가 클립보드에 복사되었습니다"
+connected_count = "%{count}명 연결됨"
+promote_cohost = "공동 호스트로 승격"
+promoted_cohost = "%{name}님을 공동 호스트로 승격했습니다"
+permissions = "권한"
+lock_annotations = "주석 잠금"
+lock_settings = "설정 잠금"
+reset_overrides = "클라이언트 재정의 초기화"
+reset_overrides_tooltip = "모든 클라이언트 표시 설정 변경 사항 초기화"
+leave = "나가기"
+role_host = "호스트"
+role_cohost = "공동 호스트"
+you = "(나)"
+display_name = "표시 이름:"
+display_name_hint = "이름..."
+display_name_error = "표시 이름을 입력해 주세요"
+enter_display_name = "먼저 표시 이름을 입력하세요"
+host_session = "세션 호스트"
+start_session = "세션 시작"
+join_session = "세션 참여"
+paste_and_join = "토큰 붙여넣기 및 참여"
+clipboard_empty = "클립보드가 비어있습니다"
+invalid_token = "유효하지 않은 토큰: %{error}"
+shared_windows = "공유 창"
+open = "열기"
+open_for_everyone = "모두에게 열기"
+tactics_board = "전술 보드"
+max_boards = "최대 %{count}개의 전술 보드가 열려 있습니다"
+waiting_for_data = "게임 데이터 로딩 대기 중…"
+
+# -- 전투 결과 텍스트 --
+
+[battle]
+victory = "승리"
+defeat = "패배"
+draw = "무승부"
+battle_starts_in = "전투 시작까지"
+
+# -- 종료 유형 --
+
+[finish_type]
+unknown = "전투 종료"
+extermination = "적 함선 전멸"
+base_captured = "기지 점령"
+timeout = "시간 만료"
+failure = "임무 실패"
+technical = "기술적 종료"
+score = "점수 한도 도달"
+score_on_timeout = "시간 만료 시 점수 우위"
+pve_success = "임무 완수"
+pve_failed = "임무 실패"
+score_zero = "점수 고갈"
+score_excess = "점수 한도 초과"
+
+# -- 통계 탭 --
+
+[ui.stats]
+overview = "개요"
+limit = "제한"
+division = "Div:"
+div_all = "전체"
+div_solo = "솔로"
+div_div = "Div"
+mode_label = "모드:"
+clear = "초기화"
+pr = "PR:"
+frags_count = "%{count} 격침"
+best_frags = "최고: %{ship} (%{count} 격침)"
+max_damage = "최대 피해량: %{ship} (%{damage})"
+copy_markdown = "Markdown으로 복사"
+copy_csv = "CSV로 복사"
+remove_games_hint = "%{ship}의 모든 게임 삭제 (Ctrl+Click으로 확인 건너뛰기)"
+no_stats = "세션 통계가 없습니다. 먼저 게임을 플레이하세요!"
+settings = "설정"
+chart_type = "차트 유형"
+stat_label = "통계:"
+chart_line = "꺾은선"
+chart_bar = "막대"
+options = "옵션"
+combined = "통합"
+rolling_avg = "이동 평균"
+labels = "레이블"
+ships = "함선"
+all_ships = "전체"
+no_ships = "없음"
+copy_as_image = "이미지로 복사"
+
+[ui.stats.table]
+min = "최소"
+max = "최대"
+total = "합계"
+average = "평균"
+
+# -- 플레이어 추적기 --
+
+[ui.player_tracker]
+clear_stats = "통계 초기화"
+player_filter = "플레이어 필터"
+populate_from_replays = "리플레이에서 데이터 가져오기"
+current_match = "현재 전투의 플레이어"
+historical = "과거 전투"
+seen_minutes = "전투 시작 %{minutes}분 후에 확인됨"
+
+[ui.player_tracker.column]
+clan = "클랜"
+player_name = "플레이어 이름"
+twitch_names = "가능한 Twitch 이름"
+wg_id = "WG ID"
+total_encounters = "총 만남 수"
+encounters_in_range = "기간 내 만남 수"
+last_encountered = "마지막 만남"
+aliases = "별명"
+notes = "메모"
+
+[ui.player_tracker.period]
+past_hour = "지난 1시간"
+past_six_hours = "지난 6시간"
+past_day = "지난 24시간"
+past_week = "지난 1주일"
+past_month = "지난 1개월"
+all_time = "전체 기간"
+
+# -- 모드 관리자 --
+
+[ui.mod_manager]
+category_filters = "카테고리 필터"
+enabled = "활성화됨"
+mod_home = "모드 홈페이지"
+discord_thread = "Discord 승인 스레드"
+save_config = "모드 설정 저장"
+load_config = "모드 설정 로드"
+filter = "필터"
+
+[ui.mod_manager.column]
+enabled = "활성화됨"
+name = "이름"
+author = "제작자"
+category = "카테고리"
+
+# -- 리플레이 렌더러 --
+
+[ui.renderer]
+loading = "리플레이 데이터 로딩 중..."
+preparing_export = "내보내기 준비 중..."
+encoding = "인코딩"
+muxing = "먹싱"
+
+[ui.renderer.advantage]
+breakdown = "이점 분석"
+team_eliminated = "한 팀이 전멸했습니다"
+score_projection = "점수 예측"
+fleet_power = "함대 전투력"
+strategic_threat = "전략적 위협"
+total = "합계"
+hp_incomplete = "HP/함선 데이터 불완전 — 점수 요인만 표시됨"
+
+[ui.renderer.context]
+show_trail = "경로 표시"
+disable_other_trails = "다른 모든 경로 비활성화"
+ranges = "사거리"
+detection = "탐지"
+main_battery = "주포"
+secondary = "부포"
+torpedo = "어뢰"
+radar = "레이더"
+hydro = "수중 탐지"
+enable_all = "모두 활성화"
+disable_all = "모두 비활성화"
+disable_other_ranges = "다른 모든 사거리 비활성화"
+enable_all_ranges = "모든 함선 사거리 활성화"
+show_armor = "실시간 장갑 표시"
+
+[ui.renderer.controls]
+jump_to_start = "처음으로 이동"
+previous_event = "이전 이벤트 (Shift+Left)"
+back_10s = "10초 뒤로 (Left)"
+pause = "일시 정지 (Space)"
+play = "재생 (Space)"
+forward_10s = "10초 앞으로 (Right)"
+next_event = "다음 이벤트 (Shift+Right)"
+jump_to_end = "끝으로 이동"
+save_as_video = "동영상으로 저장"
+copy_to_clipboard = "동영상을 클립보드에 렌더링"
+
+[ui.renderer.settings]
+ship_settings = "함선 설정"
+armament = "무장"
+dead_ships = "침몰 함선"
+dead_ship_names = "침몰 함선 이름"
+player_names = "플레이어 이름"
+ship_ranges = "함선 사거리"
+self_ship_ranges = "내 함선 사거리"
+ship_names = "함선 이름"
+turret_direction = "포탑 방향"
+trail_settings = "경로 설정"
+heat_trail = "열 경로"
+speed_trails = "속도 경로"
+dead_ship_trails = "침몰 함선 경로"
+map_settings = "맵 설정"
+buildings = "건물"
+capture_points = "점령 지역"
+consumables = "소모품"
+planes = "항공기"
+smoke = "연막"
+torpedoes = "어뢰"
+tracers = "예광탄"
+hud_settings = "HUD 설정"
+battle_result = "전투 결과"
+buff_counters = "버프 카운터"
+chat_label = "채팅"
+kill_feed = "격침 피드"
+score_label = "점수"
+score_timers = "점수 타이머"
+team_advantage = "팀 우위"
+timer = "타이머"
+export_settings = "내보내기 설정"
+prefer_cpu = "CPU 인코더 우선"
+prefer_cpu_tooltip = "동영상 내보내기에 GPU 대신 소프트웨어 (CPU) 인코더 사용"
+save_defaults = "기본값 저장"
+event_timeline = "이벤트 타임라인"
+
+# -- 파일 언패커 --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "assets.bin 로딩 중..."
+load_failed = "로드 실패: %{error}"
+no_game_data = "게임 데이터가 로드되지 않았습니다. 설정에서 World of Warships 디렉토리를 설정하세요."
+filter_files = "파일 필터..."
+search_in_files = "파일에서 검색"
+search_hint = "파일에서 검색..."
+path_filter_hint = "경로 필터 (예: *.xml)"
+queue_all = "모두 대기열에 추가"
+queue_all_files = "모든 파일 대기열에 추가"
+empty_directory = "빈 디렉토리"
+stop_search_tooltip = "검색 중지"
+no_matches = "일치하는 항목이 없습니다."
+view_as_json = "JSON으로 보기"
+extract_as_json = "JSON으로 추출"
+view_contents = "내용 보기"
+version = "버전:"
+game_params = "GameParams"
+base_as_json = "기본 JSON"
+as_json = "JSON"
+as_cbor = "CBOR"
+as_json_minimal = "JSON (최소화 / 변환)"
+as_cbor_minimal = "CBOR (최소화 / 변환)"
+decode_prototypes = "프로토타입을 JSON으로 디코딩"
+decode_prototypes_tooltip = "추출 시 지원되는 Assets.bin 프로토타입 (.visual, .model, .mfm)을 JSON으로 디코딩"
+extraction_queue = "추출 대기열"
+clear_all = "모두 지우기"
+browse = "찾아보기"
+output_dir_hint = "출력 디렉토리..."
+go_to_directory = "디렉토리로 이동"
+remove_from_queue = "대기열에서 제거"
+queue_folder = "전체 폴더 대기열에 추가"
+double_click_open = "더블 클릭하여 열기"
+
+[ui.unpacker.column]
+name = "이름"
+size = "크기"
+type_col = "유형"
+path = "경로"
+file = "파일"
+offset = "오프셋"
+context = "컨텍스트"
+
+# -- 장갑 뷰어 --
+
+[ui.armor]
+load_settings = "장갑 뷰어를 사용하려면 설정에서 게임 데이터를 로드하세요."
+gpu_unavailable = "GPU 렌더 상태를 사용할 수 없습니다."
+loading_ship = "함선 데이터 로딩 중..."
+load_failed = "함선 데이터 로드 실패: %{error}"
+empty = "비어 있음"
+mirror_cameras = "카메라 미러링"
+sync_options = "동기화 옵션"
+sync_tooltip = "모든 패널에서 장갑/선체 표시를 동기화 유지"
+compare_split = "새 분할로 비교"
+export_model = "함선 모델 내보내기"
+armor_thickness = "장갑 두께"
+export_disclaimer = "이 3D 모델과 텍스처는 Wargaming의 지적 재산이며, 이 모델의 사용은 현지 법률을 준수해야 합니다."
+export_button = "내보내기"
+armor_toggle = "장갑"
+armor_tooltip = "장갑 구역 표시 전환"
+hull_toggle = "선체"
+hull_tooltip = "선체 모델 부품 표시 전환"
+splash_toggle = "스플래시"
+splash_tooltip = "스플래시 박스 표시 전환"
+show_hidden = "숨겨진 항목 표시"
+show_hidden_tooltip = "(아마도) 숨겨진 패널 표시 전환"
+gaps = "간격"
+gaps_tooltip = "장갑판이 연결되지 않는 경계 가장자리 강조 (잠재적 간격)"
+display = "표시"
+display_tooltip = "표시 설정 (Ctrl+S)"
+marker_opacity = "마커 불투명도"
+save_defaults = "기본값으로 저장"
+export_tab = "내보내기"
+export_tooltip = "함선 모델을 OBJ 파일로 내보내기"
+pen_check = "관통 확인"
+pen_check_tooltip = "관통 비교를 위한 포탄 설정"
+trajectory = "탄도"
+trajectory_on = "탄도 [켜짐]"
+trajectory_tooltip = "장갑을 클릭하여 포탄 탄도 시뮬레이션 (Ctrl+T)"
+continue_ricochet = "도탄 후 계속"
+splash_mode = "스플래시"
+splash_on = "스플래시 [켜짐]"
+splash_no_data = "이 함선에 대한 스플래시 데이터가 없습니다"
+splash_no_shells = "비교 목록에 HE/SAP 포탄이 있는 함선을 추가하세요"
+splash_tooltip_mode = "장갑을 클릭하여 HE 스플래시 피해 범위 시각화"
+loading_armor = "함선 로딩 중..."
+select_ship = "목록에서 함선을 선택하세요"
+pen_check_label = "관통력 확인"
+all_btn = "전체"
+none_btn = "없음"
+opaque = "불투명"
+upgrade = "업그레이드:"
+plate_edges = "판 가장자리"
+waterline = "수선"
+opacity = "불투명도"
+ship_hull = "함선 선체"
+opaque_hull = "불투명 선체"
+ballistic_disclaimer = "탄도 결과는 시뮬레이션 작동 방식에 대한 역공학/추정을 기반으로 합니다"
+roll = "횡동요"
+ctrl_click_solo = "Ctrl+click으로 단독 표시"
+reset_plates = "판 초기화"
+
+[ui.armor.realtime]
+loading = "함선 장갑 로딩 중..."
+waiting = "함선 데이터 대기 중..."
+incoming_fire = "피격"
+attacker_filter = "공격자 필터"
+all_enemies = "모든 적"
+show_secondaries = "부포 표시"
+auto_scroll = "자동 스크롤"
+seek_to_salvo = "일제사격으로 이동"
+deselect = "선택 해제"
+select_all = "모두 선택"
+no_data = "포탄 데이터를 더 이상 사용할 수 없습니다"
+sim_agrees = "시뮬레이션 일치"
+no_armor_hit = "명중한 장갑판 없음"
+
+# -- 우위 수준 레이블 --
+
+[advantage]
+absolute = "절대적"
+strong = "강력"
+moderate = "보통"
+weak = "약함"

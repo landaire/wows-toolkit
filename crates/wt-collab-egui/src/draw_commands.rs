@@ -16,6 +16,7 @@ use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wt_translations::{TextResolver, TranslatableText};
 
 use crate::rendering::game_font;
 use crate::rendering::make_rotated_icon_mesh;
@@ -157,6 +158,100 @@ fn death_cause_icon_key(cause: &wows_minimap_renderer::draw_command::KillFeedEnt
 
 // ─── Core Rendering ──────────────────────────────────────────────────────────
 
+/// Render a centered glow-text overlay (used by BattleResultOverlay and PreBattleCountdown).
+fn render_glow_text_overlay(
+    text: &str,
+    subtitle: Option<&str>,
+    color: &[u8; 3],
+    subtitle_above: bool,
+    transform: &MapTransform,
+    ctx: &egui::Context,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let ws = transform.window_scale;
+    let canvas_w = transform.screen_canvas_width();
+    let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
+    let center_x = transform.origin.x + canvas_w / 2.0;
+    let center_y = transform.origin.y + canvas_h / 2.0;
+
+    let font_size = canvas_w / 8.0;
+    let main_font = game_font(font_size);
+    let main_galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), main_font, Color32::WHITE));
+    let main_w = main_galley.size().x;
+    let main_h = main_galley.size().y;
+
+    let sub_galley = subtitle.map(|s| {
+        let sub_font = game_font(font_size / 4.0);
+        ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), sub_font, Color32::from_gray(200)))
+    });
+    let sub_h = sub_galley.as_ref().map(|g| g.size().y).unwrap_or(0.0);
+    let gap = if subtitle.is_some() { 8.0 * ws } else { 0.0 };
+    let total_h = main_h + gap + sub_h;
+
+    let block_top = center_y - total_h / 2.0;
+    let (text_x, text_y, sub_top) = if subtitle_above {
+        (center_x - main_w / 2.0, block_top + sub_h + gap, block_top)
+    } else {
+        (center_x - main_w / 2.0, block_top, block_top + main_h + gap)
+    };
+
+    let offsets: &[(f32, f32)] =
+        &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+    let glow_layers: &[(f32, [u8; 3], f32)] = &[
+        (6.0, [0, 0, 0], 0.15),
+        (4.0, [0, 0, 0], 0.25),
+        (3.0, *color, 0.30),
+        (2.0, *color, 0.50),
+        (1.0, *color, 0.70),
+    ];
+
+    for &(dist, c, opacity) in glow_layers {
+        let layer_color = Color32::from_rgba_premultiplied(
+            (c[0] as f32 * opacity) as u8,
+            (c[1] as f32 * opacity) as u8,
+            (c[2] as f32 * opacity) as u8,
+            (255.0 * opacity) as u8,
+        );
+        let glow_font = game_font(font_size);
+        for &(dx, dy) in offsets {
+            let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), glow_font.clone(), layer_color));
+            shapes.push(Shape::galley(
+                Pos2::new(text_x + dx * dist, text_y + dy * dist),
+                galley,
+                Color32::TRANSPARENT,
+            ));
+        }
+    }
+
+    shapes.push(Shape::galley(Pos2::new(text_x, text_y), main_galley, Color32::TRANSPARENT));
+
+    if let Some(sub_galley) = sub_galley {
+        let sub_w = sub_galley.size().x;
+        let sub_x = center_x - sub_w / 2.0;
+        let sub_y = sub_top;
+
+        let sub_font = game_font(font_size / 4.0);
+        for &(dx, dy) in offsets {
+            let outline = ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    subtitle.unwrap().to_string(),
+                    sub_font.clone(),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 180),
+                )
+            });
+            shapes.push(Shape::galley(
+                Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0),
+                outline,
+                Color32::TRANSPARENT,
+            ));
+        }
+
+        shapes.push(Shape::galley(Pos2::new(sub_x, sub_y), sub_galley, Color32::TRANSPARENT));
+    }
+
+    shapes
+}
+
 /// Convert a single DrawCommand into epaint shapes.
 ///
 /// `placed_labels` is used by `ShipConfigCircle` to avoid label overlap. Pass `None`
@@ -169,6 +264,7 @@ pub fn draw_command_to_shapes(
     ctx: &egui::Context,
     label_opts: &DrawCommandLabelOptions,
     placed_labels: Option<&mut Vec<Rect>>,
+    text_resolver: &dyn TextResolver,
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
     let ws = transform.window_scale;
@@ -338,9 +434,12 @@ pub fn draw_command_to_shapes(
             max_score,
             team0_timer,
             team1_timer,
-            advantage_label,
-            advantage_team,
+            advantage,
         } => {
+            let advantage_label = advantage
+                .map(|(level, _)| text_resolver.resolve(&TranslatableText::Advantage(level)))
+                .unwrap_or_default();
+            let advantage_team = advantage.map(|(_, team)| team as i32).unwrap_or(-1);
             let canvas_w = transform.screen_canvas_width();
             let bar_height = HUD_HEIGHT as f32 * ws;
             let max_score = *max_score as f32;
@@ -405,7 +504,7 @@ pub fn draw_command_to_shapes(
                 w
             });
 
-            let t0_adv_w = if *advantage_team == 0 && !advantage_label.is_empty() {
+            let t0_adv_w = if advantage_team == 0 && !advantage_label.is_empty() {
                 let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
                 let w = g.size().x;
                 drop(g);
@@ -469,7 +568,7 @@ pub fn draw_command_to_shapes(
                 w
             });
 
-            let t1_adv_w = if *advantage_team == 1 && !advantage_label.is_empty() {
+            let t1_adv_w = if advantage_team == 1 && !advantage_label.is_empty() {
                 let g = ctx.fonts_mut(|f| f.layout_no_wrap(advantage_label.clone(), adv_font.clone(), Color32::WHITE));
                 let w = g.size().x;
                 drop(g);
@@ -585,13 +684,18 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::PreBattleCountdown { seconds } => {
-            let overlay = DrawCommand::BattleResultOverlay {
-                text: format!("{}", seconds),
-                subtitle: Some("BATTLE STARTS IN".to_string()),
-                color: [255, 200, 50],
-                subtitle_above: true,
-            };
-            shapes.extend(draw_command_to_shapes(&overlay, transform, textures, ctx, label_opts, None));
+            let text = format!("{}", seconds);
+            let subtitle = text_resolver.resolve(&TranslatableText::PreBattleLabel);
+            let color: [u8; 3] = [255, 200, 50];
+            let subtitle_above = true;
+            shapes.extend(render_glow_text_overlay(
+                &text,
+                Some(&subtitle),
+                &color,
+                subtitle_above,
+                transform,
+                ctx,
+            ));
         }
 
         DrawCommand::TeamAdvantage { .. } => {
@@ -1031,86 +1135,19 @@ pub fn draw_command_to_shapes(
             }
         }
 
-        DrawCommand::BattleResultOverlay { text, subtitle, color, subtitle_above } => {
-            let canvas_w = transform.screen_canvas_width();
-            let canvas_h = (transform.canvas_width + transform.hud_height) * transform.window_scale;
-            let center_x = transform.origin.x + canvas_w / 2.0;
-            let center_y = transform.origin.y + canvas_h / 2.0;
-
-            let font_size = canvas_w / 8.0;
-            let main_font = game_font(font_size);
-            let main_galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), main_font, Color32::WHITE));
-            let main_w = main_galley.size().x;
-            let main_h = main_galley.size().y;
-
-            let sub_galley = subtitle.as_ref().map(|s| {
-                let sub_font = game_font(font_size / 4.0);
-                ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), sub_font, Color32::from_gray(200)))
+        DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
+            let text = text_resolver.resolve(&TranslatableText::BattleResult(*result));
+            let subtitle = finish_type.as_ref().map(|ft| {
+                text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase()
             });
-            let sub_h = sub_galley.as_ref().map(|g| g.size().y).unwrap_or(0.0);
-            let gap = if subtitle.is_some() { 8.0 * ws } else { 0.0 };
-            let total_h = main_h + gap + sub_h;
-
-            let block_top = center_y - total_h / 2.0;
-            let (text_x, text_y, sub_top) = if *subtitle_above {
-                (center_x - main_w / 2.0, block_top + sub_h + gap, block_top)
-            } else {
-                (center_x - main_w / 2.0, block_top, block_top + main_h + gap)
-            };
-
-            let offsets: &[(f32, f32)] =
-                &[(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
-            let glow_layers: &[(f32, [u8; 3], f32)] = &[
-                (6.0, [0, 0, 0], 0.15),
-                (4.0, [0, 0, 0], 0.25),
-                (3.0, *color, 0.30),
-                (2.0, *color, 0.50),
-                (1.0, *color, 0.70),
-            ];
-
-            for &(dist, c, opacity) in glow_layers {
-                let layer_color = Color32::from_rgba_premultiplied(
-                    (c[0] as f32 * opacity) as u8,
-                    (c[1] as f32 * opacity) as u8,
-                    (c[2] as f32 * opacity) as u8,
-                    (255.0 * opacity) as u8,
-                );
-                let glow_font = game_font(font_size);
-                for &(dx, dy) in offsets {
-                    let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), glow_font.clone(), layer_color));
-                    shapes.push(Shape::galley(
-                        Pos2::new(text_x + dx * dist, text_y + dy * dist),
-                        galley,
-                        Color32::TRANSPARENT,
-                    ));
-                }
-            }
-
-            shapes.push(Shape::galley(Pos2::new(text_x, text_y), main_galley, Color32::TRANSPARENT));
-
-            if let Some(sub_galley) = sub_galley {
-                let sub_w = sub_galley.size().x;
-                let sub_x = center_x - sub_w / 2.0;
-                let sub_y = sub_top;
-
-                let sub_font = game_font(font_size / 4.0);
-                for &(dx, dy) in offsets {
-                    let outline = ctx.fonts_mut(|f| {
-                        f.layout_no_wrap(
-                            subtitle.as_ref().unwrap().clone(),
-                            sub_font.clone(),
-                            Color32::from_rgba_premultiplied(0, 0, 0, 180),
-                        )
-                    });
-                    shapes.push(Shape::galley(
-                        Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0),
-                        outline,
-                        Color32::TRANSPARENT,
-                    ));
-                }
-
-                shapes.push(Shape::galley(Pos2::new(sub_x, sub_y), sub_galley, Color32::TRANSPARENT));
-            }
+            shapes.extend(render_glow_text_overlay(
+                &text,
+                subtitle.as_deref(),
+                color,
+                *subtitle_above,
+                transform,
+                ctx,
+            ));
         }
 
         DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {

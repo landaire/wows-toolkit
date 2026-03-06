@@ -266,6 +266,9 @@ pub struct Settings {
     pub debug_mode: bool,
     #[serde(default)]
     pub build_consent_window_shown: bool,
+    /// Whether the first-launch language selection dialog has been shown.
+    #[serde(default)]
+    pub language_selection_shown: bool,
     #[serde(default)]
     pub renderer_options: SavedRenderOptions,
     /// Whether to limit session stats to the N most recent games.
@@ -319,6 +322,7 @@ impl Default for Settings {
             constants_file_commit: None,
             debug_mode: false,
             build_consent_window_shown: false,
+            language_selection_shown: false,
             has_052_game_params_fix: true,
             renderer_options: Default::default(),
             session_stats_limit_enabled: false,

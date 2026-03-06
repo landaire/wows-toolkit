@@ -62,6 +62,16 @@ fn main() -> eframe::Result<()> {
         });
     }
 
+    // The i18n!() macro generates a lazy static whose initializer needs ~1.2 MB
+    // of stack in debug builds (one HashMap::insert per translation key). Trigger
+    // it on a thread with enough stack so the main thread's default 1 MB isn't exceeded.
+    std::thread::Builder::new()
+        .stack_size(4 * 1024 * 1024)
+        .spawn(wows_toolkit::init_i18n)
+        .expect("failed to spawn i18n init thread")
+        .join()
+        .expect("i18n init thread panicked");
+
     let icon_data: &[u8] = &include_bytes!("../../../assets/wows_toolkit.png")[..];
 
     let native_options = eframe::NativeOptions {

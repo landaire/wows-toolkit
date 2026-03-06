@@ -682,6 +682,7 @@ impl WebApp {
             use wt_collab_egui::draw_commands::DrawCommandLabelOptions;
             use wt_collab_egui::draw_commands::DrawCommandTextures;
             use wt_collab_egui::draw_commands::draw_command_to_shapes;
+            use wt_translations::DefaultTextResolver;
 
             let textures = DrawCommandTextures {
                 ship_icons: &self.assets.ship_icons,
@@ -692,10 +693,11 @@ impl WebApp {
                 powerup_icons: Some(&self.assets.powerup_icons),
             };
             let label_opts = DrawCommandLabelOptions::default();
+            let text_resolver = DefaultTextResolver;
 
             for cmd in &commands {
                 let is_hud = cmd.is_hud();
-                let cmd_shapes = draw_command_to_shapes(cmd, &transform, &textures, ctx, &label_opts, None);
+                let cmd_shapes = draw_command_to_shapes(cmd, &transform, &textures, ctx, &label_opts, None, &text_resolver);
                 let target_painter = if is_hud { &painter } else { &map_painter };
                 for shape in cmd_shapes {
                     target_painter.add(shape);

@@ -1,4 +1,4 @@
-use crate::icon_str;
+use rust_i18n::t;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -75,16 +75,18 @@ pub enum Tab {
 }
 
 impl Tab {
-    fn title(&self) -> &'static str {
-        match self {
-            Tab::Unpacker => icon_str!(icons::ARCHIVE, "Resource Unpacker"),
-            Tab::Settings => icon_str!(icons::GEAR_FINE, "Settings"),
-            Tab::ReplayParser => icon_str!(icons::MAGNIFYING_GLASS, "Replay Inspector"),
-            Tab::PlayerTracker => icon_str!(icons::DETECTIVE, "Player Tracker"),
-            Tab::ModManager => icon_str!(icons::WRENCH, "Mod Manager"),
-            Tab::ArmorViewer => icon_str!(icons::SHIELD, "Armor Viewer"),
-            Tab::Stats => icon_str!(icons::CHART_BAR, "Stats"),
-        }
+    fn title(&self) -> String {
+        use rust_i18n::t;
+        let (icon, key) = match self {
+            Tab::Unpacker => (icons::ARCHIVE, "ui.tabs.unpacker"),
+            Tab::Settings => (icons::GEAR_FINE, "ui.tabs.settings"),
+            Tab::ReplayParser => (icons::MAGNIFYING_GLASS, "ui.tabs.replay_parser"),
+            Tab::PlayerTracker => (icons::DETECTIVE, "ui.tabs.player_tracker"),
+            Tab::ModManager => (icons::WRENCH, "ui.tabs.mod_manager"),
+            Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
+            Tab::Stats => (icons::CHART_BAR, "ui.tabs.stats"),
+        };
+        wt_translations::icon_t(icon, &t!(key))
     }
 }
 
@@ -152,6 +154,8 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     build_consent_window_open: bool,
     #[serde(skip)]
+    language_selection_open: bool,
+    #[serde(skip)]
     latest_release: Option<Release>,
     #[serde(skip)]
     show_about_window: bool,
@@ -201,6 +205,7 @@ impl Default for WowsToolkitApp {
             panic_info: None,
             panic_window_open: false,
             build_consent_window_open: false,
+            language_selection_open: false,
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
@@ -254,6 +259,10 @@ impl WowsToolkitApp {
         //         InsertFontFamily { family: egui::FontFamily::Monospace, priority: egui::epaint::text::FontPriority::Lowest },
         //     ],
         // ));
+
+        // Add system font fallbacks for CJK/Thai characters that egui's default
+        // fonts don't cover.
+        add_system_font_fallbacks(&mut fonts);
 
         // Register "GameFont" as a proportional fallback so game_font() never panics.
         // Upgraded to real game fonts once WoWs data is loaded.
@@ -325,8 +334,10 @@ impl WowsToolkitApp {
 
         if !had_saved_state {
             let mut this: Self = Default::default();
-            // this.tab_state.settings.locale = Some(get_locale().unwrap_or_else(|| String::from("en")));
-            this.tab_state.settings.locale = Some("en".to_string());
+            let detected = sys_locale::get_locale()
+                .and_then(|sys| wt_translations::system_locale_to_wows(&sys).map(String::from))
+                .unwrap_or_else(|| "en".into());
+            this.tab_state.settings.locale = Some(detected);
 
             let default_wows_dir = "C:\\Games\\World_of_Warships";
             let default_wows_path = Path::new(default_wows_dir);
@@ -344,6 +355,11 @@ impl WowsToolkitApp {
             state = this;
         }
 
+        // Apply locale to rust-i18n
+        if let Some(locale) = &state.tab_state.settings.locale {
+            rust_i18n::set_locale(locale);
+        }
+
         // Check if the application panicked
         let panic_log_path = Self::panic_log_path();
         if panic_log_path.exists() {
@@ -356,6 +372,17 @@ impl WowsToolkitApp {
 
         if !state.tab_state.settings.build_consent_window_shown {
             state.build_consent_window_open = true;
+        }
+
+        // Show language selection dialog on first launch if a non-English locale was detected
+        if !state.tab_state.settings.language_selection_shown {
+            let locale = state.tab_state.settings.locale.as_deref().unwrap_or("en");
+            if locale != "en" {
+                state.language_selection_open = true;
+            } else {
+                // English detected or default — no need to ask
+                state.tab_state.settings.language_selection_shown = true;
+            }
         }
 
         // Initialize logging if the feature is enabled and the user hasn't disabled it
@@ -493,7 +520,7 @@ impl WowsToolkitApp {
         }
 
         if self.tab_state.settings.debug_mode {
-            ui.label(RichText::new("⚠ Debug build ⚠").heading().color(ui.visuals().warn_fg_color));
+            ui.label(RichText::new(t!("ui.labels.debug_build")).heading().color(ui.visuals().warn_fg_color));
         }
 
         ui.horizontal(|ui| {
@@ -517,7 +544,7 @@ impl WowsToolkitApp {
                         if !shown_replay_spinner {
                             shown_replay_spinner = true;
                             ui.spinner();
-                            ui.label(format!("Loading {} replays...", pending_replay_count));
+                            ui.label(t!("ui.labels.loading_replays", count = pending_replay_count));
                         }
                         task.check_completion()
                     } else {
@@ -581,7 +608,7 @@ impl WowsToolkitApp {
                 .collect();
 
             if let Some(rx) = &self.tab_state.unpacker_progress {
-                if ui.button("Stop").clicked() {
+                if ui.button(t!("ui.buttons.stop")).clicked() {
                     UNPACKER_STOP.store(true, Ordering::Relaxed);
                 }
                 let mut done = false;
@@ -638,11 +665,11 @@ impl WowsToolkitApp {
                     self.latest_release = Some(*release);
                 }
                 NetworkResult::AppUpToDate => {
-                    self.tab_state.toasts.lock().success("Application up-to-date");
+                    self.tab_state.toasts.lock().success(t!("ui.messages.app_up_to_date"));
                 }
                 NetworkResult::AppUpdateCheckFailed(msg) => {
                     warn!("App update check failed: {}", msg);
-                    self.tab_state.toasts.lock().error("Failed to check for app updates");
+                    self.tab_state.toasts.lock().error(t!("ui.messages.update_check_failed"));
                 }
                 NetworkResult::ConstantsFetched { data, commit } => {
                     let mut constants_path = PathBuf::from("constants.json");
@@ -663,7 +690,7 @@ impl WowsToolkitApp {
                         self.tab_state
                             .toasts
                             .lock()
-                            .error("Failed to fetch updated replay data mapping. Will retry later.")
+                            .error(t!("ui.messages.constants_fetch_failed"))
                             .duration(None);
                     }
                 }
@@ -775,13 +802,13 @@ impl WowsToolkitApp {
                     self.tab_state.replay_files = replays;
                     self.tab_state.browser_state.reset_filters();
 
-                    self.tab_state.toasts.lock().success("Successfully loaded game data");
+                    self.tab_state.toasts.lock().success(t!("ui.messages.game_data_loaded"));
 
                     if no_replays {
                         self.tab_state
                             .toasts
                             .lock()
-                            .warning("No replays detected \u{2014} is your WoWs directory properly configured?");
+                            .warning(t!("ui.messages.no_replays_detected"));
                     }
 
                     self.check_constants_version_mismatch();
@@ -789,7 +816,7 @@ impl WowsToolkitApp {
                 BackgroundTaskCompletion::BuildDataLoaded { build } => {
                     self.tab_state.selected_browser_build = build;
                     self.tab_state.browser_state.reset_filters();
-                    self.tab_state.toasts.lock().success(format!("Loaded build {build}"));
+                    self.tab_state.toasts.lock().success(t!("ui.messages.build_loaded", build = build));
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
                     use crate::task::ReplaySource;
@@ -821,7 +848,7 @@ impl WowsToolkitApp {
                         if open_tab {
                             self.tab_state.open_replay_in_focused_tab(replay);
                         }
-                        self.tab_state.toasts.lock().success("Successfully loaded replay");
+                        self.tab_state.toasts.lock().success(t!("ui.messages.replay_loaded"));
                         self.try_update_constants();
                     }
                 }
@@ -1528,7 +1555,7 @@ impl WowsToolkitApp {
             if twitch_token_failed && !self.shown_twitch_token_error {
                 self.shown_twitch_token_error = true;
                 error!("Twitch token is invalid or expired");
-                self.tab_state.toasts.lock().error("Twitch token is invalid or expired. Please update it in Settings.");
+                self.tab_state.toasts.lock().error(t!("ui.messages.twitch_token_invalid"));
             } else if !twitch_token_failed {
                 self.shown_twitch_token_error = false;
             }
@@ -1537,16 +1564,16 @@ impl WowsToolkitApp {
         }
 
         if self.build_consent_window_open {
-            egui::Window::new("Build Collection Consent").collapsible(false).show(ctx, |ui| {
-                ui.label("Would you like to send player build information information from ranked and random battles to the developer? This data collection helps the community bulk analyze player builds. You may opt out at any time in the settings.");
+            egui::Window::new(t!("ui.windows.build_consent")).collapsible(false).show(ctx, |ui| {
+                ui.label(t!("ui.dialogs.build_consent_message"));
                 ui.horizontal(|ui| {
-                    if ui.button("Yes").clicked() {
+                    if ui.button(t!("ui.buttons.yes")).clicked() {
                         self.build_consent_window_open = false;
                         self.tab_state.settings.build_consent_window_shown = true;
                         self.tab_state.settings.send_replay_data = true;
                         self.tab_state.send_replay_consent_changed();
                     }
-                    if ui.button("No").clicked() {
+                    if ui.button(t!("ui.buttons.no")).clicked() {
                         self.build_consent_window_open = false;
                         self.tab_state.settings.build_consent_window_shown = true;
                         self.tab_state.settings.send_replay_data = false;
@@ -1554,6 +1581,48 @@ impl WowsToolkitApp {
                     }
                 });
             });
+        }
+
+        if self.language_selection_open {
+            let detected_locale = self
+                .tab_state
+                .settings
+                .locale
+                .clone()
+                .unwrap_or_else(|| "en".into());
+            let native_name = wt_translations::language_name(&detected_locale).unwrap_or("English");
+
+            egui::Window::new(t!("dialog.select_language"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(t!("dialog.machine_translation_warning"));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        // "Continue in English" button
+                        if ui.button(t!("dialog.continue_in_english")).clicked() {
+                            self.tab_state.settings.locale = Some("en".into());
+                            rust_i18n::set_locale("en");
+                            self.tab_state.settings.language_selection_shown = true;
+                            self.language_selection_open = false;
+                        }
+                        // "Continue in <detected language>" button
+                        let continue_label = t!("dialog.continue_in_language");
+                        // For English TOML the label is the same, but for translated TOMLs
+                        // it will be in the detected language. Show native name as fallback.
+                        let label = if continue_label == "Continue in English" {
+                            format!("Continue in {}", native_name)
+                        } else {
+                            continue_label.into()
+                        };
+                        if ui.button(label).clicked() {
+                            // Keep the detected locale
+                            self.tab_state.settings.language_selection_shown = true;
+                            self.language_selection_open = false;
+                        }
+                    });
+                });
         }
 
         if self.panic_window_open {
@@ -1566,7 +1635,7 @@ impl WowsToolkitApp {
 
         if let Some(error) = self.error_to_show.as_ref() {
             if self.show_error_window {
-                egui::Window::new("Error").open(&mut self.show_error_window).show(ctx, |ui| {
+                egui::Window::new(t!("ui.windows.error")).open(&mut self.show_error_window).show(ctx, |ui| {
                     build_error_window(ui, error);
                 });
             } else {
@@ -1575,7 +1644,7 @@ impl WowsToolkitApp {
         }
 
         if self.show_about_window {
-            egui::Window::new("About").open(&mut self.show_about_window).show(ctx, |ui| {
+            egui::Window::new(t!("ui.windows.about")).open(&mut self.show_about_window).show(ctx, |ui| {
                 build_about_window(ui);
             });
         }
@@ -1584,27 +1653,27 @@ impl WowsToolkitApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Check for Updates").clicked() {
+                    ui.menu_button(t!("ui.menu.file"), |ui| {
+                        if ui.button(t!("ui.menu.check_updates")).clicked() {
                             self.checked_for_updates = false;
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.button("About").clicked() {
+                        if ui.button(t!("ui.menu.about")).clicked() {
                             self.show_about_window = true;
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.button("Quit").clicked() {
+                        if ui.button(t!("ui.menu.quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
                     ui.add_space(16.0);
                 }
 
-                if ui.button(icon_str!(icons::BUG, "Create Issue")).clicked() {
+                if ui.button(wt_translations::icon_t(icons::BUG, &t!("ui.buttons.create_issue"))).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
                 }
 
-                if ui.button(icon_str!(icons::DISCORD_LOGO, "Discord")).clicked() {
+                if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
                     ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
                 }
             });
@@ -1676,13 +1745,9 @@ impl WowsToolkitApp {
 
     fn show_panic_window(&mut self, ctx: &Context) {
         if let Some(panic_info) = self.panic_info.as_mut() {
-            egui::Window::new("Application Crash Detected").open(&mut self.panic_window_open).show(ctx, |ui| {
+            egui::Window::new(t!("ui.windows.crash_detected")).open(&mut self.panic_window_open).show(ctx, |ui| {
                 ui.vertical(|ui| {
-                    ui.label(
-                        "It looks like WoWs Toolkit crashed the last time it ran. \
-                    If you would like to report this issue, please either post an issue on \
-                    GitHub or join the Discord server and provide the below information.",
-                    );
+                    ui.label(t!("ui.dialogs.crash_message"));
                     ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                         ui.scope(|ui| {
                             let style = ui.style_mut();
@@ -1692,25 +1757,20 @@ impl WowsToolkitApp {
                         });
                     });
                     ui.horizontal(|ui| {
-                        if ui.button("Copy").clicked() {
+                        if ui.button(t!("ui.buttons.copy")).clicked() {
                             Context::copy_text(ctx, panic_info.clone());
                         }
-                        if ui.button(icon_str!(icons::GITHUB_LOGO, "GitHub")).clicked() {
+                        if ui.button(wt_translations::icon_t(icons::GITHUB_LOGO, &t!("ui.buttons.github"))).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab(
                                 "https://github.com/landaire/wows-toolkit/issues/new/choose",
                             ));
                         }
-                        if ui.button(icon_str!(icons::DISCORD_LOGO, "Discord")).clicked() {
+                        if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
                             ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
                         }
                     });
-                    ui.collapsing("More Options", |ui| {
-                        ui.label(
-                            "If for some reason data that the application persists may \
-                        be responsible, you can try clearing settings by pressing the button below. \
-                        This will clear all settings, including tracked players. Your replays and any \
-                        WoWs data will be safe.",
-                        );
+                    ui.collapsing(t!("ui.buttons.more_options"), |ui| {
+                        ui.label(t!("ui.dialogs.crash_clear_settings"));
                         ui.scope(|ui| {
                             let visuals = &mut ui.style_mut().visuals;
 
@@ -1726,7 +1786,7 @@ impl WowsToolkitApp {
                             visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
                             visuals.widgets.active.fg_stroke.color = Color32::WHITE;
 
-                            if ui.button("Clear Settings").clicked() {
+                            if ui.button(t!("ui.buttons.clear_settings")).clicked() {
                                 self.tab_state.settings = Default::default();
                             }
                         });
@@ -1751,9 +1811,9 @@ impl WowsToolkitApp {
                 .iter()
                 .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
             if let Some(asset) = asset {
-                egui::Window::new("Update Available").open(&mut self.update_window_open).show(ctx, |ui| {
+                egui::Window::new(t!("ui.windows.update_available")).open(&mut self.update_window_open).show(ctx, |ui| {
                     ui.vertical(|ui| {
-                        ui.label(format!("Version {tag} of WoWs Toolkit is available"));
+                        ui.label(t!("ui.dialogs.update_message", tag = tag));
                         if let Some(notes) = notes.as_mut() {
                             ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
                                 CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
@@ -1762,7 +1822,7 @@ impl WowsToolkitApp {
                         ui.horizontal(|ui| {
                             #[cfg(target_os = "windows")]
                             {
-                                if ui.button("Install Update").clicked() {
+                                if ui.button(t!("ui.buttons.install_update")).clicked() {
                                     let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
                                     update_background_task!(self.tab_state.background_tasks, task);
                                 }
@@ -1770,9 +1830,9 @@ impl WowsToolkitApp {
                             #[cfg(not(target_os = "windows"))]
                             {
                                 let _ = asset;
-                                ui.label("Update available, but only Windows is supported at this time.");
+                                ui.label(t!("ui.dialogs.update_windows_only"));
                             }
-                            if ui.button("View Release").clicked() {
+                            if ui.button(t!("ui.buttons.view_release")).clicked() {
                                 ui.ctx().open_url(OpenUrl::new_tab(url));
                             }
                         });
@@ -1829,7 +1889,7 @@ impl WowsToolkitApp {
             Some(true) => {
                 self.constants_version_mismatch = true;
                 self.tab_state.toasts.lock()
-                    .warning("Replay data mapping file version does not match game version.\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server.".to_string())
+                    .warning(t!("ui.messages.constants_version_mismatch"))
                     .duration(None);
             }
             Some(false) => {
@@ -1865,14 +1925,14 @@ impl WowsToolkitApp {
                         );
                     }
 
-                    self.tab_state.toasts.lock().success("Replay data mapping file updated successfully");
+                    self.tab_state.toasts.lock().success(t!("ui.messages.constants_updated"));
                 } else if !self.constants_update_error_shown {
                     self.constants_update_error_shown = true;
                     warn!("Failed to fetch versioned constants during rebuild");
                     self.tab_state
                         .toasts
                         .lock()
-                        .error("Failed to fetch versioned constants during rebuild. Will retry later.")
+                        .error(t!("ui.messages.versioned_constants_rebuild_failed"))
                         .duration(None);
                 }
             }
@@ -1908,7 +1968,7 @@ impl WowsToolkitApp {
         let mut confirmed = false;
         let mut dismissed = false;
 
-        egui::Window::new("Confirm")
+        egui::Window::new(t!("ui.windows.confirm"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1916,10 +1976,10 @@ impl WowsToolkitApp {
                 ui.label(message);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Yes").clicked() {
+                    if ui.button(t!("ui.buttons.yes")).clicked() {
                         confirmed = true;
                     }
-                    if ui.button("No").clicked() {
+                    if ui.button(t!("ui.buttons.no")).clicked() {
                         dismissed = true;
                     }
                 });
@@ -1946,8 +2006,8 @@ impl WowsToolkitApp {
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
                 self.tab_state.settings.session_stats.clear();
             }
-            crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_name } => {
-                self.tab_state.settings.session_stats.clear_ship(&ship_name);
+            crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_id } => {
+                self.tab_state.settings.session_stats.clear_ship(ship_id);
             }
             crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
                 self.tab_state.clear_before_session_reset = true;
@@ -1964,25 +2024,22 @@ impl WowsToolkitApp {
         let mut proceed = false;
         let mut cancel = false;
 
-        egui::Window::new("Network Warning")
+        egui::Window::new(t!("ui.windows.network_warning"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(
-                    "Collaborative sessions use peer-to-peer networking. \
-                     Other users in the session may be able to see your IP address.",
-                );
+                ui.label(t!("ui.dialogs.p2p_warning"));
                 ui.add_space(4.0);
-                ui.hyperlink_to("More info", "https://landaire.github.io/wows-toolkit/networking");
+                ui.hyperlink_to(t!("ui.labels.more_info"), "https://landaire.github.io/wows-toolkit/networking");
                 ui.add_space(8.0);
-                ui.checkbox(&mut self.tab_state.settings.suppress_p2p_ip_warning, "Don't show this again");
+                ui.checkbox(&mut self.tab_state.settings.suppress_p2p_ip_warning, t!("ui.labels.suppress_warning"));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Continue").clicked() {
+                    if ui.button(t!("ui.buttons.continue_")).clicked() {
                         proceed = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t!("ui.buttons.cancel")).clicked() {
                         cancel = true;
                     }
                 });
@@ -2108,24 +2165,24 @@ impl WowsToolkitApp {
         while let Ok(event) = session.event_rx.try_recv() {
             match event {
                 crate::collab::SessionEvent::Started => {
-                    self.tab_state.toasts.lock().info("Session started");
+                    self.tab_state.toasts.lock().info(t!("ui.messages.session_started"));
                 }
                 crate::collab::SessionEvent::UserJoined(user) => {
-                    self.tab_state.toasts.lock().info(format!("{} joined", user.name));
+                    self.tab_state.toasts.lock().info(t!("ui.messages.user_joined", name = &user.name));
                 }
                 crate::collab::SessionEvent::UserLeft { name, timed_out, .. } => {
                     if timed_out {
-                        self.tab_state.toasts.lock().warning(format!("{name} timed out"));
+                        self.tab_state.toasts.lock().warning(t!("ui.messages.user_timeout", name = name));
                     } else {
-                        self.tab_state.toasts.lock().info(format!("{name} left"));
+                        self.tab_state.toasts.lock().info(t!("ui.messages.user_left", name = name));
                     }
                 }
                 crate::collab::SessionEvent::Ended => {
-                    self.tab_state.toasts.lock().info("Session ended");
+                    self.tab_state.toasts.lock().info(t!("ui.messages.session_ended"));
                     session_ended = true;
                 }
                 crate::collab::SessionEvent::Error(msg) => {
-                    self.tab_state.toasts.lock().error(format!("Session error: {msg}"));
+                    self.tab_state.toasts.lock().error(t!("ui.messages.session_error", msg = msg));
                     session_ended = true;
                 }
                 _ => {}
@@ -2201,7 +2258,7 @@ impl WowsToolkitApp {
         while let Ok(event) = session.event_rx.try_recv() {
             match event {
                 crate::collab::SessionEvent::Started => {
-                    self.tab_state.toasts.lock().info("Connected to session");
+                    self.tab_state.toasts.lock().info(t!("ui.messages.connected_to_session"));
                 }
                 crate::collab::SessionEvent::SessionInfoReceived { open_replays } => {
                     tracing::debug!("SessionInfoReceived: {} open replay(s)", open_replays.len());
@@ -2209,7 +2266,7 @@ impl WowsToolkitApp {
                     let saved_options = &self.tab_state.settings.renderer_options;
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     for replay in open_replays.into_iter().take(2) {
-                        self.tab_state.toasts.lock().info(format!("Joined session: {}", &replay.replay_name));
+                        self.tab_state.toasts.lock().info(t!("ui.messages.joined_session", name = &replay.replay_name));
                         let viewer = crate::replay::renderer::launch_client_renderer(
                             replay.replay_name,
                             replay.map_image_png,
@@ -2254,7 +2311,7 @@ impl WowsToolkitApp {
                         self.tab_state.replay_open_timestamps.pop_front();
                     }
                     if self.tab_state.replay_open_timestamps.len() >= 5 {
-                        self.tab_state.toasts.lock().error("Disconnected: host is opening replays too fast");
+                        self.tab_state.toasts.lock().error(t!("ui.messages.replay_spam_protection"));
                         if let Some(ref handle) = self.tab_state.client_session {
                             let _ = handle.command_tx.send(crate::collab::SessionCommand::Stop);
                         }
@@ -2280,7 +2337,7 @@ impl WowsToolkitApp {
 
                     let saved_options = &self.tab_state.settings.renderer_options;
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
-                    self.tab_state.toasts.lock().info(format!("Host opened replay: {replay_name}"));
+                    self.tab_state.toasts.lock().info(t!("ui.messages.host_opened_replay", name = replay_name));
                     let viewer = crate::replay::renderer::launch_client_renderer(
                         replay_name,
                         map_image_png,
@@ -2316,20 +2373,20 @@ impl WowsToolkitApp {
                         renderers.remove(pos);
                     }
                     self.tab_state.session_state.lock().viewport_sinks.remove(&replay_id);
-                    self.tab_state.toasts.lock().info("Host closed a replay");
+                    self.tab_state.toasts.lock().info(t!("ui.messages.host_closed_replay"));
                 }
                 crate::collab::SessionEvent::Error(msg) => {
-                    self.tab_state.toasts.lock().error(format!("Session: {msg}"));
+                    self.tab_state.toasts.lock().error(t!("ui.messages.session_error_generic", msg = msg));
                     self.cleanup_client_session();
                     return;
                 }
                 crate::collab::SessionEvent::Rejected(reason) => {
-                    self.tab_state.toasts.lock().error(format!("Session rejected: {reason}"));
+                    self.tab_state.toasts.lock().error(t!("ui.messages.session_rejected", reason = reason));
                     self.tab_state.client_session = None;
                     return;
                 }
                 crate::collab::SessionEvent::Ended => {
-                    self.tab_state.toasts.lock().info("Session ended");
+                    self.tab_state.toasts.lock().info(t!("ui.messages.session_ended"));
                     self.cleanup_client_session();
                     return;
                 }
@@ -2370,21 +2427,21 @@ fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::data::wo
 
 fn build_about_window(ui: &mut egui::Ui) {
     ui.vertical(|ui| {
-        ui.label("Made by landaire.");
-        ui.label("Thanks to Trackpad, TTaro, lkolbly for their contributions.");
+        ui.label(t!("ui.labels.made_by"));
+        ui.label(t!("ui.labels.credits"));
         ui.horizontal(|ui| {
-            ui.label("Personal rating (PR) calculation data and formula provided by WoWs Numbers.");
-            ui.hyperlink_to("More Info.", "https://wows-numbers.com/personal/rating");
+            ui.label(t!("ui.labels.pr_credits"));
+            ui.hyperlink_to(t!("ui.labels.more_info"), "https://wows-numbers.com/personal/rating");
         });
-        if ui.button("View Project on GitHub").clicked() {
+        if ui.button(t!("ui.buttons.view_github")).clicked() {
             ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit"));
         }
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            ui.label("Powered by ");
+            ui.label(t!("ui.labels.powered_by"));
             ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-            ui.label(" and ");
+            ui.label(t!("ui.labels.and"));
             ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
             ui.label(".");
         });
@@ -2393,13 +2450,66 @@ fn build_about_window(ui: &mut egui::Ui) {
 
 fn build_error_window(ui: &mut egui::Ui, error: &str) {
     ui.vertical(|ui| {
-        ui.label(icon_str!(icons::WARNING, "An error occurred:"));
+        ui.label(wt_translations::icon_t(icons::WARNING, &t!("ui.labels.error_occurred")));
         ui.label(error);
     });
 }
 
 /// Helper function to mitigate https://github.com/emilk/egui/issues/7434.
 ///
+/// Load system fonts that cover scripts egui's built-in fonts lack (CJK, Thai,
+/// Cyrillic, etc.) and append them as low-priority fallbacks in the Proportional
+/// family. Fonts that don't exist on the current system are silently skipped.
+#[cfg(not(target_arch = "wasm32"))]
+fn add_system_font_fallbacks(fonts: &mut egui::FontDefinitions) {
+    // (logical name, file path) — tried in order per platform.
+    #[cfg(target_os = "windows")]
+    let candidates: &[(&str, &str)] = &[
+        ("sys_cjk_sc", r"C:\Windows\Fonts\msyh.ttc"),   // Microsoft YaHei — Simplified Chinese + Latin
+        ("sys_cjk_tc", r"C:\Windows\Fonts\msjh.ttc"),    // Microsoft JhengHei — Traditional Chinese
+        ("sys_cjk_jp", r"C:\Windows\Fonts\YuGothR.ttc"), // Yu Gothic — Japanese
+        ("sys_cjk_kr", r"C:\Windows\Fonts\malgun.ttf"),  // Malgun Gothic — Korean
+        ("sys_thai", r"C:\Windows\Fonts\leelawui.ttf"),   // Leelawadee UI — Thai
+    ];
+
+    #[cfg(target_os = "macos")]
+    let candidates: &[(&str, &str)] = &[
+        ("sys_cjk_sc", "/System/Library/Fonts/PingFang.ttc"),                          // PingFang — CJK
+        ("sys_cjk_jp", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),                // Hiragino Sans
+        ("sys_thai", "/System/Library/Fonts/Supplemental/Ayuthaya.ttf"),                // Thai
+    ];
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let candidates: &[(&str, &str)] = &[
+        ("sys_cjk", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        ("sys_cjk", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
+        ("sys_cjk", "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
+        ("sys_thai", "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf"),
+        ("sys_thai", "/usr/share/fonts/noto/NotoSansThai-Regular.ttf"),
+    ];
+
+    for (name, path) in candidates {
+        // Skip if we already loaded a font under this logical name (e.g. multiple
+        // candidate paths for the same script on Linux).
+        if fonts.font_data.contains_key(*name) {
+            continue;
+        }
+        if let Ok(data) = std::fs::read(path) {
+            fonts
+                .font_data
+                .insert(name.to_string(), egui::FontData::from_owned(data).into());
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                family.push(name.to_string());
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn add_system_font_fallbacks(_fonts: &mut egui::FontDefinitions) {
+    // No filesystem access on WASM — nothing to load.
+}
+
 /// If this returns true, the app should early return in the `update()` function
 /// or call `wgpu::Device::poll()`
 pub fn mitigate_wgpu_mem_leak(ctx: &egui::Context) -> bool {

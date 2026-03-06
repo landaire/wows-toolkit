@@ -11,23 +11,26 @@ use egui_plot::PlotPoints;
 use egui_plot::Points;
 use egui_plot::Text;
 
+use rust_i18n::t;
 use std::collections::HashMap;
 
 use wows_replays::types::GameParamId;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::PerformanceInfo;
+use crate::data::session_stats::resolve_ship_name;
 use crate::tab_state::ChartableStat;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::personal_rating::ShipBattleStats;
 
-/// Generate a consistent color from a ship name using its hash.
+/// Generate a consistent color from a ship ID using its hash.
 /// Uses HSV with fixed saturation and value for good contrast.
-pub fn color_from_name(name: &str) -> Color32 {
+pub fn color_from_id(id: GameParamId) -> Color32 {
     use std::hash::Hash;
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    name.hash(&mut hasher);
+    id.hash(&mut hasher);
     let hash = hasher.finish();
 
     // Use the hash to generate a hue (0-360)
@@ -60,17 +63,18 @@ pub fn render_line_chart(
     ui: &mut egui::Ui,
     per_game_data: &[&PerGameStat],
     stat: ChartableStat,
-    selected_ships: &[String],
+    selected_ships: &[GameParamId],
     pr_data: &PersonalRatingData,
     rolling_average: bool,
     combined: bool,
     show_labels: bool,
     reset: bool,
     chart_id: u64,
+    provider: Option<&GameMetadataProvider>,
 ) -> Option<egui::Rect> {
     // Win rate doesn't make sense per-game (but rolling average win rate does)
     if stat == ChartableStat::WinRate && !rolling_average {
-        ui.label("Win Rate is not available for per-game line charts (enable Rolling Average or use Bar chart)");
+        ui.label(t!("chart.win_rate_unavailable").as_ref());
         return None;
     }
 
@@ -82,7 +86,7 @@ pub fn render_line_chart(
     if combined {
         // Combined mode: single line across all games, proper rolling aggregation
         let all_games: Vec<&&PerGameStat> =
-            per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
+            per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_id)).collect();
 
         if !all_games.is_empty() {
             let points = if stat == ChartableStat::PersonalRating && pr_data.is_loaded() {
@@ -137,23 +141,25 @@ pub fn render_line_chart(
                     .collect()
             };
 
-            ship_data.push(("Combined".to_string(), points, Color32::from_rgb(100, 180, 255)));
+            ship_data.push((t!("chart.combined").into(), points, Color32::from_rgb(100, 180, 255)));
         }
     } else {
-        // Per-ship mode (original behavior)
-        // Get unique ships from the data that are in selected_ships, preserving order
-        let mut unique_ships: Vec<String> = Vec::new();
+        // Per-ship mode — group by ship_id, preserving first-seen order
+        let mut unique_ships: Vec<GameParamId> = Vec::new();
         for game in per_game_data {
-            if selected_ships.contains(&game.ship_name) && !unique_ships.contains(&game.ship_name) {
-                unique_ships.push(game.ship_name.clone());
+            if selected_ships.contains(&game.ship_id) && !unique_ships.contains(&game.ship_id) {
+                unique_ships.push(game.ship_id);
             }
         }
 
-        for ship_name in &unique_ships {
+        for ship_id in &unique_ships {
+            let display_name = resolve_ship_name(*ship_id, provider);
+            let color = color_from_id(*ship_id);
+
             // For win rate with rolling average, we need to track wins separately
             if stat == ChartableStat::WinRate && rolling_average {
                 let ship_games: Vec<bool> =
-                    per_game_data.iter().filter(|g| &g.ship_name == ship_name).map(|g| g.is_win).collect();
+                    per_game_data.iter().filter(|g| g.ship_id == *ship_id).map(|g| g.is_win).collect();
 
                 if ship_games.is_empty() {
                     continue;
@@ -173,11 +179,11 @@ pub fn render_line_chart(
                     })
                     .collect();
 
-                ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
+                ship_data.push((display_name, points, color));
             } else {
                 let ship_games: Vec<f64> = per_game_data
                     .iter()
-                    .filter(|g| &g.ship_name == ship_name)
+                    .filter(|g| g.ship_id == *ship_id)
                     .map(|g| g.get_stat(stat, pr_data_opt))
                     .collect();
 
@@ -202,19 +208,19 @@ pub fn render_line_chart(
                     ship_games.iter().enumerate().map(|(i, v)| [i as f64 + 1.0, *v]).collect()
                 };
 
-                ship_data.push((ship_name.clone(), points, color_from_name(ship_name)));
+                ship_data.push((display_name, points, color));
             }
         }
     }
 
     if ship_data.is_empty() {
-        ui.label("No data available for selected ships");
+        ui.label(t!("chart.no_data").as_ref());
         return None;
     }
 
-    let y_label = if rolling_average {
+    let y_label: String = if rolling_average {
         match stat {
-            ChartableStat::WinRate => "Win Rate (%)",
+            ChartableStat::WinRate => t!("stat.win_rate_pct").into(),
             _ => stat.name(),
         }
     } else {
@@ -228,17 +234,17 @@ pub fn render_line_chart(
     let group_response = ui.group(|ui| {
         // Chart title (centered)
         let title = if combined {
-            format!("{} (Combined)", stat.name())
+            format!("{} {}", stat.name(), t!("chart.combined_suffix"))
         } else if rolling_average {
-            format!("{} (Rolling Average)", stat.name())
+            format!("{} {}", stat.name(), t!("chart.rolling_average_suffix"))
         } else {
-            stat.name().to_string()
+            stat.name()
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 
         let mut plot = Plot::new(egui::Id::new(("line_chart", chart_id)))
             .legend(Legend::default())
-            .x_axis_label("Game #")
+            .x_axis_label(t!("chart.game_number"))
             .y_axis_label(y_label)
             .auto_bounds([true, true])
             .include_y(0.0_f64.min(min_y));
@@ -306,17 +312,21 @@ pub fn render_bar_chart(
             ChartableStat::PersonalRating => perf_info.calculate_pr(pr_data).map(|r| r.pr).unwrap_or_default(),
         };
 
-        bar_data.push((i, ship_name.to_string(), value, color_from_name(ship_name)));
+        let color = perf_info
+            .ship_id()
+            .map(color_from_id)
+            .unwrap_or_else(|| Color32::from_rgb(100, 180, 255));
+        bar_data.push((i, ship_name.to_string(), value, color));
     }
 
-    let y_label = match stat {
-        ChartableStat::Damage => "Avg Damage",
-        ChartableStat::SpottingDamage => "Avg Spotting Damage",
-        ChartableStat::Frags => "Avg Frags",
-        ChartableStat::RawXp => "Avg Raw XP",
-        ChartableStat::BaseXp => "Avg Base XP",
-        ChartableStat::WinRate => "Win Rate (%)",
-        ChartableStat::PersonalRating => "Avg PR",
+    let y_label: String = match stat {
+        ChartableStat::Damage => t!("stat.avg_damage").into(),
+        ChartableStat::SpottingDamage => t!("stat.avg_spotting_damage").into(),
+        ChartableStat::Frags => t!("stat.avg_frags").into(),
+        ChartableStat::RawXp => t!("stat.avg_raw_xp").into(),
+        ChartableStat::BaseXp => t!("stat.avg_base_xp").into(),
+        ChartableStat::WinRate => t!("stat.win_rate_pct").into(),
+        ChartableStat::PersonalRating => t!("stat.avg_pr").into(),
     };
 
     // Compute the minimum Y value across all bars so the axis starts at 0.min(min_value)
@@ -326,8 +336,8 @@ pub fn render_bar_chart(
     let group_response = ui.group(|ui| {
         // Chart title (centered) - show "Avg" prefix for everything except Win Rate
         let title = match stat {
-            ChartableStat::WinRate => stat.name().to_string(),
-            _ => format!("Avg {}", stat.name()),
+            ChartableStat::WinRate => stat.name(),
+            _ => t!("stat.avg_prefix", name = stat.name()).into(),
         };
         ui.vertical_centered(|ui| ui.heading(&title));
 

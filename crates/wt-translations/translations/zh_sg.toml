@@ -1,0 +1,688 @@
+[meta]
+language_name = "简体中文"
+
+# -- 语言选择对话框 --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "继续使用简体中文"
+select_language = "选择语言"
+machine_translation_warning = "大部分翻译由机器生成，可能不准确。"
+
+# -- 标签页标题 --
+
+[ui.tabs]
+unpacker = "资源解包器"
+settings = "设置"
+replay_parser = "回放检查器"
+player_tracker = "玩家追踪器"
+mod_manager = "模组管理器"
+armor_viewer = "装甲查看器"
+stats = "统计"
+
+# -- 通用按钮 --
+
+[ui.buttons]
+yes = "是"
+no = "否"
+stop = "停止"
+copy = "复制"
+cancel = "取消"
+continue_ = "继续"
+install_update = "安装更新"
+view_release = "查看版本"
+clear_settings = "清除设置"
+more_options = "更多选项"
+create_issue = "创建 Issue"
+discord = "Discord"
+github = "GitHub"
+view_github = "在 GitHub 上查看项目"
+choose = "选择..."
+reset = "重置"
+
+# -- 菜单项 --
+
+[ui.menu]
+file = "文件"
+check_updates = "检查更新"
+about = "关于"
+quit = "退出"
+
+# -- 窗口标题 --
+
+[ui.windows]
+build_consent = "配置收集同意"
+crash_detected = "检测到应用程序崩溃"
+update_available = "有可用更新"
+confirm = "确认"
+network_warning = "网络警告"
+error = "错误"
+about = "关于"
+
+# -- 对话框消息 --
+
+[ui.dialogs]
+build_consent_message = "您是否愿意将排位赛和随机战斗中的玩家配置信息发送给开发者？此数据收集有助于社区批量分析玩家配置。您可以随时在设置中选择退出。"
+crash_message = "WoWs Toolkit 在上次运行时似乎崩溃了。如果您想报告此问题，请在 GitHub 上提交 Issue 或加入 Discord 服务器并提供以下信息。"
+crash_clear_settings = "如果应用程序持久化的数据可能是问题原因，您可以尝试按下方按钮清除设置。这将清除所有设置，包括追踪的玩家。您的回放和 WoWs 数据将保持安全。"
+update_message = "WoWs Toolkit 版本 %{tag} 可用"
+update_windows_only = "有可用更新，但目前仅支持 Windows。"
+p2p_warning = "协作会话使用 P2P 网络。会话中的其他用户可能能够看到您的 IP 地址。"
+
+# -- 标签 --
+
+[ui.labels]
+debug_build = "⚠ Debug build ⚠"
+error_occurred = "发生错误："
+made_by = "由 landaire 制作。"
+credits = "感谢 Trackpad、TTaro、lkolbly 的贡献。"
+pr_credits = "个人评分 (PR) 计算数据和公式由 WoWs Numbers 提供。"
+powered_by = "由 "
+and = " 和 "
+suppress_warning = "不再显示"
+more_info = "更多信息"
+loading_replays = "正在加载 %{count} 个回放..."
+
+# -- 提示消息 --
+
+[ui.messages]
+app_up_to_date = "应用程序已是最新版本"
+update_check_failed = "检查应用更新失败"
+constants_fetch_failed = "无法获取更新的回放数据映射。稍后将重试。"
+game_data_loaded = "成功加载游戏数据"
+no_replays_detected = "未检测到回放——您的 WoWs 目录是否配置正确？"
+build_loaded = "已加载配置 %{build}"
+replay_loaded = "成功加载回放"
+twitch_token_invalid = "Twitch 令牌无效或已过期。请在设置中更新。"
+twitch_token_expired = "Twitch 令牌无效或已过期"
+versioned_constants_rebuild_failed = "重建期间无法获取版本常量。稍后将重试。"
+constants_version_mismatch = "回放数据映射文件版本与游戏版本不匹配。\n战后结果可能不准确。请耐心等待项目维护者更新服务器上的映射。"
+constants_updated = "回放数据映射文件更新成功"
+session_started = "会话已开始"
+user_joined = "%{name} 已加入"
+user_timeout = "%{name} 超时"
+user_left = "%{name} 已离开"
+session_ended = "会话已结束"
+session_error = "会话错误：%{msg}"
+connected_to_session = "已连接到会话"
+joined_session = "已加入会话：%{name}"
+replay_spam_protection = "已断开连接：主机打开回放过快"
+host_opened_replay = "主机打开了回放：%{name}"
+host_closed_replay = "主机关闭了回放"
+session_error_generic = "会话：%{msg}"
+session_rejected = "会话被拒绝：%{reason}"
+
+# -- 统计名称 --
+
+[stat]
+damage = "伤害"
+spotting_damage = "侦察伤害"
+frags = "击沉"
+raw_xp = "Raw XP"
+base_xp = "Base XP"
+win_rate = "胜率"
+win_rate_pct = "胜率 (%)"
+personal_rating = "个人评分"
+avg_damage = "平均伤害"
+avg_spotting_damage = "平均侦察伤害"
+avg_frags = "平均击沉"
+avg_raw_xp = "平均 Raw XP"
+avg_base_xp = "平均 Base XP"
+avg_pr = "平均 PR"
+avg_prefix = "平均 %{name}"
+
+[chart]
+game_number = "场次 #"
+combined = "综合"
+combined_suffix = "（综合）"
+rolling_average_suffix = "（滑动平均）"
+no_data = "所选舰船无可用数据"
+win_rate_unavailable = "胜率不适用于每场折线图（请启用滑动平均或使用柱状图）"
+
+# -- 确认对话框 --
+
+[confirm]
+open_in_game = "这将启动 World of Warships。继续吗？"
+clear_all_session_stats = "这将清除所有会话统计。继续吗？"
+clear_ship_session_stats = "这将从会话统计中移除此舰船的所有战斗。继续吗？"
+set_as_session_stats = "这将替换您当前的会话统计。继续吗？"
+
+# -- 错误消息 --
+
+[error]
+file_watcher_creation = "创建文件监视器失败：%{error}"
+replay_dir_watch = "监视回放目录失败：%{error}"
+
+# -- 设置 --
+
+[ui.settings.app]
+heading = "应用程序设置"
+description = "一般应用程序行为和外观"
+check_for_updates = "启动时检查更新"
+enable_logging = "启用日志记录（重启后生效）"
+enable_logging_tooltip = "将调试日志写入应用程序数据目录中的文件。有助于故障排除。"
+send_replay_data = "将排位赛和随机战斗回放的配置发送到 ShipBuilds.com"
+zoom_factor = "缩放比例（Ctrl + 和 Ctrl - 也可更改）"
+language = "语言"
+
+[ui.settings.wows]
+heading = "World of Warships 设置"
+description = "您的 World of Warships 安装路径"
+directory_hint = "World of Warships 目录"
+
+[ui.settings.replay]
+heading = "回放设置"
+description = "配置回放结果表中显示的列"
+show_raw_xp = "显示 Raw XP"
+show_entity_id = "显示 Entity ID"
+show_observed_damage = "显示观察伤害"
+show_fires = "显示火灾"
+show_floods = "显示进水"
+show_citadels = "显示核心区"
+show_crits = "显示关键模块命中"
+auto_export_data = "自动导出数据"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "数据自动导出目录"
+
+[ui.settings.session]
+heading = "会话设置"
+description = "协作回放会话偏好设置"
+display_name = "显示名称"
+suppress_ip_warning = "不显示 P2P IP 地址警告"
+ip_warning_tooltip = "协作会话使用 P2P 网络。会话中的其他用户可能能够看到您的 IP 地址。"
+disable_auto_open = "禁用自动打开会话窗口"
+auto_open_tooltip = "启用后，会话窗口（回放、战术板）不会自动打开。您仍可从会话弹出窗口中打开它们。"
+
+[ui.settings.twitch]
+heading = "Twitch 设置"
+description = "连接 Twitch 以进行聊天集成和玩家追踪"
+get_token = "获取登录令牌"
+get_token_tooltip = "我们使用 Chatterino 的登录页面，因为它提供具有必要权限的令牌（基本上是具有聊天权限的管理员令牌），且无需 WoWs Toolkit 开发者托管自己的登录页面网站来获得相同结果。"
+paste_token_no_token = "粘贴令牌（未设置令牌）"
+paste_token_valid = "粘贴令牌（令牌有效）"
+paste_token_invalid = "粘贴令牌（令牌无效 / 已过期）"
+monitored_channel = "监控频道（默认为自己）"
+
+# -- 回放检查器 --
+
+[ui.replay]
+spectator = "观战"
+loading = "加载中..."
+no_selection = "单击回放以查看，或双击在新标签中打开"
+incomplete_results = "不完整的比赛结果"
+incomplete_results_tooltip = "回放尚无比赛结束结果。当比赛结束并将结束结果添加到回放后，数据将自动重新加载。"
+no_chat = "此回放中没有发送聊天消息"
+team_damage = "团队伤害："
+hide_my_stats = "隐藏我的测试舰船统计"
+open_manually = "手动打开回放文件..."
+autoload_latest = "自动加载最新回放"
+column_filters = "列筛选"
+nda = "NDA"
+export = "导出"
+render = "渲染"
+chat = "聊天"
+game_chat = "游戏聊天"
+copy_all = "复制全部"
+save_to_file = "保存到文件"
+chat_copied = "聊天已复制"
+copy_message = "复制消息"
+export_results = "结果"
+
+[ui.replay.context]
+open_in_new_tab = "在新标签中打开"
+copy_path = "复制路径"
+copy_replay = "复制回放"
+copy_replays = "复制 %{count} 个回放"
+show_in_explorer = "在文件资源管理器中显示"
+show_replay_controls = "显示回放控制"
+open_in_game = "在游戏中打开"
+render_replay = "渲染回放"
+set_session_stats_one = "设为会话统计（1 个回放）"
+set_session_stats_many = "设为会话统计（%{count} 个回放）"
+add_session_stats_one = "添加到会话统计（1 个回放）"
+add_session_stats_many = "添加到会话统计（%{count} 个回放）"
+
+[ui.replay.column]
+actions = "操作"
+player_name = "玩家名称"
+base_xp = "Base XP"
+raw_xp = "Raw XP"
+ship_name = "舰船名称"
+hits = "命中"
+kills = "击沉"
+observed_damage = "观察伤害"
+actual_damage = "实际伤害"
+spotting_damage = "侦察伤害"
+potential_damage = "潜在伤害"
+time_lived = "存活时间"
+fires = "火灾"
+floods = "进水"
+citadels = "核心区"
+crits = "暴击"
+received_damage = "受到伤害"
+distance_traveled = "行驶距离"
+skills = "技能"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Raw XP"
+entity_id = "Entity ID"
+observed_damage = "观察伤害"
+fires = "火灾"
+floods = "进水"
+citadels = "核心区"
+crits = "关键模块命中"
+
+[ui.replay.group]
+date = "日期"
+ship = "舰船"
+none = "无"
+prefix = "分组：%{label}"
+
+[ui.replay.player]
+hidden_profile = "该玩家隐藏了个人资料"
+never_connected = "玩家从未连接到比赛"
+
+[ui.replay.build]
+open_in_browser = "在浏览器中打开配置"
+copy_link = "复制配置链接"
+copy_short_link = "复制短配置链接"
+link_copied = "配置链接已复制"
+open_wows_numbers = "打开 WoWs Numbers 页面"
+not_spotted = "此舰船从未被侦察到。配置信息不可用。"
+
+[ui.replay.sections]
+achievements = "成就"
+ribbons = "勋带"
+modules = "模块："
+modules_none = "无模块"
+abilities = "技能："
+abilities_none = "无技能"
+captain_skills = "舰长技能："
+captain_skills_none = "无舰长技能"
+
+[ui.replay.debug]
+view_raw_metadata = "查看原始玩家元数据"
+raw_metadata = "原始元数据"
+view_results = "查看结果"
+raw_json = "原始 JSON"
+raw_json_tooltip = "由 WG 序列化的原始战斗结果。"
+mapped_json = "映射 JSON"
+mapped_json_tooltip = "位置数组已解析为命名字段的战斗结果。"
+
+[ui.replay.results]
+victory = "胜利"
+defeat = "失败"
+draw = "平局"
+
+[ui.replay.controls]
+window_title = "回放控制"
+unavailable = "控制不可用（在游戏文件中未找到 commands.scheme.xml）。"
+
+# -- 协作 / 会话 --
+
+[ui.collab]
+session = "会话"
+starting = "正在启动会话…"
+session_active = "会话活跃"
+connected_to_session = "已连接到会话"
+session_token = "会话令牌："
+toggle_visibility = "切换令牌可见性"
+copy_token = "复制令牌"
+token_copied = "令牌已复制到剪贴板"
+copy_web_link = "复制网页链接"
+copy_web_link_tooltip = "复制网页客户端链接"
+web_link_copied = "网页链接已复制到剪贴板"
+copy_localhost_link = "复制 Localhost 链接"
+copy_localhost_tooltip = "复制 localhost 链接（dev）"
+localhost_copied = "Localhost 链接已复制到剪贴板"
+connected_count = "%{count} 人已连接"
+promote_cohost = "提升为联合主持"
+promoted_cohost = "已将 %{name} 提升为联合主持"
+permissions = "权限"
+lock_annotations = "锁定标注"
+lock_settings = "锁定设置"
+reset_overrides = "重置客户端覆盖"
+reset_overrides_tooltip = "重置所有客户端显示设置更改"
+leave = "离开"
+role_host = "主持"
+role_cohost = "联合主持"
+you = "（你）"
+display_name = "显示名称："
+display_name_hint = "你的名字..."
+display_name_error = "请输入显示名称"
+enter_display_name = "请先输入显示名称"
+host_session = "主持会话"
+start_session = "开始会话"
+join_session = "加入会话"
+paste_and_join = "粘贴令牌并加入"
+clipboard_empty = "剪贴板为空"
+invalid_token = "无效令牌：%{error}"
+shared_windows = "共享窗口"
+open = "打开"
+open_for_everyone = "为所有人打开"
+tactics_board = "战术板"
+max_boards = "最多打开 %{count} 个战术板"
+waiting_for_data = "等待游戏数据加载…"
+
+# -- 战斗结果文字 --
+
+[battle]
+victory = "胜利"
+defeat = "失败"
+draw = "平局"
+battle_starts_in = "战斗开始倒计时"
+
+# -- 结束类型 --
+
+[finish_type]
+unknown = "战斗结束"
+extermination = "消灭所有敌舰"
+base_captured = "基地被占领"
+timeout = "时间到"
+failure = "任务失败"
+technical = "技术性结束"
+score = "达到分数上限"
+score_on_timeout = "时间到时分数领先"
+pve_success = "任务完成"
+pve_failed = "任务失败"
+score_zero = "分数耗尽"
+score_excess = "超过分数上限"
+
+# -- 统计标签页 --
+
+[ui.stats]
+overview = "概览"
+limit = "限制"
+division = "Div:"
+div_all = "全部"
+div_solo = "单人"
+div_div = "Div"
+mode_label = "模式："
+clear = "清除"
+pr = "PR:"
+frags_count = "%{count} 次击沉"
+best_frags = "最佳：%{ship}（%{count} 次击沉）"
+max_damage = "最高伤害：%{ship}（%{damage}）"
+copy_markdown = "复制为 Markdown"
+copy_csv = "复制为 CSV"
+remove_games_hint = "移除 %{ship} 的所有战斗（Ctrl+Click 跳过确认）"
+no_stats = "没有可用的会话统计。先去打几场吧！"
+settings = "设置"
+chart_type = "图表类型"
+stat_label = "统计："
+chart_line = "折线"
+chart_bar = "柱状"
+options = "选项"
+combined = "综合"
+rolling_avg = "滑动平均"
+labels = "标签"
+ships = "舰船"
+all_ships = "全部"
+no_ships = "无"
+copy_as_image = "复制为图片"
+
+[ui.stats.table]
+min = "最小"
+max = "最大"
+total = "总计"
+average = "平均"
+
+# -- 玩家追踪器 --
+
+[ui.player_tracker]
+clear_stats = "清除统计"
+player_filter = "玩家筛选"
+populate_from_replays = "从回放填充数据"
+current_match = "当前比赛中的玩家"
+historical = "历史比赛"
+seen_minutes = "在比赛开始 %{minutes} 分钟后发现"
+
+[ui.player_tracker.column]
+clan = "战队"
+player_name = "玩家名称"
+twitch_names = "可能的 Twitch 名称"
+wg_id = "WG ID"
+total_encounters = "总遭遇次数"
+encounters_in_range = "时间范围内遭遇次数"
+last_encountered = "上次遭遇"
+aliases = "别名"
+notes = "备注"
+
+[ui.player_tracker.period]
+past_hour = "过去 1 小时"
+past_six_hours = "过去 6 小时"
+past_day = "过去 24 小时"
+past_week = "过去一周"
+past_month = "过去一个月"
+all_time = "所有时间"
+
+# -- 模组管理器 --
+
+[ui.mod_manager]
+category_filters = "分类筛选"
+enabled = "已启用"
+mod_home = "模组主页"
+discord_thread = "Discord 审批帖"
+save_config = "保存模组配置"
+load_config = "加载模组配置"
+filter = "筛选"
+
+[ui.mod_manager.column]
+enabled = "已启用"
+name = "名称"
+author = "作者"
+category = "分类"
+
+# -- 回放渲染器 --
+
+[ui.renderer]
+loading = "正在加载回放数据..."
+preparing_export = "正在准备导出..."
+encoding = "编码中"
+muxing = "混流中"
+
+[ui.renderer.advantage]
+breakdown = "优势分析"
+team_eliminated = "一支队伍已被消灭"
+score_projection = "分数预测"
+fleet_power = "舰队战力"
+strategic_threat = "战略威胁"
+total = "总计"
+hp_incomplete = "HP/舰船数据不完整——仅显示分数因素"
+
+[ui.renderer.context]
+show_trail = "显示轨迹"
+disable_other_trails = "禁用所有其他轨迹"
+ranges = "范围"
+detection = "侦察"
+main_battery = "主炮"
+secondary = "副炮"
+torpedo = "鱼雷"
+radar = "雷达"
+hydro = "水听"
+enable_all = "全部启用"
+disable_all = "全部禁用"
+disable_other_ranges = "禁用所有其他范围"
+enable_all_ranges = "启用所有舰船范围"
+show_armor = "显示实时装甲"
+
+[ui.renderer.controls]
+jump_to_start = "跳至开始"
+previous_event = "上一事件 (Shift+Left)"
+back_10s = "后退 10 秒 (Left)"
+pause = "暂停 (Space)"
+play = "播放 (Space)"
+forward_10s = "前进 10 秒 (Right)"
+next_event = "下一事件 (Shift+Right)"
+jump_to_end = "跳至结束"
+save_as_video = "保存为视频"
+copy_to_clipboard = "将视频渲染到剪贴板"
+
+[ui.renderer.settings]
+ship_settings = "舰船设置"
+armament = "武器装备"
+dead_ships = "已沉没舰船"
+dead_ship_names = "已沉没舰船名称"
+player_names = "玩家名称"
+ship_ranges = "舰船范围"
+self_ship_ranges = "自身舰船范围"
+ship_names = "舰船名称"
+turret_direction = "炮塔方向"
+trail_settings = "轨迹设置"
+heat_trail = "热力轨迹"
+speed_trails = "速度轨迹"
+dead_ship_trails = "已沉没舰船轨迹"
+map_settings = "地图设置"
+buildings = "建筑"
+capture_points = "占领点"
+consumables = "消耗品"
+planes = "飞机"
+smoke = "烟雾"
+torpedoes = "鱼雷"
+tracers = "曳光弹"
+hud_settings = "HUD 设置"
+battle_result = "战斗结果"
+buff_counters = "增益计数器"
+chat_label = "聊天"
+kill_feed = "击沉通知"
+score_label = "分数"
+score_timers = "分数计时器"
+team_advantage = "团队优势"
+timer = "计时器"
+export_settings = "导出设置"
+prefer_cpu = "优先使用 CPU 编码器"
+prefer_cpu_tooltip = "视频导出时使用软件 (CPU) 编码器代替 GPU"
+save_defaults = "保存默认值"
+event_timeline = "事件时间线"
+
+# -- 文件解包器 --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "正在加载 assets.bin..."
+load_failed = "加载失败：%{error}"
+no_game_data = "未加载游戏数据。请在设置中设置您的 World of Warships 目录。"
+filter_files = "筛选文件..."
+search_in_files = "在文件中搜索"
+search_hint = "在文件中搜索..."
+path_filter_hint = "路径筛选（例如 *.xml）"
+queue_all = "全部加入队列"
+queue_all_files = "所有文件加入队列"
+empty_directory = "空目录"
+stop_search_tooltip = "停止搜索"
+no_matches = "未找到匹配项。"
+view_as_json = "以 JSON 查看"
+extract_as_json = "提取为 JSON"
+view_contents = "查看内容"
+version = "版本："
+game_params = "GameParams"
+base_as_json = "基础 JSON"
+as_json = "JSON"
+as_cbor = "CBOR"
+as_json_minimal = "JSON（精简 / 转换）"
+as_cbor_minimal = "CBOR（精简 / 转换）"
+decode_prototypes = "将原型解码为 JSON"
+decode_prototypes_tooltip = "提取时将受支持的 Assets.bin 原型（.visual、.model、.mfm）解码为 JSON"
+extraction_queue = "提取队列"
+clear_all = "清除全部"
+browse = "浏览"
+output_dir_hint = "输出目录..."
+go_to_directory = "前往目录"
+remove_from_queue = "从队列中移除"
+queue_folder = "将整个文件夹加入队列"
+double_click_open = "双击打开"
+
+[ui.unpacker.column]
+name = "名称"
+size = "大小"
+type_col = "类型"
+path = "路径"
+file = "文件"
+offset = "偏移"
+context = "上下文"
+
+# -- 装甲查看器 --
+
+[ui.armor]
+load_settings = "请在设置中加载游戏数据以使用装甲查看器。"
+gpu_unavailable = "GPU 渲染状态不可用。"
+loading_ship = "正在加载舰船数据..."
+load_failed = "加载舰船数据失败：%{error}"
+empty = "空"
+mirror_cameras = "镜像摄像机"
+sync_options = "同步选项"
+sync_tooltip = "在所有面板中保持装甲/船体可见性同步"
+compare_split = "在新分栏中比较"
+export_model = "导出舰船模型"
+armor_thickness = "装甲厚度"
+export_disclaimer = "这些 3D 模型和纹理是 Wargaming 的知识产权，使用这些模型应符合您当地的法律。"
+export_button = "导出"
+armor_toggle = "装甲"
+armor_tooltip = "切换装甲区域可见性"
+hull_toggle = "船体"
+hull_tooltip = "切换船体模型部件可见性"
+splash_toggle = "溅射"
+splash_tooltip = "切换溅射框可见性"
+show_hidden = "显示隐藏"
+show_hidden_tooltip = "切换（可能）隐藏面板的可见性"
+gaps = "间隙"
+gaps_tooltip = "突出显示装甲板未连接的边界边缘（潜在间隙）"
+display = "显示"
+display_tooltip = "显示设置 (Ctrl+S)"
+marker_opacity = "标记不透明度"
+save_defaults = "保存为默认值"
+export_tab = "导出"
+export_tooltip = "将舰船模型导出为 OBJ 文件"
+pen_check = "穿深检查"
+pen_check_tooltip = "配置炮弹以进行穿透比较"
+trajectory = "弹道"
+trajectory_on = "弹道 [开启]"
+trajectory_tooltip = "单击装甲以模拟炮弹弹道 (Ctrl+T)"
+continue_ricochet = "跳弹后继续"
+splash_mode = "溅射"
+splash_on = "溅射 [开启]"
+splash_no_data = "此舰船没有溅射数据"
+splash_no_shells = "请将拥有 HE/SAP 炮弹的舰船添加到比较列表"
+splash_tooltip_mode = "单击装甲以可视化 HE 溅射伤害范围"
+loading_armor = "正在加载舰船..."
+select_ship = "从列表中选择一艘舰船"
+pen_check_label = "穿透检查"
+all_btn = "全部"
+none_btn = "无"
+opaque = "不透明"
+upgrade = "升级："
+plate_edges = "装甲板边缘"
+waterline = "水线"
+opacity = "不透明度"
+ship_hull = "舰船船体"
+opaque_hull = "不透明船体"
+ballistic_disclaimer = "弹道结果基于对模拟工作方式的逆向工程/估算"
+roll = "横摇"
+ctrl_click_solo = "Ctrl+click 单独显示"
+reset_plates = "重置装甲板"
+
+[ui.armor.realtime]
+loading = "正在加载舰船装甲..."
+waiting = "等待舰船数据..."
+incoming_fire = "来袭火力"
+attacker_filter = "攻击者筛选"
+all_enemies = "所有敌人"
+show_secondaries = "显示副炮"
+auto_scroll = "自动滚动"
+seek_to_salvo = "跳至齐射"
+deselect = "取消选择"
+select_all = "全选"
+no_data = "炮弹数据不再可用"
+sim_agrees = "模拟一致"
+no_armor_hit = "未命中装甲板"
+
+# -- 优势等级标签 --
+
+[advantage]
+absolute = "绝对"
+strong = "强势"
+moderate = "中等"
+weak = "弱势"

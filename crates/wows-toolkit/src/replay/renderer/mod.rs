@@ -1,4 +1,4 @@
-use crate::icon_str;
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -26,6 +26,7 @@ use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::draw_command::ShipConfigVisibility;
+use crate::LocalizedTextResolver;
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::RenderOptions;
 
@@ -1023,7 +1024,7 @@ impl ReplayRendererViewer {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
                             ui.spinner();
-                            ui.label("Loading replay data...");
+                            ui.label(t!("ui.renderer.loading"));
                         });
                         ctx.request_repaint();
                         return;
@@ -1192,7 +1193,7 @@ impl ReplayRendererViewer {
                                     }
                                 }
                                 let is_hud = cmd.is_hud();
-                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options, &mut placed_labels);
+                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options, &mut placed_labels, &LocalizedTextResolver);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
                                     target_painter.add(shape);
@@ -1202,18 +1203,20 @@ impl ReplayRendererViewer {
                             // Hover tooltip for TeamAdvantage
                             let ws = transform.window_scale;
                             // Find ScoreBar to compute advantage label position
-                            let score_bar_info = frame.commands.iter().find_map(|cmd| {
-                                if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage_team, .. } = cmd {
-                                    Some((*team0, *team1, team0_timer.clone(), team1_timer.clone(), *advantage_team))
+                            let score_bar_info: Option<(i32, i32, Option<String>, Option<String>, i32)> = frame.commands.iter().find_map(|cmd| {
+                                if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
+                                    let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
+                                    Some((*team0, *team1, team0_timer.clone(), team1_timer.clone(), adv_team))
                                 } else {
                                     None
                                 }
                             });
                             for cmd in &frame.commands {
-                                if let DrawCommand::TeamAdvantage { label, color, breakdown } = cmd {
-                                    if label.is_empty() {
+                                if let DrawCommand::TeamAdvantage { level, color, breakdown } = cmd {
+                                    let Some(adv_level) = level else {
                                         break;
-                                    }
+                                    };
+                                    let label = adv_level.label().to_string();
                                     let canvas_w = transform.screen_canvas_width();
                                     let bar_height = HUD_HEIGHT as f32 * ws;
                                     let bar_origin = transform.hud_pos(0.0, 0.0);
@@ -1274,36 +1277,36 @@ impl ReplayRendererViewer {
                                             }
                                         };
                                         let is_nonzero = |val: (f32, f32)| val.0 != 0.0 || val.1 != 0.0;
-                                        ui.label(egui::RichText::new("Advantage Breakdown").strong());
+                                        ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
                                         ui.separator();
                                         if bd.team_eliminated {
-                                            ui.label("A team has been eliminated");
+                                            ui.label(t!("ui.renderer.advantage.team_eliminated"));
                                         } else {
                                             egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
                                                 if is_nonzero(bd.score_projection) {
-                                                    ui.label("Score Projection");
+                                                    ui.label(t!("ui.renderer.advantage.score_projection"));
                                                     ui.label(fmt_contrib(bd.score_projection));
                                                     ui.end_row();
                                                 }
                                                 if is_nonzero(bd.fleet_power) {
-                                                    ui.label("Fleet Power");
+                                                    ui.label(t!("ui.renderer.advantage.fleet_power"));
                                                     ui.label(fmt_contrib(bd.fleet_power));
                                                     ui.end_row();
                                                 }
                                                 if is_nonzero(bd.strategic_threat) {
-                                                    ui.label("Strategic Threat");
+                                                    ui.label(t!("ui.renderer.advantage.strategic_threat"));
                                                     ui.label(fmt_contrib(bd.strategic_threat));
                                                     ui.end_row();
                                                 }
                                                 ui.separator();
                                                 ui.separator();
                                                 ui.end_row();
-                                                ui.label(egui::RichText::new("Total").strong());
+                                                ui.label(egui::RichText::new(t!("ui.renderer.advantage.total").as_ref()).strong());
                                                 ui.label(egui::RichText::new(fmt_contrib(bd.total)).strong());
                                                 ui.end_row();
                                             });
                                             if !bd.hp_data_reliable {
-                                                ui.small("HP/ship data incomplete — only score factors shown");
+                                                ui.small(t!("ui.renderer.advantage.hp_incomplete"));
                                             }
                                         }
                                     });
@@ -1661,7 +1664,7 @@ impl ReplayRendererViewer {
 
                                             // Per-ship trail toggle
                                             let mut show_trail = !ann.trail_hidden_ships.contains(ship_name);
-                                            if ui.checkbox(&mut show_trail, "Show Trail").changed() {
+                                            if ui.checkbox(&mut show_trail, t!("ui.renderer.context.show_trail")).changed() {
                                                 if show_trail {
                                                     ann.trail_hidden_ships.remove(ship_name);
                                                     // If global trails are off, turn them on
@@ -1695,7 +1698,7 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Disable all other trails
-                                            if ui.button("Disable All Other Trails").clicked() {
+                                            if ui.button(t!("ui.renderer.context.disable_other_trails")).clicked() {
                                                 let state = shared_state.lock();
                                                 if let Some(ref frame) = state.frame {
                                                     for cmd in &frame.commands {
@@ -1721,19 +1724,19 @@ impl ReplayRendererViewer {
                                             // Per-type range toggles for this ship
                                             let mut filter =
                                                 ann.ship_range_overrides.get(&ship_eid).copied().unwrap_or_default();
-                                            ui.label(egui::RichText::new("Ranges").small());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.context.ranges").as_ref()).small());
                                             let mut range_changed = false;
-                                            range_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
-                                            range_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
-                                            range_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
-                                            range_changed |= ui.checkbox(&mut filter.torpedo, "Torpedo").changed();
-                                            range_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
-                                            range_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
+                                            range_changed |= ui.checkbox(&mut filter.detection, t!("ui.renderer.context.detection")).changed();
+                                            range_changed |= ui.checkbox(&mut filter.main_battery, t!("ui.renderer.context.main_battery")).changed();
+                                            range_changed |= ui.checkbox(&mut filter.secondary_battery, t!("ui.renderer.context.secondary")).changed();
+                                            range_changed |= ui.checkbox(&mut filter.torpedo, t!("ui.renderer.context.torpedo")).changed();
+                                            range_changed |= ui.checkbox(&mut filter.radar, t!("ui.renderer.context.radar")).changed();
+                                            range_changed |= ui.checkbox(&mut filter.hydro, t!("ui.renderer.context.hydro")).changed();
                                             let all_on = filter == ShipConfigFilter::all_enabled();
-                                            if !all_on && ui.button("Enable All").clicked() {
+                                            if !all_on && ui.button(t!("ui.renderer.context.enable_all")).clicked() {
                                                 filter = ShipConfigFilter::all_enabled();
                                                 range_changed = true;
-                                            } else if all_on && ui.button("Disable All").clicked() {
+                                            } else if all_on && ui.button(t!("ui.renderer.context.disable_all")).clicked() {
                                                 filter = ShipConfigFilter::default();
                                                 range_changed = true;
                                             }
@@ -1762,7 +1765,7 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Disable all other ships' ranges
-                                            if ui.button("Disable All Other Ranges").clicked() {
+                                            if ui.button(t!("ui.renderer.context.disable_other_ranges")).clicked() {
                                                 let keys: Vec<EntityId> = ann
                                                     .ship_range_overrides
                                                     .keys()
@@ -1778,7 +1781,7 @@ impl ReplayRendererViewer {
                                             }
 
                                             // Enable ranges for all alive ships
-                                            if ui.button("Enable All Ships' Ranges").clicked() {
+                                            if ui.button(t!("ui.renderer.context.enable_all_ranges")).clicked() {
                                                 let state = shared_state.lock();
                                                 if let Some(ref frame) = state.frame {
                                                     for cmd in &frame.commands {
@@ -1799,7 +1802,7 @@ impl ReplayRendererViewer {
 
                                             // ── Realtime Armor Viewer ──
                                             ui.separator();
-                                            if ui.button(icon_str!(icons::SHIELD, "Show Realtime Armor")).clicked() {
+                                            if ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.renderer.context.show_armor"))).clicked() {
                                                 let mut new_bridge = RealtimeArmorBridge::new(ship_eid);
                                                 let mut state = shared_state.lock();
                                                 // Attach pre-computed shot timeline if available
@@ -1878,8 +1881,8 @@ impl ReplayRendererViewer {
                         let progress_text = if let Some(p) = video_export_progress.lock().clone() {
                             let pct = if p.total > 0 { p.current as f32 / p.total as f32 } else { 0.0 };
                             let label = match p.stage {
-                                RenderStage::Encoding => "Encoding",
-                                RenderStage::Muxing => "Muxing",
+                                RenderStage::Encoding => t!("ui.renderer.encoding"),
+                                RenderStage::Muxing => t!("ui.renderer.muxing"),
                             };
                             Some((pct, format!("{} ({}/{})", label, p.current, p.total)))
                         } else {
@@ -1902,7 +1905,7 @@ impl ReplayRendererViewer {
                                         } else {
                                             ui.horizontal(|ui| {
                                                 ui.spinner();
-                                                ui.label("Preparing export...");
+                                                ui.label(t!("ui.renderer.preparing_export"));
                                             });
                                         }
                                     });
@@ -2000,7 +2003,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_BACK));
-                                                if btn.on_hover_text("Jump to start").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.jump_to_start")).clicked() {
                                                     let _ = command_tx.send(PlaybackCommand::Seek(GameClock(0.0)));
                                                 }
                                             }
@@ -2012,7 +2015,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::REWIND));
-                                                if btn.on_hover_text("Previous event (Shift+Left)").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.previous_event")).clicked() {
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events
                                                         && let Some(event) =
@@ -2033,7 +2036,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
-                                                if btn.on_hover_text("Back 10s (Left)").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.back_10s")).clicked() {
                                                     let target = (clock_secs - 10.0).max(GameClock(0.0));
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
@@ -2045,7 +2048,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::PAUSE))
-                                                    .on_hover_text("Pause (Space)")
+                                                    .on_hover_text(t!("ui.renderer.controls.pause"))
                                                     .clicked()
                                                 {
                                                     let _ = command_tx.send(PlaybackCommand::Pause);
@@ -2055,7 +2058,7 @@ impl ReplayRendererViewer {
                                                 .tui()
                                                 .style(fixed_style.clone())
                                                 .ui_add(egui::Button::new(icons::PLAY))
-                                                .on_hover_text("Play (Space)")
+                                                .on_hover_text(t!("ui.renderer.controls.play"))
                                                 .clicked()
                                             {
                                                 let _ = command_tx.send(PlaybackCommand::Play);
@@ -2068,7 +2071,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
-                                                if btn.on_hover_text("Forward 10s (Right)").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.forward_10s")).clicked() {
                                                     let target = (clock_secs + 10.0).min(GameClock(game_dur));
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
@@ -2080,7 +2083,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::FAST_FORWARD));
-                                                if btn.on_hover_text("Next event (Shift+Right)").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.next_event")).clicked() {
                                                     let elapsed = clock_secs.to_elapsed(battle_start);
                                                     let state = shared_state.lock();
                                                     if let Some(ref events) = state.timeline_events
@@ -2102,7 +2105,7 @@ impl ReplayRendererViewer {
                                                     .tui()
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_FORWARD));
-                                                if btn.on_hover_text("Jump to end").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.jump_to_end")).clicked() {
                                                     let _ = command_tx.send(PlaybackCommand::Seek(GameClock(game_dur)));
                                                 }
                                             }
@@ -2185,7 +2188,7 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::FLOPPY_DISK).size(18.0),
                                                     ));
-                                                if btn.on_hover_text("Save as Video").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.save_as_video")).clicked() {
                                                     let mut opts = options.clone();
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
@@ -2231,7 +2234,7 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(
                                                         egui::RichText::new(icons::CLIPBOARD).size(18.0),
                                                     ));
-                                                if btn.on_hover_text("Render Video to Clipboard").clicked() {
+                                                if btn.on_hover_text(t!("ui.renderer.controls.copy_to_clipboard")).clicked() {
                                                     let mut opts = options.clone();
                                                     // Apply per-ship range overrides for video export
                                                     let overrides = annotation_arc.lock().ship_range_overrides.clone();
@@ -2285,7 +2288,7 @@ impl ReplayRendererViewer {
                                                 if tui
                                                     .tui()
                                                     .style(fixed_style.clone())
-                                                    .ui_add(egui::Button::new("Reset"))
+                                                    .ui_add(egui::Button::new(t!("ui.buttons.reset")))
                                                     .clicked()
                                                 {
                                                     zp.zoom = 1.0;
@@ -2308,18 +2311,18 @@ impl ReplayRendererViewer {
                                             let mut changed = false;
 
                                             // ── Ship Settings ──
-                                            ui.label(egui::RichText::new("Ship Settings").small().strong());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.ship_settings").as_ref()).small().strong());
                                             ui.indent("ship_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_armament, "Armament").changed();
-                                                changed |= ui.checkbox(&mut show_dead, "Dead Ships").changed();
+                                                changed |= ui.checkbox(&mut opts.show_armament, t!("ui.renderer.settings.armament")).changed();
+                                                changed |= ui.checkbox(&mut show_dead, t!("ui.renderer.settings.dead_ships")).changed();
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_dead_ship_names, "Dead Ship Names")
+                                                    .checkbox(&mut opts.show_dead_ship_names, t!("ui.renderer.settings.dead_ship_names"))
                                                     .changed();
                                                 changed |= ui.checkbox(&mut opts.show_hp_bars, "HP Bars").changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_player_names, "Player Names").changed();
+                                                    ui.checkbox(&mut opts.show_player_names, t!("ui.renderer.settings.player_names")).changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_ship_config, "Ship Ranges").changed();
+                                                    ui.checkbox(&mut opts.show_ship_config, t!("ui.renderer.settings.ship_ranges")).changed();
 
                                                 // Self ship range toggles
                                                 if let Some(self_eid) = self_entity_id {
@@ -2327,13 +2330,13 @@ impl ReplayRendererViewer {
                                                         .get(&self_eid).copied().unwrap_or_default();
                                                     let mut self_changed = false;
                                                     ui.indent("self_ranges", |ui| {
-                                                        ui.label(egui::RichText::new("Self Ship Ranges").small());
-                                                        self_changed |= ui.checkbox(&mut filter.detection, "Detection").changed();
-                                                        self_changed |= ui.checkbox(&mut filter.main_battery, "Main Battery").changed();
-                                                        self_changed |= ui.checkbox(&mut filter.secondary_battery, "Secondary").changed();
-                                                        self_changed |= ui.checkbox(&mut filter.torpedo, "Torpedo").changed();
-                                                        self_changed |= ui.checkbox(&mut filter.radar, "Radar").changed();
-                                                        self_changed |= ui.checkbox(&mut filter.hydro, "Hydro").changed();
+                                                        ui.label(egui::RichText::new(t!("ui.renderer.settings.self_ship_ranges").as_ref()).small());
+                                                        self_changed |= ui.checkbox(&mut filter.detection, t!("ui.renderer.context.detection")).changed();
+                                                        self_changed |= ui.checkbox(&mut filter.main_battery, t!("ui.renderer.context.main_battery")).changed();
+                                                        self_changed |= ui.checkbox(&mut filter.secondary_battery, t!("ui.renderer.context.secondary")).changed();
+                                                        self_changed |= ui.checkbox(&mut filter.torpedo, t!("ui.renderer.context.torpedo")).changed();
+                                                        self_changed |= ui.checkbox(&mut filter.radar, t!("ui.renderer.context.radar")).changed();
+                                                        self_changed |= ui.checkbox(&mut filter.hydro, t!("ui.renderer.context.hydro")).changed();
                                                     });
                                                     if self_changed {
                                                         let mut ann = annotation_arc.lock();
@@ -2359,60 +2362,60 @@ impl ReplayRendererViewer {
                                                 }
 
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_ship_names, "Ship Names").changed();
+                                                    ui.checkbox(&mut opts.show_ship_names, t!("ui.renderer.settings.ship_names")).changed();
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_turret_direction, "Turret Direction")
+                                                    .checkbox(&mut opts.show_turret_direction, t!("ui.renderer.settings.turret_direction"))
                                                     .changed();
                                             });
 
                                             // ── Trail Settings ──
-                                            ui.label(egui::RichText::new("Trail Settings").small().strong());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.trail_settings").as_ref()).small().strong());
                                             ui.indent("trail_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_trails, "Heat Trail").changed();
+                                                changed |= ui.checkbox(&mut opts.show_trails, t!("ui.renderer.settings.heat_trail")).changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_speed_trails, "Speed Trails").changed();
+                                                    ui.checkbox(&mut opts.show_speed_trails, t!("ui.renderer.settings.speed_trails")).changed();
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_dead_trails, "Dead Ship Trails")
+                                                    .checkbox(&mut opts.show_dead_trails, t!("ui.renderer.settings.dead_ship_trails"))
                                                     .changed();
                                             });
 
                                             // ── Map Settings ──
-                                            ui.label(egui::RichText::new("Map Settings").small().strong());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.map_settings").as_ref()).small().strong());
                                             ui.indent("map_settings", |ui| {
-                                                changed |= ui.checkbox(&mut opts.show_buildings, "Buildings").changed();
+                                                changed |= ui.checkbox(&mut opts.show_buildings, t!("ui.renderer.settings.buildings")).changed();
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_capture_points, "Capture Points")
+                                                    .checkbox(&mut opts.show_capture_points, t!("ui.renderer.settings.capture_points"))
                                                     .changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_consumables, "Consumables").changed();
-                                                changed |= ui.checkbox(&mut opts.show_planes, "Planes").changed();
-                                                changed |= ui.checkbox(&mut opts.show_smoke, "Smoke").changed();
-                                                changed |= ui.checkbox(&mut opts.show_torpedoes, "Torpedoes").changed();
-                                                changed |= ui.checkbox(&mut opts.show_tracers, "Tracers").changed();
+                                                    ui.checkbox(&mut opts.show_consumables, t!("ui.renderer.settings.consumables")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_planes, t!("ui.renderer.settings.planes")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_smoke, t!("ui.renderer.settings.smoke")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_torpedoes, t!("ui.renderer.settings.torpedoes")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_tracers, t!("ui.renderer.settings.tracers")).changed();
                                             });
 
                                             // ── HUD Settings ──
-                                            ui.label(egui::RichText::new("HUD Settings").small().strong());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.hud_settings").as_ref()).small().strong());
                                             ui.indent("hud_settings", |ui| {
                                                 changed |= ui
-                                                    .checkbox(&mut opts.show_battle_result, "Battle Result")
+                                                    .checkbox(&mut opts.show_battle_result, t!("ui.renderer.settings.battle_result"))
                                                     .changed();
-                                                changed |= ui.checkbox(&mut opts.show_buffs, "Buff Counters").changed();
-                                                changed |= ui.checkbox(&mut opts.show_chat, "Chat").changed();
-                                                changed |= ui.checkbox(&mut opts.show_kill_feed, "Kill Feed").changed();
-                                                changed |= ui.checkbox(&mut opts.show_score, "Score").changed();
+                                                changed |= ui.checkbox(&mut opts.show_buffs, t!("ui.renderer.settings.buff_counters")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_chat, t!("ui.renderer.settings.chat_label")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_kill_feed, t!("ui.renderer.settings.kill_feed")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_score, t!("ui.renderer.settings.score_label")).changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_score_timer, "Score Timers").changed();
+                                                    ui.checkbox(&mut opts.show_score_timer, t!("ui.renderer.settings.score_timers")).changed();
                                                 changed |=
-                                                    ui.checkbox(&mut opts.show_advantage, "Team Advantage").changed();
-                                                changed |= ui.checkbox(&mut opts.show_timer, "Timer").changed();
+                                                    ui.checkbox(&mut opts.show_advantage, t!("ui.renderer.settings.team_advantage")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_timer, t!("ui.renderer.settings.timer")).changed();
                                             });
 
                                             // ── Export Settings ──
-                                            ui.label(egui::RichText::new("Export Settings").small().strong());
+                                            ui.label(egui::RichText::new(t!("ui.renderer.settings.export_settings").as_ref()).small().strong());
                                             ui.indent("export_settings", |ui| {
                                                 let mut cpu = prefer_cpu_encoder.load(Ordering::Relaxed);
-                                                if ui.checkbox(&mut cpu, "Prefer CPU Encoder").on_hover_text("Use software (CPU) encoder instead of GPU for video export").changed() {
+                                                if ui.checkbox(&mut cpu, t!("ui.renderer.settings.prefer_cpu")).on_hover_text(t!("ui.renderer.settings.prefer_cpu_tooltip")).changed() {
                                                     prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
                                                 }
                                             });
@@ -2436,7 +2439,7 @@ impl ReplayRendererViewer {
 
                                             let (opts, show_dead) = scroll_out.inner;
                                             ui.separator();
-                                            if ui.button("Save Defaults").clicked() {
+                                            if ui.button(t!("ui.renderer.settings.save_defaults")).clicked() {
                                                 let mut saved = saved_from_render_options(&opts);
                                                 saved.show_dead_ships = show_dead;
                                                 saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
@@ -2462,13 +2465,13 @@ impl ReplayRendererViewer {
                                         .show(|ui| {
                                             ui.set_width(280.0);
                                             ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new("Event Timeline").strong());
+                                                ui.label(egui::RichText::new(t!("ui.renderer.settings.event_timeline").as_ref()).strong());
                                                 ui.with_layout(
                                                     egui::Layout::right_to_left(egui::Align::Center),
                                                     |ui| {
                                                         let state = shared_state.lock();
                                                         if let Some(events) = &state.timeline_events
-                                                            && ui.small_button("Copy").clicked() {
+                                                            && ui.small_button(t!("ui.buttons.copy")).clicked() {
                                                                 let text: String = events
                                                                     .iter()
                                                                     .map(format_timeline_event)

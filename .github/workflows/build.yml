@@ -52,7 +52,8 @@ jobs:
 
       - name: Create zip archive
         run: |
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
+          Copy-Item -Recurse "crates/wt-translations/translations" "translations"
+          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md","translations" -DestinationPath "wows_toolkit_${{ github.event.release.tag_name }}_windows.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -116,6 +117,7 @@ jobs:
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp target/x86_64-unknown-linux-gnu/release/wows_toolkit AppDir/usr/bin/
+          cp -r crates/wt-translations/translations AppDir/usr/bin/translations
           cp assets/wows-toolkit.desktop AppDir/usr/share/applications/
           cp assets/icon-256.png AppDir/usr/share/icons/hicolor/256x256/apps/wows_toolkit.png
 
@@ -190,6 +192,7 @@ jobs:
           cp wows_toolkit_universal "$APP/Contents/MacOS/wows_toolkit"
           chmod +x "$APP/Contents/MacOS/wows_toolkit"
           cp wows_toolkit.icns "$APP/Contents/Resources/"
+          cp -r crates/wt-translations/translations "$APP/Contents/MacOS/translations"
 
           cat > "$APP/Contents/Info.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>

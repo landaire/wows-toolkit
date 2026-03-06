@@ -211,7 +211,6 @@ pub(super) fn extract_timeline_events(
                             for (entity_id, player) in players {
                                 let ship_name = game_metadata
                                     .localized_name_from_param(player.vehicle())
-                                    .map(|s| s.to_string())
                                     .unwrap_or_default();
                                 ship_names.insert(*entity_id, ship_name);
                                 player_names.insert(*entity_id, player.initial_state().username().to_string());

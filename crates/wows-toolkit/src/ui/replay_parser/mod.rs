@@ -4,7 +4,7 @@ mod sorting;
 
 use std::path::PathBuf;
 
-use crate::icon_str;
+use rust_i18n::t;
 pub use models::Achievement;
 pub use models::Damage;
 pub use models::DamageInteraction;
@@ -164,7 +164,7 @@ fn show_leaf_context_menu(
     path: &std::path::PathBuf,
     wows_dir: &str,
 ) {
-    if ui.button(icon_str!(icons::BROWSER, "Open in New Tab")).clicked() {
+    if ui.button(wt_translations::icon_t(icons::BROWSER, &t!("ui.replay.context.open_in_new_tab"))).clicked() {
         if let Some(r) = replay_weak.upgrade() {
             ui.ctx().data_mut(|data| {
                 data.insert_temp(egui::Id::new("open_replay_new_tab"), Arc::downgrade(&r));
@@ -173,24 +173,24 @@ fn show_leaf_context_menu(
         ui.close_kind(UiKind::Menu);
     }
     ui.separator();
-    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Path")).clicked() {
+    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.replay.context.copy_path"))).clicked() {
         ui.ctx().copy_text(path.to_string_lossy().into_owned());
         ui.close_kind(UiKind::Menu);
     }
-    if ui.button(icon_str!(icons::CLIPBOARD, "Copy Replay")).clicked() {
+    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.replay.context.copy_replay"))).clicked() {
         copy_files_to_clipboard(std::slice::from_ref(path));
         ui.close_kind(UiKind::Menu);
     }
-    if ui.button(icon_str!(icons::FOLDER, "Show in File Explorer")).clicked() {
+    if ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.replay.context.show_in_explorer"))).clicked() {
         util::open_file_explorer(path);
         ui.close_kind(UiKind::Menu);
     }
     if !wows_dir.is_empty() {
         let alt_held = ui.input(|i| i.modifiers.alt);
         let label = if alt_held {
-            icon_str!(icons::KEYBOARD, "Show Replay Controls")
+            wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
         } else {
-            icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+            wt_translations::icon_t(icons::GAME_CONTROLLER, &t!("ui.replay.context.open_in_game"))
         };
         if ui.button(label).clicked() {
             if alt_held {
@@ -208,14 +208,14 @@ fn show_leaf_context_menu(
             ui.close_kind(UiKind::Menu);
         }
     }
-    if ui.button(icon_str!(icons::PLAY, "Render Replay")).clicked() {
+    if ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.context.render_replay"))).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("context_menu_render_replay"), replay_weak.clone());
         });
         ui.close_kind(UiKind::Menu);
     }
     ui.separator();
-    if ui.button("Set as Session Stats (1 replay)").clicked() {
+    if ui.button(t!("ui.replay.context.set_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(
                 egui::Id::new("pending_confirmation_request"),
@@ -224,7 +224,7 @@ fn show_leaf_context_menu(
         });
         ui.close_kind(UiKind::Menu);
     }
-    if ui.button("Add to Session Stats (1 replay)").clicked() {
+    if ui.button(t!("ui.replay.context.add_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("add_to_session_stats_request"), vec![replay_weak.clone()]);
         });
@@ -235,15 +235,19 @@ fn show_leaf_context_menu(
 /// Show context menu items for a group node (date or ship).
 fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], replays: &[Weak<RwLock<Replay>>]) {
     let count = replays.len();
-    let copy_label = if count == 1 { "Copy Replay".to_string() } else { format!("Copy {} Replays", count) };
+    let copy_label: String = if count == 1 {
+        t!("ui.replay.context.copy_replay").into()
+    } else {
+        t!("ui.replay.context.copy_replays", count = count).into()
+    };
     if ui.button(copy_label).clicked() {
         copy_files_to_clipboard(paths);
         ui.close_kind(UiKind::Menu);
     }
-    let session_label = if count == 1 {
-        "Set as Session Stats (1 replay)".to_string()
+    let session_label: String = if count == 1 {
+        t!("ui.replay.context.set_session_stats_one").into()
     } else {
-        format!("Set as Session Stats ({} replays)", count)
+        t!("ui.replay.context.set_session_stats_many", count = count).into()
     };
     if ui.button(session_label).clicked() {
         ui.ctx().data_mut(|data| {
@@ -254,10 +258,10 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
         });
         ui.close_kind(UiKind::Menu);
     }
-    let add_label = if count == 1 {
-        "Add to Session Stats (1 replay)".to_string()
+    let add_label: String = if count == 1 {
+        t!("ui.replay.context.add_session_stats_one").into()
     } else {
-        format!("Add to Session Stats ({} replays)", count)
+        t!("ui.replay.context.add_session_stats_many", count = count).into()
     };
     if ui.button(add_label).clicked() {
         ui.ctx().data_mut(|data| {
@@ -569,7 +573,6 @@ impl UiReport {
 
             let ship_name = metadata_provider
                 .localized_name_from_param(vehicle_param)
-                .map(ToString::to_string)
                 .unwrap_or_else(|| format!("{}", vehicle_param.id()));
 
             let observed_damage = vehicle.map(|v| v.damage().ceil() as u64).unwrap_or(0);
@@ -1561,7 +1564,7 @@ impl UiReport {
                             let player = report.player();
                             // Hidden profile icon
                             if player.initial_state().is_hidden() {
-                                ui.label(icons::EYE_SLASH).on_hover_text("Player has a hidden profile");
+                                ui.label(icons::EYE_SLASH).on_hover_text(t!("ui.replay.player.hidden_profile"));
                             }
 
                             // Stream sniper icon
@@ -1589,7 +1592,7 @@ impl UiReport {
                             }
 
                             let disconnect_hover_text = if player.connection_change_info().is_empty() {
-                                Some("Player never connected to match".to_string())
+                                Some(t!("ui.replay.player.never_connected").into())
                             } else if player.connection_change_info().iter().any(|connection_info| {
                                 ConnectionChangeKind::Disconnected == connection_info.event_kind()
                                     && !connection_info.had_death_event()
@@ -1643,7 +1646,7 @@ impl UiReport {
                     }
                     ReplayColumn::ObservedDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
-                            ui.label("NDA");
+                            ui.label(t!("ui.replay.nda"));
                         } else {
                             ui.label(&report.observed_damage_text);
                         }
@@ -1651,7 +1654,7 @@ impl UiReport {
                     ReplayColumn::ActualDamage => {
                         if let Some(damage_text) = report.actual_damage_text.clone() {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 let response = ui.label(damage_text);
                                 if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
@@ -1668,7 +1671,7 @@ impl UiReport {
                     ReplayColumn::ReceivedDamage => {
                         if let Some(received_damage_text) = report.received_damage_text.clone() {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 let response = ui.label(received_damage_text);
                                 if report.received_damage_hover_text().is_some() || report.damage_interactions.is_some()
@@ -1686,7 +1689,7 @@ impl UiReport {
                     ReplayColumn::PotentialDamage => {
                         if let Some(damage_text) = report.potential_damage_text.clone() {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 let response = ui.label(damage_text);
                                 if let Some(hover_text) = report.potential_damage_hover_text.as_ref() {
@@ -1714,7 +1717,7 @@ impl UiReport {
                     ReplayColumn::Fires => {
                         if let Some(fires) = report.fires {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 ui.label(fires.to_string());
                             }
@@ -1725,7 +1728,7 @@ impl UiReport {
                     ReplayColumn::Floods => {
                         if let Some(floods) = report.floods {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 ui.label(floods.to_string());
                             }
@@ -1736,7 +1739,7 @@ impl UiReport {
                     ReplayColumn::Citadels => {
                         if let Some(citadels) = report.citadels {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 ui.label(citadels.to_string());
                             }
@@ -1747,7 +1750,7 @@ impl UiReport {
                     ReplayColumn::Crits => {
                         if let Some(crits) = report.crits {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 ui.label(crits.to_string());
                             }
@@ -1766,8 +1769,8 @@ impl UiReport {
                         if report.relation().is_enemy() && !self.debug_mode {
                             ui.label("-");
                         } else if !report.has_vehicle_entity {
-                            ui.label(RichText::new(icon_str!(icons::EXCLAMATION_MARK, "-")).color(Color32::LIGHT_RED))
-                                .on_hover_text("This ship was never spotted. Build info unavailable.");
+                            ui.label(RichText::new(wt_translations::icon_t(icons::EXCLAMATION_MARK, "-")).color(Color32::LIGHT_RED))
+                                .on_hover_text(t!("ui.replay.build.not_spotted"));
                         } else {
                             let response = ui.label(report.skill_info.label_text.clone());
                             if let Some(hover_text) = &report.skill_info.hover_text {
@@ -1786,7 +1789,7 @@ impl UiReport {
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
                             if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
-                                if ui.small_button(icon_str!(icons::SHARE, "Open Build in Browser")).clicked() {
+                                if ui.small_button(wt_translations::icon_t(icons::SHARE, &t!("ui.replay.build.open_in_browser"))).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1795,7 +1798,7 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(icon_str!(icons::COPY, "Copy Build Link")).clicked() {
+                                if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.build.copy_link"))).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1805,7 +1808,7 @@ impl UiReport {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
                                                 kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
-                                                    "Build link copied",
+                                                    t!("ui.replay.build.link_copied"),
                                                 )),
                                             })
                                         });
@@ -1814,7 +1817,7 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(icon_str!(icons::COPY, "Copy Short Build Link")).clicked() {
+                                if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.build.copy_short_link"))).clicked() {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider)
@@ -1824,7 +1827,7 @@ impl UiReport {
                                             sender.send(BackgroundTask {
                                                 receiver: None,
                                                 kind: BackgroundTaskKind::UpdateTimedMessage(ToastMessage::success(
-                                                    "Build link copied",
+                                                    t!("ui.replay.build.link_copied"),
                                                 )),
                                             })
                                         });
@@ -1836,7 +1839,7 @@ impl UiReport {
                                 ui.separator();
                             }
 
-                            if ui.small_button(icon_str!(icons::SHARE, "Open WoWs Numbers Page")).clicked() {
+                            if ui.small_button(wt_translations::icon_t(icons::SHARE, &t!("ui.replay.build.open_wows_numbers"))).clicked() {
                                 if let Some(url) = build_wows_numbers_url(report.player()) {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
@@ -1848,7 +1851,7 @@ impl UiReport {
                                 ui.separator();
 
                                 if let Some(player) = Some(report.player())
-                                    && ui.small_button(icon_str!(icons::BUG, "View Raw Player Metadata")).clicked()
+                                    && ui.small_button(wt_translations::icon_t(icons::BUG, &t!("ui.replay.debug.view_raw_metadata"))).clicked()
                                 {
                                     let pretty_meta =
                                         serde_json::to_string_pretty(player).expect("failed to serialize player");
@@ -1878,7 +1881,7 @@ impl UiReport {
                     ReplayColumn::Hits => {
                         if let Some(hits_text) = report.hits_text.clone() {
                             if report.should_hide_stats() && !self.debug_mode {
-                                ui.label("NDA");
+                                ui.label(t!("ui.replay.nda"));
                             } else {
                                 let response = ui.label(hits_text);
                                 if let Some(hover_text) = report.hits_hover_text.clone() {
@@ -1905,7 +1908,7 @@ impl UiReport {
                     ReplayColumn::Name => {
                         ui.vertical(|ui| {
                             if !report.achievements.is_empty() {
-                                ui.strong("Achievements");
+                                ui.strong(t!("ui.replay.sections.achievements"));
 
                                 // Resolve icons: read lock for cache hits, write lock only on misses
                                 let icons: Vec<Option<Arc<GameAsset>>> = {
@@ -1956,7 +1959,7 @@ impl UiReport {
                                 if !report.achievements.is_empty() {
                                     ui.separator();
                                 }
-                                ui.strong("Ribbons");
+                                ui.strong(t!("ui.replay.sections.ribbons"));
 
                                 // Sort ribbons by count descending for display
                                 let mut ribbons: Vec<_> = report.ribbons.values().collect();
@@ -2013,21 +2016,21 @@ impl UiReport {
                     }
                     ReplayColumn::ActualDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
-                            ui.label("NDA");
+                            ui.label(t!("ui.replay.nda"));
                         } else if report.actual_damage_hover_text().is_some() || report.damage_interactions.is_some() {
                             self.dealt_damage_details(report, ui);
                         }
                     }
                     ReplayColumn::PotentialDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
-                            ui.label("NDA");
+                            ui.label(t!("ui.replay.nda"));
                         } else if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
                         }
                     }
                     ReplayColumn::ReceivedDamage => {
                         if report.should_hide_stats() && !self.debug_mode {
-                            ui.label("NDA");
+                            ui.label(t!("ui.replay.nda"));
                         } else if report.received_damage_hover_text.is_some() || report.damage_interactions.is_some() {
                             self.received_damage_details(report, ui);
                         }
@@ -2042,9 +2045,9 @@ impl UiReport {
                                     ui.separator();
 
                                     if build_info.modules.is_empty() {
-                                        ui.label("No Modules");
+                                        ui.label(t!("ui.replay.sections.modules_none"));
                                     } else {
-                                        ui.label("Modules:");
+                                        ui.label(t!("ui.replay.sections.modules"));
                                         for module in &build_info.modules {
                                             if let Some(name) = &module.name {
                                                 let label = ui.label(name);
@@ -2058,9 +2061,9 @@ impl UiReport {
                                     ui.separator();
 
                                     if build_info.abilities.is_empty() {
-                                        ui.label("No Abilities");
+                                        ui.label(t!("ui.replay.sections.abilities_none"));
                                     } else {
-                                        ui.label("Abilities:");
+                                        ui.label(t!("ui.replay.sections.abilities"));
                                         for ability in &build_info.abilities {
                                             if let Some(name) = &ability.name {
                                                 ui.label(name);
@@ -2071,9 +2074,9 @@ impl UiReport {
                                     ui.separator();
 
                                     if let Some(captain_skills) = build_info.captain_skills.as_ref() {
-                                        ui.label("Captain Skills:");
+                                        ui.label(t!("ui.replay.sections.captain_skills"));
                                         if captain_skills.is_empty() {
-                                            ui.label("No Captain Skills");
+                                            ui.label(t!("ui.replay.sections.captain_skills_none"));
                                         } else {
                                             for skill in captain_skills {
                                                 if let Some(name) = &skill.name {
@@ -2085,7 +2088,7 @@ impl UiReport {
                                             }
                                         }
                                     } else {
-                                        ui.label("No Captain Skills");
+                                        ui.label(t!("ui.replay.sections.captain_skills_none"));
                                     }
                                 }
                             });
@@ -2093,7 +2096,7 @@ impl UiReport {
                     }
                     ReplayColumn::Hits => {
                         if report.should_hide_stats() && !self.debug_mode {
-                            ui.label("NDA");
+                            ui.label(t!("ui.replay.nda"));
                         } else if let Some(hits_extended_info) = report.hits_hover_text.clone() {
                             ui.label(hits_extended_info);
                         }
@@ -2209,12 +2212,12 @@ impl egui_table::TableDelegate for UiReport {
             let column = *self.columns.get(*group_index).expect("somehow ended up with zero columns?");
             match column {
                 ReplayColumn::Actions => {
-                    ui.label("Actions");
+                    ui.label(t!("ui.replay.column.actions"));
                 }
                 ReplayColumn::Name => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Player Name",
+                            &t!("ui.replay.column.player_name"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Name,
@@ -2229,7 +2232,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::BaseXp => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Base XP",
+                            &t!("ui.replay.column.base_xp"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::BaseXp,
@@ -2244,7 +2247,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::RawXp => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Raw XP",
+                            &t!("ui.replay.column.raw_xp"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::RawXp,
@@ -2259,7 +2262,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::ShipName => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Ship Name",
+                            &t!("ui.replay.column.ship_name"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::ShipName,
@@ -2273,7 +2276,7 @@ impl egui_table::TableDelegate for UiReport {
                 }
                 ReplayColumn::Hits => {
                     if ui
-                        .strong(column_name_with_sort_order("Hits", false, *self.replay_sort.lock(), SortColumn::Hits))
+                        .strong(column_name_with_sort_order(&t!("ui.replay.column.hits"), false, *self.replay_sort.lock(), SortColumn::Hits))
                         .clicked()
                     {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
@@ -2284,7 +2287,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::Kills => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Kills",
+                            &t!("ui.replay.column.kills"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Kills,
@@ -2299,7 +2302,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::ObservedDamage => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Observed Damage",
+                            &t!("ui.replay.column.observed_damage"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::ObservedDamage,
@@ -2314,7 +2317,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::ActualDamage => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Actual Damage",
+                            &t!("ui.replay.column.actual_damage"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::ActualDamage,
@@ -2329,7 +2332,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::SpottingDamage => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Spotting Damage",
+                            &t!("ui.replay.column.spotting_damage"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::SpottingDamage,
@@ -2344,7 +2347,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::PotentialDamage => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Potential Damage",
+                            &t!("ui.replay.column.potential_damage"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::PotentialDamage,
@@ -2357,12 +2360,12 @@ impl egui_table::TableDelegate for UiReport {
                     };
                 }
                 ReplayColumn::TimeLived => {
-                    ui.strong("Time Lived");
+                    ui.strong(t!("ui.replay.column.time_lived"));
                 }
                 ReplayColumn::Fires => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Fires",
+                            &t!("ui.replay.column.fires"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Fires,
@@ -2377,7 +2380,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::Floods => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Floods",
+                            &t!("ui.replay.column.floods"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Floods,
@@ -2392,7 +2395,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::Citadels => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Citadels",
+                            &t!("ui.replay.column.citadels"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Citadels,
@@ -2407,7 +2410,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::Crits => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Crits",
+                            &t!("ui.replay.column.crits"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::Crits,
@@ -2422,7 +2425,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::ReceivedDamage => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Received Damage",
+                            &t!("ui.replay.column.received_damage"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::ReceivedDamage,
@@ -2437,7 +2440,7 @@ impl egui_table::TableDelegate for UiReport {
                 ReplayColumn::DistanceTraveled => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "Distance Traveled",
+                            &t!("ui.replay.column.distance_traveled"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::DistanceTraveled,
@@ -2450,12 +2453,12 @@ impl egui_table::TableDelegate for UiReport {
                     };
                 }
                 ReplayColumn::Skills => {
-                    ui.strong("Skills");
+                    ui.strong(t!("ui.replay.column.skills"));
                 }
                 ReplayColumn::PersonalRating => {
                     if ui
                         .strong(column_name_with_sort_order(
-                            "PR",
+                            &t!("ui.replay.column.personal_rating"),
                             false,
                             *self.replay_sort.lock(),
                             SortColumn::PersonalRating,
@@ -2549,7 +2552,7 @@ impl Replay {
         self.player_vehicle()
             .and_then(|vehicle| metadata_provider.param_localization_id(vehicle.shipId.raw().into()))
             .and_then(|id| metadata_provider.localized_name_from_id(id))
-            .unwrap_or_else(|| "Spectator".to_string())
+            .unwrap_or_else(|| t!("ui.replay.spectator").into())
     }
 
     #[allow(dead_code)]
@@ -2694,22 +2697,21 @@ impl Replay {
 }
 
 fn column_name_with_sort_order(
-    text: &'static str,
+    text: &str,
     has_info: bool,
     sort_order: SortOrder,
     column: SortColumn,
-) -> Cow<'static, str> {
+) -> String {
     if sort_order.column() == column {
-        let text_with_icon = if has_info {
+        if has_info {
             format!("{} {} {}", text, icons::INFO, sort_order.icon())
         } else {
             format!("{} {}", text, sort_order.icon())
-        };
-        Cow::Owned(text_with_icon)
+        }
     } else if has_info {
-        Cow::Owned(format!("{} {}", text, icons::INFO))
+        format!("{} {}", text, icons::INFO)
     } else {
-        Cow::Borrowed(text)
+        text.to_string()
     }
 }
 
@@ -2743,7 +2745,7 @@ impl ToolkitTabViewer<'_> {
         let mut columns =
             vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
         let action_label_layout = ui.painter().layout_no_wrap(
-            "Actions".to_string(),
+            t!("ui.replay.column.actions").into(),
             egui::FontId::default(),
             ui.style().visuals.text_color(),
         );
@@ -2771,16 +2773,15 @@ impl ToolkitTabViewer<'_> {
             let mut self_report = None;
             ui.horizontal(|ui| {
                 if replay_file.battle_results_are_pending() {
-                    let text = RichText::new(icon_str!(icons::INFO, "Incomplete Match Results")).color(Color32::ORANGE);
-                    let hover_text = "The replay does not yet have end-of-match results. Data will be automatically re-loaded when the match ends and end-of-match results are added to the replay.";
-                    ui.strong(text).on_hover_text(hover_text);
+                    let text = RichText::new(wt_translations::icon_t(icons::INFO, &t!("ui.replay.incomplete_results"))).color(Color32::ORANGE);
+                    ui.strong(text).on_hover_text(t!("ui.replay.incomplete_results_tooltip"));
                 }
 
                 if let Some(battle_result) = replay_file.battle_result() {
                     let text = match battle_result {
-                        BattleResult::Win(_) => RichText::new(icon_str!(icons::TROPHY, "Victory")).color(Color32::LIGHT_GREEN),
-                        BattleResult::Loss(_) => RichText::new(icon_str!(icons::SMILEY_SAD, "Defeat")).color(Color32::LIGHT_RED),
-                        BattleResult::Draw => RichText::new(icon_str!(icons::NOTCHES, "Draw")).color(Color32::LIGHT_YELLOW),
+                        BattleResult::Win(_) => RichText::new(wt_translations::icon_t(icons::TROPHY, &t!("ui.replay.results.victory"))).color(Color32::LIGHT_GREEN),
+                        BattleResult::Loss(_) => RichText::new(wt_translations::icon_t(icons::SMILEY_SAD, &t!("ui.replay.results.defeat"))).color(Color32::LIGHT_RED),
+                        BattleResult::Draw => RichText::new(wt_translations::icon_t(icons::NOTCHES, &t!("ui.replay.results.draw"))).color(Color32::LIGHT_YELLOW),
                     };
                     ui.label(text);
                 }
@@ -2802,9 +2803,9 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                ui.menu_button("Export", |ui| {
-                    ui.label(RichText::new("Chat").strong());
-                    if ui.small_button(icon_str!(icons::FLOPPY_DISK, "Save To File")).clicked() {
+                ui.menu_button(t!("ui.replay.export"), |ui| {
+                    ui.label(RichText::new(t!("ui.replay.chat").as_ref()).strong());
+                    if ui.small_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
                             .save_file()
@@ -2824,7 +2825,7 @@ impl ToolkitTabViewer<'_> {
                         }
                         ui.close_kind(UiKind::Menu);
                     }
-                    if ui.small_button(icon_str!(icons::COPY, "Copy")).clicked() {
+                    if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.buttons.copy"))).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
                             let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
@@ -2843,12 +2844,12 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     ui.separator();
-                    ui.label(RichText::new("Results").strong());
-                    let format = if ui.button("JSON").clicked() {
+                    ui.label(RichText::new(t!("ui.replay.export_results").as_ref()).strong());
+                    let format = if ui.button(t!("ui.settings.replay.format_json")).clicked() {
                         Some(ReplayExportFormat::Json)
-                    } else if ui.button("CBOR").clicked() {
+                    } else if ui.button(t!("ui.settings.replay.format_cbor")).clicked() {
                         Some(ReplayExportFormat::Cbor)
-                    } else if ui.button("CSV").clicked() {
+                    } else if ui.button(t!("ui.settings.replay.format_csv")).clicked() {
                         Some(ReplayExportFormat::Csv)
                     } else {
                         None
@@ -2884,9 +2885,9 @@ impl ToolkitTabViewer<'_> {
                 {
                     let has_chat = !report.game_chat().is_empty();
                     let show_chat: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
-                    let response = ui.add_enabled(has_chat, egui::Button::new(icon_str!(icons::CHAT_TEXT, "Chat")).selected(show_chat));
+                    let response = ui.add_enabled(has_chat, egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat"))).selected(show_chat));
                     if !has_chat {
-                        response.on_disabled_hover_text("No chat messages were sent in this replay");
+                        response.on_disabled_hover_text(t!("ui.replay.no_chat"));
                     } else if response.clicked() {
                         ui.ctx().data_mut(|d| {
                             d.insert_temp(egui::Id::new("show_game_chat"), !show_chat);
@@ -2894,7 +2895,7 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if self.tab_state.settings.debug_mode && ui.button("Raw Metadata").clicked() {
+                if self.tab_state.settings.debug_mode && ui.button(t!("ui.replay.debug.raw_metadata")).clicked() {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
                     let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
                     let viewer = plaintext_viewer::PlaintextFileViewer {
@@ -2907,8 +2908,8 @@ impl ToolkitTabViewer<'_> {
                 if self.tab_state.settings.debug_mode {
                     let has_results = report.battle_results().is_some();
                     ui.add_enabled_ui(has_results, |ui| {
-                        ui.menu_button("View Results", |ui| {
-                            if ui.button("Raw JSON").on_hover_text("The raw battle results as serialized by WG.").clicked() {
+                        ui.menu_button(t!("ui.replay.debug.view_results"), |ui| {
+                            if ui.button(t!("ui.replay.debug.raw_json")).on_hover_text(t!("ui.replay.debug.raw_json_tooltip")).clicked() {
                                 if let Some(results_json) = report.battle_results() {
                                     let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse battle results");
                                     let pretty = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize battle results");
@@ -2921,7 +2922,7 @@ impl ToolkitTabViewer<'_> {
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if ui.button("Mapped JSON").on_hover_text("Battle results with positional arrays resolved to named fields.").clicked() {
+                            if ui.button(t!("ui.replay.debug.mapped_json")).on_hover_text(t!("ui.replay.debug.mapped_json_tooltip")).clicked() {
                                 if let Some(resolved) = replay_file.ui_report.as_ref().and_then(|r| r.resolved_results.as_ref()) {
                                     let pretty = serde_json::to_string_pretty(resolved).expect("failed to serialize resolved results");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
@@ -2942,9 +2943,9 @@ impl ToolkitTabViewer<'_> {
                 {
                     let alt_held = ui.input(|i| i.modifiers.alt);
                     let label = if alt_held {
-                        icon_str!(icons::KEYBOARD, "Show Replay Controls")
+                        wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
                     } else {
-                        icon_str!(icons::GAME_CONTROLLER, "Open in Game")
+                        wt_translations::icon_t(icons::GAME_CONTROLLER, &t!("ui.replay.context.open_in_game"))
                     };
                     if ui.button(label).clicked() {
                         if alt_held {
@@ -2965,7 +2966,7 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 if self.tab_state.wows_data_map.is_some()
-                    && ui.button(icon_str!(icons::PLAY, "Render")).clicked()
+                    && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
                 {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
                     let pkt_data = replay_file.replay_file.packet_data.clone();
@@ -3008,7 +3009,7 @@ impl ToolkitTabViewer<'_> {
 
                 if let Some(self_report) = self_report
                     && self_report.is_test_ship()
-                    && ui.checkbox(&mut hide_my_stats, "Hide My Test Ship Stats").changed()
+                    && ui.checkbox(&mut hide_my_stats, t!("ui.replay.hide_my_stats")).changed()
                 {
                     hide_my_stats_changed = true;
                 }
@@ -3051,7 +3052,7 @@ impl ToolkitTabViewer<'_> {
                     let locale = self.tab_state.settings.locale.as_ref().map(|s| s.as_ref());
                     let mut job = LayoutJob::default();
                     let weak_fmt = TextFormat { color: weak, ..Default::default() };
-                    job.append("Team Damage: ", 0.0, weak_fmt.clone());
+                    job.append(&t!("ui.replay.team_damage"), 0.0, weak_fmt.clone());
                     job.append(
                         &separate_number(team_damage, locale),
                         0.0,
@@ -3364,7 +3365,7 @@ impl ToolkitTabViewer<'_> {
 
     fn build_replay_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button(icon_str!(icons::FOLDER_OPEN, "Manually Open Replay File...")).clicked()
+            if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.open_manually"))).clicked()
                 && let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file()
             {
                 self.tab_state.settings.current_replay_path = file;
@@ -3380,39 +3381,39 @@ impl ToolkitTabViewer<'_> {
                 }
             }
 
-            ui.checkbox(&mut self.tab_state.auto_load_latest_replay, "Autoload Latest Replay");
+            ui.checkbox(&mut self.tab_state.auto_load_latest_replay, t!("ui.replay.autoload_latest"));
 
             ComboBox::from_id_salt("replay_grouping")
-                .selected_text(format!("Group: {}", self.tab_state.settings.replay_settings.grouping.label()))
+                .selected_text(t!("ui.replay.group.prefix", label = self.tab_state.settings.replay_settings.grouping.label()))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.tab_state.settings.replay_settings.grouping,
                         ReplayGrouping::Date,
-                        "Date",
+                        t!("ui.replay.group.date"),
                     );
                     ui.selectable_value(
                         &mut self.tab_state.settings.replay_settings.grouping,
                         ReplayGrouping::Ship,
-                        "Ship",
+                        t!("ui.replay.group.ship"),
                     );
                     ui.selectable_value(
                         &mut self.tab_state.settings.replay_settings.grouping,
                         ReplayGrouping::None,
-                        "None",
+                        t!("ui.replay.group.none"),
                     );
                 });
 
             ComboBox::from_id_salt("column_filters")
-                .selected_text("Column Filters")
+                .selected_text(t!("ui.replay.column_filters"))
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, "Raw XP");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, "Entity ID");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, "Observed Damage");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, "Fires");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, "Floods");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, "Citadels");
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, "Critical Module Hits");
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, t!("ui.replay.filter.raw_xp"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, t!("ui.replay.filter.entity_id"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, t!("ui.replay.filter.observed_damage"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, t!("ui.replay.filter.fires"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, t!("ui.replay.filter.floods"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, t!("ui.replay.filter.citadels"));
+                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, t!("ui.replay.filter.crits"));
                 });
 
             ui.separator();
@@ -3427,15 +3428,12 @@ impl ToolkitTabViewer<'_> {
                 let at_limit = board_count >= crate::collab::protocol::MAX_TACTICS_BOARDS;
                 let btn = ui.add_enabled(
                     has_data && !at_limit,
-                    egui::Button::new(icon_str!(icons::MAP_TRIFOLD, "Tactics Board")),
+                    egui::Button::new(wt_translations::icon_t(icons::MAP_TRIFOLD, &t!("ui.collab.tactics_board"))),
                 );
                 let btn = if !has_data {
-                    btn.on_hover_text("Waiting for game data to load\u{2026}")
+                    btn.on_hover_text(t!("ui.collab.waiting_for_data"))
                 } else if at_limit {
-                    btn.on_hover_text(format!(
-                        "Maximum {} tactics boards open",
-                        crate::collab::protocol::MAX_TACTICS_BOARDS
-                    ))
+                    btn.on_hover_text(t!("ui.collab.max_boards", count = crate::collab::protocol::MAX_TACTICS_BOARDS))
                 } else {
                     btn
                 };
@@ -3481,9 +3479,9 @@ impl ToolkitTabViewer<'_> {
 
         // Session button (turns red when active).
         let label = if any_active {
-            RichText::new(icon_str!(icons::BROADCAST, "Session")).color(Color32::WHITE)
+            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session"))).color(Color32::WHITE)
         } else {
-            RichText::new(icon_str!(icons::BROADCAST, "Session"))
+            RichText::new(wt_translations::icon_t(icons::BROADCAST, &t!("ui.collab.session")))
         };
         let mut button = egui::Button::new(label);
         if any_active {
@@ -3499,9 +3497,9 @@ impl ToolkitTabViewer<'_> {
                     // ── Host session is starting ──
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Starting session\u{2026}");
+                        ui.label(t!("ui.collab.starting"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Cancel").clicked() {
+                            if ui.small_button(t!("ui.buttons.cancel")).clicked() {
                                 if let Some(ref handle) = self.tab_state.host_session {
                                     let _ = handle.command_tx.send(SessionCommand::Stop);
                                 }
@@ -3527,9 +3525,9 @@ impl ToolkitTabViewer<'_> {
                 } else if host_active {
                     // ── Active host session controls ──
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Session Active").strong().color(Color32::from_rgb(220, 50, 50)));
+                        ui.label(RichText::new(t!("ui.collab.session_active").as_ref()).strong().color(Color32::from_rgb(220, 50, 50)));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Stop").clicked() {
+                            if ui.small_button(t!("ui.buttons.stop")).clicked() {
                                 if let Some(ref handle) = self.tab_state.host_session {
                                     let _ = handle.command_tx.send(SessionCommand::Stop);
                                 }
@@ -3557,7 +3555,7 @@ impl ToolkitTabViewer<'_> {
                     // Token display
                     let token = self.tab_state.session_state.lock().token.clone().unwrap_or_default();
                     if !token.is_empty() {
-                        ui.label("Session Token:");
+                        ui.label(t!("ui.collab.session_token"));
                         let visible = self.tab_state.session_token_visible;
                         ui.horizontal(|ui| {
                             let mut display_token = token.clone();
@@ -3568,35 +3566,35 @@ impl ToolkitTabViewer<'_> {
                             ui.add(te);
 
                             let eye_icon = if visible { icons::EYE } else { icons::EYE_SLASH };
-                            if ui.button(eye_icon).on_hover_text("Toggle token visibility").clicked() {
+                            if ui.button(eye_icon).on_hover_text(t!("ui.collab.toggle_visibility")).clicked() {
                                 self.tab_state.session_token_visible = !visible;
                             }
 
-                            if ui.button(icons::COPY).on_hover_text("Copy token").clicked() {
+                            if ui.button(icons::COPY).on_hover_text(t!("ui.collab.copy_token")).clicked() {
                                 ui.ctx().copy_text(token.clone());
-                                self.tab_state.toasts.lock().info("Token copied to clipboard");
+                                self.tab_state.toasts.lock().info(t!("ui.collab.token_copied"));
                             }
                         });
 
                         // Copy web link buttons
                         if ui
-                            .button(icon_str!(icons::BROWSER, "Copy Web Link"))
-                            .on_hover_text("Copy link for the web client")
+                            .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.collab.copy_web_link")))
+                            .on_hover_text(t!("ui.collab.copy_web_link_tooltip"))
                             .clicked()
                         {
                             let url = format!("{}#{}", crate::collab::WEB_CLIENT_URL, token);
                             ui.ctx().copy_text(url);
-                            self.tab_state.toasts.lock().info("Web link copied to clipboard");
+                            self.tab_state.toasts.lock().info(t!("ui.collab.web_link_copied"));
                         }
                         #[cfg(debug_assertions)]
                         if ui
-                            .button(icon_str!(icons::BROWSER, "Copy Localhost Link"))
-                            .on_hover_text("Copy localhost link (dev)")
+                            .button(wt_translations::icon_t(icons::BROWSER, &t!("ui.collab.copy_localhost_link")))
+                            .on_hover_text(t!("ui.collab.copy_localhost_tooltip"))
                             .clicked()
                         {
                             let url = format!("http://localhost:8080/#{}", token);
                             ui.ctx().copy_text(url);
-                            self.tab_state.toasts.lock().info("Localhost link copied to clipboard");
+                            self.tab_state.toasts.lock().info(t!("ui.collab.localhost_copied"));
                         }
 
                         ui.add_space(4.0);
@@ -3609,7 +3607,7 @@ impl ToolkitTabViewer<'_> {
                     let peer_count = connected_users.iter().filter(|u| u.id != my_id).count();
                     ui.horizontal(|ui| {
                         ui.label(icons::USERS);
-                        ui.label(format!("{} connected", peer_count));
+                        ui.label(t!("ui.collab.connected_count", count = peer_count));
                     });
                     // Show each connected user with color dot, name, and role
                     for user in &connected_users {
@@ -3626,11 +3624,11 @@ impl ToolkitTabViewer<'_> {
                             }
                             if user.role != crate::collab::PeerRole::Host
                                 && user.role != crate::collab::PeerRole::CoHost
-                                && ui.small_button(icons::CROWN).on_hover_text("Promote to co-host").clicked()
+                                && ui.small_button(icons::CROWN).on_hover_text(t!("ui.collab.promote_cohost")).clicked()
                                 && let Some(ref handle) = self.tab_state.host_session
                             {
                                 let _ = handle.command_tx.send(SessionCommand::PromoteToCoHost { user_id: user.id });
-                                self.tab_state.toasts.lock().info(format!("Promoted {} to co-host", user.name));
+                                self.tab_state.toasts.lock().info(t!("ui.collab.promoted_cohost", name = &user.name));
                             }
                         });
                     }
@@ -3639,15 +3637,15 @@ impl ToolkitTabViewer<'_> {
                     ui.separator();
 
                     // Permission controls
-                    ui.label(RichText::new("Permissions").small().strong());
+                    ui.label(RichText::new(t!("ui.collab.permissions").as_ref()).small().strong());
                     let (mut lock_ann, mut lock_settings) = {
                         let s = self.tab_state.session_state.lock();
                         (s.permissions.annotations_locked, s.permissions.settings_locked)
                     };
 
                     let mut perms_changed = false;
-                    perms_changed |= ui.checkbox(&mut lock_ann, "Lock Annotations").changed();
-                    perms_changed |= ui.checkbox(&mut lock_settings, "Lock Settings").changed();
+                    perms_changed |= ui.checkbox(&mut lock_ann, t!("ui.collab.lock_annotations")).changed();
+                    perms_changed |= ui.checkbox(&mut lock_settings, t!("ui.collab.lock_settings")).changed();
 
                     if perms_changed {
                         let perms = Permissions { annotations_locked: lock_ann, settings_locked: lock_settings };
@@ -3659,8 +3657,8 @@ impl ToolkitTabViewer<'_> {
 
                     ui.add_space(4.0);
                     if ui
-                        .button("Reset Client Overrides")
-                        .on_hover_text("Reset all client display setting changes")
+                        .button(t!("ui.collab.reset_overrides"))
+                        .on_hover_text(t!("ui.collab.reset_overrides_tooltip"))
                         .clicked()
                         && let Some(ref handle) = self.tab_state.host_session
                     {
@@ -3669,9 +3667,9 @@ impl ToolkitTabViewer<'_> {
                 } else if client_active {
                     // ── Active client session ──
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Connected to Session").strong());
+                        ui.label(RichText::new(t!("ui.collab.connected_to_session").as_ref()).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Leave").clicked() {
+                            if ui.small_button(t!("ui.collab.leave")).clicked() {
                                 if let Some(ref handle) = self.tab_state.client_session {
                                     let _ = handle.command_tx.send(SessionCommand::Stop);
                                 }
@@ -3691,20 +3689,20 @@ impl ToolkitTabViewer<'_> {
                             ui.painter().circle_filled(rect.center(), 4.0, color);
                             if user.id == my_id {
                                 ui.label(RichText::new(&user.name).italics());
-                                ui.label(RichText::new("(you)").small().weak());
+                                ui.label(RichText::new(t!("ui.collab.you").as_ref()).small().weak());
                             } else {
                                 ui.label(&user.name);
                             }
                             match user.role {
                                 crate::collab::PeerRole::Host => {
                                     ui.label(RichText::new(icons::CROWN).small().color(Color32::from_rgb(255, 195, 0)))
-                                        .on_hover_text("Host");
+                                        .on_hover_text(t!("ui.collab.role_host"));
                                 }
                                 crate::collab::PeerRole::CoHost => {
                                     ui.label(
                                         RichText::new(icons::CROWN).small().color(Color32::from_rgb(136, 84, 208)),
                                     )
-                                    .on_hover_text("Co-host");
+                                    .on_hover_text(t!("ui.collab.role_cohost"));
                                 }
                                 _ => {}
                             }
@@ -3718,13 +3716,13 @@ impl ToolkitTabViewer<'_> {
                     // Display name (shared for host + join)
                     if self.tab_state.show_display_name_error {
                         ui.label(
-                            RichText::new("Please enter a display name").color(Color32::from_rgb(220, 50, 50)).small(),
+                            RichText::new(t!("ui.collab.display_name_error").as_ref()).color(Color32::from_rgb(220, 50, 50)).small(),
                         );
                     }
-                    ui.label("Display name:");
+                    ui.label(t!("ui.collab.display_name"));
                     let name_response = ui.add(
                         egui::TextEdit::singleline(&mut self.tab_state.settings.collab_display_name)
-                            .hint_text("Your name...")
+                            .hint_text(t!("ui.collab.display_name_hint"))
                             .desired_width(160.0)
                             .text_color(if self.tab_state.show_display_name_error {
                                 Color32::from_rgb(220, 50, 50)
@@ -3749,11 +3747,11 @@ impl ToolkitTabViewer<'_> {
                     ui.separator();
                     ui.add_space(4.0);
 
-                    ui.label(RichText::new("Host a Session").strong());
-                    if ui.button("Start Session").clicked() {
+                    ui.label(RichText::new(t!("ui.collab.host_session").as_ref()).strong());
+                    if ui.button(t!("ui.collab.start_session")).clicked() {
                         if self.tab_state.settings.collab_display_name.trim().is_empty() {
                             self.tab_state.show_display_name_error = true;
-                            self.tab_state.toasts.lock().error("Enter a display name first");
+                            self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
                         } else {
                             self.tab_state.pending_host = true;
                             if !self.tab_state.settings.suppress_p2p_ip_warning {
@@ -3767,22 +3765,22 @@ impl ToolkitTabViewer<'_> {
                     ui.add_space(4.0);
 
                     // ── Join a session ──
-                    ui.label(RichText::new("Join a Session").strong());
+                    ui.label(RichText::new(t!("ui.collab.join_session").as_ref()).strong());
                     ui.add_space(2.0);
 
                     // Paste token -> validate -> auto-join
-                    if ui.button(icon_str!(icons::CLIPBOARD, "Paste token & join")).clicked()
+                    if ui.button(wt_translations::icon_t(icons::CLIPBOARD, &t!("ui.collab.paste_and_join"))).clicked()
                         && let Ok(mut clipboard) = arboard::Clipboard::new()
                         && let Ok(text) = clipboard.get_text()
                     {
                         let trimmed = text.trim().to_string();
                         if trimmed.is_empty() {
-                            self.tab_state.toasts.lock().error("Clipboard is empty");
+                            self.tab_state.toasts.lock().error(t!("ui.collab.clipboard_empty"));
                         } else if self.tab_state.settings.collab_display_name.trim().is_empty() {
                             self.tab_state.show_display_name_error = true;
-                            self.tab_state.toasts.lock().error("Enter a display name first");
+                            self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
                         } else if let Err(e) = crate::collab::protocol::decode_token(&trimmed) {
-                            self.tab_state.toasts.lock().error(format!("Invalid token: {e}"));
+                            self.tab_state.toasts.lock().error(t!("ui.collab.invalid_token", error = e));
                         } else {
                             self.tab_state.join_session_token = trimmed;
                             self.tab_state.pending_join = true;
@@ -3827,7 +3825,7 @@ impl ToolkitTabViewer<'_> {
 
         ui.add_space(4.0);
         ui.separator();
-        ui.label(RichText::new("Shared Windows").small().strong());
+        ui.label(RichText::new(t!("ui.collab.shared_windows").as_ref()).small().strong());
 
         // ── Replays ──
         let renderers = self.tab_state.replay_renderers.lock();
@@ -3852,7 +3850,7 @@ impl ToolkitTabViewer<'_> {
                     ui.label(&label);
                 } else {
                     ui.label(RichText::new(&label).weak());
-                    if ui.small_button("Open").clicked() {
+                    if ui.small_button(t!("ui.collab.open")).clicked() {
                         let renderers = self.tab_state.replay_renderers.lock();
                         // Check for an existing hidden viewer we can reuse.
                         let existing = renderers
@@ -3922,7 +3920,7 @@ impl ToolkitTabViewer<'_> {
                     ui.label(&label);
                 } else {
                     ui.label(RichText::new(&label).weak());
-                    if ui.small_button("Open").clicked()
+                    if ui.small_button(t!("ui.collab.open")).clicked()
                         && let Some(ref wows_data) = self.tab_state.world_of_warships_data
                     {
                         let board_count = self.tab_state.tactics_boards.lock().len();
@@ -3947,7 +3945,7 @@ impl ToolkitTabViewer<'_> {
                 // Host can request all peers to open this window.
                 if is_host_role
                     && let Some(handle) = session_handle
-                    && ui.small_button("Open for everyone").clicked()
+                    && ui.small_button(t!("ui.collab.open_for_everyone")).clicked()
                 {
                     let _ = handle
                         .command_tx
@@ -4035,7 +4033,7 @@ impl ToolkitTabViewer<'_> {
                     self.tab_state.replay_dock_state = dock_state;
                 } else {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                        ui.heading("Click a replay to view, or double-click to open in a new tab");
+                        ui.heading(t!("ui.replay.no_selection"));
                     });
                 }
             });
@@ -4068,14 +4066,14 @@ impl ToolkitTabViewer<'_> {
         let toasts = self.tab_state.toasts.clone();
         let metadata_provider = self.metadata_provider();
 
-        egui::Window::new(icon_str!(icons::CHAT_TEXT, "Game Chat"))
+        egui::Window::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.game_chat")))
             .open(&mut open)
             .default_width(CHAT_VIEW_WIDTH)
             .default_height(400.0)
             .resizable(true)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button(icon_str!(icons::COPY, "Copy All")).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.copy_all"))).clicked() {
                         let mut buf = std::io::BufWriter::new(Vec::new());
                         for message in chat_messages {
                             let GameMessage {
@@ -4106,9 +4104,9 @@ impl ToolkitTabViewer<'_> {
                         let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner"))
                             .expect("failed to convert game chat buffer to string");
                         ui.ctx().copy_text(game_chat);
-                        toasts.lock().success("Chat copied");
+                        toasts.lock().success(t!("ui.replay.chat_copied"));
                     }
-                    if ui.button(icon_str!(icons::FLOPPY_DISK, "Save To File")).clicked()
+                    if ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .set_file_name(format!(
                                 "{} {} {} - Game Chat.txt",
@@ -4249,7 +4247,7 @@ impl ToolkitTabViewer<'_> {
             return;
         }
 
-        egui::Window::new("Replay Controls")
+        egui::Window::new(t!("ui.replay.controls.window_title"))
             .open(&mut self.tab_state.show_replay_controls)
             .collapsible(true)
             .resizable(true)
@@ -4283,7 +4281,7 @@ impl ToolkitTabViewer<'_> {
                         }
                     });
                 } else {
-                    ui.label("Controls not available (commands.scheme.xml not found in game files).");
+                    ui.label(t!("ui.replay.controls.unavailable"));
                 }
             });
     }
@@ -4308,7 +4306,7 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
             let map = replay.map_name(&mp);
             format!("{ship} - {map}").into()
         } else {
-            "Loading...".into()
+            t!("ui.replay.loading").into_owned().into()
         }
     }
 
@@ -4409,7 +4407,7 @@ fn build_replay_chat_content(
             let btn_rect = egui::Align2::RIGHT_CENTER
                 .align_size_within_rect(egui::vec2(20.0, label_response.rect.height()), padded_row);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(btn_rect));
-            if child.small_button(crate::icons::COPY).on_hover_text("Copy message").clicked() {
+            if child.small_button(crate::icons::COPY).on_hover_text(t!("ui.replay.copy_message")).clicked() {
                 ui.ctx().copy_text(text);
             }
         }

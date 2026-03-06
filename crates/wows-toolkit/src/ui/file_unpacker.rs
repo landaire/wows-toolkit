@@ -1,4 +1,4 @@
-use crate::icon_str;
+use rust_i18n::t;
 use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
@@ -272,11 +272,11 @@ impl TabViewer for UnpackerPaneViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
         match tab {
             UnpackerPane::Browser(b) => {
-                let (icon, label) = match b.source {
-                    BrowserSource::Pkg => (icons::ARCHIVE, "PKG"),
-                    BrowserSource::AssetsBin => (icons::DATABASE, "Assets.bin"),
+                let label: String = match b.source {
+                    BrowserSource::Pkg => wt_translations::icon_t(icons::ARCHIVE, "PKG"),
+                    BrowserSource::AssetsBin => wt_translations::icon_t(icons::DATABASE, &t!("ui.unpacker.assets_bin")),
                 };
-                format!("{} {}", icon, label).into()
+                label.into()
             }
             UnpackerPane::Search(s) => {
                 let status = if s.running { " ..." } else { "" };
@@ -325,7 +325,7 @@ impl UnpackerPaneViewer<'_> {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 20.0);
                 ui.spinner();
-                ui.label(RichText::new("Loading assets.bin...").weak());
+                ui.label(RichText::new(t!("ui.unpacker.loading_assets").as_ref()).weak());
             });
             return;
         }
@@ -335,7 +335,7 @@ impl UnpackerPaneViewer<'_> {
             ui.vertical_centered(|ui| {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 10.0);
-                ui.label(RichText::new(format!("Failed to load: {}", err)).color(egui::Color32::from_rgb(220, 80, 80)));
+                ui.label(RichText::new(t!("ui.unpacker.load_failed", error = err).as_ref()).color(egui::Color32::from_rgb(220, 80, 80)));
             });
             return;
         }
@@ -346,7 +346,7 @@ impl UnpackerPaneViewer<'_> {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 10.0);
                 ui.label(
-                    RichText::new("No game data loaded. Set your World of Warships directory in Settings.").weak(),
+                    RichText::new(t!("ui.unpacker.no_game_data").as_ref()).weak(),
                 );
             });
             return;
@@ -368,7 +368,7 @@ impl UnpackerPaneViewer<'_> {
                 // Filter input
                 ui.horizontal(|ui| {
                     ui.label(icons::FUNNEL);
-                    let response = ui.add(egui::TextEdit::singleline(&mut browser.filter).hint_text("Filter files..."));
+                    let response = ui.add(egui::TextEdit::singleline(&mut browser.filter).hint_text(t!("ui.unpacker.filter_files")));
                     if response.changed() {
                         browser.used_filter = None;
                     }
@@ -378,12 +378,12 @@ impl UnpackerPaneViewer<'_> {
                 // Content search input (at bottom of sidebar)
                 egui::TopBottomPanel::bottom(format!("browser_content_search_{}", source_id)).show_inside(ui, |ui| {
                     ui.add_space(2.0);
-                    ui.label(RichText::new("Search in Files").strong());
+                    ui.label(RichText::new(t!("ui.unpacker.search_in_files").as_ref()).strong());
                     ui.horizontal(|ui| {
                         ui.label(icons::MAGNIFYING_GLASS);
                         let search_response = ui.add(
                             egui::TextEdit::singleline(&mut browser.content_search_query)
-                                .hint_text("Search in files..."),
+                                .hint_text(t!("ui.unpacker.search_hint")),
                         );
                         if search_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             self.start_search.set(Some(browser.source.clone()));
@@ -393,7 +393,7 @@ impl UnpackerPaneViewer<'_> {
                         ui.add_space(20.0);
                         ui.add(
                             egui::TextEdit::singleline(&mut browser.content_search_path_filter)
-                                .hint_text("Path filter (e.g. *.xml)"),
+                                .hint_text(t!("ui.unpacker.path_filter_hint")),
                         );
                     });
                 });
@@ -466,7 +466,7 @@ impl UnpackerPaneViewer<'_> {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("{} results", filtered_files.len())).weak());
                         if !filtered_files.is_empty()
-                            && ui.small_button(icon_str!(icons::PLUS_CIRCLE, "Queue All")).clicked()
+                            && ui.small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all"))).clicked()
                         {
                             for file in filtered_files.iter() {
                                 queue_extract(self.items_to_extract, file.1.clone());
@@ -531,14 +531,14 @@ impl UnpackerPaneViewer<'_> {
 
                     if entries.is_empty() {
                         ui.centered_and_justified(|ui| {
-                            ui.label(RichText::new("Empty directory").weak());
+                            ui.label(RichText::new(t!("ui.unpacker.empty_directory").as_ref()).weak());
                         });
                     } else {
                         let file_entries: Vec<&FileEntry> = entries.iter().filter(|e| !e.is_dir).collect();
                         if !file_entries.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("{} items", entries.len())).weak());
-                                if ui.small_button(icon_str!(icons::PLUS_CIRCLE, "Queue All Files")).clicked() {
+                                if ui.small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all_files"))).clicked() {
                                     for entry in &file_entries {
                                         queue_extract(self.items_to_extract, entry.vfs_path.clone());
                                     }
@@ -577,7 +577,7 @@ impl UnpackerPaneViewer<'_> {
 
                 if ui
                     .button(RichText::new(icons::X_CIRCLE).color(egui::Color32::from_rgb(220, 80, 80)))
-                    .on_hover_text("Stop search")
+                    .on_hover_text(t!("ui.unpacker.stop_search_tooltip"))
                     .clicked()
                 {
                     search.stop_flag.store(true, Ordering::Relaxed);
@@ -600,7 +600,7 @@ impl UnpackerPaneViewer<'_> {
         if search.results.is_empty() {
             if !search.running {
                 ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("No matches found.").weak());
+                    ui.label(RichText::new(t!("ui.unpacker.no_matches").as_ref()).weak());
                 });
             }
         } else {
@@ -703,11 +703,11 @@ fn add_view_file_context_menu(
             let node_view = node.clone();
             let node_extract = node.clone();
             response.context_menu(|ui| {
-                if ui.button(icon_str!(icons::EYE, "View as JSON")).clicked() {
+                if ui.button(wt_translations::icon_t(icons::EYE, &t!("ui.unpacker.view_as_json"))).clicked() {
                     open_decoded_json_viewer(file_viewer, &node_view, pt);
                     ui.close_kind(UiKind::Menu);
                 }
-                if ui.button(icon_str!(icons::DOWNLOAD_SIMPLE, "Extract as JSON")).clicked() {
+                if ui.button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.unpacker.extract_as_json"))).clicked() {
                     extract_single_as_json(&node_extract, pt);
                     ui.close_kind(UiKind::Menu);
                 }
@@ -722,7 +722,7 @@ fn add_view_file_context_menu(
 
     if is_viewable {
         response.context_menu(|ui| {
-            if ui.button(icon_str!(icons::EYE, "View Contents")).clicked() {
+            if ui.button(wt_translations::icon_t(icons::EYE, &t!("ui.unpacker.view_contents"))).clicked() {
                 open_file_viewer(file_viewer, node);
                 ui.close_kind(UiKind::Menu);
             }
@@ -929,13 +929,13 @@ fn render_file_listing_table(
             header.col(|_ui| {});
             header.col(|_ui| {});
             header.col(|ui| {
-                ui.strong("Name");
+                ui.strong(t!("ui.unpacker.column.name"));
             });
             header.col(|ui| {
-                ui.strong("Size");
+                ui.strong(t!("ui.unpacker.column.size"));
             });
             header.col(|ui| {
-                ui.strong("Type");
+                ui.strong(t!("ui.unpacker.column.type_col"));
             });
         })
         .body(|body| {
@@ -946,10 +946,10 @@ fn render_file_listing_table(
                 row.col(|ui| {
                     if entry.is_dir {
                         if is_queued {
-                            if ui.small_button(icons::X_CIRCLE).on_hover_text("Remove from queue").clicked() {
+                            if ui.small_button(icons::X_CIRCLE).on_hover_text(t!("ui.unpacker.remove_from_queue")).clicked() {
                                 items_to_extract.lock().retain(|v| v.as_str() != entry.vfs_path.as_str());
                             }
-                        } else if ui.small_button(icons::PLUS_CIRCLE).on_hover_text("Queue entire folder").clicked() {
+                        } else if ui.small_button(icons::PLUS_CIRCLE).on_hover_text(t!("ui.unpacker.queue_folder")).clicked() {
                             queue_extract(items_to_extract, entry.vfs_path.clone());
                         }
                     } else {
@@ -992,7 +992,7 @@ fn render_file_listing_table(
                     if row_response.double_clicked() {
                         navigate_to.set(Some((source.clone(), entry.vfs_path.as_str().to_string())));
                     }
-                    row_response.on_hover_text("Double-click to open");
+                    row_response.on_hover_text(t!("ui.unpacker.double_click_open"));
                 } else {
                     add_view_file_context_menu(file_viewer, &name_label_response, &entry.vfs_path, source);
                     add_view_file_context_menu(file_viewer, &name_response, &entry.vfs_path, source);
@@ -1033,13 +1033,13 @@ fn render_filter_results_table(
             header.col(|_ui| {});
             header.col(|_ui| {});
             header.col(|ui| {
-                ui.strong("Path");
+                ui.strong(t!("ui.unpacker.column.path"));
             });
             header.col(|ui| {
-                ui.strong("Size");
+                ui.strong(t!("ui.unpacker.column.size"));
             });
             header.col(|ui| {
-                ui.strong("Type");
+                ui.strong(t!("ui.unpacker.column.type_col"));
             });
         })
         .body(|body| {
@@ -1135,13 +1135,13 @@ fn render_search_results_table(
             header.col(|_ui| {});
             header.col(|_ui| {});
             header.col(|ui| {
-                ui.strong("File");
+                ui.strong(t!("ui.unpacker.column.file"));
             });
             header.col(|ui| {
-                ui.strong("Offset");
+                ui.strong(t!("ui.unpacker.column.offset"));
             });
             header.col(|ui| {
-                ui.strong("Context");
+                ui.strong(t!("ui.unpacker.column.context"));
             });
         })
         .body(|body| {
@@ -1183,7 +1183,7 @@ fn render_search_results_table(
                 let vfs_str2 = vfs_str.clone();
                 let vfs_path2 = vfs_path.clone();
                 file_response.context_menu(|ui| {
-                    if ui.button(icon_str!(icons::FOLDER_OPEN, "Go to Directory")).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory"))).clicked() {
                         if let Some(parent_end) = vfs_str.rfind('/') {
                             let parent = &vfs_str[..parent_end];
                             navigate_to.set(Some((
@@ -1194,13 +1194,13 @@ fn render_search_results_table(
                         }
                         ui.close_kind(UiKind::Menu);
                     }
-                    if ui.button(icon_str!(icons::EYE, "View Contents")).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::EYE, &t!("ui.unpacker.view_contents"))).clicked() {
                         open_file_viewer(file_viewer, &vfs_path);
                         ui.close_kind(UiKind::Menu);
                     }
                 });
                 row.response().context_menu(|ui| {
-                    if ui.button(icon_str!(icons::FOLDER_OPEN, "Go to Directory")).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory"))).clicked() {
                         if let Some(parent_end) = vfs_str2.rfind('/') {
                             let parent = &vfs_str2[..parent_end];
                             navigate_to.set(Some((
@@ -1211,7 +1211,7 @@ fn render_search_results_table(
                         }
                         ui.close_kind(UiKind::Menu);
                     }
-                    if ui.button(icon_str!(icons::EYE, "View Contents")).clicked() {
+                    if ui.button(wt_translations::icon_t(icons::EYE, &t!("ui.unpacker.view_contents"))).clicked() {
                         open_file_viewer(file_viewer, &vfs_path2);
                         ui.close_kind(UiKind::Menu);
                     }
@@ -1784,7 +1784,7 @@ impl ToolkitTabViewer<'_> {
                     let selected_label = format!("{}", self.tab_state.selected_browser_build);
 
                     ui.horizontal(|ui| {
-                        ui.label("Version:");
+                        ui.label(t!("ui.unpacker.version"));
                         egui::ComboBox::from_id_salt("browser_version_select").selected_text(&selected_label).show_ui(
                             ui,
                             |ui| {
@@ -1864,32 +1864,32 @@ impl ToolkitTabViewer<'_> {
             ui.horizontal_centered(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // GameParams dump menu (rightmost)
-                    ui.menu_button(icon_str!(icons::FLOPPY_DISK, "GameParams"), |ui| {
-                        if ui.small_button("Base As JSON").clicked() {
+                    ui.menu_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.unpacker.game_params")), |ui| {
+                        if ui.small_button(t!("ui.unpacker.base_as_json")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
                                 self.dump_game_params(path, GameParamsFormat::Json, true);
                             }
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.small_button("As JSON").clicked() {
+                        if ui.small_button(t!("ui.unpacker.as_json")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.json").save_file() {
                                 self.dump_game_params(path, GameParamsFormat::Json, false);
                             }
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.small_button("As CBOR").clicked() {
+                        if ui.small_button(t!("ui.unpacker.as_cbor")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().set_file_name("GameParams.cbor").save_file() {
                                 self.dump_game_params(path, GameParamsFormat::Cbor, false);
                             }
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.small_button("As JSON (Minimal / Transformed)").clicked() {
+                        if ui.small_button(t!("ui.unpacker.as_json_minimal")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.json").save_file() {
                                 self.dump_game_params(path, GameParamsFormat::MinimalJson, false);
                             }
                             ui.close_kind(UiKind::Menu);
                         }
-                        if ui.small_button("As CBOR (Minimal / Transformed)").clicked() {
+                        if ui.small_button(t!("ui.unpacker.as_cbor_minimal")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().set_file_name("MinGameParams.cbor").save_file() {
                                 self.dump_game_params(path, GameParamsFormat::MinimalCbor, false);
                             }
@@ -1915,10 +1915,10 @@ impl ToolkitTabViewer<'_> {
 
                     ui.checkbox(
                         &mut self.tab_state.browser_state.decode_prototypes_as_json,
-                        "Decode prototypes as JSON",
+                        t!("ui.unpacker.decode_prototypes"),
                     )
                     .on_hover_text(
-                        "Decode supported Assets.bin prototypes (.visual, .model, .mfm) to JSON on extraction",
+                        t!("ui.unpacker.decode_prototypes_tooltip"),
                     );
 
                     // Queue popover button
@@ -1945,9 +1945,9 @@ impl ToolkitTabViewer<'_> {
                                     ui.set_max_height(300.0);
                                     ui.vertical(|ui| {
                                         ui.horizontal(|ui| {
-                                            ui.strong("Extraction Queue");
+                                            ui.strong(t!("ui.unpacker.extraction_queue"));
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.small_button(icon_str!(icons::TRASH, "Clear All")).clicked() {
+                                                if ui.small_button(wt_translations::icon_t(icons::TRASH, &t!("ui.unpacker.clear_all"))).clicked() {
                                                     self.tab_state.items_to_extract.lock().clear();
                                                     self.tab_state.browser_state.show_queue_popover = false;
                                                 }
@@ -1990,7 +1990,7 @@ impl ToolkitTabViewer<'_> {
                     ui.separator();
 
                     // Browse button
-                    if ui.button(icon_str!(icons::FOLDER, "Browse")).clicked()
+                    if ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.unpacker.browse"))).clicked()
                         && let Some(folder) = rfd::FileDialog::new().pick_folder()
                     {
                         self.tab_state.output_dir = folder.to_string_lossy().into_owned();
@@ -1999,7 +1999,7 @@ impl ToolkitTabViewer<'_> {
                     // Output path text box fills remaining space
                     ui.add(
                         egui::TextEdit::singleline(&mut self.tab_state.output_dir)
-                            .hint_text("Output directory...")
+                            .hint_text(t!("ui.unpacker.output_dir_hint"))
                             .desired_width(ui.available_width()),
                     );
                 });

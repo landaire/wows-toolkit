@@ -52,6 +52,7 @@ arc = ["wows_replays/arc"]
 [dependencies]
 wows_replays = { workspace = true, default-features = false }
 wowsunpack = { workspace = true, default-features = false }
+wt-translations = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg"], optional = true }
 ab_glyph = { version = "0.2", optional = true }
 mp4 = { version = "0.14", optional = true }

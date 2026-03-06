@@ -1,0 +1,688 @@
+[meta]
+language_name = "Nederlands"
+
+# -- Taalselectie dialoog --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "Doorgaan in het Nederlands"
+select_language = "Taal selecteren"
+machine_translation_warning = "De meeste vertalingen zijn machinaal gegenereerd en kunnen onnauwkeurig zijn."
+
+# -- Tabtitels --
+
+[ui.tabs]
+unpacker = "Bronnen uitpakken"
+settings = "Instellingen"
+replay_parser = "Replay-inspecteur"
+player_tracker = "Spelersvolger"
+mod_manager = "Modbeheer"
+armor_viewer = "Pantserweergave"
+stats = "Statistieken"
+
+# -- Algemene knoppen --
+
+[ui.buttons]
+yes = "Ja"
+no = "Nee"
+stop = "Stop"
+copy = "Kopiëren"
+cancel = "Annuleren"
+continue_ = "Doorgaan"
+install_update = "Update installeren"
+view_release = "Release bekijken"
+clear_settings = "Instellingen wissen"
+more_options = "Meer opties"
+create_issue = "Issue aanmaken"
+discord = "Discord"
+github = "GitHub"
+view_github = "Project op GitHub bekijken"
+choose = "Kiezen..."
+reset = "Herstellen"
+
+# -- Menu-items --
+
+[ui.menu]
+file = "Bestand"
+check_updates = "Controleren op updates"
+about = "Over"
+quit = "Afsluiten"
+
+# -- Venstertitels --
+
+[ui.windows]
+build_consent = "Toestemming buildverzameling"
+crash_detected = "Applicatiecrash gedetecteerd"
+update_available = "Update beschikbaar"
+confirm = "Bevestigen"
+network_warning = "Netwerkwaarschuwing"
+error = "Fout"
+about = "Over"
+
+# -- Dialoog- / berichttekst --
+
+[ui.dialogs]
+build_consent_message = "Wilt u buildinformatie van spelers uit classificatie- en willekeurige gevechten naar de ontwikkelaar sturen? Deze gegevensverzameling helpt de gemeenschap om builds van spelers in bulk te analyseren. U kunt dit op elk moment uitschakelen in de instellingen."
+crash_message = "Het lijkt erop dat WoWs Toolkit de vorige keer is gecrasht. Als u dit probleem wilt melden, maak dan een issue aan op GitHub of sluit u aan bij de Discord-server en geef de onderstaande informatie."
+crash_clear_settings = "Als om de een of andere reden de opgeslagen gegevens van de applicatie verantwoordelijk zouden kunnen zijn, kunt u proberen de instellingen te wissen door op de onderstaande knop te drukken. Dit wist alle instellingen, inclusief gevolgde spelers. Uw replays en WoWs-gegevens blijven veilig."
+update_message = "Versie %{tag} van WoWs Toolkit is beschikbaar"
+update_windows_only = "Update beschikbaar, maar momenteel wordt alleen Windows ondersteund."
+p2p_warning = "Samenwerkingssessies gebruiken P2P-netwerken. Andere gebruikers in de sessie kunnen mogelijk uw IP-adres zien."
+
+# -- Labels --
+
+[ui.labels]
+debug_build = "⚠ Debug build ⚠"
+error_occurred = "Er is een fout opgetreden:"
+made_by = "Gemaakt door landaire."
+credits = "Met dank aan Trackpad, TTaro, lkolbly voor hun bijdragen."
+pr_credits = "Persoonlijke beoordeling (PR) berekeningsgegevens en formule geleverd door WoWs Numbers."
+powered_by = "Mogelijk gemaakt door "
+and = " en "
+suppress_warning = "Niet meer weergeven"
+more_info = "Meer informatie"
+loading_replays = "%{count} replays laden..."
+
+# -- Toastberichten --
+
+[ui.messages]
+app_up_to_date = "Applicatie is up-to-date"
+update_check_failed = "Kan niet controleren op app-updates"
+constants_fetch_failed = "Kan bijgewerkte replaydatamapping niet ophalen. Wordt later opnieuw geprobeerd."
+game_data_loaded = "Spelgegevens succesvol geladen"
+no_replays_detected = "Geen replays gevonden — is uw WoWs-map correct geconfigureerd?"
+build_loaded = "Build %{build} geladen"
+replay_loaded = "Replay succesvol geladen"
+twitch_token_invalid = "Twitch-token is ongeldig of verlopen. Werk het bij in Instellingen."
+twitch_token_expired = "Twitch-token is ongeldig of verlopen"
+versioned_constants_rebuild_failed = "Kan versieconstanten niet ophalen tijdens herbouw. Wordt later opnieuw geprobeerd."
+constants_version_mismatch = "De versie van het replaydatamappingbestand komt niet overeen met de spelversie.\nResultaten na het gevecht zijn mogelijk niet accuraat. Wees geduldig terwijl de projectbeheerders de mapping op de server bijwerken."
+constants_updated = "Replaydatamappingbestand succesvol bijgewerkt"
+session_started = "Sessie gestart"
+user_joined = "%{name} is toegetreden"
+user_timeout = "%{name} is verlopen"
+user_left = "%{name} is vertrokken"
+session_ended = "Sessie beëindigd"
+session_error = "Sessiefout: %{msg}"
+connected_to_session = "Verbonden met sessie"
+joined_session = "Sessie betreden: %{name}"
+replay_spam_protection = "Verbinding verbroken: host opent replays te snel"
+host_opened_replay = "Host heeft replay geopend: %{name}"
+host_closed_replay = "Host heeft een replay gesloten"
+session_error_generic = "Sessie: %{msg}"
+session_rejected = "Sessie geweigerd: %{reason}"
+
+# -- Statistieknamen --
+
+[stat]
+damage = "Schade"
+spotting_damage = "Verkenningsschade"
+frags = "Eliminaties"
+raw_xp = "Ruwe XP"
+base_xp = "Basis XP"
+win_rate = "Winstpercentage"
+win_rate_pct = "Winstpercentage (%)"
+personal_rating = "Persoonlijke beoordeling"
+avg_damage = "Gem. schade"
+avg_spotting_damage = "Gem. verkenningsschade"
+avg_frags = "Gem. eliminaties"
+avg_raw_xp = "Gem. ruwe XP"
+avg_base_xp = "Gem. basis XP"
+avg_pr = "Gem. PR"
+avg_prefix = "Gem. %{name}"
+
+[chart]
+game_number = "Spel #"
+combined = "Gecombineerd"
+combined_suffix = "(Gecombineerd)"
+rolling_average_suffix = "(Voortschrijdend gemiddelde)"
+no_data = "Geen gegevens beschikbaar voor geselecteerde schepen"
+win_rate_unavailable = "Winstpercentage is niet beschikbaar voor lijngrafieken per spel (schakel Voortschrijdend gemiddelde in of gebruik staafdiagram)"
+
+# -- Bevestigingsdialogen --
+
+[confirm]
+open_in_game = "Dit start World of Warships. Doorgaan?"
+clear_all_session_stats = "Dit wist alle sessiestatistieken. Doorgaan?"
+clear_ship_session_stats = "Dit verwijdert alle spellen voor dit schip uit de sessiestatistieken. Doorgaan?"
+set_as_session_stats = "Dit vervangt uw huidige sessiestatistieken. Doorgaan?"
+
+# -- Foutmeldingen --
+
+[error]
+file_watcher_creation = "Kan bestandswatcher niet aanmaken: %{error}"
+replay_dir_watch = "Kan replaymap niet bewaken: %{error}"
+
+# -- Instellingen --
+
+[ui.settings.app]
+heading = "Applicatie-instellingen"
+description = "Algemeen applicatiegedrag en uiterlijk"
+check_for_updates = "Controleren op updates bij opstarten"
+enable_logging = "Logboek inschakelen (van kracht na herstart)"
+enable_logging_tooltip = "Schrijf debuglogboeken naar een bestand in de applicatiegegevensmap. Nuttig voor probleemoplossing."
+send_replay_data = "Builds van classificatie- en willekeurige gevechtsreplays naar ShipBuilds.com sturen"
+zoom_factor = "Zoomfactor (Ctrl + en Ctrl - wijzigen dit ook)"
+language = "Taal"
+
+[ui.settings.wows]
+heading = "World of Warships-instellingen"
+description = "Pad naar uw World of Warships-installatie"
+directory_hint = "World of Warships-map"
+
+[ui.settings.replay]
+heading = "Replay-instellingen"
+description = "Configureer welke kolommen in de replayresultatentabel verschijnen"
+show_raw_xp = "Ruwe XP weergeven"
+show_entity_id = "Entiteits-ID weergeven"
+show_observed_damage = "Waargenomen schade weergeven"
+show_fires = "Branden weergeven"
+show_floods = "Overstromingen weergeven"
+show_citadels = "Citadellen weergeven"
+show_crits = "Kritieke moduletreffers weergeven"
+auto_export_data = "Automatische gegevensexport"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "Map voor automatische gegevensexport"
+
+[ui.settings.session]
+heading = "Sessie-instellingen"
+description = "Voorkeuren voor samenwerkende replaysessies"
+display_name = "Weergavenaam"
+suppress_ip_warning = "P2P IP-adreswaarschuwing niet tonen"
+ip_warning_tooltip = "Samenwerkingssessies gebruiken P2P-netwerken. Andere gebruikers in de sessie kunnen mogelijk uw IP-adres zien."
+disable_auto_open = "Automatisch openen van sessievensters uitschakelen"
+auto_open_tooltip = "Indien ingeschakeld, worden sessievensters (replays, tactiekborden) niet automatisch geopend. U kunt ze nog steeds openen vanuit de sessiepopover."
+
+[ui.settings.twitch]
+heading = "Twitch-instellingen"
+description = "Verbind met Twitch voor chatintegratie en spelersvolging"
+get_token = "Inlogtoken ophalen"
+get_token_tooltip = "We gebruiken de inlogpagina van Chatterino omdat deze een token levert met de benodigde rechten (in feite een moderatortoken met chatrechten), en het maakt het niet nodig voor de WoWs Toolkit-ontwikkelaar om een eigen inlogpagina te hosten die hetzelfde resultaat zou opleveren."
+paste_token_no_token = "Token plakken (geen token ingesteld)"
+paste_token_valid = "Token plakken (token geldig)"
+paste_token_invalid = "Token plakken (token ongeldig / verlopen)"
+monitored_channel = "Bewaakt kanaal (standaard: uzelf)"
+
+# -- Replay-inspecteur --
+
+[ui.replay]
+spectator = "Toeschouwer"
+loading = "Laden..."
+no_selection = "Klik op een replay om te bekijken, of dubbelklik om in een nieuw tabblad te openen"
+incomplete_results = "Onvolledige wedstrijdresultaten"
+incomplete_results_tooltip = "De replay heeft nog geen eindresultaten. Gegevens worden automatisch opnieuw geladen wanneer de wedstrijd eindigt en de eindresultaten aan de replay worden toegevoegd."
+no_chat = "Er zijn geen chatberichten verzonden in deze replay"
+team_damage = "Teamschade: "
+hide_my_stats = "Mijn testschipstatistieken verbergen"
+open_manually = "Replaybestand handmatig openen..."
+autoload_latest = "Nieuwste replay automatisch laden"
+column_filters = "Kolomfilters"
+nda = "NDA"
+export = "Exporteren"
+render = "Renderen"
+chat = "Chat"
+game_chat = "Spelchat"
+copy_all = "Alles kopiëren"
+save_to_file = "Opslaan als bestand"
+chat_copied = "Chat gekopieerd"
+copy_message = "Bericht kopiëren"
+export_results = "Resultaten"
+
+[ui.replay.context]
+open_in_new_tab = "Openen in nieuw tabblad"
+copy_path = "Pad kopiëren"
+copy_replay = "Replay kopiëren"
+copy_replays = "%{count} replays kopiëren"
+show_in_explorer = "Weergeven in Verkenner"
+show_replay_controls = "Replaybediening weergeven"
+open_in_game = "Openen in spel"
+render_replay = "Replay renderen"
+set_session_stats_one = "Instellen als sessiestatistieken (1 replay)"
+set_session_stats_many = "Instellen als sessiestatistieken (%{count} replays)"
+add_session_stats_one = "Toevoegen aan sessiestatistieken (1 replay)"
+add_session_stats_many = "Toevoegen aan sessiestatistieken (%{count} replays)"
+
+[ui.replay.column]
+actions = "Acties"
+player_name = "Spelersnaam"
+base_xp = "Basis XP"
+raw_xp = "Ruwe XP"
+ship_name = "Scheepsnaam"
+hits = "Treffers"
+kills = "Eliminaties"
+observed_damage = "Waargenomen schade"
+actual_damage = "Werkelijke schade"
+spotting_damage = "Verkenningsschade"
+potential_damage = "Potentiële schade"
+time_lived = "Tijd geleefd"
+fires = "Branden"
+floods = "Overstromingen"
+citadels = "Citadellen"
+crits = "Kritiek"
+received_damage = "Ontvangen schade"
+distance_traveled = "Afgelegde afstand"
+skills = "Vaardigheden"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Ruwe XP"
+entity_id = "Entiteits-ID"
+observed_damage = "Waargenomen schade"
+fires = "Branden"
+floods = "Overstromingen"
+citadels = "Citadellen"
+crits = "Kritieke moduletreffers"
+
+[ui.replay.group]
+date = "Datum"
+ship = "Schip"
+none = "Geen"
+prefix = "Groepering: %{label}"
+
+[ui.replay.player]
+hidden_profile = "Speler heeft een verborgen profiel"
+never_connected = "Speler heeft nooit verbinding gemaakt met de wedstrijd"
+
+[ui.replay.build]
+open_in_browser = "Build openen in browser"
+copy_link = "Buildlink kopiëren"
+copy_short_link = "Korte buildlink kopiëren"
+link_copied = "Buildlink gekopieerd"
+open_wows_numbers = "WoWs Numbers-pagina openen"
+not_spotted = "Dit schip is nooit gespot. Buildinformatie niet beschikbaar."
+
+[ui.replay.sections]
+achievements = "Prestaties"
+ribbons = "Linten"
+modules = "Modules:"
+modules_none = "Geen modules"
+abilities = "Vaardigheden:"
+abilities_none = "Geen vaardigheden"
+captain_skills = "Kapiteinvaardigheden:"
+captain_skills_none = "Geen kapiteinvaardigheden"
+
+[ui.replay.debug]
+view_raw_metadata = "Ruwe spelersmetadata bekijken"
+raw_metadata = "Ruwe metadata"
+view_results = "Resultaten bekijken"
+raw_json = "Ruwe JSON"
+raw_json_tooltip = "De ruwe gevechtsresultaten zoals geserialiseerd door WG."
+mapped_json = "Toegewezen JSON"
+mapped_json_tooltip = "Gevechtsresultaten met positionele arrays omgezet naar benoemde velden."
+
+[ui.replay.results]
+victory = "Overwinning"
+defeat = "Nederlaag"
+draw = "Gelijkspel"
+
+[ui.replay.controls]
+window_title = "Replaybediening"
+unavailable = "Bediening niet beschikbaar (commands.scheme.xml niet gevonden in spelbestanden)."
+
+# -- Samenwerking / Sessie --
+
+[ui.collab]
+session = "Sessie"
+starting = "Sessie starten…"
+session_active = "Sessie actief"
+connected_to_session = "Verbonden met sessie"
+session_token = "Sessietoken:"
+toggle_visibility = "Tokenzichtbaarheid wisselen"
+copy_token = "Token kopiëren"
+token_copied = "Token gekopieerd naar klembord"
+copy_web_link = "Weblink kopiëren"
+copy_web_link_tooltip = "Link kopiëren voor de webclient"
+web_link_copied = "Weblink gekopieerd naar klembord"
+copy_localhost_link = "Localhost-link kopiëren"
+copy_localhost_tooltip = "Localhost-link kopiëren (dev)"
+localhost_copied = "Localhost-link gekopieerd naar klembord"
+connected_count = "%{count} verbonden"
+promote_cohost = "Promoveer tot co-host"
+promoted_cohost = "%{name} gepromoveerd tot co-host"
+permissions = "Rechten"
+lock_annotations = "Annotaties vergrendelen"
+lock_settings = "Instellingen vergrendelen"
+reset_overrides = "Clientoverschrijvingen herstellen"
+reset_overrides_tooltip = "Alle wijzigingen in clientweergave-instellingen herstellen"
+leave = "Verlaten"
+role_host = "Host"
+role_cohost = "Co-host"
+you = "(jij)"
+display_name = "Weergavenaam:"
+display_name_hint = "Uw naam..."
+display_name_error = "Voer een weergavenaam in"
+enter_display_name = "Voer eerst een weergavenaam in"
+host_session = "Een sessie hosten"
+start_session = "Sessie starten"
+join_session = "Deelnemen aan een sessie"
+paste_and_join = "Token plakken en deelnemen"
+clipboard_empty = "Klembord is leeg"
+invalid_token = "Ongeldig token: %{error}"
+shared_windows = "Gedeelde vensters"
+open = "Openen"
+open_for_everyone = "Openen voor iedereen"
+tactics_board = "Tactiekbord"
+max_boards = "Maximaal %{count} tactiekborden geopend"
+waiting_for_data = "Wachten tot spelgegevens zijn geladen…"
+
+# -- Gevechtsresultaattekst --
+
+[battle]
+victory = "OVERWINNING"
+defeat = "NEDERLAAG"
+draw = "GELIJKSPEL"
+battle_starts_in = "GEVECHT BEGINT OVER"
+
+# -- Beschrijvingen aflooptype --
+
+[finish_type]
+unknown = "Gevecht beëindigd"
+extermination = "Alle vijandelijke schepen vernietigd"
+base_captured = "Basis veroverd"
+timeout = "Tijd verstreken"
+failure = "Missie mislukt"
+technical = "Technische beëindiging"
+score = "Scorelimiet bereikt"
+score_on_timeout = "Scorevoorsprong bij tijdslimiet"
+pve_success = "Missie volbracht"
+pve_failed = "Missie mislukt"
+score_zero = "Score uitgeput"
+score_excess = "Scorelimiet overschreden"
+
+# -- Statistiekentab --
+
+[ui.stats]
+overview = "Overzicht"
+limit = "Limiet"
+division = "Div:"
+div_all = "Alle"
+div_solo = "Solo"
+div_div = "Div"
+mode_label = "Modus:"
+clear = "Wissen"
+pr = "PR:"
+frags_count = "%{count} eliminaties"
+best_frags = "Beste: %{ship} (%{count} kills)"
+max_damage = "Max schade: %{ship} (%{damage})"
+copy_markdown = "Kopiëren als Markdown"
+copy_csv = "Kopiëren als CSV"
+remove_games_hint = "Alle %{ship}-spellen verwijderen (Ctrl+Click om bevestiging over te slaan)"
+no_stats = "Geen sessiestatistieken beschikbaar. Speel eerst enkele spellen!"
+settings = "Instellingen"
+chart_type = "Grafiektype"
+stat_label = "Statistiek:"
+chart_line = "Lijn"
+chart_bar = "Staaf"
+options = "Opties"
+combined = "Gecombineerd"
+rolling_avg = "Voortschrijdend gem."
+labels = "Labels"
+ships = "Schepen"
+all_ships = "Alle"
+no_ships = "Geen"
+copy_as_image = "Kopiëren als afbeelding"
+
+[ui.stats.table]
+min = "Min"
+max = "Max"
+total = "Totaal"
+average = "Gemiddelde"
+
+# -- Spelersvolger --
+
+[ui.player_tracker]
+clear_stats = "Statistieken wissen"
+player_filter = "Spelersfilter"
+populate_from_replays = "Gegevens vullen vanuit replays"
+current_match = "Spelers in huidige wedstrijd"
+historical = "Historische wedstrijden"
+seen_minutes = "Gezien %{minutes} minuten na start wedstrijd"
+
+[ui.player_tracker.column]
+clan = "Clan"
+player_name = "Spelersnaam"
+twitch_names = "Mogelijke Twitch-namen"
+wg_id = "WG-ID"
+total_encounters = "Totale ontmoetingen"
+encounters_in_range = "Ontmoetingen in tijdsbereik"
+last_encountered = "Laatst ontmoet"
+aliases = "Aliassen"
+notes = "Notities"
+
+[ui.player_tracker.period]
+past_hour = "Afgelopen uur"
+past_six_hours = "Afgelopen 6 uur"
+past_day = "Afgelopen 24 uur"
+past_week = "Afgelopen week"
+past_month = "Afgelopen maand"
+all_time = "Altijd"
+
+# -- Modbeheer --
+
+[ui.mod_manager]
+category_filters = "Categoriefilters"
+enabled = "Ingeschakeld"
+mod_home = "Mod-startpagina"
+discord_thread = "Discord-goedkeuringsthread"
+save_config = "Modconfiguratie opslaan"
+load_config = "Modconfiguratie laden"
+filter = "Filter"
+
+[ui.mod_manager.column]
+enabled = "Ingeschakeld"
+name = "Naam"
+author = "Auteur"
+category = "Categorie"
+
+# -- Replayrenderer --
+
+[ui.renderer]
+loading = "Replaygegevens laden..."
+preparing_export = "Export voorbereiden..."
+encoding = "Coderen"
+muxing = "Muxing"
+
+[ui.renderer.advantage]
+breakdown = "Voordeelanalyse"
+team_eliminated = "Een team is geëlimineerd"
+score_projection = "Scoreprojectie"
+fleet_power = "Vlootkracht"
+strategic_threat = "Strategische dreiging"
+total = "Totaal"
+hp_incomplete = "HP/scheepsgegevens onvolledig — alleen scorefactoren weergegeven"
+
+[ui.renderer.context]
+show_trail = "Spoor tonen"
+disable_other_trails = "Alle andere sporen uitschakelen"
+ranges = "Bereiken"
+detection = "Detectie"
+main_battery = "Hoofdbatterij"
+secondary = "Secundair"
+torpedo = "Torpedo"
+radar = "Radar"
+hydro = "Hydro"
+enable_all = "Alles inschakelen"
+disable_all = "Alles uitschakelen"
+disable_other_ranges = "Alle andere bereiken uitschakelen"
+enable_all_ranges = "Bereiken van alle schepen inschakelen"
+show_armor = "Realtime pantser tonen"
+
+[ui.renderer.controls]
+jump_to_start = "Naar begin springen"
+previous_event = "Vorig evenement (Shift+Left)"
+back_10s = "10s terug (Left)"
+pause = "Pauze (Space)"
+play = "Afspelen (Space)"
+forward_10s = "10s vooruit (Right)"
+next_event = "Volgend evenement (Shift+Right)"
+jump_to_end = "Naar einde springen"
+save_as_video = "Opslaan als video"
+copy_to_clipboard = "Video renderen naar klembord"
+
+[ui.renderer.settings]
+ship_settings = "Scheepsinstellingen"
+armament = "Bewapening"
+dead_ships = "Vernietigde schepen"
+dead_ship_names = "Namen vernietigde schepen"
+player_names = "Spelersnamen"
+ship_ranges = "Scheepsbereiken"
+self_ship_ranges = "Eigen scheepsbereiken"
+ship_names = "Scheepsnamen"
+turret_direction = "Geschutskoepelrichting"
+trail_settings = "Spoorinstellingen"
+heat_trail = "Warmtespoor"
+speed_trails = "Snelheidssporen"
+dead_ship_trails = "Sporen vernietigde schepen"
+map_settings = "Kaartinstellingen"
+buildings = "Gebouwen"
+capture_points = "Innamepunten"
+consumables = "Verbruiksartikelen"
+planes = "Vliegtuigen"
+smoke = "Rook"
+torpedoes = "Torpedo's"
+tracers = "Spoorlichtkogels"
+hud_settings = "HUD-instellingen"
+battle_result = "Gevechtsresultaat"
+buff_counters = "Bufftellers"
+chat_label = "Chat"
+kill_feed = "Eliminatiefeed"
+score_label = "Score"
+score_timers = "Scoretimers"
+team_advantage = "Teamvoordeel"
+timer = "Timer"
+export_settings = "Exportinstellingen"
+prefer_cpu = "CPU-encoder voorkeur"
+prefer_cpu_tooltip = "Gebruik software (CPU)-encoder in plaats van GPU voor video-export"
+save_defaults = "Standaarden opslaan"
+event_timeline = "Evenementtijdlijn"
+
+# -- Bestandsuitpakker --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "Assets.bin laden..."
+load_failed = "Kan niet laden: %{error}"
+no_game_data = "Geen spelgegevens geladen. Stel uw World of Warships-map in bij Instellingen."
+filter_files = "Bestanden filteren..."
+search_in_files = "Zoeken in bestanden"
+search_hint = "Zoeken in bestanden..."
+path_filter_hint = "Padfilter (bijv. *.xml)"
+queue_all = "Alles in wachtrij"
+queue_all_files = "Alle bestanden in wachtrij"
+empty_directory = "Lege map"
+stop_search_tooltip = "Zoeken stoppen"
+no_matches = "Geen resultaten gevonden."
+view_as_json = "Bekijken als JSON"
+extract_as_json = "Extraheren als JSON"
+view_contents = "Inhoud bekijken"
+version = "Versie:"
+game_params = "GameParams"
+base_as_json = "Basis als JSON"
+as_json = "Als JSON"
+as_cbor = "Als CBOR"
+as_json_minimal = "Als JSON (Minimaal / Getransformeerd)"
+as_cbor_minimal = "Als CBOR (Minimaal / Getransformeerd)"
+decode_prototypes = "Prototypen decoderen als JSON"
+decode_prototypes_tooltip = "Ondersteunde Assets.bin-prototypen (.visual, .model, .mfm) decoderen naar JSON bij extractie"
+extraction_queue = "Extractiewachtrij"
+clear_all = "Alles wissen"
+browse = "Bladeren"
+output_dir_hint = "Uitvoermap..."
+go_to_directory = "Naar map gaan"
+remove_from_queue = "Verwijderen uit wachtrij"
+queue_folder = "Hele map in wachtrij"
+double_click_open = "Dubbelklik om te openen"
+
+[ui.unpacker.column]
+name = "Naam"
+size = "Grootte"
+type_col = "Type"
+path = "Pad"
+file = "Bestand"
+offset = "Offset"
+context = "Context"
+
+# -- Pantserweergave --
+
+[ui.armor]
+load_settings = "Laad spelgegevens in Instellingen om de Pantserweergave te gebruiken."
+gpu_unavailable = "GPU-renderstatus niet beschikbaar."
+loading_ship = "Scheepsgegevens laden..."
+load_failed = "Kan scheepsgegevens niet laden: %{error}"
+empty = "Leeg"
+mirror_cameras = "Camera's spiegelen"
+sync_options = "Opties synchroniseren"
+sync_tooltip = "Houd pantser-/rompzichtbaarheid gesynchroniseerd over alle panelen"
+compare_split = "Vergelijken in nieuw paneel"
+export_model = "Scheepsmodel exporteren"
+armor_thickness = "Pantserdikte"
+export_disclaimer = "Deze 3D-modellen en texturen zijn intellectueel eigendom van Wargaming en elk gebruik van deze modellen moet in overeenstemming zijn met uw lokale wetgeving."
+export_button = "Exporteren"
+armor_toggle = "Pantser"
+armor_tooltip = "Pantserzones weergeven/verbergen"
+hull_toggle = "Romp"
+hull_tooltip = "Rompmodelonderdelen weergeven/verbergen"
+splash_toggle = "Splash"
+splash_tooltip = "Splashbox weergeven/verbergen"
+show_hidden = "Verborgen tonen"
+show_hidden_tooltip = "(Mogelijk) verborgen panelen weergeven/verbergen"
+gaps = "Openingen"
+gaps_tooltip = "Markeer grenzen waar pantserpanelen niet aansluiten (mogelijke openingen)"
+display = "Weergave"
+display_tooltip = "Weergave-instellingen (Ctrl+S)"
+marker_opacity = "Markeringsdekking"
+save_defaults = "Opslaan als standaard"
+export_tab = "Exporteren"
+export_tooltip = "Scheepsmodel exporteren naar OBJ-bestand"
+pen_check = "Penetratiecontrole"
+pen_check_tooltip = "Granaten configureren voor penetratievergelijking"
+trajectory = "Baan"
+trajectory_on = "Baan [AAN]"
+trajectory_tooltip = "Klik op pantser om granatenbanen te simuleren (Ctrl+T)"
+continue_ricochet = "Doorgaan na ricochet"
+splash_mode = "Splash"
+splash_on = "Splash [AAN]"
+splash_no_data = "Geen splashgegevens voor dit schip"
+splash_no_shells = "Voeg een schip met HE/SAP-granaten toe aan de vergelijkingslijst"
+splash_tooltip_mode = "Klik op pantser om HE-splashschadevolume te visualiseren"
+loading_armor = "Schip laden..."
+select_ship = "Selecteer een schip uit de lijst"
+pen_check_label = "Penetratiecontrole"
+all_btn = "Alle"
+none_btn = "Geen"
+opaque = "Ondoorzichtig"
+upgrade = "Upgrade:"
+plate_edges = "Plaatranden"
+waterline = "Waterlijn"
+opacity = "Dekking"
+ship_hull = "Scheepsromp"
+opaque_hull = "Ondoorzichtige romp"
+ballistic_disclaimer = "Ballistische resultaten zijn gebaseerd op reverse engineering/schattingen van hoe de simulatie werkt"
+roll = "Rollen"
+ctrl_click_solo = "Ctrl+klik om te isoleren"
+reset_plates = "Platen herstellen"
+
+[ui.armor.realtime]
+loading = "Scheepspantser laden..."
+waiting = "Wachten op scheepsgegevens..."
+incoming_fire = "Inkomend vuur"
+attacker_filter = "Aanvallerfilter"
+all_enemies = "Alle vijanden"
+show_secondaries = "Secundaire bewapening tonen"
+auto_scroll = "Automatisch scrollen"
+seek_to_salvo = "Naar salvo zoeken"
+deselect = "Deselecteren"
+select_all = "Alles selecteren"
+no_data = "Granatgegevens niet meer beschikbaar"
+sim_agrees = "Simulatie bevestigt"
+no_armor_hit = "Geen pantserpanelen geraakt"
+
+# -- Labels voordeelniveau --
+
+[advantage]
+absolute = "Absoluut"
+strong = "Sterk"
+moderate = "Matig"
+weak = "Zwak"

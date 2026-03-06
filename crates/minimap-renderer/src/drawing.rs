@@ -20,6 +20,8 @@ use tiny_skia::Stroke;
 use tiny_skia::StrokeDash;
 use tiny_skia::Transform;
 
+use std::sync::Arc;
+
 use crate::assets::GameFonts;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
@@ -28,6 +30,7 @@ use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RenderTarget;
 use crate::draw_command::ShipVisibility;
 use wows_replays::types::ElapsedClock;
+use wt_translations::{DefaultTextResolver, TextResolver, TranslatableText};
 
 // ── Pixmap conversion helpers ──────────────────────────────────────────────
 
@@ -682,11 +685,16 @@ fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedCloc
     }
 }
 
-fn draw_pre_battle_countdown(pm: &mut Pixmap, seconds: i64, fonts: &GameFonts) {
+fn draw_pre_battle_countdown(
+    pm: &mut Pixmap,
+    seconds: i64,
+    fonts: &GameFonts,
+    resolver: &dyn TextResolver,
+) {
     let text = format!("{}", seconds);
-    let subtitle = "BATTLE STARTS IN";
+    let subtitle = resolver.resolve(&TranslatableText::PreBattleLabel);
     let glow_color: [u8; 3] = [255, 200, 50]; // gold
-    draw_battle_result_overlay(pm, &text, Some(subtitle), glow_color, true, fonts);
+    draw_battle_result_overlay(pm, &text, Some(&subtitle), glow_color, true, fonts);
 }
 
 /// Map a DeathCause to the icon key used in the death_cause_icons HashMap.
@@ -1291,6 +1299,8 @@ pub struct ImageTarget {
     powerup_icons: HashMap<String, RgbaImage>,
     /// Bounding rects [x, y, w, h] of previously placed config-circle labels in the current frame.
     placed_labels: Vec<[i32; 4]>,
+    /// Resolves translatable game text (battle results, advantage labels, etc.)
+    text_resolver: Arc<dyn TextResolver>,
 }
 
 impl ImageTarget {
@@ -1325,7 +1335,13 @@ impl ImageTarget {
             death_cause_icons,
             powerup_icons,
             placed_labels: Vec::new(),
+            text_resolver: Arc::new(DefaultTextResolver),
         }
+    }
+
+    /// Set a custom text resolver for translating game text.
+    pub fn set_text_resolver(&mut self, resolver: Arc<dyn TextResolver>) {
+        self.text_resolver = resolver;
     }
 
     /// Access the current frame as an RGB image (converted from Pixmap).
@@ -1567,9 +1583,12 @@ impl RenderTarget for ImageTarget {
                 max_score,
                 team0_timer,
                 team1_timer,
-                advantage_label,
-                advantage_team,
+                advantage,
             } => {
+                let advantage_label = advantage
+                    .map(|(level, _)| self.text_resolver.resolve(&TranslatableText::Advantage(level)))
+                    .unwrap_or_default();
+                let advantage_team = advantage.map(|(_, team)| team as i32).unwrap_or(-1);
                 draw_score_bar(
                     &mut self.canvas,
                     *team0,
@@ -1579,8 +1598,8 @@ impl RenderTarget for ImageTarget {
                     *max_score,
                     team0_timer.as_deref(),
                     team1_timer.as_deref(),
-                    advantage_label,
-                    *advantage_team,
+                    &advantage_label,
+                    advantage_team,
                     &self.fonts,
                 );
             }
@@ -1592,7 +1611,7 @@ impl RenderTarget for ImageTarget {
                 draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts);
             }
             DrawCommand::PreBattleCountdown { seconds } => {
-                draw_pre_battle_countdown(&mut self.canvas, *seconds, &self.fonts);
+                draw_pre_battle_countdown(&mut self.canvas, *seconds, &self.fonts, &*self.text_resolver);
             }
             DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
                 let icon_size = 16i32;
@@ -1745,10 +1764,14 @@ impl RenderTarget for ImageTarget {
             DrawCommand::ChatOverlay { entries } => {
                 draw_chat_overlay(&mut self.canvas, entries, &self.fonts, &self.ship_icons, HUD_HEIGHT);
             }
-            DrawCommand::BattleResultOverlay { text, subtitle, color, subtitle_above } => {
+            DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
+                let text = self.text_resolver.resolve(&TranslatableText::BattleResult(*result));
+                let subtitle = finish_type.as_ref().map(|ft| {
+                    self.text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase()
+                });
                 draw_battle_result_overlay(
                     &mut self.canvas,
-                    text,
+                    &text,
                     subtitle.as_deref(),
                     *color,
                     *subtitle_above,

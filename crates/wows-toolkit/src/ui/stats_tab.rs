@@ -9,9 +9,10 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use crate::app::ToolkitTabViewer;
 use crate::data::session_stats::DivisionFilter;
 use crate::data::session_stats::PerformanceInfo;
+use crate::data::session_stats::resolve_ship_name;
 use crate::data::wows_data::GameAsset;
-use crate::icon_str;
 use crate::icons;
+use rust_i18n::t;
 use crate::tab_state::ChartMode;
 use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
@@ -20,6 +21,8 @@ use crate::ui::session_stats_chart::render_line_chart;
 use crate::util::separate_number;
 use std::cmp::Reverse;
 use std::sync::Arc;
+use wows_replays::types::GameParamId;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 
 /// TabViewer for the stats sub-tabs (Overview / Charts).
 ///
@@ -43,7 +46,7 @@ impl TabViewer for StatsTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
-            StatsSubTab::Overview => icon_str!(icons::LIST, "Overview").into(),
+            StatsSubTab::Overview => wt_translations::icon_t(icons::LIST, &t!("ui.stats.overview")).into(),
             StatsSubTab::Charts(id) => {
                 let cfg = self.tab_state.chart_config(*id);
                 let stat = cfg.selected_stat;
@@ -112,7 +115,7 @@ impl ToolkitTabViewer<'_> {
     pub fn build_stats_tab(&mut self, ui: &mut egui::Ui) {
         // ── Shared filter bar (above the dock, applies to all sub-tabs) ──
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.tab_state.settings.session_stats_limit_enabled, "Limit");
+            ui.checkbox(&mut self.tab_state.settings.session_stats_limit_enabled, t!("ui.stats.limit"));
             let mut value = self.tab_state.settings.session_stats_game_count as u32;
             if ui
                 .add_enabled(
@@ -126,25 +129,25 @@ impl ToolkitTabViewer<'_> {
 
             ui.separator();
 
-            ui.label("Div:");
-            ui.selectable_value(&mut self.tab_state.settings.session_stats_division_filter, DivisionFilter::All, "All");
+            ui.label(t!("ui.stats.division"));
+            ui.selectable_value(&mut self.tab_state.settings.session_stats_division_filter, DivisionFilter::All, t!("ui.stats.div_all"));
             ui.selectable_value(
                 &mut self.tab_state.settings.session_stats_division_filter,
                 DivisionFilter::SoloOnly,
-                "Solo",
+                t!("ui.stats.div_solo"),
             );
             ui.selectable_value(
                 &mut self.tab_state.settings.session_stats_division_filter,
                 DivisionFilter::DivOnly,
-                "Div",
+                t!("ui.stats.div_div"),
             );
 
             let all_modes = self.tab_state.settings.session_stats.all_match_groups();
             if all_modes.len() > 1 {
                 ui.separator();
-                ui.label("Mode:");
+                ui.label(t!("ui.stats.mode_label"));
                 if ui
-                    .selectable_label(self.tab_state.settings.session_stats_game_mode_filter.is_empty(), "All")
+                    .selectable_label(self.tab_state.settings.session_stats_game_mode_filter.is_empty(), t!("ui.stats.div_all"))
                     .clicked()
                 {
                     self.tab_state.settings.session_stats_game_mode_filter.clear();
@@ -165,7 +168,7 @@ impl ToolkitTabViewer<'_> {
 
             ui.separator();
 
-            if ui.button(icon_str!(icons::ERASER, "Clear")).clicked() {
+            if ui.button(wt_translations::icon_t(icons::ERASER, &t!("ui.stats.clear"))).clicked() {
                 self.tab_state.pending_confirmation = Some(crate::tab_state::ConfirmableAction::ClearSessionStats);
             }
         });
@@ -225,7 +228,15 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.stats_dock_state = dock_state;
     }
 }
+/// Extract the game metadata provider from tab state (if game data is loaded).
+fn get_metadata_provider(tab_state: &crate::tab_state::TabState) -> Option<Arc<GameMetadataProvider>> {
+    tab_state.world_of_warships_data.as_ref().and_then(|wd| wd.read().game_metadata.clone())
+}
+
 fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egui::Ui) {
+    let provider = get_metadata_provider(tab_state);
+    let provider_ref = provider.as_deref();
+
     // ── Summary stats: compact horizontal flow ──
     let wins = tab_state.settings.session_stats.games_won();
     let losses = tab_state.settings.session_stats.games_lost();
@@ -241,7 +252,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         // PR
         if let Some(pr_result) = tab_state.settings.session_stats.calculate_pr(&tab_state.personal_rating_data.read()) {
             ui.separator();
-            ui.label("PR:");
+            ui.label(t!("ui.stats.pr"));
             ui.label(
                 RichText::new(format!("{:.0} ({})", pr_result.pr, pr_result.category.name()))
                     .color(pr_result.category.color())
@@ -252,18 +263,20 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         // Total frags
         let total_frags = tab_state.settings.session_stats.total_frags();
         ui.separator();
-        ui.label(format!("{total_frags} Frags"));
+        ui.label(t!("ui.stats.frags_count", count = total_frags));
 
         // Max frags
-        if let Some((ship_name, max_frags)) = tab_state.settings.session_stats.max_frags() {
+        if let Some((ship_id, max_frags)) = tab_state.settings.session_stats.max_frags() {
+            let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
-            ui.label(format!("Best: {ship_name} ({max_frags} kills)"));
+            ui.label(t!("ui.stats.best_frags", ship = ship, count = max_frags));
         }
 
         // Max damage
-        if let Some((ship_name, max_damage)) = tab_state.settings.session_stats.max_damage() {
+        if let Some((ship_id, max_damage)) = tab_state.settings.session_stats.max_damage() {
+            let ship = resolve_ship_name(ship_id, provider_ref);
             ui.separator();
-            ui.label(format!("Max DMG: {ship_name} ({})", separate_number(max_damage, locale)));
+            ui.label(t!("ui.stats.max_damage", ship = ship, damage = separate_number(max_damage, locale)));
         }
     });
 
@@ -280,7 +293,13 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         }
     }
 
-    all_achievements.sort_by(|a, b| (Reverse(a.count), &b.display_name).cmp(&(Reverse(b.count), &b.display_name)));
+    let loader: Option<&dyn wowsunpack::data::ResourceLoader> = provider_ref.map(|p| p as &dyn wowsunpack::data::ResourceLoader);
+
+    all_achievements.sort_by(|a, b| {
+        let name_a = a.resolved_name(loader);
+        let name_b = b.resolved_name(loader);
+        (Reverse(a.count), &name_a).cmp(&(Reverse(b.count), &name_b))
+    });
 
     if !all_achievements.is_empty()
         && let Some(wows_data_lock) = tab_state.world_of_warships_data.as_ref()
@@ -303,7 +322,9 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
         ui.horizontal_wrapped(|ui| {
             for (achievement, icon) in all_achievements.iter().zip(icons) {
-                let tooltip = format!("{}: {}", &achievement.display_name, &achievement.description);
+                let name = achievement.resolved_name(loader);
+                let desc = achievement.resolved_description(loader);
+                let tooltip = format!("{}: {}", &name, &desc);
                 ui.vertical(|ui| {
                     ui.set_width(56.0);
                     if let Some(icon) = icon {
@@ -315,12 +336,12 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                             ui.add(image);
                             ui.label(RichText::new(format!("x{}", achievement.count)).small().strong());
-                            ui.label(RichText::new(&achievement.display_name).small().weak());
+                            ui.label(RichText::new(&name).small().weak());
                         });
                     } else {
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                             ui.label(RichText::new(format!("x{}", achievement.count)).strong());
-                            ui.label(RichText::new(&achievement.display_name).small().weak());
+                            ui.label(RichText::new(&name).small().weak());
                         });
                     }
                 })
@@ -334,35 +355,36 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
     ScrollArea::vertical().show(ui, |ui| {
         // Collect per-ship PR stats (min/max/avg) before entering the mutable loop
-        let pr_stats_by_ship: std::collections::HashMap<String, crate::data::session_stats::PrStats> = {
+        let pr_stats_by_ship: std::collections::HashMap<GameParamId, crate::data::session_stats::PrStats> = {
             let per_ship_games = tab_state.settings.session_stats.per_ship_limited_games();
-            let mut games_by_ship: std::collections::HashMap<&str, Vec<&crate::data::session_stats::PerGameStat>> =
+            let mut games_by_ship: std::collections::HashMap<GameParamId, Vec<&crate::data::session_stats::PerGameStat>> =
                 std::collections::HashMap::new();
             for game in &per_ship_games {
-                games_by_ship.entry(game.ship_name.as_str()).or_default().push(game);
+                games_by_ship.entry(game.ship_id).or_default().push(game);
             }
             let pr_data = tab_state.personal_rating_data.read();
             games_by_ship
                 .into_iter()
-                .filter_map(|(name, games)| {
-                    crate::data::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (name.to_string(), pr))
+                .filter_map(|(id, games)| {
+                    crate::data::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (id, pr))
                 })
                 .collect()
         };
 
-        let mut battle_results: Vec<(String, PerformanceInfo)> =
+        let mut battle_results: Vec<(GameParamId, PerformanceInfo)> =
             tab_state.settings.session_stats.ship_stats_per_ship_limited().drain().collect();
         battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()));
-        for (ship_name, perf_info) in battle_results {
+        for (ship_id, perf_info) in &battle_results {
             if perf_info.win_rate().is_none() {
                 continue;
             }
 
+            let ship_name = resolve_ship_name(*ship_id, provider_ref);
             let locale = tab_state.settings.locale.as_deref();
             let pr_data = tab_state.personal_rating_data.read();
             let ship_pr = perf_info.calculate_pr(&pr_data);
             drop(pr_data);
-            let pr_stats = pr_stats_by_ship.get(&ship_name);
+            let pr_stats = pr_stats_by_ship.get(ship_id);
 
             let wld = if perf_info.draws() > 0 {
                 format!("{}W/{}L/{}D", perf_info.wins(), perf_info.losses(), perf_info.draws())
@@ -379,7 +401,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             let mut table_rows: Vec<[String; 5]> = Vec::new();
             if let Some(pr) = pr_stats {
                 table_rows.push([
-                    "Personal Rating".into(),
+                    t!("stat.personal_rating").into(),
                     format!("{:.0}", pr.min),
                     format!("{:.0}", pr.max),
                     String::new(),
@@ -387,49 +409,49 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                 ]);
             }
             table_rows.push([
-                "Damage".into(),
+                t!("stat.damage").into(),
                 separate_number(perf_info.min_damage(), locale),
                 separate_number(perf_info.max_damage(), locale),
                 separate_number(perf_info.total_damage(), locale),
                 separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale),
             ]);
             table_rows.push([
-                "Spotting Damage".into(),
+                t!("stat.spotting_damage").into(),
                 separate_number(perf_info.min_spotting_damage(), locale),
                 separate_number(perf_info.max_spotting_damage(), locale),
                 separate_number(perf_info.total_spotting_damage(), locale),
                 separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale),
             ]);
             table_rows.push([
-                "Frags".into(),
+                t!("stat.frags").into(),
                 separate_number(perf_info.min_frags(), locale),
                 separate_number(perf_info.max_frags(), locale),
                 separate_number(perf_info.total_frags(), locale),
                 format!("{:.2}", perf_info.avg_frags().unwrap_or_default()),
             ]);
             table_rows.push([
-                "Raw XP".into(),
+                t!("stat.raw_xp").into(),
                 separate_number(perf_info.min_xp(), locale),
                 separate_number(perf_info.max_xp(), locale),
                 separate_number(perf_info.total_xp(), locale),
                 separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale),
             ]);
             table_rows.push([
-                "Base XP".into(),
+                t!("stat.base_xp").into(),
                 separate_number(perf_info.min_win_adjusted_xp(), locale),
                 separate_number(perf_info.max_win_adjusted_xp(), locale),
                 separate_number(perf_info.total_win_adjusted_xp(), locale),
                 separate_number(perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64, locale),
             ]);
 
-            let collapsing_id = ui.make_persistent_id(format!("ship_stats_collapse_{ship_name}"));
+            let collapsing_id = ui.make_persistent_id(("ship_stats_collapse", ship_id));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
                 .show_header(ui, |ui| {
                     ui.label(&header);
                     ui.menu_button(icons::COPY, |ui| {
-                        if ui.button("Copy as Markdown").clicked() {
+                        if ui.button(t!("ui.stats.copy_markdown")).clicked() {
                             let mut md = format!("**{header}**\n\n");
-                            md.push_str("| | Min | Max | Total | Average |\n");
+                            md.push_str(&format!("| | {} | {} | {} | {} |\n", t!("ui.stats.table.min"), t!("ui.stats.table.max"), t!("ui.stats.table.total"), t!("ui.stats.table.average")));
                             md.push_str("|---|---|---|---|---|\n");
                             for row in &table_rows {
                                 md.push_str(&format!(
@@ -440,8 +462,8 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                             ui.ctx().copy_text(md);
                             ui.close();
                         }
-                        if ui.button("Copy as CSV").clicked() {
-                            let mut csv = String::from(",Min,Max,Total,Average\n");
+                        if ui.button(t!("ui.stats.copy_csv")).clicked() {
+                            let mut csv = format!(",{},{},{},{}\n", t!("ui.stats.table.min"), t!("ui.stats.table.max"), t!("ui.stats.table.total"), t!("ui.stats.table.average"));
                             for row in &table_rows {
                                 csv.push_str(&format!("{},{},{},{},{}\n", row[0], row[1], row[2], row[3], row[4]));
                             }
@@ -451,32 +473,32 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                     });
                     if ui
                         .small_button(icons::TRASH)
-                        .on_hover_text(format!("Remove all {} games (Ctrl+Click to skip confirmation)", ship_name))
+                        .on_hover_text(t!("ui.stats.remove_games_hint", ship = ship_name))
                         .clicked()
                     {
                         if ui.input(|i| i.modifiers.ctrl) {
-                            tab_state.settings.session_stats.clear_ship(&ship_name);
+                            tab_state.settings.session_stats.clear_ship(*ship_id);
                         } else {
                             tab_state.pending_confirmation =
                                 Some(crate::tab_state::ConfirmableAction::ClearShipSessionStats {
-                                    ship_name: ship_name.clone(),
+                                    ship_id: *ship_id,
                                 });
                         }
                     }
                 })
                 .body(|ui| {
-                    egui::Grid::new(format!("ship_stats_{ship_name}")).num_columns(5).striped(true).show(ui, |ui| {
+                    egui::Grid::new(("ship_stats", ship_id)).num_columns(5).striped(true).show(ui, |ui| {
                         use crate::util::personal_rating::PersonalRatingCategory;
 
                         ui.strong("");
-                        ui.strong("Min");
-                        ui.strong("Max");
-                        ui.strong("Total");
-                        ui.strong("Average");
+                        ui.strong(t!("ui.stats.table.min"));
+                        ui.strong(t!("ui.stats.table.max"));
+                        ui.strong(t!("ui.stats.table.total"));
+                        ui.strong(t!("ui.stats.table.average"));
                         ui.end_row();
 
                         if let Some(pr) = pr_stats {
-                            ui.label("Personal Rating");
+                            ui.label(t!("stat.personal_rating"));
                             let min_cat = PersonalRatingCategory::from_pr(pr.min);
                             ui.label(RichText::new(format!("{:.0}", pr.min)).color(min_cat.color()))
                                 .on_hover_text(min_cat.name());
@@ -490,35 +512,35 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                             ui.end_row();
                         }
 
-                        ui.label("Damage");
+                        ui.label(t!("stat.damage"));
                         ui.label(separate_number(perf_info.min_damage(), locale));
                         ui.label(separate_number(perf_info.max_damage(), locale));
                         ui.label(separate_number(perf_info.total_damage(), locale));
                         ui.strong(separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale));
                         ui.end_row();
 
-                        ui.label("Spotting Damage");
+                        ui.label(t!("stat.spotting_damage"));
                         ui.label(separate_number(perf_info.min_spotting_damage(), locale));
                         ui.label(separate_number(perf_info.max_spotting_damage(), locale));
                         ui.label(separate_number(perf_info.total_spotting_damage(), locale));
                         ui.strong(separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale));
                         ui.end_row();
 
-                        ui.label("Frags");
+                        ui.label(t!("stat.frags"));
                         ui.label(separate_number(perf_info.min_frags(), locale));
                         ui.label(separate_number(perf_info.max_frags(), locale));
                         ui.label(separate_number(perf_info.total_frags(), locale));
                         ui.strong(format!("{:.2}", perf_info.avg_frags().unwrap_or_default()));
                         ui.end_row();
 
-                        ui.label("Raw XP");
+                        ui.label(t!("stat.raw_xp"));
                         ui.label(separate_number(perf_info.min_xp(), locale));
                         ui.label(separate_number(perf_info.max_xp(), locale));
                         ui.label(separate_number(perf_info.total_xp(), locale));
                         ui.strong(separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale));
                         ui.end_row();
 
-                        ui.label("Base XP");
+                        ui.label(t!("stat.base_xp"));
                         ui.label(separate_number(perf_info.min_win_adjusted_xp(), locale));
                         ui.label(separate_number(perf_info.max_win_adjusted_xp(), locale));
                         ui.label(separate_number(perf_info.total_win_adjusted_xp(), locale));
@@ -530,14 +552,22 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
     });
 }
 fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64, ui: &mut egui::Ui) {
+    let provider = get_metadata_provider(tab_state);
+    let provider_ref = provider.as_deref();
+
     // Collect all session data into owned locals first to avoid borrow conflicts
     // with chart_configs (which requires &mut self via chart_config()).
-    let ship_stats: Vec<(String, PerformanceInfo)> = tab_state
+    // Resolve ship names from IDs for display, keyed by GameParamId.
+    let ship_stats: Vec<(GameParamId, String, PerformanceInfo)> = tab_state
         .settings
         .session_stats
         .ship_stats_per_ship_limited()
         .into_iter()
         .filter(|(_, perf)| perf.win_rate().is_some())
+        .map(|(id, perf)| {
+            let name = resolve_ship_name(id, provider_ref);
+            (id, name, perf)
+        })
         .collect();
 
     let per_game_data: Vec<crate::data::session_stats::PerGameStat> =
@@ -582,34 +612,36 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
     }
 
     if ship_stats.is_empty() {
-        ui.label("No session stats available. Play some games first!");
+        ui.label(t!("ui.stats.no_stats"));
         return;
     }
 
-    // Get list of ship names for selection
-    let mut ship_names: Vec<String> = ship_stats.iter().map(|(name, _)| name.clone()).collect();
-    ship_names.sort();
+    // Build sorted list of (id, display_name) for selection UI
+    let mut ship_entries: Vec<(GameParamId, String)> =
+        ship_stats.iter().map(|(id, name, _)| (*id, name.clone())).collect();
+    ship_entries.sort_by(|a, b| a.1.cmp(&b.1));
+    let all_ship_ids: Vec<GameParamId> = ship_entries.iter().map(|(id, _)| *id).collect();
 
     let cfg = tab_state.chart_config(chart_id);
 
     // If no ships selected, select all by default
     if !cfg.selected_ships_manually_changed {
-        cfg.selected_ships = ship_names.clone();
+        cfg.selected_ships = all_ship_ids.clone();
     }
 
     // ── Toolbar: settings popover + copy button ──
     ui.horizontal(|ui| {
         // Settings menu button with nested popup support
-        ui.menu_button(icon_str!(icons::GEAR_FINE, "Settings"), |ui| {
+        ui.menu_button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.stats.settings")), |ui| {
             let cfg = tab_state.chart_config(chart_id);
 
             ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                 ui.set_min_width(280.0);
 
                 // ── Chart Type ──
-                ui.strong("Chart Type");
+                ui.strong(t!("ui.stats.chart_type"));
                 ui.indent(("chart_type_indent", chart_id), |ui| {
-                    ui.label("Stat:");
+                    ui.label(t!("ui.stats.stat_label"));
                     ui.horizontal_wrapped(|ui| {
                         for stat in ChartableStat::all() {
                             if ui.selectable_label(cfg.selected_stat == *stat, stat.name()).clicked() {
@@ -619,12 +651,12 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Mode:");
+                        ui.label(t!("ui.stats.mode_label"));
                         ui.add_enabled_ui(!cfg.combined, |ui| {
-                            if ui.selectable_value(&mut cfg.mode, ChartMode::Line, "Line").clicked() {
+                            if ui.selectable_value(&mut cfg.mode, ChartMode::Line, t!("ui.stats.chart_line")).clicked() {
                                 cfg.reset_plot = true;
                             }
-                            if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, "Bar").clicked() {
+                            if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, t!("ui.stats.chart_bar")).clicked() {
                                 cfg.reset_plot = true;
                             }
                         });
@@ -634,42 +666,42 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                 ui.separator();
 
                 // ── Options ──
-                ui.strong("Options");
+                ui.strong(t!("ui.stats.options"));
                 ui.indent(("options_indent", chart_id), |ui| {
-                    if ui.checkbox(&mut cfg.combined, "Combined").changed() {
+                    if ui.checkbox(&mut cfg.combined, t!("ui.stats.combined")).changed() {
                         cfg.reset_plot = true;
                         if cfg.combined {
                             cfg.mode = ChartMode::Line;
                         }
                     }
                     if cfg.mode == ChartMode::Line {
-                        ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, "Rolling Avg"));
+                        ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, t!("ui.stats.rolling_avg")));
                     }
-                    ui.checkbox(&mut cfg.show_labels, "Labels");
+                    ui.checkbox(&mut cfg.show_labels, t!("ui.stats.labels"));
                 });
 
                 ui.separator();
 
                 // ── Ships ──
-                ui.strong("Ships");
+                ui.strong(t!("ui.stats.ships"));
                 ui.indent(("ships_indent", chart_id), |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("All").clicked() {
-                            cfg.selected_ships = ship_names.clone();
+                        if ui.button(t!("ui.stats.all_ships")).clicked() {
+                            cfg.selected_ships = all_ship_ids.clone();
                             cfg.selected_ships_manually_changed = true;
                         }
-                        if ui.button("None").clicked() {
+                        if ui.button(t!("ui.stats.no_ships")).clicked() {
                             cfg.selected_ships.clear();
                             cfg.selected_ships_manually_changed = true;
                         }
                     });
-                    for ship_name in &ship_names {
-                        let mut is_selected = cfg.selected_ships.contains(ship_name);
-                        if ui.checkbox(&mut is_selected, ship_name).changed() {
+                    for (ship_id, ship_display_name) in &ship_entries {
+                        let mut is_selected = cfg.selected_ships.contains(ship_id);
+                        if ui.checkbox(&mut is_selected, ship_display_name.as_str()).changed() {
                             if is_selected {
-                                cfg.selected_ships.push(ship_name.clone());
+                                cfg.selected_ships.push(*ship_id);
                             } else {
-                                cfg.selected_ships.retain(|s| s != ship_name);
+                                cfg.selected_ships.retain(|s| s != ship_id);
                             }
                             cfg.selected_ships_manually_changed = true;
                         }
@@ -680,7 +712,7 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
         // Copy as Image button (stays outside popover)
         let has_plot = tab_state.chart_config(chart_id).plot_rect.is_some();
-        if has_plot && ui.button(icon_str!(icons::CAMERA, "Copy as Image")).clicked() {
+        if has_plot && ui.button(wt_translations::icon_t(icons::CAMERA, &t!("ui.stats.copy_as_image"))).clicked() {
             let cfg = tab_state.chart_config(chart_id);
             cfg.screenshot_requested = true;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
@@ -702,7 +734,7 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
     match mode {
         ChartMode::Line => {
             let filtered_data: Vec<&crate::data::session_stats::PerGameStat> =
-                per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_name)).collect();
+                per_game_data.iter().filter(|g| selected_ships.contains(&g.ship_id)).collect();
 
             if !filtered_data.is_empty() {
                 plot_rect = render_line_chart(
@@ -716,14 +748,15 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                     show_labels,
                     reset_plot,
                     chart_id,
+                    provider_ref,
                 );
             }
         }
         ChartMode::Bar => {
             let mut selected_stats: Vec<(&String, &PerformanceInfo)> = ship_stats
                 .iter()
-                .filter(|(name, _)| selected_ships.contains(name))
-                .map(|(name, perf)| (name, perf))
+                .filter(|(id, _, _)| selected_ships.contains(id))
+                .map(|(_, name, perf)| (name, perf))
                 .collect();
 
             selected_stats.sort_by_key(|a| a.0);

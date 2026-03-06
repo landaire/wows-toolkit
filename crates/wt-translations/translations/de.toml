@@ -1,0 +1,688 @@
+[meta]
+language_name = "Deutsch"
+
+# -- Sprachauswahl-Dialog --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "Weiter auf Deutsch"
+select_language = "Sprache auswählen"
+machine_translation_warning = "Die meisten Übersetzungen wurden maschinell erstellt und können ungenau sein."
+
+# -- Tab-Titel --
+
+[ui.tabs]
+unpacker = "Ressourcen-Entpacker"
+settings = "Einstellungen"
+replay_parser = "Replay-Inspektor"
+player_tracker = "Spieler-Tracker"
+mod_manager = "Mod-Verwaltung"
+armor_viewer = "Panzerungsansicht"
+stats = "Statistiken"
+
+# -- Allgemeine Schaltflächen --
+
+[ui.buttons]
+yes = "Ja"
+no = "Nein"
+stop = "Stopp"
+copy = "Kopieren"
+cancel = "Abbrechen"
+continue_ = "Weiter"
+install_update = "Update installieren"
+view_release = "Release ansehen"
+clear_settings = "Einstellungen zurücksetzen"
+more_options = "Weitere Optionen"
+create_issue = "Issue erstellen"
+discord = "Discord"
+github = "GitHub"
+view_github = "Projekt auf GitHub ansehen"
+choose = "Auswählen..."
+reset = "Zurücksetzen"
+
+# -- Menüpunkte --
+
+[ui.menu]
+file = "Datei"
+check_updates = "Nach Updates suchen"
+about = "Über"
+quit = "Beenden"
+
+# -- Fenstertitel --
+
+[ui.windows]
+build_consent = "Einwilligung zur Build-Erfassung"
+crash_detected = "Anwendungsabsturz erkannt"
+update_available = "Update verfügbar"
+confirm = "Bestätigen"
+network_warning = "Netzwerkwarnung"
+error = "Fehler"
+about = "Über"
+
+# -- Dialog- / Nachrichtentexte --
+
+[ui.dialogs]
+build_consent_message = "Möchten Sie Spieler-Build-Informationen aus Rang- und Zufallsgefechten an den Entwickler senden? Diese Datenerhebung hilft der Community, Spieler-Builds in großem Umfang zu analysieren. Sie können sich jederzeit in den Einstellungen abmelden."
+crash_message = "Es sieht so aus, als wäre WoWs Toolkit beim letzten Mal abgestürzt. Wenn Sie dieses Problem melden möchten, erstellen Sie bitte ein Issue auf GitHub oder treten Sie dem Discord-Server bei und geben Sie die folgenden Informationen an."
+crash_clear_settings = "Falls gespeicherte Anwendungsdaten für das Problem verantwortlich sein könnten, können Sie versuchen, die Einstellungen über die Schaltfläche unten zurückzusetzen. Dadurch werden alle Einstellungen gelöscht, einschließlich verfolgter Spieler. Ihre Replays und WoWs-Daten bleiben erhalten."
+update_message = "Version %{tag} von WoWs Toolkit ist verfügbar"
+update_windows_only = "Update verfügbar, aber derzeit wird nur Windows unterstützt."
+p2p_warning = "Kollaborative Sitzungen verwenden Peer-to-Peer-Netzwerke. Andere Benutzer in der Sitzung können möglicherweise Ihre IP-Adresse sehen."
+
+# -- Beschriftungen --
+
+[ui.labels]
+debug_build = "\u26a0 Debug build \u26a0"
+error_occurred = "Ein Fehler ist aufgetreten:"
+made_by = "Erstellt von landaire."
+credits = "Danke an Trackpad, TTaro, lkolbly für ihre Beiträge."
+pr_credits = "Daten und Formel zur Berechnung der persönlichen Bewertung (PR) bereitgestellt von WoWs Numbers."
+powered_by = "Betrieben von "
+and = " und "
+suppress_warning = "Nicht mehr anzeigen"
+more_info = "Mehr Informationen"
+loading_replays = "Lade %{count} Replays..."
+
+# -- Toast-Nachrichten --
+
+[ui.messages]
+app_up_to_date = "Anwendung ist aktuell"
+update_check_failed = "Konnte nicht nach App-Updates suchen"
+constants_fetch_failed = "Replay-Datenzuordnung konnte nicht abgerufen werden. Erneuter Versuch später."
+game_data_loaded = "Spieldaten erfolgreich geladen"
+no_replays_detected = "Keine Replays erkannt \u2014 ist Ihr WoWs-Verzeichnis richtig konfiguriert?"
+build_loaded = "Build %{build} geladen"
+replay_loaded = "Replay erfolgreich geladen"
+twitch_token_invalid = "Twitch-Token ist ungültig oder abgelaufen. Bitte aktualisieren Sie ihn in den Einstellungen."
+twitch_token_expired = "Twitch-Token ist ungültig oder abgelaufen"
+versioned_constants_rebuild_failed = "Versionierte Konstanten konnten beim Neuaufbau nicht abgerufen werden. Erneuter Versuch später."
+constants_version_mismatch = "Die Version der Replay-Datenzuordnung stimmt nicht mit der Spielversion überein.\nNachkampfergebnisse sind möglicherweise nicht genau. Bitte haben Sie Geduld, während die Projektbetreuer die Zuordnung auf dem Server aktualisieren."
+constants_updated = "Replay-Datenzuordnung erfolgreich aktualisiert"
+session_started = "Sitzung gestartet"
+user_joined = "%{name} ist beigetreten"
+user_timeout = "%{name} hat die Verbindung verloren"
+user_left = "%{name} hat die Sitzung verlassen"
+session_ended = "Sitzung beendet"
+session_error = "Sitzungsfehler: %{msg}"
+connected_to_session = "Mit Sitzung verbunden"
+joined_session = "Sitzung beigetreten: %{name}"
+replay_spam_protection = "Getrennt: Host öffnet Replays zu schnell"
+host_opened_replay = "Host hat Replay geöffnet: %{name}"
+host_closed_replay = "Host hat ein Replay geschlossen"
+session_error_generic = "Sitzung: %{msg}"
+session_rejected = "Sitzung abgelehnt: %{reason}"
+
+# -- Statistiknamen --
+
+[stat]
+damage = "Schaden"
+spotting_damage = "Aufklärungsschaden"
+frags = "Abschüsse"
+raw_xp = "Roh-XP"
+base_xp = "Basis-XP"
+win_rate = "Siegrate"
+win_rate_pct = "Siegrate (%)"
+personal_rating = "Persönliche Bewertung"
+avg_damage = "Durchschn. Schaden"
+avg_spotting_damage = "Durchschn. Aufklärungsschaden"
+avg_frags = "Durchschn. Abschüsse"
+avg_raw_xp = "Durchschn. Roh-XP"
+avg_base_xp = "Durchschn. Basis-XP"
+avg_pr = "Durchschn. PR"
+avg_prefix = "Durchschn. %{name}"
+
+[chart]
+game_number = "Spiel Nr."
+combined = "Kombiniert"
+combined_suffix = "(Kombiniert)"
+rolling_average_suffix = "(Gleitender Durchschnitt)"
+no_data = "Keine Daten für ausgewählte Schiffe verfügbar"
+win_rate_unavailable = "Siegrate ist für Einzelspiel-Liniendiagramme nicht verfügbar (aktivieren Sie den gleitenden Durchschnitt oder verwenden Sie ein Balkendiagramm)"
+
+# -- Bestätigungsdialoge --
+
+[confirm]
+open_in_game = "Dies wird World of Warships starten. Fortfahren?"
+clear_all_session_stats = "Dies wird alle Sitzungsstatistiken löschen. Fortfahren?"
+clear_ship_session_stats = "Dies wird alle Spiele für dieses Schiff aus den Sitzungsstatistiken entfernen. Fortfahren?"
+set_as_session_stats = "Dies wird Ihre aktuellen Sitzungsstatistiken ersetzen. Fortfahren?"
+
+# -- Fehlermeldungen --
+
+[error]
+file_watcher_creation = "Dateiüberwachung konnte nicht erstellt werden: %{error}"
+replay_dir_watch = "Replay-Verzeichnis konnte nicht überwacht werden: %{error}"
+
+# -- Einstellungen --
+
+[ui.settings.app]
+heading = "Anwendungseinstellungen"
+description = "Allgemeines Anwendungsverhalten und Erscheinungsbild"
+check_for_updates = "Beim Start nach Updates suchen"
+enable_logging = "Protokollierung aktivieren (wird beim Neustart wirksam)"
+enable_logging_tooltip = "Debug-Protokolle in eine Datei im Anwendungsdatenverzeichnis schreiben. Nützlich zur Fehlerbehebung."
+send_replay_data = "Builds aus Rang- und Zufallsgefecht-Replays an ShipBuilds.com senden"
+zoom_factor = "Zoomfaktor (Strg + und Strg - ändert dies ebenfalls)"
+language = "Sprache"
+
+[ui.settings.wows]
+heading = "World of Warships Einstellungen"
+description = "Pfad zu Ihrer World of Warships Installation"
+directory_hint = "World of Warships Verzeichnis"
+
+[ui.settings.replay]
+heading = "Replay-Einstellungen"
+description = "Konfigurieren Sie, welche Spalten in der Replay-Ergebnistabelle angezeigt werden"
+show_raw_xp = "Roh-XP anzeigen"
+show_entity_id = "Entity-ID anzeigen"
+show_observed_damage = "Beobachteten Schaden anzeigen"
+show_fires = "Brände anzeigen"
+show_floods = "Flutungen anzeigen"
+show_citadels = "Zitadellentreffer anzeigen"
+show_crits = "Kritische Modultreffer anzeigen"
+auto_export_data = "Daten automatisch exportieren"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "Verzeichnis für automatischen Datenexport"
+
+[ui.settings.session]
+heading = "Sitzungseinstellungen"
+description = "Einstellungen für kollaborative Replay-Sitzungen"
+display_name = "Anzeigename"
+suppress_ip_warning = "P2P-IP-Adressenwarnung nicht anzeigen"
+ip_warning_tooltip = "Kollaborative Sitzungen verwenden Peer-to-Peer-Netzwerke. Andere Benutzer in der Sitzung können möglicherweise Ihre IP-Adresse sehen."
+disable_auto_open = "Automatisches Öffnen von Sitzungsfenstern deaktivieren"
+auto_open_tooltip = "Wenn aktiviert, werden Sitzungsfenster (Replays, Taktiktafeln) nicht automatisch geöffnet. Sie können sie weiterhin über das Sitzungs-Popover öffnen."
+
+[ui.settings.twitch]
+heading = "Twitch-Einstellungen"
+description = "Mit Twitch verbinden für Chat-Integration und Spielerverfolgung"
+get_token = "Anmelde-Token abrufen"
+get_token_tooltip = "Wir verwenden die Anmeldeseite von Chatterino, da sie ein Token mit den erforderlichen Berechtigungen bereitstellt (im Grunde ein Moderator-Token mit Chat-Berechtigungen), und es entfällt die Notwendigkeit für den WoWs Toolkit-Entwickler, eine eigene Anmeldeseite zu hosten, die das gleiche Ergebnis hätte."
+paste_token_no_token = "Token einfügen (Kein Token gesetzt)"
+paste_token_valid = "Token einfügen (Token gültig)"
+paste_token_invalid = "Token einfügen (Token ungültig / abgelaufen)"
+monitored_channel = "Überwachter Kanal (Standard: eigener Kanal)"
+
+# -- Replay-Inspektor --
+
+[ui.replay]
+spectator = "Zuschauer"
+loading = "Laden..."
+no_selection = "Klicken Sie auf ein Replay zum Anzeigen, oder doppelklicken Sie, um es in einem neuen Tab zu öffnen"
+incomplete_results = "Unvollständige Kampfergebnisse"
+incomplete_results_tooltip = "Das Replay hat noch keine Endkampfergebnisse. Die Daten werden automatisch neu geladen, wenn das Gefecht endet und die Endergebnisse dem Replay hinzugefügt werden."
+no_chat = "In diesem Replay wurden keine Chatnachrichten gesendet"
+team_damage = "Teamschaden: "
+hide_my_stats = "Meine Testschiff-Statistiken ausblenden"
+open_manually = "Replay-Datei manuell öffnen..."
+autoload_latest = "Neuestes Replay automatisch laden"
+column_filters = "Spaltenfilter"
+nda = "NDA"
+export = "Exportieren"
+render = "Rendern"
+chat = "Chat"
+game_chat = "Spielchat"
+copy_all = "Alles kopieren"
+save_to_file = "In Datei speichern"
+chat_copied = "Chat kopiert"
+copy_message = "Nachricht kopieren"
+export_results = "Ergebnisse"
+
+[ui.replay.context]
+open_in_new_tab = "In neuem Tab öffnen"
+copy_path = "Pfad kopieren"
+copy_replay = "Replay kopieren"
+copy_replays = "%{count} Replays kopieren"
+show_in_explorer = "Im Datei-Explorer anzeigen"
+show_replay_controls = "Replay-Steuerung anzeigen"
+open_in_game = "Im Spiel öffnen"
+render_replay = "Replay rendern"
+set_session_stats_one = "Als Sitzungsstatistik setzen (1 Replay)"
+set_session_stats_many = "Als Sitzungsstatistik setzen (%{count} Replays)"
+add_session_stats_one = "Zu Sitzungsstatistik hinzufügen (1 Replay)"
+add_session_stats_many = "Zu Sitzungsstatistik hinzufügen (%{count} Replays)"
+
+[ui.replay.column]
+actions = "Aktionen"
+player_name = "Spielername"
+base_xp = "Basis-XP"
+raw_xp = "Roh-XP"
+ship_name = "Schiffsname"
+hits = "Treffer"
+kills = "Abschüsse"
+observed_damage = "Beobachteter Schaden"
+actual_damage = "Tatsächlicher Schaden"
+spotting_damage = "Aufklärungsschaden"
+potential_damage = "Potenzieller Schaden"
+time_lived = "Überlebenszeit"
+fires = "Brände"
+floods = "Flutungen"
+citadels = "Zitadellen"
+crits = "Krit. Treffer"
+received_damage = "Erhaltener Schaden"
+distance_traveled = "Zurückgelegte Strecke"
+skills = "Fähigkeiten"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Roh-XP"
+entity_id = "Entity-ID"
+observed_damage = "Beobachteter Schaden"
+fires = "Brände"
+floods = "Flutungen"
+citadels = "Zitadellen"
+crits = "Kritische Modultreffer"
+
+[ui.replay.group]
+date = "Datum"
+ship = "Schiff"
+none = "Keine"
+prefix = "Gruppe: %{label}"
+
+[ui.replay.player]
+hidden_profile = "Spieler hat ein verstecktes Profil"
+never_connected = "Spieler hat sich nie mit dem Gefecht verbunden"
+
+[ui.replay.build]
+open_in_browser = "Build im Browser öffnen"
+copy_link = "Build-Link kopieren"
+copy_short_link = "Kurzen Build-Link kopieren"
+link_copied = "Build-Link kopiert"
+open_wows_numbers = "WoWs Numbers Seite öffnen"
+not_spotted = "Dieses Schiff wurde nie aufgeklärt. Build-Informationen nicht verfügbar."
+
+[ui.replay.sections]
+achievements = "Auszeichnungen"
+ribbons = "Abzeichen"
+modules = "Module:"
+modules_none = "Keine Module"
+abilities = "Fähigkeiten:"
+abilities_none = "Keine Fähigkeiten"
+captain_skills = "Kapitänsfertigkeiten:"
+captain_skills_none = "Keine Kapitänsfertigkeiten"
+
+[ui.replay.debug]
+view_raw_metadata = "Rohe Spielermetadaten anzeigen"
+raw_metadata = "Rohe Metadaten"
+view_results = "Ergebnisse anzeigen"
+raw_json = "Roh-JSON"
+raw_json_tooltip = "Die rohen Kampfergebnisse, wie sie von WG serialisiert wurden."
+mapped_json = "Zugeordnetes JSON"
+mapped_json_tooltip = "Kampfergebnisse mit positionellen Arrays aufgelöst zu benannten Feldern."
+
+[ui.replay.results]
+victory = "Sieg"
+defeat = "Niederlage"
+draw = "Unentschieden"
+
+[ui.replay.controls]
+window_title = "Replay-Steuerung"
+unavailable = "Steuerung nicht verfügbar (commands.scheme.xml nicht in den Spieldateien gefunden)."
+
+# -- Kollaboration / Sitzung --
+
+[ui.collab]
+session = "Sitzung"
+starting = "Sitzung wird gestartet..."
+session_active = "Sitzung aktiv"
+connected_to_session = "Mit Sitzung verbunden"
+session_token = "Sitzungs-Token:"
+toggle_visibility = "Token-Sichtbarkeit umschalten"
+copy_token = "Token kopieren"
+token_copied = "Token in Zwischenablage kopiert"
+copy_web_link = "Web-Link kopieren"
+copy_web_link_tooltip = "Link für den Web-Client kopieren"
+web_link_copied = "Web-Link in Zwischenablage kopiert"
+copy_localhost_link = "Localhost-Link kopieren"
+copy_localhost_tooltip = "Localhost-Link kopieren (Entwicklung)"
+localhost_copied = "Localhost-Link in Zwischenablage kopiert"
+connected_count = "%{count} verbunden"
+promote_cohost = "Zum Co-Host befördern"
+promoted_cohost = "%{name} zum Co-Host befördert"
+permissions = "Berechtigungen"
+lock_annotations = "Anmerkungen sperren"
+lock_settings = "Einstellungen sperren"
+reset_overrides = "Client-Änderungen zurücksetzen"
+reset_overrides_tooltip = "Alle Änderungen der Client-Anzeigeeinstellungen zurücksetzen"
+leave = "Verlassen"
+role_host = "Host"
+role_cohost = "Co-Host"
+you = "(du)"
+display_name = "Anzeigename:"
+display_name_hint = "Dein Name..."
+display_name_error = "Bitte geben Sie einen Anzeigenamen ein"
+enter_display_name = "Geben Sie zuerst einen Anzeigenamen ein"
+host_session = "Sitzung hosten"
+start_session = "Sitzung starten"
+join_session = "Sitzung beitreten"
+paste_and_join = "Token einfügen und beitreten"
+clipboard_empty = "Zwischenablage ist leer"
+invalid_token = "Ungültiger Token: %{error}"
+shared_windows = "Geteilte Fenster"
+open = "Öffnen"
+open_for_everyone = "Für alle öffnen"
+tactics_board = "Taktiktafel"
+max_boards = "Maximal %{count} Taktiktafeln geöffnet"
+waiting_for_data = "Warte auf das Laden der Spieldaten..."
+
+# -- Kampfergebnis-Text --
+
+[battle]
+victory = "SIEG"
+defeat = "NIEDERLAGE"
+draw = "UNENTSCHIEDEN"
+battle_starts_in = "GEFECHT BEGINNT IN"
+
+# -- Beschreibungen des Kampfendes --
+
+[finish_type]
+unknown = "Gefecht beendet"
+extermination = "Alle feindlichen Schiffe zerstört"
+base_captured = "Basis erobert"
+timeout = "Zeit abgelaufen"
+failure = "Mission fehlgeschlagen"
+technical = "Technisches Ende"
+score = "Punktelimit erreicht"
+score_on_timeout = "Punkteführung bei Zeitablauf"
+pve_success = "Mission erfüllt"
+pve_failed = "Mission fehlgeschlagen"
+score_zero = "Punkte aufgebraucht"
+score_excess = "Punktelimit überschritten"
+
+# -- Statistik-Tab --
+
+[ui.stats]
+overview = "Übersicht"
+limit = "Limit"
+division = "Div.:"
+div_all = "Alle"
+div_solo = "Solo"
+div_div = "Div"
+mode_label = "Modus:"
+clear = "Löschen"
+pr = "PR:"
+frags_count = "%{count} Abschüsse"
+best_frags = "Beste: %{ship} (%{count} Abschüsse)"
+max_damage = "Max. Schaden: %{ship} (%{damage})"
+copy_markdown = "Als Markdown kopieren"
+copy_csv = "Als CSV kopieren"
+remove_games_hint = "Alle %{ship}-Spiele entfernen (Strg+Klick zum Überspringen der Bestätigung)"
+no_stats = "Keine Sitzungsstatistiken verfügbar. Spielen Sie zuerst einige Gefechte!"
+settings = "Einstellungen"
+chart_type = "Diagrammtyp"
+stat_label = "Statistik:"
+chart_line = "Linie"
+chart_bar = "Balken"
+options = "Optionen"
+combined = "Kombiniert"
+rolling_avg = "Gleit. Durchschn."
+labels = "Beschriftungen"
+ships = "Schiffe"
+all_ships = "Alle"
+no_ships = "Keine"
+copy_as_image = "Als Bild kopieren"
+
+[ui.stats.table]
+min = "Min"
+max = "Max"
+total = "Gesamt"
+average = "Durchschnitt"
+
+# -- Spieler-Tracker --
+
+[ui.player_tracker]
+clear_stats = "Statistiken löschen"
+player_filter = "Spielerfilter"
+populate_from_replays = "Daten aus Replays befüllen"
+current_match = "Spieler im aktuellen Gefecht"
+historical = "Historische Gefechte"
+seen_minutes = "%{minutes} Minuten nach Gefechtsstart gesehen"
+
+[ui.player_tracker.column]
+clan = "Clan"
+player_name = "Spielername"
+twitch_names = "Mögliche Twitch-Namen"
+wg_id = "WG-ID"
+total_encounters = "Begegnungen gesamt"
+encounters_in_range = "Begegnungen im Zeitraum"
+last_encountered = "Zuletzt begegnet"
+aliases = "Aliase"
+notes = "Notizen"
+
+[ui.player_tracker.period]
+past_hour = "Letzte Stunde"
+past_six_hours = "Letzte 6 Stunden"
+past_day = "Letzte 24 Stunden"
+past_week = "Letzte Woche"
+past_month = "Letzter Monat"
+all_time = "Gesamte Zeit"
+
+# -- Mod-Verwaltung --
+
+[ui.mod_manager]
+category_filters = "Kategoriefilter"
+enabled = "Aktiviert"
+mod_home = "Mod-Homepage"
+discord_thread = "Discord-Genehmigungsthread"
+save_config = "Mod-Konfiguration speichern"
+load_config = "Mod-Konfiguration laden"
+filter = "Filter"
+
+[ui.mod_manager.column]
+enabled = "Aktiviert"
+name = "Name"
+author = "Autor"
+category = "Kategorie"
+
+# -- Replay-Renderer --
+
+[ui.renderer]
+loading = "Replay-Daten werden geladen..."
+preparing_export = "Export wird vorbereitet..."
+encoding = "Kodierung"
+muxing = "Muxing"
+
+[ui.renderer.advantage]
+breakdown = "Vorteilsaufschlüsselung"
+team_eliminated = "Ein Team wurde ausgeschaltet"
+score_projection = "Punkteprognose"
+fleet_power = "Flottenstärke"
+strategic_threat = "Strategische Bedrohung"
+total = "Gesamt"
+hp_incomplete = "HP/Schiffsdaten unvollständig \u2014 nur Punktefaktoren werden angezeigt"
+
+[ui.renderer.context]
+show_trail = "Spur anzeigen"
+disable_other_trails = "Alle anderen Spuren deaktivieren"
+ranges = "Reichweiten"
+detection = "Erkennung"
+main_battery = "Hauptbatterie"
+secondary = "Sekundärbewaffnung"
+torpedo = "Torpedo"
+radar = "Radar"
+hydro = "Hydro"
+enable_all = "Alle aktivieren"
+disable_all = "Alle deaktivieren"
+disable_other_ranges = "Alle anderen Reichweiten deaktivieren"
+enable_all_ranges = "Reichweiten aller Schiffe aktivieren"
+show_armor = "Echtzeit-Panzerung anzeigen"
+
+[ui.renderer.controls]
+jump_to_start = "Zum Anfang springen"
+previous_event = "Vorheriges Ereignis (Shift+Left)"
+back_10s = "10s zurück (Left)"
+pause = "Pause (Space)"
+play = "Abspielen (Space)"
+forward_10s = "10s vorwärts (Right)"
+next_event = "Nächstes Ereignis (Shift+Right)"
+jump_to_end = "Zum Ende springen"
+save_as_video = "Als Video speichern"
+copy_to_clipboard = "Video in Zwischenablage rendern"
+
+[ui.renderer.settings]
+ship_settings = "Schiffseinstellungen"
+armament = "Bewaffnung"
+dead_ships = "Zerstörte Schiffe"
+dead_ship_names = "Namen zerstörter Schiffe"
+player_names = "Spielernamen"
+ship_ranges = "Schiffsreichweiten"
+self_ship_ranges = "Eigene Schiffsreichweiten"
+ship_names = "Schiffsnamen"
+turret_direction = "Turmrichtung"
+trail_settings = "Spureinstellungen"
+heat_trail = "Wärmespur"
+speed_trails = "Geschwindigkeitsspuren"
+dead_ship_trails = "Spuren zerstörter Schiffe"
+map_settings = "Karteneinstellungen"
+buildings = "Gebäude"
+capture_points = "Eroberungspunkte"
+consumables = "Verbrauchsgüter"
+planes = "Flugzeuge"
+smoke = "Rauch"
+torpedoes = "Torpedos"
+tracers = "Leuchtspur"
+hud_settings = "HUD-Einstellungen"
+battle_result = "Kampfergebnis"
+buff_counters = "Buff-Zähler"
+chat_label = "Chat"
+kill_feed = "Abschussliste"
+score_label = "Punktestand"
+score_timers = "Punkte-Timer"
+team_advantage = "Teamvorteil"
+timer = "Timer"
+export_settings = "Export-Einstellungen"
+prefer_cpu = "CPU-Encoder bevorzugen"
+prefer_cpu_tooltip = "Software-Encoder (CPU) anstelle von GPU für den Videoexport verwenden"
+save_defaults = "Standardwerte speichern"
+event_timeline = "Ereigniszeitleiste"
+
+# -- Datei-Entpacker --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "Lade assets.bin..."
+load_failed = "Laden fehlgeschlagen: %{error}"
+no_game_data = "Keine Spieldaten geladen. Setzen Sie Ihr World of Warships Verzeichnis in den Einstellungen."
+filter_files = "Dateien filtern..."
+search_in_files = "In Dateien suchen"
+search_hint = "In Dateien suchen..."
+path_filter_hint = "Pfadfilter (z.B. *.xml)"
+queue_all = "Alle einreihen"
+queue_all_files = "Alle Dateien einreihen"
+empty_directory = "Leeres Verzeichnis"
+stop_search_tooltip = "Suche stoppen"
+no_matches = "Keine Treffer gefunden."
+view_as_json = "Als JSON anzeigen"
+extract_as_json = "Als JSON extrahieren"
+view_contents = "Inhalt anzeigen"
+version = "Version:"
+game_params = "GameParams"
+base_as_json = "Basis als JSON"
+as_json = "Als JSON"
+as_cbor = "Als CBOR"
+as_json_minimal = "Als JSON (Minimal / Transformiert)"
+as_cbor_minimal = "Als CBOR (Minimal / Transformiert)"
+decode_prototypes = "Prototypen als JSON dekodieren"
+decode_prototypes_tooltip = "Unterstützte Assets.bin-Prototypen (.visual, .model, .mfm) beim Extrahieren als JSON dekodieren"
+extraction_queue = "Extraktionswarteschlange"
+clear_all = "Alle löschen"
+browse = "Durchsuchen"
+output_dir_hint = "Ausgabeverzeichnis..."
+go_to_directory = "Zum Verzeichnis gehen"
+remove_from_queue = "Aus Warteschlange entfernen"
+queue_folder = "Gesamten Ordner einreihen"
+double_click_open = "Doppelklicken zum Öffnen"
+
+[ui.unpacker.column]
+name = "Name"
+size = "Größe"
+type_col = "Typ"
+path = "Pfad"
+file = "Datei"
+offset = "Offset"
+context = "Kontext"
+
+# -- Panzerungsansicht --
+
+[ui.armor]
+load_settings = "Laden Sie Spieldaten in den Einstellungen, um die Panzerungsansicht zu verwenden."
+gpu_unavailable = "GPU-Renderstatus nicht verfügbar."
+loading_ship = "Schiffsdaten werden geladen..."
+load_failed = "Laden der Schiffsdaten fehlgeschlagen: %{error}"
+empty = "Leer"
+mirror_cameras = "Kameras spiegeln"
+sync_options = "Optionen synchronisieren"
+sync_tooltip = "Panzerungs-/Rumpfsichtbarkeit über alle Fenster synchron halten"
+compare_split = "In neuem Split vergleichen"
+export_model = "Schiffsmodell exportieren"
+armor_thickness = "Panzerungsdicke"
+export_disclaimer = "Diese 3D-Modelle und Texturen sind geistiges Eigentum von Wargaming, und jede Nutzung dieser Modelle sollte den geltenden Gesetzen Ihres Landes entsprechen."
+export_button = "Exportieren"
+armor_toggle = "Panzerung"
+armor_tooltip = "Panzerungszonen ein-/ausblenden"
+hull_toggle = "Rumpf"
+hull_tooltip = "Rumpfmodellteile ein-/ausblenden"
+splash_toggle = "Splash"
+splash_tooltip = "Splash-Box ein-/ausblenden"
+show_hidden = "Versteckte anzeigen"
+show_hidden_tooltip = "(Möglicherweise) versteckte Platten ein-/ausblenden"
+gaps = "Lücken"
+gaps_tooltip = "Grenzflächen hervorheben, an denen Panzerplatten nicht verbunden sind (mögliche Lücken)"
+display = "Anzeige"
+display_tooltip = "Anzeigeeinstellungen (Ctrl+S)"
+marker_opacity = "Markierungsdeckkraft"
+save_defaults = "Als Standard speichern"
+export_tab = "Export"
+export_tooltip = "Schiffsmodell als OBJ-Datei exportieren"
+pen_check = "Durchschlagspr."
+pen_check_tooltip = "Granaten für Durchschlagsvergleich konfigurieren"
+trajectory = "Flugbahn"
+trajectory_on = "Flugbahn [AN]"
+trajectory_tooltip = "Auf Panzerung klicken, um Granatflugbahnen zu simulieren (Ctrl+T)"
+continue_ricochet = "Nach Abpraller fortsetzen"
+splash_mode = "Splash"
+splash_on = "Splash [AN]"
+splash_no_data = "Keine Splash-Daten für dieses Schiff"
+splash_no_shells = "Fügen Sie ein Schiff mit HE/SAP-Granaten zur Vergleichsliste hinzu"
+splash_tooltip_mode = "Auf Panzerung klicken, um das HE-Splash-Schadensvolumen zu visualisieren"
+loading_armor = "Schiff wird geladen..."
+select_ship = "Wählen Sie ein Schiff aus der Liste"
+pen_check_label = "Durchschlagsprüfung"
+all_btn = "Alle"
+none_btn = "Keine"
+opaque = "Undurchsichtig"
+upgrade = "Aufrüstung:"
+plate_edges = "Plattenkanten"
+waterline = "Wasserlinie"
+opacity = "Deckkraft"
+ship_hull = "Schiffsrumpf"
+opaque_hull = "Undurchsichtiger Rumpf"
+ballistic_disclaimer = "Ballistische Ergebnisse basieren auf Reverse Engineering/Schätzungen der Simulationsfunktionsweise"
+roll = "Krängung"
+ctrl_click_solo = "Strg+Klick zum Isolieren"
+reset_plates = "Platten zurücksetzen"
+
+[ui.armor.realtime]
+loading = "Schiffspanzerung wird geladen..."
+waiting = "Warte auf Schiffsdaten..."
+incoming_fire = "Eingehender Beschuss"
+attacker_filter = "Angreiferfilter"
+all_enemies = "Alle Feinde"
+show_secondaries = "Sekundärbewaffnung anzeigen"
+auto_scroll = "Automatisches Scrollen"
+seek_to_salvo = "Zur Salve springen"
+deselect = "Abwählen"
+select_all = "Alle auswählen"
+no_data = "Granatendaten nicht mehr verfügbar"
+sim_agrees = "Simulation stimmt überein"
+no_armor_hit = "Keine Panzerplatten getroffen"
+
+# -- Vorteilsstufen-Bezeichnungen --
+
+[advantage]
+absolute = "Absolut"
+strong = "Stark"
+moderate = "Mäßig"
+weak = "Schwach"

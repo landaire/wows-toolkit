@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
+wt-translations = { workspace = true }
+rust-i18n = { workspace = true }
 wows_minimap_renderer = { workspace = true, default-features = false, features = ["rkyv"] }
 egui = { workspace = true }
 egui-phosphor = { workspace = true }

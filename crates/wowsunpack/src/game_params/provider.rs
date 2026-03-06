@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use gettext::Catalog;
 use itertools::Itertools;
@@ -26,7 +27,7 @@ use super::types::*;
 pub struct GameMetadataProvider {
     params: GameParams,
     param_id_to_translation_id: HashMap<GameParamId, String>,
-    translations: Option<Catalog>,
+    translations: RwLock<Option<Catalog>>,
     specs: Arc<Vec<EntitySpec>>,
 }
 
@@ -49,13 +50,12 @@ impl GameParamProvider for GameMetadataProvider {
 }
 
 impl ResourceLoader for GameMetadataProvider {
-    fn localized_name_from_param(&self, param: &Param) -> Option<&str> {
-        self.param_localization_id(param.id())
-            .and_then(|id| self.translations.as_ref().map(|catalog| catalog.gettext(id)))
+    fn localized_name_from_param(&self, param: &Param) -> Option<String> {
+        self.param_localization_id(param.id()).and_then(|id| self.translate(id))
     }
 
     fn localized_name_from_id(&self, id: &str) -> Option<String> {
-        self.translations.as_ref().map(move |catalog| catalog.gettext(id).to_string())
+        self.translate(id)
     }
 
     fn game_param_by_id(&self, id: GameParamId) -> Option<Rc<Param>> {
@@ -1289,7 +1289,7 @@ impl GameMetadataProvider {
 
         let specs = Arc::new(parse_scripts(&data_file_loader).unwrap());
 
-        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: None, specs })
+        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: RwLock::new(None), specs })
     }
 
     /// Similar to [`Self::from_params`], but does not allow looking up specs. Useful for scenarios where you
@@ -1300,11 +1300,20 @@ impl GameMetadataProvider {
 
         let specs = Arc::new(Vec::new());
 
-        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: None, specs })
+        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: RwLock::new(None), specs })
     }
 
-    pub fn set_translations(&mut self, catalog: Catalog) {
-        self.translations = Some(catalog);
+    pub fn set_translations(&self, catalog: Catalog) {
+        *self.translations.write().expect("translations lock poisoned") = Some(catalog);
+    }
+
+    /// Look up a translation key in the catalog, returning `None` when the
+    /// catalog is absent or gettext returns the key unchanged (= not found).
+    fn translate(&self, key: &str) -> Option<String> {
+        let guard = self.translations.read().ok()?;
+        let catalog = guard.as_ref()?;
+        let result = catalog.gettext(key);
+        if result == key { None } else { Some(result.to_string()) }
     }
 
     pub fn param_localization_id(&self, ship_id: GameParamId) -> Option<&str> {

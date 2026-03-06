@@ -32,7 +32,7 @@ use crate::armor_viewer::state::VisibilitySnapshot;
 use crate::armor_viewer::state::ZonePart;
 use crate::armor_viewer::ui::analysis::focus_analysis_tab;
 use crate::armor_viewer::ui::legend::show_armor_legend;
-use crate::icon_str;
+use rust_i18n::t;
 use crate::icons;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::LAYER_DEFAULT;
@@ -71,7 +71,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        tab.loaded_armor.as_ref().map(|a| a.display_name.as_str()).unwrap_or("Empty").into()
+        tab.loaded_armor.as_ref().map_or_else(|| t!("ui.armor.empty").to_string(), |a| a.display_name.clone()).into()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
@@ -107,7 +107,7 @@ impl ToolkitTabViewer<'_> {
             Some(data) => data,
             None => {
                 ui.centered_and_justified(|ui| {
-                    ui.label("Load game data in Settings to use the Armor Viewer.");
+                    ui.label(t!("ui.armor.load_settings").as_ref());
                 });
                 return;
             }
@@ -117,7 +117,7 @@ impl ToolkitTabViewer<'_> {
             Some(rs) => rs,
             None => {
                 ui.centered_and_justified(|ui| {
-                    ui.label("GPU render state not available.");
+                    ui.label(t!("ui.armor.gpu_unavailable").as_ref());
                 });
                 return;
             }
@@ -185,7 +185,7 @@ impl ToolkitTabViewer<'_> {
                         let available = ui.available_height();
                         ui.add_space(available * 0.4);
                         ui.spinner();
-                        ui.label("Loading ship data...");
+                        ui.label(t!("ui.armor.loading_ship").as_ref());
                     });
                     ui.ctx().request_repaint();
                     return;
@@ -194,7 +194,7 @@ impl ToolkitTabViewer<'_> {
                     ui.vertical_centered(|ui| {
                         let available = ui.available_height();
                         ui.add_space(available * 0.4);
-                        ui.colored_label(egui::Color32::RED, format!("Failed to load ship data: {e}"));
+                        ui.colored_label(egui::Color32::RED, t!("ui.armor.load_failed", error = e).as_ref());
                     });
                     return;
                 }
@@ -236,9 +236,9 @@ impl ToolkitTabViewer<'_> {
         let pane_count = state.dock_state.main_surface().num_tabs();
         if pane_count > 1 {
             ui.horizontal(|ui| {
-                ui.toggle_value(&mut state.mirror_cameras, "Mirror cameras");
-                ui.toggle_value(&mut state.sync_options, "Sync options")
-                    .on_hover_text("Keep armor/hull visibility in sync across all panes");
+                ui.toggle_value(&mut state.mirror_cameras, t!("ui.armor.mirror_cameras").as_ref());
+                ui.toggle_value(&mut state.sync_options, t!("ui.armor.sync_options").as_ref())
+                    .on_hover_text(t!("ui.armor.sync_tooltip").as_ref());
             });
         }
 
@@ -446,13 +446,13 @@ impl ToolkitTabViewer<'_> {
                                             let leaf = egui_ltreeview::NodeBuilder::leaf(ship_id)
                                                 .label(label)
                                                 .context_menu(move |ui| {
-                                                    if ui.button("Compare in new split").clicked() {
+                                                    if ui.button(t!("ui.armor.compare_split").as_ref()).clicked() {
                                                         deferred_compare_ref
                                                             .set(Some((param_idx.clone(), display_name.clone())));
                                                         ui.close();
                                                     }
                                                     if ui
-                                                        .button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export Ship Model"))
+                                                        .button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.armor.export_model")))
                                                         .clicked()
                                                     {
                                                         deferred_export_ref.set(Some(ExportRequest {
@@ -601,7 +601,7 @@ impl ToolkitTabViewer<'_> {
         // Global armor thickness legend (shown once, not per-pane)
         let any_ship_loaded = state.dock_state.iter_all_tabs().any(|(_, tab)| tab.loaded_armor.is_some());
         if any_ship_loaded {
-            egui::Window::new("Armor Thickness")
+            egui::Window::new(t!("ui.armor.armor_thickness").as_ref())
                 .id(egui::Id::new("armor_legend_global"))
                 .collapsible(true)
                 .resizable(false)
@@ -936,15 +936,15 @@ impl ToolkitTabViewer<'_> {
             let param_index = export_req.param_index.clone();
             let display_name = export_req.display_name.clone();
             let selected_hull = export_req.selected_hull.clone();
-            egui::Window::new("Export Ship Model")
+            egui::Window::new(t!("ui.armor.export_model").as_ref())
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| {
-                    ui.label("These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws.");
+                    ui.label(t!("ui.armor.export_disclaimer").as_ref());
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Export").clicked() {
+                        if ui.button(t!("ui.armor.export_button").as_ref()).clicked() {
                             let default_filename = format!("{}.glb", display_name);
                             if let Some(path) = rfd::FileDialog::new()
                                 .set_file_name(&default_filename)
@@ -992,7 +992,7 @@ impl ToolkitTabViewer<'_> {
                             }
                             close_export_dialog = true;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(t!("ui.buttons.cancel").as_ref()).clicked() {
                             close_export_dialog = true;
                         }
                     });
@@ -1297,7 +1297,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 vp_ui.horizontal(|ui| {
                     // ── Armor Zones button with popover ──
                     let armor_btn =
-                        ui.button(icon_str!(icons::SHIELD, "Armor")).on_hover_text("Toggle armor zone visibility");
+                        ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle"))).on_hover_text(t!("ui.armor.armor_tooltip").as_ref());
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1313,8 +1313,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     // ── Hull Model button with popover ──
                     if !armor.hull_part_groups.is_empty() {
                         let hull_btn = ui
-                            .button(icon_str!(icons::THREE_D, "Hull"))
-                            .on_hover_text("Toggle hull model part visibility");
+                            .button(wt_translations::icon_t(icons::THREE_D, &t!("ui.armor.hull_toggle")))
+                            .on_hover_text(t!("ui.armor.hull_tooltip").as_ref());
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
@@ -1337,11 +1337,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     // ── Splash Boxes button with popover ──
                     if !armor.splash_box_groups.is_empty() {
                         let splash_label = if pane.show_splash_boxes {
-                            format!("{} Splash \u{25CF}", icons::CUBE)
+                            format!("{} {} \u{25CF}", icons::CUBE, t!("ui.armor.splash_toggle"))
                         } else {
-                            icon_str!(icons::CUBE, "Splash").to_string()
+                            wt_translations::icon_t(icons::CUBE, &t!("ui.armor.splash_toggle"))
                         };
-                        let splash_btn = ui.button(splash_label).on_hover_text("Toggle splash box visibility");
+                        let splash_btn = ui.button(splash_label).on_hover_text(t!("ui.armor.splash_tooltip").as_ref());
                         egui::Popup::from_toggle_button_response(&splash_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
@@ -1357,8 +1357,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                     // ── Show Hidden Plates toggle ──
                     if ui
-                        .selectable_label(pane.show_hidden_only, icon_str!(icons::EYE_SLASH, "Show Hidden"))
-                        .on_hover_text("Toggle (possibly) hidden panel visibility")
+                        .selectable_label(pane.show_hidden_only, wt_translations::icon_t(icons::EYE_SLASH, &t!("ui.armor.show_hidden")))
+                        .on_hover_text(t!("ui.armor.show_hidden_tooltip").as_ref())
                         .clicked()
                     {
                         pane.show_hidden_only = !pane.show_hidden_only;
@@ -1368,11 +1368,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     // ── Gap Detection toggle ──
                     {
                         let gap_label = if pane.show_gaps && pane.gap_count > 0 {
-                            format!("{} Gaps ({})", icons::WARNING, pane.gap_count)
+                            format!("{} {} ({})", icons::WARNING, t!("ui.armor.gaps"), pane.gap_count)
                         } else if pane.show_gaps {
-                            format!("{} Gaps (0)", icons::CHECK)
+                            format!("{} {} (0)", icons::CHECK, t!("ui.armor.gaps"))
                         } else {
-                            icon_str!(icons::WARNING, "Gaps").to_string()
+                            wt_translations::icon_t(icons::WARNING, &t!("ui.armor.gaps"))
                         };
                         let gap_color = if pane.show_gaps && pane.gap_count > 0 {
                             Some(egui::Color32::from_rgb(255, 100, 100))
@@ -1387,7 +1387,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         }
                         if ui
                             .selectable_label(pane.show_gaps, label)
-                            .on_hover_text("Highlight boundary edges where armor panels don't connect (potential gaps)")
+                            .on_hover_text(t!("ui.armor.gaps_tooltip").as_ref())
                             .clicked()
                         {
                             pane.show_gaps = !pane.show_gaps;
@@ -1397,7 +1397,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                     // ── Display settings button with popover ──
                     let display_btn =
-                        ui.button(icon_str!(icons::GEAR_FINE, "Display")).on_hover_text("Display settings (Ctrl+S)");
+                        ui.button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display"))).on_hover_text(t!("ui.armor.display_tooltip").as_ref());
                     let display_popup_id = display_btn.id.with("display_popup");
                     // Ctrl+S opens display popover at mouse position
                     if ctrl_s_pressed {
@@ -1412,12 +1412,12 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                             }
                             if !pane.trajectories.is_empty() {
                                 ui.horizontal(|ui| {
-                                    ui.label("Marker Opacity");
+                                    ui.label(t!("ui.armor.marker_opacity").as_ref());
                                     ui.add(egui::Slider::new(&mut pane.marker_opacity, 0.0..=1.0).fixed_decimals(2));
                                 });
                             }
                             ui.separator();
-                            if ui.button("Save as defaults").clicked() {
+                            if ui.button(t!("ui.armor.save_defaults").as_ref()).clicked() {
                                 let hull_all_on =
                                     pane.hull_visibility.values().all(|&v| v) && !pane.hull_visibility.is_empty();
                                 let armor_all_on = !pane.part_visibility.is_empty()
@@ -1440,8 +1440,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     // ── Export Ship Model button ──
                     if let Some(param_index) = &pane.selected_ship
                         && ui
-                            .button(icon_str!(icons::DOWNLOAD_SIMPLE, "Export"))
-                            .on_hover_text("Export ship model to OBJ file")
+                            .button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.armor.export_tab")))
+                            .on_hover_text(t!("ui.armor.export_tooltip").as_ref())
                             .clicked()
                     {
                         let display_name = armor.display_name.clone();
@@ -1455,22 +1455,22 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     // ── Penetration Check toggle ──
                     {
                         let label = if comparison_ships.is_empty() {
-                            icon_str!(icons::CROSSHAIR, "Pen Check").to_string()
+                            wt_translations::icon_t(icons::CROSSHAIR, &t!("ui.armor.pen_check"))
                         } else {
-                            format!("{} Pen Check ({})", icons::CROSSHAIR, comparison_ships.len())
+                            format!("{} {} ({})", icons::CROSSHAIR, t!("ui.armor.pen_check"), comparison_ships.len())
                         };
-                        if ui.button(label).on_hover_text("Configure shells for penetration comparison").clicked() {
+                        if ui.button(label).on_hover_text(t!("ui.armor.pen_check_tooltip").as_ref()).clicked() {
                             pen_check_toggle.set(true);
                         }
                     }
 
                     // ── Trajectory mode toggle ──
                     {
-                        let traj_label = if pane.trajectory_mode { "Trajectory [ON]" } else { "Trajectory" };
+                        let traj_label = if pane.trajectory_mode { t!("ui.armor.trajectory_on").to_string() } else { t!("ui.armor.trajectory").to_string() };
                         let btn = egui::Button::new(traj_label);
                         let btn =
                             if pane.trajectory_mode { btn.fill(egui::Color32::from_rgb(80, 60, 20)) } else { btn };
-                        if ui.add(btn).on_hover_text("Click armor to simulate shell trajectories (Ctrl+T)").clicked() {
+                        if ui.add(btn).on_hover_text(t!("ui.armor.trajectory_tooltip").as_ref()).clicked() {
                             pane.trajectory_mode = !pane.trajectory_mode;
                             if pane.trajectory_mode {
                                 pane.splash_mode = false; // mutually exclusive
@@ -1480,7 +1480,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     }
 
                     if pane.trajectory_mode
-                        && ui.checkbox(&mut pane.continue_on_ricochet, "Continue past ricochet").changed()
+                        && ui.checkbox(&mut pane.continue_on_ricochet, t!("ui.armor.continue_ricochet").as_ref()).changed()
                         && !pane.trajectories.is_empty()
                     {
                         let cam_dist = pane.viewport.camera.distance;
@@ -1506,17 +1506,17 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         let has_he_shell = comparison_ships.iter().any(|s| {
                             s.shells.iter().any(|sh| sh.ammo_type == AmmoType::HE || sh.ammo_type == AmmoType::SAP)
                         });
-                        let splash_label = if pane.splash_mode { "Splash [ON]" } else { "Splash" };
+                        let splash_label = if pane.splash_mode { t!("ui.armor.splash_on").to_string() } else { t!("ui.armor.splash_mode").to_string() };
                         let btn = egui::Button::new(splash_label);
                         let btn = if pane.splash_mode { btn.fill(egui::Color32::from_rgb(80, 40, 10)) } else { btn };
                         let enabled = has_splash && has_he_shell;
                         let resp = ui.add_enabled(enabled, btn);
                         let resp = if !has_splash {
-                            resp.on_disabled_hover_text("No splash data for this ship")
+                            resp.on_disabled_hover_text(t!("ui.armor.splash_no_data").as_ref())
                         } else if !has_he_shell {
-                            resp.on_disabled_hover_text("Add a ship with HE/SAP shells to the comparison list")
+                            resp.on_disabled_hover_text(t!("ui.armor.splash_no_shells").as_ref())
                         } else {
-                            resp.on_hover_text("Click armor to visualize HE splash damage volume")
+                            resp.on_hover_text(t!("ui.armor.splash_tooltip_mode").as_ref())
                         };
                         if resp.clicked() {
                             pane.splash_mode = !pane.splash_mode;
@@ -1584,7 +1584,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                 let available = ui.available_height();
                 ui.add_space(available * 0.4);
                 ui.spinner();
-                ui.label("Loading ship...");
+                ui.label(t!("ui.armor.loading_armor").as_ref());
             });
             vp_ui.ctx().request_repaint();
         } else if pane.loaded_armor.is_some() {
@@ -2014,7 +2014,7 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
             vp_ui.vertical_centered(|ui| {
                 let available = ui.available_height();
                 ui.add_space(available * 0.4);
-                ui.label("Select a ship from the list");
+                ui.label(t!("ui.armor.select_ship").as_ref());
             });
         }
 
@@ -2525,7 +2525,7 @@ pub(crate) fn show_armor_tooltip(
     // Penetration check results
     if !comparison_ships.is_empty() {
         ui.separator();
-        ui.label(egui::RichText::new("Penetration Check").small().strong());
+        ui.label(egui::RichText::new(t!("ui.armor.pen_check_label").as_ref()).small().strong());
         if ifhe_enabled {
             ui.label(egui::RichText::new("IFHE active (+25% HE pen)").small().color(egui::Color32::YELLOW));
         }
@@ -2845,19 +2845,19 @@ pub(crate) fn draw_hull_visibility_popover(
     let all_hull_names: Vec<&String> = armor.hull_part_groups.iter().flat_map(|(_, names)| names).collect();
 
     ui.horizontal(|ui| {
-        if ui.small_button("All").clicked() {
+        if ui.small_button(t!("ui.armor.all_btn").as_ref()).clicked() {
             for name in &all_hull_names {
                 pane.hull_visibility.insert((*name).clone(), true);
             }
             result.zone_changed = true;
         }
-        if ui.small_button("None").clicked() {
+        if ui.small_button(t!("ui.armor.none_btn").as_ref()).clicked() {
             for name in &all_hull_names {
                 pane.hull_visibility.insert((*name).clone(), false);
             }
             result.zone_changed = true;
         }
-        if ui.checkbox(&mut pane.hull_opaque, "Opaque").changed() {
+        if ui.checkbox(&mut pane.hull_opaque, t!("ui.armor.opaque").as_ref()).changed() {
             result.zone_changed = true;
         }
     });
@@ -2865,7 +2865,7 @@ pub(crate) fn draw_hull_visibility_popover(
     // Hull upgrade selector
     if armor.hull_upgrade_names.len() > 1 {
         ui.horizontal(|ui| {
-            ui.label("Upgrade:");
+            ui.label(t!("ui.armor.upgrade").as_ref());
             for (key, label) in &armor.hull_upgrade_names {
                 let is_selected = pane.selected_hull.as_ref() == Some(key)
                     || (pane.selected_hull.is_none() && *key == armor.hull_upgrade_names[0].0);
@@ -4053,7 +4053,7 @@ pub(crate) fn draw_armor_visibility_popover(
     let mut zone_changed = false;
     let hovered: std::cell::Cell<Option<SidebarHighlightKey>> = std::cell::Cell::new(None);
     ui.horizontal(|ui| {
-        if ui.small_button("All").clicked() {
+        if ui.small_button(t!("ui.armor.all_btn").as_ref()).clicked() {
             pane.undo_stack.push(VisibilitySnapshot {
                 part_visibility: pane.part_visibility.clone(),
                 plate_visibility: pane.plate_visibility.clone(),
@@ -4066,7 +4066,7 @@ pub(crate) fn draw_armor_visibility_popover(
             pane.plate_visibility.clear();
             zone_changed = true;
         }
-        if ui.small_button("None").clicked() {
+        if ui.small_button(t!("ui.armor.none_btn").as_ref()).clicked() {
             pane.undo_stack.push(VisibilitySnapshot {
                 part_visibility: pane.part_visibility.clone(),
                 plate_visibility: pane.plate_visibility.clone(),
@@ -4080,7 +4080,7 @@ pub(crate) fn draw_armor_visibility_popover(
         }
     });
     // "Reset plates" clears plate-level overrides
-    if !pane.plate_visibility.is_empty() && ui.small_button("Reset plates").clicked() {
+    if !pane.plate_visibility.is_empty() && ui.small_button(t!("ui.armor.reset_plates").as_ref()).clicked() {
         pane.undo_stack.push(VisibilitySnapshot {
             part_visibility: pane.part_visibility.clone(),
             plate_visibility: pane.plate_visibility.clone(),
@@ -4153,7 +4153,7 @@ pub(crate) fn draw_armor_visibility_popover(
                         }
                         zone_changed = true;
                     }
-                    let lbl = ui.label(&zone.name).on_hover_text("Ctrl+click to solo");
+                    let lbl = ui.label(&zone.name).on_hover_text(t!("ui.armor.ctrl_click_solo").as_ref());
                     if cb.hovered() || lbl.hovered() {
                         hovered.set(Some(SidebarHighlightKey::Zone(zone.name.clone())));
                     }
@@ -4268,14 +4268,14 @@ pub(crate) fn draw_splash_box_visibility_popover(
     let all_names: Vec<&String> = armor.splash_box_groups.iter().flat_map(|(_, names)| names).collect();
 
     ui.horizontal(|ui| {
-        if ui.small_button("All").clicked() {
+        if ui.small_button(t!("ui.armor.all_btn").as_ref()).clicked() {
             pane.show_splash_boxes = true;
             for name in &all_names {
                 pane.splash_box_visibility.insert((*name).clone(), true);
             }
             zone_changed = true;
         }
-        if ui.small_button("None").clicked() {
+        if ui.small_button(t!("ui.armor.none_btn").as_ref()).clicked() {
             pane.show_splash_boxes = false;
             for name in &all_names {
                 pane.splash_box_visibility.insert((*name).clone(), false);
@@ -4494,7 +4494,7 @@ pub(crate) fn draw_viewport_watermark(painter: &egui::Painter, viewport_rect: eg
     painter.text(
         pos,
         egui::Align2::LEFT_BOTTOM,
-        "Ballistic results are based on reverse engineering/estimates of how simulation works",
+        &t!("ui.armor.ballistic_disclaimer"),
         font,
         text_color,
     );
@@ -4506,7 +4506,7 @@ pub(crate) fn draw_roll_slider(ui: &mut egui::Ui, viewport: &mut crate::viewport
     let roll_deg = &mut viewport.model_roll;
     // Store in degrees for the slider, convert on render
     let mut deg = roll_deg.to_degrees();
-    let response = ui.add(egui::Slider::new(&mut deg, -25.0..=25.0).fixed_decimals(1).suffix("°").text("Roll"));
+    let response = ui.add(egui::Slider::new(&mut deg, -25.0..=25.0).fixed_decimals(1).suffix("°").text(t!("ui.armor.roll").as_ref()));
     *roll_deg = deg.to_radians();
     if response.double_clicked() {
         *roll_deg = 0.0;
@@ -4523,17 +4523,17 @@ pub(crate) fn draw_roll_slider(ui: &mut egui::Ui, viewport: &mut crate::viewport
 pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorPane, armor: &LoadedShipArmor) -> bool {
     let mut zone_changed = false;
     ui.set_min_width(160.0);
-    if ui.checkbox(&mut pane.show_plate_edges, "Plate Edges").changed() {
+    if ui.checkbox(&mut pane.show_plate_edges, t!("ui.armor.plate_edges").as_ref()).changed() {
         zone_changed = true;
     }
     if armor.dock_y_offset.is_some() {
-        if ui.checkbox(&mut pane.show_waterline, "Waterline").changed() {
+        if ui.checkbox(&mut pane.show_waterline, t!("ui.armor.waterline").as_ref()).changed() {
             zone_changed = true;
         }
         if pane.show_waterline {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
-                ui.label("Opacity");
+                ui.label(t!("ui.armor.opacity").as_ref());
                 if ui.add(egui::Slider::new(&mut pane.waterline_opacity, 0.05..=1.0).fixed_decimals(2)).changed() {
                     zone_changed = true;
                 }
@@ -4546,7 +4546,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
     if !armor.hull_meshes.is_empty() {
         let any_hull_on = pane.hull_visibility.values().any(|&v| v);
         let mut hull_checked = any_hull_on;
-        if ui.checkbox(&mut hull_checked, "Ship Hull").changed() {
+        if ui.checkbox(&mut hull_checked, t!("ui.armor.ship_hull").as_ref()).changed() {
             for (_, vis) in pane.hull_visibility.iter_mut() {
                 *vis = hull_checked;
             }
@@ -4555,7 +4555,7 @@ pub(crate) fn draw_display_settings_popover(ui: &mut egui::Ui, pane: &mut ArmorP
         if any_hull_on {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
-                if ui.checkbox(&mut pane.hull_opaque, "Opaque Hull").changed() {
+                if ui.checkbox(&mut pane.hull_opaque, t!("ui.armor.opaque_hull").as_ref()).changed() {
                     zone_changed = true;
                 }
             });

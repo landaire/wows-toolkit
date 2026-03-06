@@ -5,6 +5,7 @@ use egui::Vec2;
 
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::RenderOptions;
+use wt_translations::TextResolver;
 
 use super::Annotation;
 use super::MapTransform;
@@ -146,6 +147,7 @@ pub(super) fn draw_command_to_shapes(
     ctx: &egui::Context,
     opts: &RenderOptions,
     placed_labels: &mut Vec<Rect>,
+    text_resolver: &dyn TextResolver,
 ) -> Vec<Shape> {
     let shared_tex = make_shared_textures(textures);
     let label_opts = make_label_opts(opts);
@@ -156,5 +158,6 @@ pub(super) fn draw_command_to_shapes(
         ctx,
         &label_opts,
         Some(placed_labels),
+        text_resolver,
     )
 }

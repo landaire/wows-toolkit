@@ -10,9 +10,9 @@ use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::PlaneCategory;
 use wowsunpack::game_params::types::Species;
 
+use wowsunpack::game_types::BattleResult;
 use wows_replays::analyzer::decoder::BattleStage;
 use wows_replays::analyzer::decoder::BuoyancyState;
-use wows_replays::analyzer::decoder::FinishType;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::analyzer::decoder::WeaponType;
@@ -233,7 +233,7 @@ impl<'a> MinimapRenderer<'a> {
             self.player_clan_colors.insert(*entity_id, clan_color);
             self.ship_param_ids.insert(*entity_id, player.vehicle().id());
             if let Some(name) = self.game_params.localized_name_from_param(player.vehicle()) {
-                self.ship_display_names.insert(*entity_id, name.to_string());
+                self.ship_display_names.insert(*entity_id, name);
             }
 
             // Cache consumable variants for detection radius lookup.
@@ -634,19 +634,16 @@ impl<'a> MinimapRenderer<'a> {
                 };
 
                 // Team advantage indicator
-                let (advantage_label, advantage_team, advantage_breakdown) = if self.options.show_advantage {
+                let (advantage, advantage_breakdown) = if self.options.show_advantage {
                     let result = self.calculate_team_advantage(controller);
-                    match result.advantage {
-                        crate::advantage::TeamAdvantage::Team0(level) => {
-                            (level.label().to_string(), 0, Some(result.breakdown))
-                        }
-                        crate::advantage::TeamAdvantage::Team1(level) => {
-                            (level.label().to_string(), 1, Some(result.breakdown))
-                        }
-                        crate::advantage::TeamAdvantage::Even => (String::new(), -1, Some(result.breakdown)),
-                    }
+                    let adv = match result.advantage {
+                        crate::advantage::TeamAdvantage::Team0(level) => Some((level, 0u8)),
+                        crate::advantage::TeamAdvantage::Team1(level) => Some((level, 1u8)),
+                        crate::advantage::TeamAdvantage::Even => None,
+                    };
+                    (adv, Some(result.breakdown))
                 } else {
-                    (String::new(), -1, None)
+                    (None, None)
                 };
 
                 commands.push(DrawCommand::ScoreBar {
@@ -657,17 +654,16 @@ impl<'a> MinimapRenderer<'a> {
                     max_score,
                     team0_timer,
                     team1_timer,
-                    advantage_label: advantage_label.clone(),
-                    advantage_team,
+                    advantage,
                 });
 
                 if let Some(breakdown) = advantage_breakdown {
                     commands.push(DrawCommand::TeamAdvantage {
-                        label: advantage_label,
-                        color: match advantage_team {
-                            0 => TEAM0_COLOR,
-                            1 => TEAM1_COLOR,
-                            _ => [255, 255, 255],
+                        level: advantage.map(|(level, _)| level),
+                        color: match advantage {
+                            Some((_, 0)) => TEAM0_COLOR,
+                            Some((_, _)) => TEAM1_COLOR,
+                            None => [255, 255, 255],
                         },
                         breakdown,
                     });
@@ -1608,7 +1604,7 @@ impl<'a> MinimapRenderer<'a> {
                         None
                     };
                     let species = player.vehicle().species().and_then(species_key);
-                    let name = self.game_params.localized_name_from_param(player.vehicle()).map(|s| s.to_string());
+                    let name = self.game_params.localized_name_from_param(player.vehicle());
                     (tag, color, species, name)
                 } else {
                     (String::new(), None, None, None)
@@ -1670,38 +1666,20 @@ impl<'a> MinimapRenderer<'a> {
 
         // 11. Battle result overlay (shown as soon as winner is known)
         if let Some(wt) = controller.winning_team() {
-            let (text, color) = match (self.self_team_id, wt) {
+            let (result, color) = match (self.self_team_id, wt) {
                 (Some(self_t), wt) if wt >= 0 && wt == self_t as i8 => {
-                    ("VICTORY".to_string(), [76, 232, 170]) // green
+                    (BattleResult::Victory, [76, 232, 170]) // green
                 }
                 (Some(_), wt) if wt >= 0 => {
-                    ("DEFEAT".to_string(), [254, 77, 42]) // red
+                    (BattleResult::Defeat, [254, 77, 42]) // red
                 }
-                _ => ("DRAW".to_string(), [255, 165, 0]), // orange
+                _ => (BattleResult::Draw, [255, 165, 0]), // orange
             };
-            let subtitle = controller.finish_type().map(|ft| finish_type_description(ft).to_uppercase());
-            commands.push(DrawCommand::BattleResultOverlay { text, subtitle, color, subtitle_above: false });
+            let finish_type = controller.finish_type().cloned();
+            commands.push(DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above: false });
         }
 
         commands
-    }
-}
-
-/// Human-readable description for how the battle ended.
-fn finish_type_description(ft: &Recognized<FinishType>) -> String {
-    match ft.known() {
-        Some(FinishType::Extermination) => "All enemy ships destroyed".into(),
-        Some(FinishType::BaseCaptured) => "Base captured".into(),
-        Some(FinishType::Timeout) => "Time expired".into(),
-        Some(FinishType::Score) => "Score limit reached".into(),
-        Some(FinishType::ScoreOnTimeout) => "Leading on points at timeout".into(),
-        Some(FinishType::ScoreZero) => "Points depleted".into(),
-        Some(FinishType::ScoreExcess) => "Score limit exceeded".into(),
-        Some(FinishType::Failure) => "Mission failed".into(),
-        Some(FinishType::Technical) => "Technical finish".into(),
-        Some(FinishType::PveMainTaskSucceeded) => "Mission accomplished".into(),
-        Some(FinishType::PveMainTaskFailed) => "Mission failed".into(),
-        _ => "Battle ended".into(),
     }
 }
 

@@ -1,0 +1,10 @@
+[package]
+name = "wt-translations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit"
+
+[dependencies]
+wowsunpack = { workspace = true, default-features = false }

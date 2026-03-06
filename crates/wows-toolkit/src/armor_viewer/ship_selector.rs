@@ -111,7 +111,6 @@ impl ShipCatalog {
 
             let display_name = metadata
                 .localized_name_from_param(param)
-                .map(|s: &str| s.to_string())
                 .unwrap_or_else(|| param.name().to_string());
 
             let search_name = unidecode::unidecode(&display_name).to_lowercase();

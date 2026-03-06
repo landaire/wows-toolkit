@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::icons;
 use crate::task;
 use crate::util;
+use rust_i18n::t;
 use egui::Color32;
 use egui::RichText;
 use egui_extras::Column;
@@ -208,14 +209,14 @@ impl Default for SortedBy {
 }
 
 impl TimePeriod {
-    fn description(&self) -> &'static str {
+    fn description(&self) -> String {
         match self {
-            TimePeriod::LastHour => "Past Hour",
-            TimePeriod::LastSixHours => "Past 6 Hour",
-            TimePeriod::LastDay => "Past 24 Hours",
-            TimePeriod::LastWeek => "Past Week",
-            TimePeriod::LastMonth => "Past Month",
-            TimePeriod::AllTime => "All Time",
+            TimePeriod::LastHour => t!("ui.player_tracker.period.past_hour").into(),
+            TimePeriod::LastSixHours => t!("ui.player_tracker.period.past_six_hours").into(),
+            TimePeriod::LastDay => t!("ui.player_tracker.period.past_day").into(),
+            TimePeriod::LastWeek => t!("ui.player_tracker.period.past_week").into(),
+            TimePeriod::LastMonth => t!("ui.player_tracker.period.past_month").into(),
+            TimePeriod::AllTime => t!("ui.player_tracker.period.all_time").into(),
         }
     }
 
@@ -240,7 +241,7 @@ impl ToolkitTabViewer<'_> {
         let now = Timestamp::now();
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                if ui.button("Clear Stats").clicked() {
+                if ui.button(t!("ui.player_tracker.clear_stats")).clicked() {
                     player_tracker_settings.tracked_players.clear();
                     player_tracker_settings.tracked_players_by_time.clear();
                 }
@@ -249,18 +250,18 @@ impl ToolkitTabViewer<'_> {
                 egui::ComboBox::from_id_salt("player_inspector_time_period_selection")
                     .selected_text(selected.description())
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(selected, TimePeriod::LastHour, "Past Hour");
-                        ui.selectable_value(selected, TimePeriod::LastSixHours, "Past 6 Hours");
-                        ui.selectable_value(selected, TimePeriod::LastDay, "Past 24 Hours");
-                        ui.selectable_value(selected, TimePeriod::LastWeek, "Past Week");
-                        ui.selectable_value(selected, TimePeriod::LastMonth, "Past Month");
-                        ui.selectable_value(selected, TimePeriod::AllTime, "All Time");
+                        ui.selectable_value(selected, TimePeriod::LastHour, t!("ui.player_tracker.period.past_hour"));
+                        ui.selectable_value(selected, TimePeriod::LastSixHours, t!("ui.player_tracker.period.past_six_hours"));
+                        ui.selectable_value(selected, TimePeriod::LastDay, t!("ui.player_tracker.period.past_day"));
+                        ui.selectable_value(selected, TimePeriod::LastWeek, t!("ui.player_tracker.period.past_week"));
+                        ui.selectable_value(selected, TimePeriod::LastMonth, t!("ui.player_tracker.period.past_month"));
+                        ui.selectable_value(selected, TimePeriod::AllTime, t!("ui.player_tracker.period.all_time"));
                     });
-                ui.label("Player Filter");
+                ui.label(t!("ui.player_tracker.player_filter"));
                 ui.text_edit_singleline(&mut player_tracker_settings.player_filter);
                 if let Some(replay_files) = self.tab_state.replay_files.as_ref()
                     && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
-                    && ui.button("Populate Data From Replays").clicked()
+                    && ui.button(t!("ui.player_tracker.populate_from_replays")).clicked()
                 {
                     crate::update_background_task!(
                         self.tab_state.background_tasks,
@@ -278,7 +279,7 @@ impl ToolkitTabViewer<'_> {
             ui.separator();
             egui::SidePanel::left("current_match_side_panel").default_width(450.0).show_inside(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.heading("Players in Current Match");
+                    ui.heading(t!("ui.player_tracker.current_match"));
                     egui::ScrollArea::both().id_salt("current_match_scroll_area").show(ui, |ui| {
                         let table = TableBuilder::new(ui)
                             .striped(true)
@@ -292,10 +293,10 @@ impl ToolkitTabViewer<'_> {
 
                         let table = table.header(20.0, |mut header| {
                             header.col(|ui| {
-                                ui.strong("Player Name");
+                                ui.strong(t!("ui.player_tracker.column.player_name"));
                             });
                             header.col(|ui| {
-                                ui.strong("Possible Twitch Names");
+                                ui.strong(t!("ui.player_tracker.column.twitch_names"));
                             });
                         });
 
@@ -314,16 +315,14 @@ impl ToolkitTabViewer<'_> {
                                         {
                                             row.col(|ui| {
                                                 for (participant, timestamps) in participant_info {
-                                                    ui.label(participant).on_hover_text(format!(
-                                                        "Seen {} minutes after match start",
-                                                        timestamps
-                                                            .iter()
-                                                            .map(|ts| {
-                                                                let delta = *ts - *match_timestamp;
-                                                                delta.total(jiff::Unit::Minute).unwrap_or(0.0) as i64
-                                                            })
-                                                            .join(", ")
-                                                    ));
+                                                    let minutes_str = timestamps
+                                                        .iter()
+                                                        .map(|ts| {
+                                                            let delta = *ts - *match_timestamp;
+                                                            delta.total(jiff::Unit::Minute).unwrap_or(0.0) as i64
+                                                        })
+                                                        .join(", ");
+                                                    ui.label(participant).on_hover_text(t!("ui.player_tracker.seen_minutes", minutes = minutes_str));
                                                 }
                                             });
                                         } else {
@@ -340,7 +339,7 @@ impl ToolkitTabViewer<'_> {
             });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                ui.heading("Historical Matches");
+                ui.heading(t!("ui.player_tracker.historical"));
                 egui::ScrollArea::horizontal().id_salt("player_tracker_central").show(ui, |ui| {
                     let table = TableBuilder::new(ui)
                         .striped(true)
@@ -360,11 +359,11 @@ impl ToolkitTabViewer<'_> {
                     table
                         .header(20.0, |mut header| {
                             header.col(|ui| {
-                                let raw_text = "Clan";
+                                let raw_text: String = t!("ui.player_tracker.column.clan").into();
                                 let text = if let SortedBy::Clan(sort_order) = sorted_by {
                                     format!("{} {}", raw_text, sort_order.icon())
                                 } else {
-                                    raw_text.to_string()
+                                    raw_text
                                 };
 
                                 if ui.strong(text).clicked() {
@@ -372,11 +371,11 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             header.col(|ui| {
-                                let raw_text = "Player Name";
+                                let raw_text: String = t!("ui.player_tracker.column.player_name").into();
                                 let text = if let SortedBy::Name(sort_order) = sorted_by {
                                     format!("{} {}", raw_text, sort_order.icon())
                                 } else {
-                                    raw_text.to_string()
+                                    raw_text
                                 };
 
                                 if ui.strong(text).clicked() {
@@ -384,14 +383,14 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             header.col(|ui| {
-                                ui.strong("WG ID");
+                                ui.strong(t!("ui.player_tracker.column.wg_id"));
                             });
                             header.col(|ui| {
-                                let raw_text = "Total Encounters";
+                                let raw_text: String = t!("ui.player_tracker.column.total_encounters").into();
                                 let text = if let SortedBy::TimesEncountered(sort_order) = sorted_by {
                                     format!("{} {}", raw_text, sort_order.icon())
                                 } else {
-                                    raw_text.to_string()
+                                    raw_text
                                 };
 
                                 if ui.strong(text).clicked() {
@@ -401,11 +400,11 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             header.col(|ui| {
-                                let raw_text = "Encounters in Time Range";
+                                let raw_text: String = t!("ui.player_tracker.column.encounters_in_range").into();
                                 let text = if let SortedBy::TimesEncounteredInTimeRange(sort_order) = sorted_by {
                                     format!("{} {}", raw_text, sort_order.icon())
                                 } else {
-                                    raw_text.to_string()
+                                    raw_text
                                 };
 
                                 if ui.strong(text).clicked() {
@@ -415,11 +414,11 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             header.col(|ui| {
-                                let raw_text = "Last Encountered";
+                                let raw_text: String = t!("ui.player_tracker.column.last_encountered").into();
                                 let text = if let SortedBy::LastEncountered(sort_order) = sorted_by {
                                     format!("{} {}", raw_text, sort_order.icon())
                                 } else {
-                                    raw_text.to_string()
+                                    raw_text
                                 };
 
                                 if ui.strong(text).clicked() {
@@ -429,10 +428,10 @@ impl ToolkitTabViewer<'_> {
                                 }
                             });
                             header.col(|ui| {
-                                ui.strong("Aliases");
+                                ui.strong(t!("ui.player_tracker.column.aliases"));
                             });
                             header.col(|ui| {
-                                ui.strong("Notes");
+                                ui.strong(t!("ui.player_tracker.column.notes"));
                             });
                         })
                         .body(|mut body| {

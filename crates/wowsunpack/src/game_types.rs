@@ -1219,6 +1219,38 @@ impl fmt::Display for FinishType {
     }
 }
 
+/// Outcome of a battle for a team.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum BattleResult {
+    Victory,
+    Defeat,
+    Draw,
+}
+
+/// Strength of one team's advantage over the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum AdvantageLevel {
+    Absolute,
+    Strong,
+    Moderate,
+    Weak,
+}
+
+impl AdvantageLevel {
+    pub fn label(&self) -> &'static str {
+        match self {
+            AdvantageLevel::Absolute => "Absolute",
+            AdvantageLevel::Strong => "Strong",
+            AdvantageLevel::Moderate => "Moderate",
+            AdvantageLevel::Weak => "Weak",
+        }
+    }
+}
+
 /// Submarine depth state, from `DEPTH_STATE` in battle.xml.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -32,8 +32,8 @@ use crate::armor_viewer::penetration::ServerVsSimComparison;
 use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::SidebarHighlightKey;
 use crate::armor_viewer::state::StoredTrajectory;
-use crate::icon_str;
 use crate::icons;
+use rust_i18n::t;
 use crate::replay::renderer::RealtimeArmorBridge;
 use crate::replay::renderer::ReplayPlayerInfo;
 use crate::viewport_3d::GpuPipeline;
@@ -1316,14 +1316,14 @@ impl RealtimeArmorViewer {
         if self.pane.loading {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
-                ui.label("Loading ship armor...");
+                ui.label(t!("ui.armor.realtime.loading"));
             });
             return;
         }
 
         if !self.ship_loaded {
             ui.centered_and_justified(|ui| {
-                ui.label("Waiting for ship data...");
+                ui.label(t!("ui.armor.realtime.waiting"));
             });
             return;
         }
@@ -1346,7 +1346,7 @@ impl RealtimeArmorViewer {
                 ui.horizontal(|ui| {
                     // Armor Zones button
                     let armor_btn =
-                        ui.button(icon_str!(icons::SHIELD, "Armor")).on_hover_text("Toggle armor zone visibility");
+                        ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle"))).on_hover_text(t!("ui.armor.armor_tooltip"));
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1367,8 +1367,8 @@ impl RealtimeArmorViewer {
                     // Hull Model button with popover
                     if !armor.hull_part_groups.is_empty() {
                         let hull_btn = ui
-                            .button(icon_str!(icons::THREE_D, "Hull"))
-                            .on_hover_text("Toggle hull model part visibility");
+                            .button(wt_translations::icon_t(icons::THREE_D, &t!("ui.armor.hull_toggle")))
+                            .on_hover_text(t!("ui.armor.hull_tooltip"));
                         egui::Popup::from_toggle_button_response(&hull_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
@@ -1395,11 +1395,11 @@ impl RealtimeArmorViewer {
                     // ── Splash Boxes button with popover ──
                     if !armor.splash_box_groups.is_empty() {
                         let splash_label = if self.pane.show_splash_boxes {
-                            format!("{} Splash \u{25CF}", icons::CUBE)
+                            format!("{} {} \u{25CF}", icons::CUBE, t!("ui.armor.splash_toggle"))
                         } else {
-                            icon_str!(icons::CUBE, "Splash").to_string()
+                            wt_translations::icon_t(icons::CUBE, &t!("ui.armor.splash_toggle"))
                         };
-                        let splash_btn = ui.button(splash_label).on_hover_text("Toggle splash box visibility");
+                        let splash_btn = ui.button(splash_label).on_hover_text(t!("ui.armor.splash_tooltip"));
                         egui::Popup::from_toggle_button_response(&splash_btn)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| {
@@ -1419,7 +1419,7 @@ impl RealtimeArmorViewer {
 
                     // Display settings button
                     let display_btn =
-                        ui.button(icon_str!(icons::GEAR_FINE, "Display")).on_hover_text("Display settings");
+                        ui.button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display"))).on_hover_text(t!("ui.armor.display_tooltip"));
                     egui::Popup::from_toggle_button_response(&display_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1428,7 +1428,7 @@ impl RealtimeArmorViewer {
                             }
                             if !self.pane.trajectories.is_empty() {
                                 ui.horizontal(|ui| {
-                                    ui.label("Marker Opacity");
+                                    ui.label(t!("ui.armor.marker_opacity"));
                                     ui.add(
                                         egui::Slider::new(&mut self.pane.marker_opacity, 0.0..=1.0).fixed_decimals(2),
                                     );
@@ -1654,7 +1654,7 @@ impl RealtimeArmorViewer {
 
     /// Draw the side panel with attacker selector and salvo log.
     fn draw_side_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Incoming Fire");
+        ui.heading(t!("ui.armor.realtime.incoming_fire"));
         ui.separator();
 
         // Health timeline strip
@@ -1666,7 +1666,8 @@ impl RealtimeArmorViewer {
         ui.separator();
 
         // Attacker selector
-        ui.label(egui::RichText::new("Attacker Filter").strong());
+        ui.label(egui::RichText::new(t!("ui.armor.realtime.attacker_filter").as_ref()).strong());
+        let all_enemies = t!("ui.armor.realtime.all_enemies");
         let current_label = if let Some(ref sel) = self.selected_attacker {
             self.enemy_players
                 .iter()
@@ -1674,12 +1675,12 @@ impl RealtimeArmorViewer {
                 .map(|p| format!("{} ({})", p.username, p.ship_display_name))
                 .unwrap_or_else(|| "Unknown".to_string())
         } else {
-            "All Enemies".to_string()
+            all_enemies.to_string()
         };
 
         let mut attacker_changed = false;
         egui::ComboBox::from_id_salt("attacker_selector").selected_text(&current_label).show_ui(ui, |ui| {
-            if ui.selectable_value(&mut self.selected_attacker, None, "All Enemies").changed() {
+            if ui.selectable_value(&mut self.selected_attacker, None, all_enemies.as_ref()).changed() {
                 attacker_changed = true;
             }
             for player in &self.enemy_players {
@@ -1694,12 +1695,12 @@ impl RealtimeArmorViewer {
             self.needs_repaint = true;
         }
 
-        if ui.checkbox(&mut self.show_secondaries, "Show secondary armament").changed() {
+        if ui.checkbox(&mut self.show_secondaries, t!("ui.armor.realtime.show_secondaries")).changed() {
             self.clear_and_reprocess();
             self.needs_repaint = true;
         }
 
-        if ui.checkbox(&mut self.pane.continue_on_ricochet, "Continue past ricochet").changed() {
+        if ui.checkbox(&mut self.pane.continue_on_ricochet, t!("ui.armor.continue_ricochet")).changed() {
             self.clear_and_reprocess();
             self.needs_repaint = true;
         }
@@ -1739,7 +1740,7 @@ impl RealtimeArmorViewer {
         // Auto-scroll toggle + current clock
         let current_clock = self.bridge.lock().last_clock;
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.auto_scroll, "Auto-scroll");
+            ui.checkbox(&mut self.auto_scroll, t!("ui.armor.realtime.auto_scroll"));
             let cs_f = current_clock.seconds();
             let cm = (cs_f / 60.0).floor() as i32;
             let cs = (cs_f % 60.0) as i32;
@@ -1811,8 +1812,8 @@ impl RealtimeArmorViewer {
                         let resp = egui::Frame::group(ui.style()).fill(header_bg).show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 if ui
-                                    .small_button(icon_str!(icons::CLOCK_COUNTER_CLOCKWISE, ""))
-                                    .on_hover_text("Seek to salvo")
+                                    .small_button(icons::CLOCK_COUNTER_CLOCKWISE)
+                                    .on_hover_text(t!("ui.armor.realtime.seek_to_salvo"))
                                     .clicked()
                                 {
                                     click_action = Some(ClickAction::SeekTo(group.first_clock));
@@ -1848,15 +1849,15 @@ impl RealtimeArmorViewer {
                         state
                             .show_header(ui, |ui| {
                                 if ui
-                                    .small_button(icon_str!(icons::CLOCK_COUNTER_CLOCKWISE, ""))
-                                    .on_hover_text("Seek to salvo")
+                                    .small_button(icons::CLOCK_COUNTER_CLOCKWISE)
+                                    .on_hover_text(t!("ui.armor.realtime.seek_to_salvo"))
                                     .clicked()
                                 {
                                     click_action = Some(ClickAction::SeekTo(group.first_clock));
                                 }
                                 // Select All / Deselect button
-                                let btn_label = if group_selected { "Deselect" } else { "Select All" };
-                                if ui.small_button(btn_label).clicked() {
+                                let btn_label = if group_selected { t!("ui.armor.realtime.deselect") } else { t!("ui.armor.realtime.select_all") };
+                                if ui.small_button(btn_label.as_ref()).clicked() {
                                     click_action = Some(ClickAction::SelectAllInGroup(group_key.clone()));
                                 }
                                 ui.label(egui::RichText::new(&header_text).strong().small());
@@ -2008,7 +2009,7 @@ impl RealtimeArmorViewer {
         let traj = self.pane.trajectories.iter().find(|t| t.meta.id == trajectory_id);
 
         let (Some((shell_entry, group)), Some(traj)) = (shell_and_group, traj) else {
-            ui.label(egui::RichText::new("Shell data no longer available").small().weak());
+            ui.label(egui::RichText::new(t!("ui.armor.realtime.no_data").as_ref()).small().weak());
             return;
         };
 
@@ -2057,7 +2058,7 @@ impl RealtimeArmorViewer {
             // Verdict line
             match &cmp.verdict {
                 ComparisonVerdict::Match => {
-                    ui.label(egui::RichText::new("Sim agrees").small().color(egui::Color32::from_rgb(80, 220, 80)));
+                    ui.label(egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref()).small().color(egui::Color32::from_rgb(80, 220, 80)));
                 }
                 ComparisonVerdict::RicochetRngDefer { angle_deg, range_start_deg, range_end_deg } => {
                     ui.label(
@@ -2248,7 +2249,7 @@ impl RealtimeArmorViewer {
             }
 
             if result.hits.is_empty() {
-                ui.label(egui::RichText::new("No armor plates hit").small().weak());
+                ui.label(egui::RichText::new(t!("ui.armor.realtime.no_armor_hit").as_ref()).small().weak());
             }
         });
     }

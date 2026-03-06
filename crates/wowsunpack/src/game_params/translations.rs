@@ -59,27 +59,18 @@ pub struct RibbonTranslation {
 /// Tries `IDS_RIBBON_{key}` first, then falls back to `IDS_RIBBON_SUB{key}`.
 /// Returns `None` if no translation is found.
 pub fn translate_ribbon(key: &str, resource_loader: &dyn ResourceLoader) -> Option<RibbonTranslation> {
-    let primary_id = format!("IDS_RIBBON_{key}");
     let (display_name, is_subribbon) = resource_loader
-        .localized_name_from_id(&primary_id)
-        .filter(|name| name != &primary_id)
+        .localized_name_from_id(&format!("IDS_RIBBON_{key}"))
         .map(|name| (name, false))
         .or_else(|| {
-            let fallback_id = format!("IDS_RIBBON_SUB{key}");
             resource_loader
-                .localized_name_from_id(&fallback_id)
-                .filter(|name| name != &fallback_id)
+                .localized_name_from_id(&format!("IDS_RIBBON_SUB{key}"))
                 .map(|name| (name, true))
         })?;
 
-    let primary_desc_id = format!("IDS_RIBBON_DESCRIPTION_{key}");
     let description = resource_loader
-        .localized_name_from_id(&primary_desc_id)
-        .filter(|desc| desc != &primary_desc_id)
-        .or_else(|| {
-            let fallback_desc_id = format!("IDS_RIBBON_DESCRIPTION_SUB{key}");
-            resource_loader.localized_name_from_id(&fallback_desc_id).filter(|desc| desc != &fallback_desc_id)
-        })
+        .localized_name_from_id(&format!("IDS_RIBBON_DESCRIPTION_{key}"))
+        .or_else(|| resource_loader.localized_name_from_id(&format!("IDS_RIBBON_DESCRIPTION_SUB{key}")))
         .unwrap_or_default();
 
     Some(RibbonTranslation { display_name, description, is_subribbon, icon_key: key.to_lowercase() })

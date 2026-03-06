@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::icon_str;
 use crate::icons;
+use rust_i18n::t;
 use egui::CollapsingHeader;
 use egui::ImageSource;
 use egui::Label;
@@ -229,7 +229,7 @@ impl ToolkitTabViewer<'_> {
     pub fn build_mod_manager_tab(&mut self, ui: &mut egui::Ui) {
         let mod_manager_info = &mut self.tab_state.mod_manager_info;
         egui::SidePanel::left("mod_manager_left").show_inside(ui, |ui| {
-            ui.heading("Category Filters");
+            ui.heading(t!("ui.mod_manager.category_filters"));
 
             for (macro_group, categories) in &mut mod_manager_info.categories {
                 CollapsingHeader::new(&*macro_group).default_open(true).show(ui, |ui| {
@@ -247,15 +247,15 @@ impl ToolkitTabViewer<'_> {
                 ui.vertical(|ui| {
                     ui.heading(&selected_mod.meta.name);
                     ui.horizontal(|ui| {
-                        if ui.checkbox(&mut selected_mod.enabled, "Enabled").changed() {
+                        if ui.checkbox(&mut selected_mod.enabled, t!("ui.mod_manager.enabled")).changed() {
                             self.tab_state
                                 .mod_action_sender
                                 .send(selected_mod.clone())
                                 .expect("failed to send selected mod on mod_action_sender");
                         }
-                        ui.hyperlink_to(icon_str!(icons::BROWSER, "Mod Home Page"), &selected_mod.meta.repo_url);
+                        ui.hyperlink_to(wt_translations::icon_t(icons::BROWSER, &t!("ui.mod_manager.mod_home")), &selected_mod.meta.repo_url);
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
-                            ui.hyperlink_to(icon_str!(icons::DISCORD_LOGO, "Discord Approval Thread"), discord_url);
+                            ui.hyperlink_to(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.mod_manager.discord_thread")), discord_url);
                         }
                     });
                     CommonMarkViewer::new().show(
@@ -273,9 +273,9 @@ impl ToolkitTabViewer<'_> {
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.button(icon_str!(icons::FLOPPY_DISK, "Save Mod Config")).clicked();
-                ui.button(icon_str!(icons::FOLDER, "Load Mod Config")).clicked();
-                ui.add(egui::TextEdit::singleline(&mut mod_manager_info.filter_text).hint_text("Filter"));
+                ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.mod_manager.save_config"))).clicked();
+                ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.mod_manager.load_config"))).clicked();
+                ui.add(egui::TextEdit::singleline(&mut mod_manager_info.filter_text).hint_text(t!("ui.mod_manager.filter")));
             });
 
             ui.vertical(|ui| {
@@ -292,16 +292,16 @@ impl ToolkitTabViewer<'_> {
                 table
                     .header(20.0, |mut header| {
                         header.col(|ui| {
-                            ui.strong("Enabled");
+                            ui.strong(t!("ui.mod_manager.column.enabled"));
                         });
                         header.col(|ui| {
-                            ui.strong("Name");
+                            ui.strong(t!("ui.mod_manager.column.name"));
                         });
                         header.col(|ui| {
-                            ui.strong("Author");
+                            ui.strong(t!("ui.mod_manager.column.author"));
                         });
                         header.col(|ui| {
-                            ui.strong("Category");
+                            ui.strong(t!("ui.mod_manager.column.category"));
                         });
                     })
                     .body(|mut body| {

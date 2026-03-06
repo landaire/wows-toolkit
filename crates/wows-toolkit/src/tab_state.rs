@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
 use wows_replays::ReplayFile;
+use wows_replays::types::GameParamId;
 use wowsunpack::vfs::VfsPath;
 
 use crate::data::session_stats::PerGameStat;
@@ -71,16 +72,18 @@ pub enum ChartableStat {
 }
 
 impl ChartableStat {
-    pub fn name(&self) -> &'static str {
+    pub fn name(&self) -> String {
+        use rust_i18n::t;
         match self {
-            ChartableStat::Damage => "Damage",
-            ChartableStat::SpottingDamage => "Spotting Damage",
-            ChartableStat::Frags => "Frags",
-            ChartableStat::RawXp => "Raw XP",
-            ChartableStat::BaseXp => "Base XP",
-            ChartableStat::WinRate => "Win Rate",
-            ChartableStat::PersonalRating => "Personal Rating",
+            ChartableStat::Damage => t!("stat.damage"),
+            ChartableStat::SpottingDamage => t!("stat.spotting_damage"),
+            ChartableStat::Frags => t!("stat.frags"),
+            ChartableStat::RawXp => t!("stat.raw_xp"),
+            ChartableStat::BaseXp => t!("stat.base_xp"),
+            ChartableStat::WinRate => t!("stat.win_rate"),
+            ChartableStat::PersonalRating => t!("stat.personal_rating"),
         }
+        .into()
     }
 
     pub fn all() -> &'static [ChartableStat] {
@@ -106,6 +109,43 @@ pub enum ChartMode {
     Bar,
 }
 
+/// Deserialize `selected_ships` from either `Vec<GameParamId>` (new format) or
+/// `Vec<String>` (old format).  Old string-based selections cannot be mapped back
+/// to IDs, so they are silently dropped — the user simply re-selects ships.
+fn deserialize_selected_ships<'de, D>(deserializer: D) -> Result<Vec<GameParamId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct ShipVisitor;
+
+    impl<'de> de::Visitor<'de> for ShipVisitor {
+        type Value = Vec<GameParamId>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a sequence of ship IDs (u64) or ship names (string)")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut ids = Vec::new();
+            // Try each element — keep u64 values, skip strings.
+            while let Some(value) = seq.next_element::<serde_json::Value>()? {
+                if let Some(n) = value.as_u64() {
+                    ids.push(GameParamId::from(n));
+                }
+                // Old string entries are silently dropped
+            }
+            Ok(ids)
+        }
+    }
+
+    deserializer.deserialize_seq(ShipVisitor)
+}
+
 /// Configuration for the session stats chart (one per Charts tab)
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct SessionStatsChartConfig {
@@ -113,8 +153,11 @@ pub struct SessionStatsChartConfig {
     pub selected_stat: ChartableStat,
     /// Chart display mode (line or bar)
     pub mode: ChartMode,
-    /// Selected ships to show (empty = all ships)
-    pub selected_ships: Vec<String>,
+    /// Selected ships to show (empty = all ships).
+    /// Uses a custom deserializer so that old configs with `Vec<String>` ship names
+    /// gracefully degrade to an empty selection instead of failing entirely.
+    #[serde(default, deserialize_with = "deserialize_selected_ships")]
+    pub selected_ships: Vec<GameParamId>,
     pub selected_ships_manually_changed: bool,
     /// Whether to show rolling average instead of per-game values (line chart only)
     pub rolling_average: bool,
@@ -164,21 +207,21 @@ pub enum ConfirmableAction {
     /// Clear all session stats.
     ClearSessionStats,
     /// Clear session stats for a specific ship.
-    ClearShipSessionStats { ship_name: String },
+    ClearShipSessionStats { ship_id: GameParamId },
     /// Replace session stats with the given replays.
     SetAsSessionStats { replays: Vec<std::sync::Weak<RwLock<Replay>>> },
 }
 
 impl ConfirmableAction {
-    pub fn confirmation_message(&self) -> &str {
+    pub fn confirmation_message(&self) -> String {
+        use rust_i18n::t;
         match self {
-            ConfirmableAction::OpenInGame { .. } => "This will launch World of Warships. Continue?",
-            ConfirmableAction::ClearSessionStats => "This will clear all session stats. Continue?",
-            ConfirmableAction::ClearShipSessionStats { .. } => {
-                "This will remove all games for this ship from session stats. Continue?"
-            }
-            ConfirmableAction::SetAsSessionStats { .. } => "This will replace your current session stats. Continue?",
+            ConfirmableAction::OpenInGame { .. } => t!("confirm.open_in_game"),
+            ConfirmableAction::ClearSessionStats => t!("confirm.clear_all_session_stats"),
+            ConfirmableAction::ClearShipSessionStats { .. } => t!("confirm.clear_ship_session_stats"),
+            ConfirmableAction::SetAsSessionStats { .. } => t!("confirm.set_as_session_stats"),
         }
+        .into()
     }
 }
 
@@ -837,13 +880,13 @@ impl TabState {
             }) {
                 Ok(w) => w,
                 Err(e) => {
-                    self.toasts.lock().error(format!("Failed to create file watcher: {e}"));
+                    self.toasts.lock().error(rust_i18n::t!("error.file_watcher_creation", error = e));
                     return;
                 }
             };
 
         if let Err(e) = watcher.watch(replay_dir, RecursiveMode::NonRecursive) {
-            self.toasts.lock().error(format!("Failed to watch replay directory: {e}"));
+            self.toasts.lock().error(rust_i18n::t!("error.replay_dir_watch", error = e));
             return;
         }
 

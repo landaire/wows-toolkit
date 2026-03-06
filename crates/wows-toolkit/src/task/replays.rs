@@ -227,11 +227,14 @@ pub fn load_wows_data_for_build(
         .collect();
 
     // Load translations
-    let language_tag: LanguageTag = locale
-        .parse()
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid locale: {locale}")))
-        .context_with(|| format!("failed to parse locale '{locale}'"))?;
-    let attempted_dirs = [locale, language_tag.primary_language(), "en"];
+    // WoWs locale codes use underscores (e.g. "zh_tw", "pt_br") but BCP 47
+    // language tags use hyphens. Normalize before parsing.
+    let bcp47 = locale.replace('_', "-");
+    let primary_lang = bcp47
+        .parse::<LanguageTag>()
+        .map(|tag| tag.primary_language().to_string())
+        .unwrap_or_else(|_| locale.to_string());
+    let attempted_dirs = [locale, &primary_lang, "en"];
     let mut found_catalog = None;
     for dir in attempted_dirs {
         let localization_path = wows_directory.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
@@ -248,7 +251,7 @@ pub fn load_wows_data_for_build(
     }
 
     debug!("Loading GameParams for build {}", build);
-    let metadata_provider = load_game_params(&vfs, game_patch).ok().map(|mut metadata_provider| {
+    let metadata_provider = load_game_params(&vfs, game_patch).ok().map(|metadata_provider| {
         if let Some(catalog) = found_catalog {
             metadata_provider.set_translations(catalog)
         }

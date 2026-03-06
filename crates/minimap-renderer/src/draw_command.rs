@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "rendering")]
 use image::RgbaImage;
+use wowsunpack::game_types::{AdvantageLevel, BattleResult, FinishType};
 use wows_replays::analyzer::decoder::DeathCause;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ElapsedClock;
@@ -386,16 +387,14 @@ pub enum DrawCommand {
         team0_timer: Option<String>,
         /// Time-to-win for team 1 (e.g. "3:15"), or None if no caps
         team1_timer: Option<String>,
-        /// Advantage label (e.g. "Strong") to display inside the leading team's bar.
-        /// Empty string if even or advantage tracking is disabled.
-        advantage_label: String,
-        /// Which team has the advantage: 0 = team0, 1 = team1, -1 = even/none
-        advantage_team: i32,
+        /// Which team has the advantage and at what level. None = even or disabled.
+        /// Tuple is (level, team_index) where team_index is 0 or 1.
+        advantage: Option<(AdvantageLevel, u8)>,
     },
     /// Team advantage indicator (shown in score bar area)
     TeamAdvantage {
-        /// Advantage label (e.g. "Strong", "Moderate"), empty if Even
-        label: String,
+        /// Advantage level, or None if even
+        level: Option<AdvantageLevel>,
         /// Color for the label (advantaged team's color)
         color: [u8; 3],
         /// Detailed breakdown for tooltip display
@@ -416,9 +415,10 @@ pub enum DrawCommand {
     ChatOverlay { entries: Vec<ChatEntry> },
     /// Battle result overlay (shown at end of match)
     BattleResultOverlay {
-        text: String,
-        /// Subtitle (e.g. finish reason like "All enemy ships destroyed")
-        subtitle: Option<String>,
+        /// The battle outcome (Victory, Defeat, Draw)
+        result: BattleResult,
+        /// How the battle ended
+        finish_type: Option<Recognized<FinishType>>,
         /// Glow/shadow color behind the text
         color: [u8; 3],
         /// If true, subtitle is drawn above the main text; otherwise below.

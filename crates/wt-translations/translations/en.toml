@@ -1,0 +1,688 @@
+[meta]
+language_name = "English"
+
+# -- Language selection dialog --
+
+[dialog]
+continue_in_english = "Continue in English"
+continue_in_language = "Continue in English"
+select_language = "Select Language"
+machine_translation_warning = "Most translations were machine-generated and may be inaccurate."
+
+# -- Tab titles --
+
+[ui.tabs]
+unpacker = "Resource Unpacker"
+settings = "Settings"
+replay_parser = "Replay Inspector"
+player_tracker = "Player Tracker"
+mod_manager = "Mod Manager"
+armor_viewer = "Armor Viewer"
+stats = "Stats"
+
+# -- Common buttons --
+
+[ui.buttons]
+yes = "Yes"
+no = "No"
+stop = "Stop"
+copy = "Copy"
+cancel = "Cancel"
+continue_ = "Continue"
+install_update = "Install Update"
+view_release = "View Release"
+clear_settings = "Clear Settings"
+more_options = "More Options"
+create_issue = "Create Issue"
+discord = "Discord"
+github = "GitHub"
+view_github = "View Project on GitHub"
+choose = "Choose..."
+reset = "Reset"
+
+# -- Menu items --
+
+[ui.menu]
+file = "File"
+check_updates = "Check for Updates"
+about = "About"
+quit = "Quit"
+
+# -- Window titles --
+
+[ui.windows]
+build_consent = "Build Collection Consent"
+crash_detected = "Application Crash Detected"
+update_available = "Update Available"
+confirm = "Confirm"
+network_warning = "Network Warning"
+error = "Error"
+about = "About"
+
+# -- Dialog / message text --
+
+[ui.dialogs]
+build_consent_message = "Would you like to send player build information information from ranked and random battles to the developer? This data collection helps the community bulk analyze player builds. You may opt out at any time in the settings."
+crash_message = "It looks like WoWs Toolkit crashed the last time it ran. If you would like to report this issue, please either post an issue on GitHub or join the Discord server and provide the below information."
+crash_clear_settings = "If for some reason data that the application persists may be responsible, you can try clearing settings by pressing the button below. This will clear all settings, including tracked players. Your replays and any WoWs data will be safe."
+update_message = "Version %{tag} of WoWs Toolkit is available"
+update_windows_only = "Update available, but only Windows is supported at this time."
+p2p_warning = "Collaborative sessions use peer-to-peer networking. Other users in the session may be able to see your IP address."
+
+# -- Labels --
+
+[ui.labels]
+debug_build = "⚠ Debug build ⚠"
+error_occurred = "An error occurred:"
+made_by = "Made by landaire."
+credits = "Thanks to Trackpad, TTaro, lkolbly for their contributions."
+pr_credits = "Personal rating (PR) calculation data and formula provided by WoWs Numbers."
+powered_by = "Powered by "
+and = " and "
+suppress_warning = "Don't show this again"
+more_info = "More info"
+loading_replays = "Loading %{count} replays..."
+
+# -- Toast messages --
+
+[ui.messages]
+app_up_to_date = "Application up-to-date"
+update_check_failed = "Failed to check for app updates"
+constants_fetch_failed = "Failed to fetch updated replay data mapping. Will retry later."
+game_data_loaded = "Successfully loaded game data"
+no_replays_detected = "No replays detected — is your WoWs directory properly configured?"
+build_loaded = "Loaded build %{build}"
+replay_loaded = "Successfully loaded replay"
+twitch_token_invalid = "Twitch token is invalid or expired. Please update it in Settings."
+twitch_token_expired = "Twitch token is invalid or expired"
+versioned_constants_rebuild_failed = "Failed to fetch versioned constants during rebuild. Will retry later."
+constants_version_mismatch = "Replay data mapping file version does not match game version.\nPost-battle results may not be accurate. Please be patient while project maintainers update the mapping on the server."
+constants_updated = "Replay data mapping file updated successfully"
+session_started = "Session started"
+user_joined = "%{name} joined"
+user_timeout = "%{name} timed out"
+user_left = "%{name} left"
+session_ended = "Session ended"
+session_error = "Session error: %{msg}"
+connected_to_session = "Connected to session"
+joined_session = "Joined session: %{name}"
+replay_spam_protection = "Disconnected: host is opening replays too fast"
+host_opened_replay = "Host opened replay: %{name}"
+host_closed_replay = "Host closed a replay"
+session_error_generic = "Session: %{msg}"
+session_rejected = "Session rejected: %{reason}"
+
+# -- Stat names --
+
+[stat]
+damage = "Damage"
+spotting_damage = "Spotting Damage"
+frags = "Frags"
+raw_xp = "Raw XP"
+base_xp = "Base XP"
+win_rate = "Win Rate"
+win_rate_pct = "Win Rate (%)"
+personal_rating = "Personal Rating"
+avg_damage = "Avg Damage"
+avg_spotting_damage = "Avg Spotting Damage"
+avg_frags = "Avg Frags"
+avg_raw_xp = "Avg Raw XP"
+avg_base_xp = "Avg Base XP"
+avg_pr = "Avg PR"
+avg_prefix = "Avg %{name}"
+
+[chart]
+game_number = "Game #"
+combined = "Combined"
+combined_suffix = "(Combined)"
+rolling_average_suffix = "(Rolling Average)"
+no_data = "No data available for selected ships"
+win_rate_unavailable = "Win Rate is not available for per-game line charts (enable Rolling Average or use Bar chart)"
+
+# -- Confirmation dialogs --
+
+[confirm]
+open_in_game = "This will launch World of Warships. Continue?"
+clear_all_session_stats = "This will clear all session stats. Continue?"
+clear_ship_session_stats = "This will remove all games for this ship from session stats. Continue?"
+set_as_session_stats = "This will replace your current session stats. Continue?"
+
+# -- Error messages --
+
+[error]
+file_watcher_creation = "Failed to create file watcher: %{error}"
+replay_dir_watch = "Failed to watch replay directory: %{error}"
+
+# -- Settings --
+
+[ui.settings.app]
+heading = "Application Settings"
+description = "General application behavior and appearance"
+check_for_updates = "Check for Updates on Startup"
+enable_logging = "Enable Logging (takes effect on restart)"
+enable_logging_tooltip = "Write debug logs to a file in the application data directory. Useful for troubleshooting."
+send_replay_data = "Send Builds from Ranked and Random Battles Replays to ShipBuilds.com"
+zoom_factor = "Zoom Factor (Ctrl + and Ctrl - also changes this)"
+language = "Language"
+
+[ui.settings.wows]
+heading = "World of Warships Settings"
+description = "Path to your World of Warships installation"
+directory_hint = "World of Warships Directory"
+
+[ui.settings.replay]
+heading = "Replay Settings"
+description = "Configure which columns appear in the replay results table"
+show_raw_xp = "Show Raw XP"
+show_entity_id = "Show Entity ID"
+show_observed_damage = "Show Observed Damage"
+show_fires = "Show Fires"
+show_floods = "Show Floods"
+show_citadels = "Show Citadels"
+show_crits = "Show Critical Module Hits"
+auto_export_data = "Auto-Export Data"
+format_json = "JSON"
+format_csv = "CSV"
+format_cbor = "CBOR"
+export_path_hint = "Data auto-export directory"
+
+[ui.settings.session]
+heading = "Session Settings"
+description = "Collaborative replay session preferences"
+display_name = "Display Name"
+suppress_ip_warning = "Don't show P2P IP address warning"
+ip_warning_tooltip = "Collaborative sessions use peer-to-peer networking. Other users in the session may be able to see your IP address."
+disable_auto_open = "Disable auto-opening session windows"
+auto_open_tooltip = "When enabled, session windows (replays, tactics boards) won't open automatically. You can still open them from the session popover."
+
+[ui.settings.twitch]
+heading = "Twitch Settings"
+description = "Connect to Twitch for chat integration and player tracking"
+get_token = "Get Login Token"
+get_token_tooltip = "We use Chatterino's login page as it provides a token with the necessary permissions (basically a moderator token with chat permissions), and it removes the need for the WoWs Toolkit developer to host their own login page website which would have the same result."
+paste_token_no_token = "Paste Token (No Token Set)"
+paste_token_valid = "Paste Token (Token Valid)"
+paste_token_invalid = "Paste Token (Token Invalid / Expired)"
+monitored_channel = "Monitored Channel (Default to Self)"
+
+# -- Replay Inspector --
+
+[ui.replay]
+spectator = "Spectator"
+loading = "Loading..."
+no_selection = "Click a replay to view, or double-click to open in a new tab"
+incomplete_results = "Incomplete Match Results"
+incomplete_results_tooltip = "The replay does not yet have end-of-match results. Data will be automatically re-loaded when the match ends and end-of-match results are added to the replay."
+no_chat = "No chat messages were sent in this replay"
+team_damage = "Team Damage: "
+hide_my_stats = "Hide My Test Ship Stats"
+open_manually = "Manually Open Replay File..."
+autoload_latest = "Autoload Latest Replay"
+column_filters = "Column Filters"
+nda = "NDA"
+export = "Export"
+render = "Render"
+chat = "Chat"
+game_chat = "Game Chat"
+copy_all = "Copy All"
+save_to_file = "Save To File"
+chat_copied = "Chat copied"
+copy_message = "Copy message"
+export_results = "Results"
+
+[ui.replay.context]
+open_in_new_tab = "Open in New Tab"
+copy_path = "Copy Path"
+copy_replay = "Copy Replay"
+copy_replays = "Copy %{count} Replays"
+show_in_explorer = "Show in File Explorer"
+show_replay_controls = "Show Replay Controls"
+open_in_game = "Open in Game"
+render_replay = "Render Replay"
+set_session_stats_one = "Set as Session Stats (1 replay)"
+set_session_stats_many = "Set as Session Stats (%{count} replays)"
+add_session_stats_one = "Add to Session Stats (1 replay)"
+add_session_stats_many = "Add to Session Stats (%{count} replays)"
+
+[ui.replay.column]
+actions = "Actions"
+player_name = "Player Name"
+base_xp = "Base XP"
+raw_xp = "Raw XP"
+ship_name = "Ship Name"
+hits = "Hits"
+kills = "Kills"
+observed_damage = "Observed Damage"
+actual_damage = "Actual Damage"
+spotting_damage = "Spotting Damage"
+potential_damage = "Potential Damage"
+time_lived = "Time Lived"
+fires = "Fires"
+floods = "Floods"
+citadels = "Citadels"
+crits = "Crits"
+received_damage = "Received Damage"
+distance_traveled = "Distance Traveled"
+skills = "Skills"
+personal_rating = "PR"
+
+[ui.replay.filter]
+raw_xp = "Raw XP"
+entity_id = "Entity ID"
+observed_damage = "Observed Damage"
+fires = "Fires"
+floods = "Floods"
+citadels = "Citadels"
+crits = "Critical Module Hits"
+
+[ui.replay.group]
+date = "Date"
+ship = "Ship"
+none = "None"
+prefix = "Group: %{label}"
+
+[ui.replay.player]
+hidden_profile = "Player has a hidden profile"
+never_connected = "Player never connected to match"
+
+[ui.replay.build]
+open_in_browser = "Open Build in Browser"
+copy_link = "Copy Build Link"
+copy_short_link = "Copy Short Build Link"
+link_copied = "Build link copied"
+open_wows_numbers = "Open WoWs Numbers Page"
+not_spotted = "This ship was never spotted. Build info unavailable."
+
+[ui.replay.sections]
+achievements = "Achievements"
+ribbons = "Ribbons"
+modules = "Modules:"
+modules_none = "No Modules"
+abilities = "Abilities:"
+abilities_none = "No Abilities"
+captain_skills = "Captain Skills:"
+captain_skills_none = "No Captain Skills"
+
+[ui.replay.debug]
+view_raw_metadata = "View Raw Player Metadata"
+raw_metadata = "Raw Metadata"
+view_results = "View Results"
+raw_json = "Raw JSON"
+raw_json_tooltip = "The raw battle results as serialized by WG."
+mapped_json = "Mapped JSON"
+mapped_json_tooltip = "Battle results with positional arrays resolved to named fields."
+
+[ui.replay.results]
+victory = "Victory"
+defeat = "Defeat"
+draw = "Draw"
+
+[ui.replay.controls]
+window_title = "Replay Controls"
+unavailable = "Controls not available (commands.scheme.xml not found in game files)."
+
+# -- Collab / Session --
+
+[ui.collab]
+session = "Session"
+starting = "Starting session…"
+session_active = "Session Active"
+connected_to_session = "Connected to Session"
+session_token = "Session Token:"
+toggle_visibility = "Toggle token visibility"
+copy_token = "Copy token"
+token_copied = "Token copied to clipboard"
+copy_web_link = "Copy Web Link"
+copy_web_link_tooltip = "Copy link for the web client"
+web_link_copied = "Web link copied to clipboard"
+copy_localhost_link = "Copy Localhost Link"
+copy_localhost_tooltip = "Copy localhost link (dev)"
+localhost_copied = "Localhost link copied to clipboard"
+connected_count = "%{count} connected"
+promote_cohost = "Promote to co-host"
+promoted_cohost = "Promoted %{name} to co-host"
+permissions = "Permissions"
+lock_annotations = "Lock Annotations"
+lock_settings = "Lock Settings"
+reset_overrides = "Reset Client Overrides"
+reset_overrides_tooltip = "Reset all client display setting changes"
+leave = "Leave"
+role_host = "Host"
+role_cohost = "Co-host"
+you = "(you)"
+display_name = "Display name:"
+display_name_hint = "Your name..."
+display_name_error = "Please enter a display name"
+enter_display_name = "Enter a display name first"
+host_session = "Host a Session"
+start_session = "Start Session"
+join_session = "Join a Session"
+paste_and_join = "Paste token & join"
+clipboard_empty = "Clipboard is empty"
+invalid_token = "Invalid token: %{error}"
+shared_windows = "Shared Windows"
+open = "Open"
+open_for_everyone = "Open for everyone"
+tactics_board = "Tactics Board"
+max_boards = "Maximum %{count} tactics boards open"
+waiting_for_data = "Waiting for game data to load…"
+
+# -- Battle result text --
+
+[battle]
+victory = "VICTORY"
+defeat = "DEFEAT"
+draw = "DRAW"
+battle_starts_in = "BATTLE STARTS IN"
+
+# -- Finish type descriptions --
+
+[finish_type]
+unknown = "Battle ended"
+extermination = "All enemy ships destroyed"
+base_captured = "Base captured"
+timeout = "Time expired"
+failure = "Mission failed"
+technical = "Technical finish"
+score = "Score limit reached"
+score_on_timeout = "Score lead at time limit"
+pve_success = "Mission accomplished"
+pve_failed = "Mission failed"
+score_zero = "Score depleted"
+score_excess = "Score limit exceeded"
+
+# -- Stats Tab --
+
+[ui.stats]
+overview = "Overview"
+limit = "Limit"
+division = "Div:"
+div_all = "All"
+div_solo = "Solo"
+div_div = "Div"
+mode_label = "Mode:"
+clear = "Clear"
+pr = "PR:"
+frags_count = "%{count} Frags"
+best_frags = "Best: %{ship} (%{count} kills)"
+max_damage = "Max DMG: %{ship} (%{damage})"
+copy_markdown = "Copy as Markdown"
+copy_csv = "Copy as CSV"
+remove_games_hint = "Remove all %{ship} games (Ctrl+Click to skip confirmation)"
+no_stats = "No session stats available. Play some games first!"
+settings = "Settings"
+chart_type = "Chart Type"
+stat_label = "Stat:"
+chart_line = "Line"
+chart_bar = "Bar"
+options = "Options"
+combined = "Combined"
+rolling_avg = "Rolling Avg"
+labels = "Labels"
+ships = "Ships"
+all_ships = "All"
+no_ships = "None"
+copy_as_image = "Copy as Image"
+
+[ui.stats.table]
+min = "Min"
+max = "Max"
+total = "Total"
+average = "Average"
+
+# -- Player Tracker --
+
+[ui.player_tracker]
+clear_stats = "Clear Stats"
+player_filter = "Player Filter"
+populate_from_replays = "Populate Data From Replays"
+current_match = "Players in Current Match"
+historical = "Historical Matches"
+seen_minutes = "Seen %{minutes} minutes after match start"
+
+[ui.player_tracker.column]
+clan = "Clan"
+player_name = "Player Name"
+twitch_names = "Possible Twitch Names"
+wg_id = "WG ID"
+total_encounters = "Total Encounters"
+encounters_in_range = "Encounters in Time Range"
+last_encountered = "Last Encountered"
+aliases = "Aliases"
+notes = "Notes"
+
+[ui.player_tracker.period]
+past_hour = "Past Hour"
+past_six_hours = "Past 6 Hours"
+past_day = "Past 24 Hours"
+past_week = "Past Week"
+past_month = "Past Month"
+all_time = "All Time"
+
+# -- Mod Manager --
+
+[ui.mod_manager]
+category_filters = "Category Filters"
+enabled = "Enabled"
+mod_home = "Mod Home Page"
+discord_thread = "Discord Approval Thread"
+save_config = "Save Mod Config"
+load_config = "Load Mod Config"
+filter = "Filter"
+
+[ui.mod_manager.column]
+enabled = "Enabled"
+name = "Name"
+author = "Author"
+category = "Category"
+
+# -- Replay Renderer --
+
+[ui.renderer]
+loading = "Loading replay data..."
+preparing_export = "Preparing export..."
+encoding = "Encoding"
+muxing = "Muxing"
+
+[ui.renderer.advantage]
+breakdown = "Advantage Breakdown"
+team_eliminated = "A team has been eliminated"
+score_projection = "Score Projection"
+fleet_power = "Fleet Power"
+strategic_threat = "Strategic Threat"
+total = "Total"
+hp_incomplete = "HP/ship data incomplete — only score factors shown"
+
+[ui.renderer.context]
+show_trail = "Show Trail"
+disable_other_trails = "Disable All Other Trails"
+ranges = "Ranges"
+detection = "Detection"
+main_battery = "Main Battery"
+secondary = "Secondary"
+torpedo = "Torpedo"
+radar = "Radar"
+hydro = "Hydro"
+enable_all = "Enable All"
+disable_all = "Disable All"
+disable_other_ranges = "Disable All Other Ranges"
+enable_all_ranges = "Enable All Ships' Ranges"
+show_armor = "Show Realtime Armor"
+
+[ui.renderer.controls]
+jump_to_start = "Jump to start"
+previous_event = "Previous event (Shift+Left)"
+back_10s = "Back 10s (Left)"
+pause = "Pause (Space)"
+play = "Play (Space)"
+forward_10s = "Forward 10s (Right)"
+next_event = "Next event (Shift+Right)"
+jump_to_end = "Jump to end"
+save_as_video = "Save as Video"
+copy_to_clipboard = "Render Video to Clipboard"
+
+[ui.renderer.settings]
+ship_settings = "Ship Settings"
+armament = "Armament"
+dead_ships = "Dead Ships"
+dead_ship_names = "Dead Ship Names"
+player_names = "Player Names"
+ship_ranges = "Ship Ranges"
+self_ship_ranges = "Self Ship Ranges"
+ship_names = "Ship Names"
+turret_direction = "Turret Direction"
+trail_settings = "Trail Settings"
+heat_trail = "Heat Trail"
+speed_trails = "Speed Trails"
+dead_ship_trails = "Dead Ship Trails"
+map_settings = "Map Settings"
+buildings = "Buildings"
+capture_points = "Capture Points"
+consumables = "Consumables"
+planes = "Planes"
+smoke = "Smoke"
+torpedoes = "Torpedoes"
+tracers = "Tracers"
+hud_settings = "HUD Settings"
+battle_result = "Battle Result"
+buff_counters = "Buff Counters"
+chat_label = "Chat"
+kill_feed = "Kill Feed"
+score_label = "Score"
+score_timers = "Score Timers"
+team_advantage = "Team Advantage"
+timer = "Timer"
+export_settings = "Export Settings"
+prefer_cpu = "Prefer CPU Encoder"
+prefer_cpu_tooltip = "Use software (CPU) encoder instead of GPU for video export"
+save_defaults = "Save Defaults"
+event_timeline = "Event Timeline"
+
+# -- File Unpacker --
+
+[ui.unpacker]
+assets_bin = "Assets.bin"
+loading_assets = "Loading assets.bin..."
+load_failed = "Failed to load: %{error}"
+no_game_data = "No game data loaded. Set your World of Warships directory in Settings."
+filter_files = "Filter files..."
+search_in_files = "Search in Files"
+search_hint = "Search in files..."
+path_filter_hint = "Path filter (e.g. *.xml)"
+queue_all = "Queue All"
+queue_all_files = "Queue All Files"
+empty_directory = "Empty directory"
+stop_search_tooltip = "Stop search"
+no_matches = "No matches found."
+view_as_json = "View as JSON"
+extract_as_json = "Extract as JSON"
+view_contents = "View Contents"
+version = "Version:"
+game_params = "GameParams"
+base_as_json = "Base As JSON"
+as_json = "As JSON"
+as_cbor = "As CBOR"
+as_json_minimal = "As JSON (Minimal / Transformed)"
+as_cbor_minimal = "As CBOR (Minimal / Transformed)"
+decode_prototypes = "Decode prototypes as JSON"
+decode_prototypes_tooltip = "Decode supported Assets.bin prototypes (.visual, .model, .mfm) to JSON on extraction"
+extraction_queue = "Extraction Queue"
+clear_all = "Clear All"
+browse = "Browse"
+output_dir_hint = "Output directory..."
+go_to_directory = "Go to Directory"
+remove_from_queue = "Remove from queue"
+queue_folder = "Queue entire folder"
+double_click_open = "Double-click to open"
+
+[ui.unpacker.column]
+name = "Name"
+size = "Size"
+type_col = "Type"
+path = "Path"
+file = "File"
+offset = "Offset"
+context = "Context"
+
+# -- Armor Viewer --
+
+[ui.armor]
+load_settings = "Load game data in Settings to use the Armor Viewer."
+gpu_unavailable = "GPU render state not available."
+loading_ship = "Loading ship data..."
+load_failed = "Failed to load ship data: %{error}"
+empty = "Empty"
+mirror_cameras = "Mirror cameras"
+sync_options = "Sync options"
+sync_tooltip = "Keep armor/hull visibility in sync across all panes"
+compare_split = "Compare in new split"
+export_model = "Export Ship Model"
+armor_thickness = "Armor Thickness"
+export_disclaimer = "These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws."
+export_button = "Export"
+armor_toggle = "Armor"
+armor_tooltip = "Toggle armor zone visibility"
+hull_toggle = "Hull"
+hull_tooltip = "Toggle hull model part visibility"
+splash_toggle = "Splash"
+splash_tooltip = "Toggle splash box visibility"
+show_hidden = "Show Hidden"
+show_hidden_tooltip = "Toggle (possibly) hidden panel visibility"
+gaps = "Gaps"
+gaps_tooltip = "Highlight boundary edges where armor panels don't connect (potential gaps)"
+display = "Display"
+display_tooltip = "Display settings (Ctrl+S)"
+marker_opacity = "Marker Opacity"
+save_defaults = "Save as defaults"
+export_tab = "Export"
+export_tooltip = "Export ship model to OBJ file"
+pen_check = "Pen Check"
+pen_check_tooltip = "Configure shells for penetration comparison"
+trajectory = "Trajectory"
+trajectory_on = "Trajectory [ON]"
+trajectory_tooltip = "Click armor to simulate shell trajectories (Ctrl+T)"
+continue_ricochet = "Continue past ricochet"
+splash_mode = "Splash"
+splash_on = "Splash [ON]"
+splash_no_data = "No splash data for this ship"
+splash_no_shells = "Add a ship with HE/SAP shells to the comparison list"
+splash_tooltip_mode = "Click armor to visualize HE splash damage volume"
+loading_armor = "Loading ship..."
+select_ship = "Select a ship from the list"
+pen_check_label = "Penetration Check"
+all_btn = "All"
+none_btn = "None"
+opaque = "Opaque"
+upgrade = "Upgrade:"
+plate_edges = "Plate Edges"
+waterline = "Waterline"
+opacity = "Opacity"
+ship_hull = "Ship Hull"
+opaque_hull = "Opaque Hull"
+ballistic_disclaimer = "Ballistic results are based on reverse engineering/estimates of how simulation works"
+roll = "Roll"
+ctrl_click_solo = "Ctrl+click to solo"
+reset_plates = "Reset plates"
+
+[ui.armor.realtime]
+loading = "Loading ship armor..."
+waiting = "Waiting for ship data..."
+incoming_fire = "Incoming Fire"
+attacker_filter = "Attacker Filter"
+all_enemies = "All Enemies"
+show_secondaries = "Show secondary armament"
+auto_scroll = "Auto-scroll"
+seek_to_salvo = "Seek to salvo"
+deselect = "Deselect"
+select_all = "Select All"
+no_data = "Shell data no longer available"
+sim_agrees = "Sim agrees"
+no_armor_hit = "No armor plates hit"
+
+# -- Advantage level labels --
+
+[advantage]
+absolute = "Absolute"
+strong = "Strong"
+moderate = "Moderate"
+weak = "Weak"
