@@ -1069,43 +1069,39 @@ impl UiReport {
         });
 
         let mut player_reports: Vec<PlayerReport> = player_reports.collect();
-        let mut all_received_damages = HashMap::new();
+        let mut all_received_damages: HashMap<AccountId, HashMap<AccountId, (u64, String, String)>> = HashMap::new();
 
-        // For each player report, we need to update the damage interactions so they
-        // have the correct received damage
+        // For each player, scan ALL other players to find anyone who dealt damage
+        // to this player. The old logic only checked mutual combatants (players
+        // this player also damaged), missing one-directional attackers.
         for report in &player_reports {
-            let mut received_damages = HashMap::new();
-            let Some(damage_interactions) = report.damage_interactions.as_ref() else {
-                continue;
-            };
+            let this_id = report.player().initial_state().db_id();
 
-            let this_player = report.player();
-            let this_player_state = this_player.initial_state();
+            for attacker in &player_reports {
+                let attacker_id = attacker.player().initial_state().db_id();
+                if attacker_id == this_id {
+                    continue;
+                }
 
-            for player_id in damage_interactions.keys() {
-                let Some(other_player) =
-                    player_reports.iter().find(|report| report.player().initial_state().db_id() == *player_id)
-                else {
+                let Some(attacker_interactions) = attacker.damage_interactions.as_ref() else {
                     continue;
                 };
-
-                if let Some(interactions) = other_player.damage_interactions.as_ref() {
-                    let Some(interaction_with_this_player) = interactions.get(&this_player_state.db_id()) else {
-                        continue;
-                    };
-
-                    received_damages.insert(
-                        *player_id,
-                        (
-                            interaction_with_this_player.damage_dealt,
-                            interaction_with_this_player.damage_dealt_text.clone(),
-                            interaction_with_this_player.damage_dealt_hover_text.clone(),
-                        ),
-                    );
+                let Some(interaction) = attacker_interactions.get(&this_id) else {
+                    continue;
+                };
+                if interaction.damage_dealt == 0 {
+                    continue;
                 }
-            }
 
-            all_received_damages.insert(this_player_state.db_id(), received_damages);
+                all_received_damages.entry(this_id).or_default().insert(
+                    attacker_id,
+                    (
+                        interaction.damage_dealt,
+                        interaction.damage_dealt_text.clone(),
+                        interaction.damage_dealt_hover_text.clone(),
+                    ),
+                );
+            }
         }
 
         for report in &mut player_reports {
