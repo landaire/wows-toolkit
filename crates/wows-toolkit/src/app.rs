@@ -687,11 +687,7 @@ impl WowsToolkitApp {
                     warn!("Constants fetch failed: {}", msg);
                     if !self.constants_update_error_shown {
                         self.constants_update_error_shown = true;
-                        self.tab_state
-                            .toasts
-                            .lock()
-                            .error(t!("ui.messages.constants_fetch_failed"))
-                            .duration(None);
+                        self.tab_state.toasts.lock().error(t!("ui.messages.constants_fetch_failed")).duration(None);
                     }
                 }
                 NetworkResult::PersonalRatingDataFetched(data) => {
@@ -805,10 +801,7 @@ impl WowsToolkitApp {
                     self.tab_state.toasts.lock().success(t!("ui.messages.game_data_loaded"));
 
                     if no_replays {
-                        self.tab_state
-                            .toasts
-                            .lock()
-                            .warning(t!("ui.messages.no_replays_detected"));
+                        self.tab_state.toasts.lock().warning(t!("ui.messages.no_replays_detected"));
                     }
 
                     self.check_constants_version_mismatch();
@@ -1584,12 +1577,7 @@ impl WowsToolkitApp {
         }
 
         if self.language_selection_open {
-            let detected_locale = self
-                .tab_state
-                .settings
-                .locale
-                .clone()
-                .unwrap_or_else(|| "en".into());
+            let detected_locale = self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".into());
             let native_name = wt_translations::language_name(&detected_locale).unwrap_or("English");
 
             egui::Window::new(t!("dialog.select_language"))
@@ -1765,7 +1753,8 @@ impl WowsToolkitApp {
                                 "https://github.com/landaire/wows-toolkit/issues/new/choose",
                             ));
                         }
-                        if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
+                        if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked()
+                        {
                             ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
                         }
                     });
@@ -1811,33 +1800,36 @@ impl WowsToolkitApp {
                 .iter()
                 .find(|asset| asset.name.contains("windows") && asset.name.ends_with(".zip"));
             if let Some(asset) = asset {
-                egui::Window::new(t!("ui.windows.update_available")).open(&mut self.update_window_open).show(ctx, |ui| {
-                    ui.vertical(|ui| {
-                        ui.label(t!("ui.dialogs.update_message", tag = tag));
-                        if let Some(notes) = notes.as_mut() {
-                            ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
-                                CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
-                            });
-                        }
-                        ui.horizontal(|ui| {
-                            #[cfg(target_os = "windows")]
-                            {
-                                if ui.button(t!("ui.buttons.install_update")).clicked() {
-                                    let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
-                                    update_background_task!(self.tab_state.background_tasks, task);
+                egui::Window::new(t!("ui.windows.update_available")).open(&mut self.update_window_open).show(
+                    ctx,
+                    |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(t!("ui.dialogs.update_message", tag = tag));
+                            if let Some(notes) = notes.as_mut() {
+                                ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
+                                    CommonMarkViewer::new().show(ui, &mut self.tab_state.markdown_cache, notes);
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    if ui.button(t!("ui.buttons.install_update")).clicked() {
+                                        let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                        update_background_task!(self.tab_state.background_tasks, task);
+                                    }
                                 }
-                            }
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                let _ = asset;
-                                ui.label(t!("ui.dialogs.update_windows_only"));
-                            }
-                            if ui.button(t!("ui.buttons.view_release")).clicked() {
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                            }
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    let _ = asset;
+                                    ui.label(t!("ui.dialogs.update_windows_only"));
+                                }
+                                if ui.button(t!("ui.buttons.view_release")).clicked() {
+                                    ui.ctx().open_url(OpenUrl::new_tab(url));
+                                }
+                            });
                         });
-                    });
-                });
+                    },
+                );
             } else {
                 self.update_window_open = false;
             }
@@ -1888,9 +1880,7 @@ impl WowsToolkitApp {
         match mismatch_status {
             Some(true) => {
                 self.constants_version_mismatch = true;
-                self.tab_state.toasts.lock()
-                    .warning(t!("ui.messages.constants_version_mismatch"))
-                    .duration(None);
+                self.tab_state.toasts.lock().warning(t!("ui.messages.constants_version_mismatch")).duration(None);
             }
             Some(false) => {
                 self.constants_version_mismatch = false;
@@ -2465,18 +2455,18 @@ fn add_system_font_fallbacks(fonts: &mut egui::FontDefinitions) {
     // (logical name, file path) — tried in order per platform.
     #[cfg(target_os = "windows")]
     let candidates: &[(&str, &str)] = &[
-        ("sys_cjk_sc", r"C:\Windows\Fonts\msyh.ttc"),   // Microsoft YaHei — Simplified Chinese + Latin
-        ("sys_cjk_tc", r"C:\Windows\Fonts\msjh.ttc"),    // Microsoft JhengHei — Traditional Chinese
+        ("sys_cjk_sc", r"C:\Windows\Fonts\msyh.ttc"), // Microsoft YaHei — Simplified Chinese + Latin
+        ("sys_cjk_tc", r"C:\Windows\Fonts\msjh.ttc"), // Microsoft JhengHei — Traditional Chinese
         ("sys_cjk_jp", r"C:\Windows\Fonts\YuGothR.ttc"), // Yu Gothic — Japanese
-        ("sys_cjk_kr", r"C:\Windows\Fonts\malgun.ttf"),  // Malgun Gothic — Korean
-        ("sys_thai", r"C:\Windows\Fonts\leelawui.ttf"),   // Leelawadee UI — Thai
+        ("sys_cjk_kr", r"C:\Windows\Fonts\malgun.ttf"), // Malgun Gothic — Korean
+        ("sys_thai", r"C:\Windows\Fonts\leelawui.ttf"), // Leelawadee UI — Thai
     ];
 
     #[cfg(target_os = "macos")]
     let candidates: &[(&str, &str)] = &[
-        ("sys_cjk_sc", "/System/Library/Fonts/PingFang.ttc"),                          // PingFang — CJK
-        ("sys_cjk_jp", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),                // Hiragino Sans
-        ("sys_thai", "/System/Library/Fonts/Supplemental/Ayuthaya.ttf"),                // Thai
+        ("sys_cjk_sc", "/System/Library/Fonts/PingFang.ttc"), // PingFang — CJK
+        ("sys_cjk_jp", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"), // Hiragino Sans
+        ("sys_thai", "/System/Library/Fonts/Supplemental/Ayuthaya.ttf"), // Thai
     ];
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -2495,9 +2485,7 @@ fn add_system_font_fallbacks(fonts: &mut egui::FontDefinitions) {
             continue;
         }
         if let Ok(data) = std::fs::read(path) {
-            fonts
-                .font_data
-                .insert(name.to_string(), egui::FontData::from_owned(data).into());
+            fonts.font_data.insert(name.to_string(), egui::FontData::from_owned(data).into());
             if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
                 family.push(name.to_string());
             }

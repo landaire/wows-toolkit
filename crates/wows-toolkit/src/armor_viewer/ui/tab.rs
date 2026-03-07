@@ -32,7 +32,6 @@ use crate::armor_viewer::state::VisibilitySnapshot;
 use crate::armor_viewer::state::ZonePart;
 use crate::armor_viewer::ui::analysis::focus_analysis_tab;
 use crate::armor_viewer::ui::legend::show_armor_legend;
-use rust_i18n::t;
 use crate::icons;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::LAYER_DEFAULT;
@@ -41,6 +40,7 @@ use crate::viewport_3d::LAYER_OVERLAY;
 use crate::viewport_3d::MeshId;
 use crate::viewport_3d::Vec3;
 use crate::viewport_3d::Vertex;
+use rust_i18n::t;
 use wowsunpack::game_params::types::AmmoType;
 
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for armor panes.
@@ -452,7 +452,10 @@ impl ToolkitTabViewer<'_> {
                                                         ui.close();
                                                     }
                                                     if ui
-                                                        .button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.armor.export_model")))
+                                                        .button(wt_translations::icon_t(
+                                                            icons::DOWNLOAD_SIMPLE,
+                                                            &t!("ui.armor.export_model"),
+                                                        ))
                                                         .clicked()
                                                     {
                                                         deferred_export_ref.set(Some(ExportRequest {
@@ -976,8 +979,7 @@ impl ToolkitTabViewer<'_> {
                                             .map_err(|e| format!("{e:?}"))?;
                                         let mut file = std::fs::File::create(&path)
                                             .map_err(|e| format!("Failed to create file: {e}"))?;
-                                        ctx.export_glb(&mut file)
-                                            .map_err(|e| format!("Export failed: {e:?}"))?;
+                                        ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
                                         Ok(())
                                     })();
                                     match result {
@@ -1296,8 +1298,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
             if !armor.zone_parts.is_empty() {
                 vp_ui.horizontal(|ui| {
                     // ── Armor Zones button with popover ──
-                    let armor_btn =
-                        ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle"))).on_hover_text(t!("ui.armor.armor_tooltip").as_ref());
+                    let armor_btn = ui
+                        .button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle")))
+                        .on_hover_text(t!("ui.armor.armor_tooltip").as_ref());
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1357,7 +1360,10 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                     // ── Show Hidden Plates toggle ──
                     if ui
-                        .selectable_label(pane.show_hidden_only, wt_translations::icon_t(icons::EYE_SLASH, &t!("ui.armor.show_hidden")))
+                        .selectable_label(
+                            pane.show_hidden_only,
+                            wt_translations::icon_t(icons::EYE_SLASH, &t!("ui.armor.show_hidden")),
+                        )
                         .on_hover_text(t!("ui.armor.show_hidden_tooltip").as_ref())
                         .clicked()
                     {
@@ -1396,8 +1402,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     }
 
                     // ── Display settings button with popover ──
-                    let display_btn =
-                        ui.button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display"))).on_hover_text(t!("ui.armor.display_tooltip").as_ref());
+                    let display_btn = ui
+                        .button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display")))
+                        .on_hover_text(t!("ui.armor.display_tooltip").as_ref());
                     let display_popup_id = display_btn.id.with("display_popup");
                     // Ctrl+S opens display popover at mouse position
                     if ctrl_s_pressed {
@@ -1466,7 +1473,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
 
                     // ── Trajectory mode toggle ──
                     {
-                        let traj_label = if pane.trajectory_mode { t!("ui.armor.trajectory_on").to_string() } else { t!("ui.armor.trajectory").to_string() };
+                        let traj_label = if pane.trajectory_mode {
+                            t!("ui.armor.trajectory_on").to_string()
+                        } else {
+                            t!("ui.armor.trajectory").to_string()
+                        };
                         let btn = egui::Button::new(traj_label);
                         let btn =
                             if pane.trajectory_mode { btn.fill(egui::Color32::from_rgb(80, 60, 20)) } else { btn };
@@ -1480,7 +1491,9 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                     }
 
                     if pane.trajectory_mode
-                        && ui.checkbox(&mut pane.continue_on_ricochet, t!("ui.armor.continue_ricochet").as_ref()).changed()
+                        && ui
+                            .checkbox(&mut pane.continue_on_ricochet, t!("ui.armor.continue_ricochet").as_ref())
+                            .changed()
                         && !pane.trajectories.is_empty()
                     {
                         let cam_dist = pane.viewport.camera.distance;
@@ -1506,7 +1519,11 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                         let has_he_shell = comparison_ships.iter().any(|s| {
                             s.shells.iter().any(|sh| sh.ammo_type == AmmoType::HE || sh.ammo_type == AmmoType::SAP)
                         });
-                        let splash_label = if pane.splash_mode { t!("ui.armor.splash_on").to_string() } else { t!("ui.armor.splash_mode").to_string() };
+                        let splash_label = if pane.splash_mode {
+                            t!("ui.armor.splash_on").to_string()
+                        } else {
+                            t!("ui.armor.splash_mode").to_string()
+                        };
                         let btn = egui::Button::new(splash_label);
                         let btn = if pane.splash_mode { btn.fill(egui::Color32::from_rgb(80, 40, 10)) } else { btn };
                         let enabled = has_splash && has_he_shell;
@@ -4491,13 +4508,7 @@ pub(crate) fn draw_viewport_watermark(painter: &egui::Painter, viewport_rect: eg
     let font = egui::FontId::proportional(11.0);
     let text_color = egui::Color32::from_rgba_unmultiplied(180, 180, 180, 120);
     let pos = egui::pos2(viewport_rect.left() + 6.0, viewport_rect.bottom() - 18.0);
-    painter.text(
-        pos,
-        egui::Align2::LEFT_BOTTOM,
-        &t!("ui.armor.ballistic_disclaimer"),
-        font,
-        text_color,
-    );
+    painter.text(pos, egui::Align2::LEFT_BOTTOM, &t!("ui.armor.ballistic_disclaimer"), font, text_color);
 }
 
 /// Draw the ship roll slider. Returns true if the roll value changed.
@@ -4506,7 +4517,9 @@ pub(crate) fn draw_roll_slider(ui: &mut egui::Ui, viewport: &mut crate::viewport
     let roll_deg = &mut viewport.model_roll;
     // Store in degrees for the slider, convert on render
     let mut deg = roll_deg.to_degrees();
-    let response = ui.add(egui::Slider::new(&mut deg, -25.0..=25.0).fixed_decimals(1).suffix("°").text(t!("ui.armor.roll").as_ref()));
+    let response = ui.add(
+        egui::Slider::new(&mut deg, -25.0..=25.0).fixed_decimals(1).suffix("°").text(t!("ui.armor.roll").as_ref()),
+    );
     *roll_deg = deg.to_radians();
     if response.double_clicked() {
         *roll_deg = 0.0;

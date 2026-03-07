@@ -246,7 +246,17 @@ pub(super) fn render_video_blocking(
         let powerup_icons: HashMap<String, image::RgbaImage> =
             powerup_raw.iter().map(|(k, a)| (k.clone(), to_rgba(a))).collect();
 
-        (map_image, ship_icons, plane_icons, building_icons, consumable_icons, death_cause_icons, powerup_icons, map_info, game_fonts)
+        (
+            map_image,
+            ship_icons,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            death_cause_icons,
+            powerup_icons,
+            map_info,
+            game_fonts,
+        )
     };
 
     // Build replay parser components

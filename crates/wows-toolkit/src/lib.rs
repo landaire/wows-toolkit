@@ -49,9 +49,7 @@ impl FileBackend {
     /// Attempt to load `translations/*.toml` from the exe directory.
     /// Returns an empty backend if the directory doesn't exist.
     pub fn try_load() -> Self {
-        let translations_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("translations")));
+        let translations_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("translations")));
 
         let mut all = std::collections::HashMap::new();
         if let Some(dir) = translations_dir {
@@ -68,12 +66,11 @@ fn load_toml_dir(
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "toml") {
-            if let Some(locale) = path.file_stem().and_then(|s| s.to_str()) {
-                if let Some(flat) = load_locale_file(&path) {
-                    out.insert(locale.to_string(), flat);
-                }
-            }
+        if path.extension().is_some_and(|e| e == "toml")
+            && let Some(locale) = path.file_stem().and_then(|s| s.to_str())
+            && let Some(flat) = load_locale_file(&path)
+        {
+            out.insert(locale.to_string(), flat);
         }
     }
 }
@@ -92,11 +89,7 @@ fn load_locale_file(path: &std::path::Path) -> Option<std::collections::HashMap<
 
 fn flatten_toml(prefix: &str, table: &toml::Table, out: &mut std::collections::HashMap<String, String>) {
     for (k, v) in table {
-        let key = if prefix.is_empty() {
-            k.clone()
-        } else {
-            format!("{prefix}.{k}")
-        };
+        let key = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
         match v {
             toml::Value::String(s) => {
                 out.insert(key, s.clone());
@@ -115,8 +108,6 @@ impl rust_i18n::Backend for FileBackend {
     }
 
     fn translate(&self, locale: &str, key: &str) -> Option<&str> {
-        self.translations
-            .get(locale)
-            .and_then(|m| m.get(key).map(|s| s.as_str()))
+        self.translations.get(locale).and_then(|m| m.get(key).map(|s| s.as_str()))
     }
 }

@@ -335,7 +335,10 @@ impl UnpackerPaneViewer<'_> {
             ui.vertical_centered(|ui| {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 10.0);
-                ui.label(RichText::new(t!("ui.unpacker.load_failed", error = err).as_ref()).color(egui::Color32::from_rgb(220, 80, 80)));
+                ui.label(
+                    RichText::new(t!("ui.unpacker.load_failed", error = err).as_ref())
+                        .color(egui::Color32::from_rgb(220, 80, 80)),
+                );
             });
             return;
         }
@@ -345,9 +348,7 @@ impl UnpackerPaneViewer<'_> {
             ui.vertical_centered(|ui| {
                 let avail = ui.available_height();
                 ui.add_space(avail / 2.0 - 10.0);
-                ui.label(
-                    RichText::new(t!("ui.unpacker.no_game_data").as_ref()).weak(),
-                );
+                ui.label(RichText::new(t!("ui.unpacker.no_game_data").as_ref()).weak());
             });
             return;
         }
@@ -368,7 +369,8 @@ impl UnpackerPaneViewer<'_> {
                 // Filter input
                 ui.horizontal(|ui| {
                     ui.label(icons::FUNNEL);
-                    let response = ui.add(egui::TextEdit::singleline(&mut browser.filter).hint_text(t!("ui.unpacker.filter_files")));
+                    let response = ui
+                        .add(egui::TextEdit::singleline(&mut browser.filter).hint_text(t!("ui.unpacker.filter_files")));
                     if response.changed() {
                         browser.used_filter = None;
                     }
@@ -466,7 +468,9 @@ impl UnpackerPaneViewer<'_> {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("{} results", filtered_files.len())).weak());
                         if !filtered_files.is_empty()
-                            && ui.small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all"))).clicked()
+                            && ui
+                                .small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all")))
+                                .clicked()
                         {
                             for file in filtered_files.iter() {
                                 queue_extract(self.items_to_extract, file.1.clone());
@@ -538,7 +542,13 @@ impl UnpackerPaneViewer<'_> {
                         if !file_entries.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("{} items", entries.len())).weak());
-                                if ui.small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all_files"))).clicked() {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::PLUS_CIRCLE,
+                                        &t!("ui.unpacker.queue_all_files"),
+                                    ))
+                                    .clicked()
+                                {
                                     for entry in &file_entries {
                                         queue_extract(self.items_to_extract, entry.vfs_path.clone());
                                     }
@@ -707,7 +717,10 @@ fn add_view_file_context_menu(
                     open_decoded_json_viewer(file_viewer, &node_view, pt);
                     ui.close_kind(UiKind::Menu);
                 }
-                if ui.button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.unpacker.extract_as_json"))).clicked() {
+                if ui
+                    .button(wt_translations::icon_t(icons::DOWNLOAD_SIMPLE, &t!("ui.unpacker.extract_as_json")))
+                    .clicked()
+                {
                     extract_single_as_json(&node_extract, pt);
                     ui.close_kind(UiKind::Menu);
                 }
@@ -946,10 +959,18 @@ fn render_file_listing_table(
                 row.col(|ui| {
                     if entry.is_dir {
                         if is_queued {
-                            if ui.small_button(icons::X_CIRCLE).on_hover_text(t!("ui.unpacker.remove_from_queue")).clicked() {
+                            if ui
+                                .small_button(icons::X_CIRCLE)
+                                .on_hover_text(t!("ui.unpacker.remove_from_queue"))
+                                .clicked()
+                            {
                                 items_to_extract.lock().retain(|v| v.as_str() != entry.vfs_path.as_str());
                             }
-                        } else if ui.small_button(icons::PLUS_CIRCLE).on_hover_text(t!("ui.unpacker.queue_folder")).clicked() {
+                        } else if ui
+                            .small_button(icons::PLUS_CIRCLE)
+                            .on_hover_text(t!("ui.unpacker.queue_folder"))
+                            .clicked()
+                        {
                             queue_extract(items_to_extract, entry.vfs_path.clone());
                         }
                     } else {
@@ -1183,7 +1204,10 @@ fn render_search_results_table(
                 let vfs_str2 = vfs_str.clone();
                 let vfs_path2 = vfs_path.clone();
                 file_response.context_menu(|ui| {
-                    if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory"))).clicked() {
+                    if ui
+                        .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory")))
+                        .clicked()
+                    {
                         if let Some(parent_end) = vfs_str.rfind('/') {
                             let parent = &vfs_str[..parent_end];
                             navigate_to.set(Some((
@@ -1200,7 +1224,10 @@ fn render_search_results_table(
                     }
                 });
                 row.response().context_menu(|ui| {
-                    if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory"))).clicked() {
+                    if ui
+                        .button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.unpacker.go_to_directory")))
+                        .clicked()
+                    {
                         if let Some(parent_end) = vfs_str2.rfind('/') {
                             let parent = &vfs_str2[..parent_end];
                             navigate_to.set(Some((
@@ -1917,9 +1944,7 @@ impl ToolkitTabViewer<'_> {
                         &mut self.tab_state.browser_state.decode_prototypes_as_json,
                         t!("ui.unpacker.decode_prototypes"),
                     )
-                    .on_hover_text(
-                        t!("ui.unpacker.decode_prototypes_tooltip"),
-                    );
+                    .on_hover_text(t!("ui.unpacker.decode_prototypes_tooltip"));
 
                     // Queue popover button
                     let queue_label = if queue_count > 0 {
@@ -1947,7 +1972,13 @@ impl ToolkitTabViewer<'_> {
                                         ui.horizontal(|ui| {
                                             ui.strong(t!("ui.unpacker.extraction_queue"));
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if ui.small_button(wt_translations::icon_t(icons::TRASH, &t!("ui.unpacker.clear_all"))).clicked() {
+                                                if ui
+                                                    .small_button(wt_translations::icon_t(
+                                                        icons::TRASH,
+                                                        &t!("ui.unpacker.clear_all"),
+                                                    ))
+                                                    .clicked()
+                                                {
                                                     self.tab_state.items_to_extract.lock().clear();
                                                     self.tab_state.browser_state.show_queue_popover = false;
                                                 }

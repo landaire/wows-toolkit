@@ -273,7 +273,8 @@ pub fn load_building_icons(vfs: &VfsPath) -> HashMap<String, RgbaImage> {
             let filename = format!("icon_ground_{}_{}.png", btype, relation);
             let path = format!("gui/battle_hud/markers/building_icons/normal/{}", filename);
             if let Some(img) = load_packed_image(&path, vfs) {
-                let resized = image::imageops::resize(&img, ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
+                let resized =
+                    image::imageops::resize(&img, ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
                 let key = format!("{}_{}", btype, relation);
                 icons.insert(key, resized);
             }

@@ -12,13 +12,13 @@ use crate::data::session_stats::PerformanceInfo;
 use crate::data::session_stats::resolve_ship_name;
 use crate::data::wows_data::GameAsset;
 use crate::icons;
-use rust_i18n::t;
 use crate::tab_state::ChartMode;
 use crate::tab_state::ChartableStat;
 use crate::tab_state::StatsSubTab;
 use crate::ui::session_stats_chart::render_bar_chart;
 use crate::ui::session_stats_chart::render_line_chart;
 use crate::util::separate_number;
+use rust_i18n::t;
 use std::cmp::Reverse;
 use std::sync::Arc;
 use wows_replays::types::GameParamId;
@@ -130,7 +130,11 @@ impl ToolkitTabViewer<'_> {
             ui.separator();
 
             ui.label(t!("ui.stats.division"));
-            ui.selectable_value(&mut self.tab_state.settings.session_stats_division_filter, DivisionFilter::All, t!("ui.stats.div_all"));
+            ui.selectable_value(
+                &mut self.tab_state.settings.session_stats_division_filter,
+                DivisionFilter::All,
+                t!("ui.stats.div_all"),
+            );
             ui.selectable_value(
                 &mut self.tab_state.settings.session_stats_division_filter,
                 DivisionFilter::SoloOnly,
@@ -147,7 +151,10 @@ impl ToolkitTabViewer<'_> {
                 ui.separator();
                 ui.label(t!("ui.stats.mode_label"));
                 if ui
-                    .selectable_label(self.tab_state.settings.session_stats_game_mode_filter.is_empty(), t!("ui.stats.div_all"))
+                    .selectable_label(
+                        self.tab_state.settings.session_stats_game_mode_filter.is_empty(),
+                        t!("ui.stats.div_all"),
+                    )
                     .clicked()
                 {
                     self.tab_state.settings.session_stats_game_mode_filter.clear();
@@ -293,7 +300,8 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         }
     }
 
-    let loader: Option<&dyn wowsunpack::data::ResourceLoader> = provider_ref.map(|p| p as &dyn wowsunpack::data::ResourceLoader);
+    let loader: Option<&dyn wowsunpack::data::ResourceLoader> =
+        provider_ref.map(|p| p as &dyn wowsunpack::data::ResourceLoader);
 
     all_achievements.sort_by(|a, b| {
         let name_a = a.resolved_name(loader);
@@ -357,8 +365,10 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         // Collect per-ship PR stats (min/max/avg) before entering the mutable loop
         let pr_stats_by_ship: std::collections::HashMap<GameParamId, crate::data::session_stats::PrStats> = {
             let per_ship_games = tab_state.settings.session_stats.per_ship_limited_games();
-            let mut games_by_ship: std::collections::HashMap<GameParamId, Vec<&crate::data::session_stats::PerGameStat>> =
-                std::collections::HashMap::new();
+            let mut games_by_ship: std::collections::HashMap<
+                GameParamId,
+                Vec<&crate::data::session_stats::PerGameStat>,
+            > = std::collections::HashMap::new();
             for game in &per_ship_games {
                 games_by_ship.entry(game.ship_id).or_default().push(game);
             }
@@ -451,7 +461,13 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                     ui.menu_button(icons::COPY, |ui| {
                         if ui.button(t!("ui.stats.copy_markdown")).clicked() {
                             let mut md = format!("**{header}**\n\n");
-                            md.push_str(&format!("| | {} | {} | {} | {} |\n", t!("ui.stats.table.min"), t!("ui.stats.table.max"), t!("ui.stats.table.total"), t!("ui.stats.table.average")));
+                            md.push_str(&format!(
+                                "| | {} | {} | {} | {} |\n",
+                                t!("ui.stats.table.min"),
+                                t!("ui.stats.table.max"),
+                                t!("ui.stats.table.total"),
+                                t!("ui.stats.table.average")
+                            ));
                             md.push_str("|---|---|---|---|---|\n");
                             for row in &table_rows {
                                 md.push_str(&format!(
@@ -463,7 +479,13 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                             ui.close();
                         }
                         if ui.button(t!("ui.stats.copy_csv")).clicked() {
-                            let mut csv = format!(",{},{},{},{}\n", t!("ui.stats.table.min"), t!("ui.stats.table.max"), t!("ui.stats.table.total"), t!("ui.stats.table.average"));
+                            let mut csv = format!(
+                                ",{},{},{},{}\n",
+                                t!("ui.stats.table.min"),
+                                t!("ui.stats.table.max"),
+                                t!("ui.stats.table.total"),
+                                t!("ui.stats.table.average")
+                            );
                             for row in &table_rows {
                                 csv.push_str(&format!("{},{},{},{},{}\n", row[0], row[1], row[2], row[3], row[4]));
                             }
@@ -480,9 +502,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                             tab_state.settings.session_stats.clear_ship(*ship_id);
                         } else {
                             tab_state.pending_confirmation =
-                                Some(crate::tab_state::ConfirmableAction::ClearShipSessionStats {
-                                    ship_id: *ship_id,
-                                });
+                                Some(crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_id: *ship_id });
                         }
                     }
                 })
@@ -653,7 +673,8 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                     ui.horizontal(|ui| {
                         ui.label(t!("ui.stats.mode_label"));
                         ui.add_enabled_ui(!cfg.combined, |ui| {
-                            if ui.selectable_value(&mut cfg.mode, ChartMode::Line, t!("ui.stats.chart_line")).clicked() {
+                            if ui.selectable_value(&mut cfg.mode, ChartMode::Line, t!("ui.stats.chart_line")).clicked()
+                            {
                                 cfg.reset_plot = true;
                             }
                             if ui.selectable_value(&mut cfg.mode, ChartMode::Bar, t!("ui.stats.chart_bar")).clicked() {
@@ -675,7 +696,10 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                         }
                     }
                     if cfg.mode == ChartMode::Line {
-                        ui.add_enabled(!cfg.combined, egui::Checkbox::new(&mut cfg.rolling_average, t!("ui.stats.rolling_avg")));
+                        ui.add_enabled(
+                            !cfg.combined,
+                            egui::Checkbox::new(&mut cfg.rolling_average, t!("ui.stats.rolling_avg")),
+                        );
                     }
                     ui.checkbox(&mut cfg.show_labels, t!("ui.stats.labels"));
                 });

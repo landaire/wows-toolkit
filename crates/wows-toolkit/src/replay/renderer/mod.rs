@@ -16,6 +16,7 @@ use egui::TextureHandle;
 use egui::Vec2;
 use parking_lot::Mutex;
 
+use crate::LocalizedTextResolver;
 use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
@@ -26,7 +27,6 @@ use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::draw_command::ShipConfigVisibility;
-use crate::LocalizedTextResolver;
 use wows_minimap_renderer::map_data::MapInfo;
 use wows_minimap_renderer::renderer::RenderOptions;
 
@@ -67,6 +67,15 @@ use crate::replay::minimap_view::send_annotation_clear;
 use crate::replay::minimap_view::send_annotation_full_sync;
 use crate::replay::minimap_view::send_annotation_remove;
 use crate::replay::minimap_view::send_annotation_update;
+/// Extracted score bar state used for positioning the advantage label.
+struct ScoreBarInfo {
+    team0_score: i32,
+    team1_score: i32,
+    team0_timer: Option<String>,
+    team1_timer: Option<String>,
+    adv_team: i32,
+}
+
 /// RGBA image data with dimensions.
 pub struct RgbaAsset {
     pub data: Vec<u8>,
@@ -1226,10 +1235,16 @@ impl ReplayRendererViewer {
                             // Hover tooltip for TeamAdvantage
                             let ws = transform.window_scale;
                             // Find ScoreBar to compute advantage label position
-                            let score_bar_info: Option<(i32, i32, Option<String>, Option<String>, i32)> = frame.commands.iter().find_map(|cmd| {
+                            let score_bar_info: Option<ScoreBarInfo> = frame.commands.iter().find_map(|cmd| {
                                 if let DrawCommand::ScoreBar { team0, team1, team0_timer, team1_timer, advantage, .. } = cmd {
                                     let adv_team = advantage.as_ref().map(|(_, t)| *t as i32).unwrap_or(-1);
-                                    Some((*team0, *team1, team0_timer.clone(), team1_timer.clone(), adv_team))
+                                    Some(ScoreBarInfo {
+                                        team0_score: *team0,
+                                        team1_score: *team1,
+                                        team0_timer: team0_timer.clone(),
+                                        team1_timer: team1_timer.clone(),
+                                        adv_team,
+                                    })
                                 } else {
                                     None
                                 }
@@ -1253,7 +1268,7 @@ impl ReplayRendererViewer {
                                     let text_w = galley.size().x;
                                     let text_h = galley.size().y;
 
-                                    let (t0_end_x, t1_start_x) = if let Some((t0_score, t1_score, ref t0_timer, ref t1_timer, _)) = score_bar_info {
+                                    let (t0_end_x, t1_start_x) = if let Some(ScoreBarInfo { team0_score: t0_score, team1_score: t1_score, team0_timer: ref t0_timer, team1_timer: ref t1_timer, .. }) = score_bar_info {
                                         let t0_text = format!("{}", t0_score);
                                         let t0g = ctx.fonts_mut(|f| f.layout_no_wrap(t0_text, score_font.clone(), Color32::WHITE));
                                         let mut t0_end = bar_origin.x + 8.0 * ws + t0g.size().x;
@@ -1274,7 +1289,7 @@ impl ReplayRendererViewer {
                                         (bar_origin.x + half, bar_origin.x + half)
                                     };
 
-                                    let adv_team = score_bar_info.as_ref().map(|s| s.4).unwrap_or(-1);
+                                    let adv_team = score_bar_info.as_ref().map(|s| s.adv_team).unwrap_or(-1);
                                     let x = if adv_team == 0 {
                                         t0_end_x + 6.0 * ws
                                     } else {

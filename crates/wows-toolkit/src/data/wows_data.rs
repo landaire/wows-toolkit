@@ -114,14 +114,12 @@ impl WoWsDataMap {
             };
 
             for dir in &attempted_dirs {
-                let mo_path =
-                    self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
+                let mo_path = self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
                 if !mo_path.exists() {
                     continue;
                 }
                 match std::fs::File::open(&mo_path).and_then(|f| {
-                    gettext::Catalog::parse(f)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    gettext::Catalog::parse(f).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                 }) {
                     Ok(catalog) => {
                         debug!(build, locale = dir, "Reloaded translations");
@@ -225,6 +223,7 @@ pub struct WorldOfWarshipsData {
 
     pub replays_dir: PathBuf,
 
+    #[allow(dead_code)]
     pub build_dir: PathBuf,
 }
 

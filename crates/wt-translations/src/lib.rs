@@ -10,7 +10,9 @@
 pub mod keys;
 mod text_resolver;
 
-pub use text_resolver::{DefaultTextResolver, TextResolver, TranslatableText};
+pub use text_resolver::DefaultTextResolver;
+pub use text_resolver::TextResolver;
+pub use text_resolver::TranslatableText;
 
 /// Runtime icon + translated text concatenation.
 ///
@@ -162,7 +164,9 @@ mod tests {
 
     #[test]
     fn test_key_mappings() {
-        use wowsunpack::game_types::{AdvantageLevel, BattleResult, FinishType};
+        use wowsunpack::game_types::AdvantageLevel;
+        use wowsunpack::game_types::BattleResult;
+        use wowsunpack::game_types::FinishType;
 
         assert_eq!(keys::battle_result_key(BattleResult::Victory), "battle.victory");
         assert_eq!(keys::battle_result_key(BattleResult::Defeat), "battle.defeat");
@@ -192,7 +196,8 @@ mod tests {
 
     #[test]
     fn test_default_text_resolver() {
-        use wowsunpack::game_types::{BattleResult, FinishType};
+        use wowsunpack::game_types::BattleResult;
+        use wowsunpack::game_types::FinishType;
         use wowsunpack::recognized::Recognized;
 
         let resolver = DefaultTextResolver;

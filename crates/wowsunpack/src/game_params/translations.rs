@@ -62,11 +62,7 @@ pub fn translate_ribbon(key: &str, resource_loader: &dyn ResourceLoader) -> Opti
     let (display_name, is_subribbon) = resource_loader
         .localized_name_from_id(&format!("IDS_RIBBON_{key}"))
         .map(|name| (name, false))
-        .or_else(|| {
-            resource_loader
-                .localized_name_from_id(&format!("IDS_RIBBON_SUB{key}"))
-                .map(|name| (name, true))
-        })?;
+        .or_else(|| resource_loader.localized_name_from_id(&format!("IDS_RIBBON_SUB{key}")).map(|name| (name, true)))?;
 
     let description = resource_loader
         .localized_name_from_id(&format!("IDS_RIBBON_DESCRIPTION_{key}"))

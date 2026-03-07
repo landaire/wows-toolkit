@@ -698,7 +698,8 @@ impl WebApp {
 
             for cmd in &commands {
                 let is_hud = cmd.is_hud();
-                let cmd_shapes = draw_command_to_shapes(cmd, &transform, &textures, ctx, &label_opts, None, &text_resolver);
+                let cmd_shapes =
+                    draw_command_to_shapes(cmd, &transform, &textures, ctx, &label_opts, None, &text_resolver);
                 let target_painter = if is_hud { &painter } else { &map_painter };
                 for shape in cmd_shapes {
                     target_painter.add(shape);

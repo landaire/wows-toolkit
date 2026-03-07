@@ -204,8 +204,7 @@ impl ShipAssets {
 
             return Ok(ShipInfo {
                 model_dir: name.to_string(),
-                display_name: param
-                    .and_then(|p| self.metadata.localized_name_from_param(p)),
+                display_name: param.and_then(|p| self.metadata.localized_name_from_param(p)),
                 param_index: param.map(|p| p.index().to_string()).unwrap_or_default(),
             });
         }
@@ -238,10 +237,8 @@ impl ShipAssets {
                 None => continue,
             };
 
-            let display_name = self
-                .metadata
-                .localized_name_from_param(param)
-                .unwrap_or_else(|| param.index().to_string());
+            let display_name =
+                self.metadata.localized_name_from_param(param).unwrap_or_else(|| param.index().to_string());
 
             let normalized_display = unidecode::unidecode(&display_name).to_lowercase();
             if normalized_display.contains(&normalized_input) {

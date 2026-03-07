@@ -6,7 +6,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::icons;
-use rust_i18n::t;
 use egui::CollapsingHeader;
 use egui::ImageSource;
 use egui::Label;
@@ -15,6 +14,7 @@ use egui_commonmark::CommonMarkViewer;
 use egui_extras::Column;
 use egui_extras::TableBuilder;
 use parking_lot::Mutex;
+use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -253,9 +253,15 @@ impl ToolkitTabViewer<'_> {
                                 .send(selected_mod.clone())
                                 .expect("failed to send selected mod on mod_action_sender");
                         }
-                        ui.hyperlink_to(wt_translations::icon_t(icons::BROWSER, &t!("ui.mod_manager.mod_home")), &selected_mod.meta.repo_url);
+                        ui.hyperlink_to(
+                            wt_translations::icon_t(icons::BROWSER, &t!("ui.mod_manager.mod_home")),
+                            &selected_mod.meta.repo_url,
+                        );
                         if let Some(discord_url) = &selected_mod.meta.discord_approval_url {
-                            ui.hyperlink_to(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.mod_manager.discord_thread")), discord_url);
+                            ui.hyperlink_to(
+                                wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.mod_manager.discord_thread")),
+                                discord_url,
+                            );
                         }
                     });
                     CommonMarkViewer::new().show(
@@ -275,7 +281,10 @@ impl ToolkitTabViewer<'_> {
             ui.horizontal(|ui| {
                 ui.button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.mod_manager.save_config"))).clicked();
                 ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.mod_manager.load_config"))).clicked();
-                ui.add(egui::TextEdit::singleline(&mut mod_manager_info.filter_text).hint_text(t!("ui.mod_manager.filter")));
+                ui.add(
+                    egui::TextEdit::singleline(&mut mod_manager_info.filter_text)
+                        .hint_text(t!("ui.mod_manager.filter")),
+                );
             });
 
             ui.vertical(|ui| {

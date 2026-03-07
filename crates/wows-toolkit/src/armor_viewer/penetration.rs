@@ -75,8 +75,7 @@ pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -
     let tier = vehicle.level();
     let nation = param.nation().to_string();
 
-    let display_name =
-        metadata.localized_name_from_param(&param).unwrap_or_else(|| param.name().to_string());
+    let display_name = metadata.localized_name_from_param(&param).unwrap_or_else(|| param.name().to_string());
 
     // Get main battery ammo names from the config data
     let config = vehicle.config_data()?;

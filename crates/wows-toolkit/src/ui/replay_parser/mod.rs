@@ -4,7 +4,6 @@ mod sorting;
 
 use std::path::PathBuf;
 
-use rust_i18n::t;
 pub use models::Achievement;
 pub use models::Damage;
 pub use models::DamageInteraction;
@@ -14,6 +13,7 @@ pub use models::PotentialDamage;
 pub use models::SkillInfo;
 pub use models::TranslatedBuild;
 pub use models::ship_class_icon_from_species;
+use rust_i18n::t;
 pub use sorting::ReplayColumn;
 pub use sorting::SortColumn;
 use sorting::SortKey;
@@ -1769,8 +1769,11 @@ impl UiReport {
                         if report.relation().is_enemy() && !self.debug_mode {
                             ui.label("-");
                         } else if !report.has_vehicle_entity {
-                            ui.label(RichText::new(wt_translations::icon_t(icons::EXCLAMATION_MARK, "-")).color(Color32::LIGHT_RED))
-                                .on_hover_text(t!("ui.replay.build.not_spotted"));
+                            ui.label(
+                                RichText::new(wt_translations::icon_t(icons::EXCLAMATION_MARK, "-"))
+                                    .color(Color32::LIGHT_RED),
+                            )
+                            .on_hover_text(t!("ui.replay.build.not_spotted"));
                         } else {
                             let response = ui.label(report.skill_info.label_text.clone());
                             if let Some(hover_text) = &report.skill_info.hover_text {
@@ -1789,7 +1792,13 @@ impl UiReport {
                     ReplayColumn::Actions => {
                         ui.menu_button(icons::DOTS_THREE, |ui| {
                             if (!report.relation().is_enemy() || self.debug_mode) && report.has_vehicle_entity {
-                                if ui.small_button(wt_translations::icon_t(icons::SHARE, &t!("ui.replay.build.open_in_browser"))).clicked() {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::SHARE,
+                                        &t!("ui.replay.build.open_in_browser"),
+                                    ))
+                                    .clicked()
+                                {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1798,7 +1807,13 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.build.copy_link"))).clicked() {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::COPY,
+                                        &t!("ui.replay.build.copy_link"),
+                                    ))
+                                    .clicked()
+                                {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_ship_config_url(report.player(), &metadata_provider) {
@@ -1817,7 +1832,13 @@ impl UiReport {
                                     ui.close_kind(UiKind::Menu);
                                 }
 
-                                if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.replay.build.copy_short_link"))).clicked() {
+                                if ui
+                                    .small_button(wt_translations::icon_t(
+                                        icons::COPY,
+                                        &t!("ui.replay.build.copy_short_link"),
+                                    ))
+                                    .clicked()
+                                {
                                     let metadata_provider = self.metadata_provider();
 
                                     if let Some(url) = build_short_ship_config_url(report.player(), &metadata_provider)
@@ -1839,7 +1860,13 @@ impl UiReport {
                                 ui.separator();
                             }
 
-                            if ui.small_button(wt_translations::icon_t(icons::SHARE, &t!("ui.replay.build.open_wows_numbers"))).clicked() {
+                            if ui
+                                .small_button(wt_translations::icon_t(
+                                    icons::SHARE,
+                                    &t!("ui.replay.build.open_wows_numbers"),
+                                ))
+                                .clicked()
+                            {
                                 if let Some(url) = build_wows_numbers_url(report.player()) {
                                     ui.ctx().open_url(OpenUrl::new_tab(url));
                                 }
@@ -1851,7 +1878,12 @@ impl UiReport {
                                 ui.separator();
 
                                 if let Some(player) = Some(report.player())
-                                    && ui.small_button(wt_translations::icon_t(icons::BUG, &t!("ui.replay.debug.view_raw_metadata"))).clicked()
+                                    && ui
+                                        .small_button(wt_translations::icon_t(
+                                            icons::BUG,
+                                            &t!("ui.replay.debug.view_raw_metadata"),
+                                        ))
+                                        .clicked()
                                 {
                                     let pretty_meta =
                                         serde_json::to_string_pretty(player).expect("failed to serialize player");
@@ -2276,7 +2308,12 @@ impl egui_table::TableDelegate for UiReport {
                 }
                 ReplayColumn::Hits => {
                     if ui
-                        .strong(column_name_with_sort_order(&t!("ui.replay.column.hits"), false, *self.replay_sort.lock(), SortColumn::Hits))
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.hits"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Hits,
+                        ))
                         .clicked()
                     {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
@@ -2696,12 +2733,7 @@ impl Replay {
     }
 }
 
-fn column_name_with_sort_order(
-    text: &str,
-    has_info: bool,
-    sort_order: SortOrder,
-    column: SortColumn,
-) -> String {
+fn column_name_with_sort_order(text: &str, has_info: bool, sort_order: SortOrder, column: SortColumn) -> String {
     if sort_order.column() == column {
         if has_info {
             format!("{} {} {}", text, icons::INFO, sort_order.icon())
@@ -2773,15 +2805,25 @@ impl ToolkitTabViewer<'_> {
             let mut self_report = None;
             ui.horizontal(|ui| {
                 if replay_file.battle_results_are_pending() {
-                    let text = RichText::new(wt_translations::icon_t(icons::INFO, &t!("ui.replay.incomplete_results"))).color(Color32::ORANGE);
+                    let text = RichText::new(wt_translations::icon_t(icons::INFO, &t!("ui.replay.incomplete_results")))
+                        .color(Color32::ORANGE);
                     ui.strong(text).on_hover_text(t!("ui.replay.incomplete_results_tooltip"));
                 }
 
                 if let Some(battle_result) = replay_file.battle_result() {
                     let text = match battle_result {
-                        BattleResult::Win(_) => RichText::new(wt_translations::icon_t(icons::TROPHY, &t!("ui.replay.results.victory"))).color(Color32::LIGHT_GREEN),
-                        BattleResult::Loss(_) => RichText::new(wt_translations::icon_t(icons::SMILEY_SAD, &t!("ui.replay.results.defeat"))).color(Color32::LIGHT_RED),
-                        BattleResult::Draw => RichText::new(wt_translations::icon_t(icons::NOTCHES, &t!("ui.replay.results.draw"))).color(Color32::LIGHT_YELLOW),
+                        BattleResult::Win(_) => {
+                            RichText::new(wt_translations::icon_t(icons::TROPHY, &t!("ui.replay.results.victory")))
+                                .color(Color32::LIGHT_GREEN)
+                        }
+                        BattleResult::Loss(_) => {
+                            RichText::new(wt_translations::icon_t(icons::SMILEY_SAD, &t!("ui.replay.results.defeat")))
+                                .color(Color32::LIGHT_RED)
+                        }
+                        BattleResult::Draw => {
+                            RichText::new(wt_translations::icon_t(icons::NOTCHES, &t!("ui.replay.results.draw")))
+                                .color(Color32::LIGHT_YELLOW)
+                        }
                     };
                     ui.label(text);
                 }
@@ -2789,7 +2831,10 @@ impl ToolkitTabViewer<'_> {
                 if let Some(battle_stats) = replay_file.to_battle_stats() {
                     let pr_data = self.tab_state.personal_rating_data.read();
                     if let Some(pr_result) = pr_data.calculate_pr(&[battle_stats]) {
-                        ui.label(RichText::new(format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name())).color(pr_result.category.color()));
+                        ui.label(
+                            RichText::new(format!("PR: {:.0} ({})", pr_result.pr, pr_result.category.name()))
+                                .color(pr_result.category.color()),
+                        );
                     }
                 }
 
@@ -2805,17 +2850,40 @@ impl ToolkitTabViewer<'_> {
 
                 ui.menu_button(t!("ui.replay.export"), |ui| {
                     ui.label(RichText::new(t!("ui.replay.chat").as_ref()).strong());
-                    if ui.small_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file"))).clicked() {
+                    if ui
+                        .small_button(wt_translations::icon_t(icons::FLOPPY_DISK, &t!("ui.replay.save_to_file")))
+                        .clicked()
+                    {
                         if let Some(path) = rfd::FileDialog::new()
-                            .set_file_name(format!("{} {} {} - Game Chat.txt", report.game_type(), report.game_mode(), report.map_name()))
+                            .set_file_name(format!(
+                                "{} {} {} - Game Chat.txt",
+                                report.game_type(),
+                                report.game_mode(),
+                                report.map_name()
+                            ))
                             .save_file()
                             && let Ok(mut file) = std::fs::File::create(path)
                         {
                             for message in report.game_chat() {
-                                let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                                let GameMessage {
+                                    sender_relation: _,
+                                    sender_name,
+                                    channel,
+                                    message,
+                                    entity_id: _,
+                                    player,
+                                    clock: _,
+                                } = message;
                                 match player {
                                     Some(player) if !player.initial_state().clan().is_empty() => {
-                                        let _ = writeln!(file, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                        let _ = writeln!(
+                                            file,
+                                            "[{}] {} ({:?}): {}",
+                                            player.initial_state().clan(),
+                                            sender_name,
+                                            channel,
+                                            message
+                                        );
                                     }
                                     _ => {
                                         let _ = writeln!(file, "{sender_name} ({channel:?}): {message}");
@@ -2828,17 +2896,33 @@ impl ToolkitTabViewer<'_> {
                     if ui.small_button(wt_translations::icon_t(icons::COPY, &t!("ui.buttons.copy"))).clicked() {
                         let mut buf = BufWriter::new(Vec::new());
                         for message in report.game_chat() {
-                            let GameMessage { sender_relation: _, sender_name, channel, message, entity_id: _, player, clock: _ } = message;
+                            let GameMessage {
+                                sender_relation: _,
+                                sender_name,
+                                channel,
+                                message,
+                                entity_id: _,
+                                player,
+                                clock: _,
+                            } = message;
                             match player {
                                 Some(player) if !player.initial_state().clan().is_empty() => {
-                                    let _ = writeln!(buf, "[{}] {} ({:?}): {}", player.initial_state().clan(), sender_name, channel, message);
+                                    let _ = writeln!(
+                                        buf,
+                                        "[{}] {} ({:?}): {}",
+                                        player.initial_state().clan(),
+                                        sender_name,
+                                        channel,
+                                        message
+                                    );
                                 }
                                 _ => {
                                     let _ = writeln!(buf, "{sender_name} ({channel:?}): {message}");
                                 }
                             }
                         }
-                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner")).expect("failed to convert game chat buffer to string");
+                        let game_chat = String::from_utf8(buf.into_inner().expect("failed to get buf inner"))
+                            .expect("failed to convert game chat buffer to string");
                         ui.ctx().copy_text(game_chat);
                         ui.close_kind(UiKind::Menu);
                     }
@@ -2855,14 +2939,21 @@ impl ToolkitTabViewer<'_> {
                         None
                     };
                     if let Some(format) = format
-                        && let Some(path) =
-                            rfd::FileDialog::new().set_file_name(format!("{}.{}", replay_file.better_file_name(metadata_provider), format.extension())).save_file()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!(
+                                "{}.{}",
+                                replay_file.better_file_name(metadata_provider),
+                                format.extension()
+                            ))
+                            .save_file()
                         && let Ok(mut file) = std::fs::File::create(path)
                     {
                         let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
                         let result = match format {
-                            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-                            ReplayExportFormat::Cbor => serde_cbor::to_writer(&mut file, &transformed_results).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+                            ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results)
+                                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+                            ReplayExportFormat::Cbor => serde_cbor::to_writer(&mut file, &transformed_results)
+                                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
                             ReplayExportFormat::Csv => {
                                 let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
                                 let mut result = Ok(());
@@ -2884,8 +2975,13 @@ impl ToolkitTabViewer<'_> {
 
                 {
                     let has_chat = !report.game_chat().is_empty();
-                    let show_chat: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
-                    let response = ui.add_enabled(has_chat, egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat"))).selected(show_chat));
+                    let show_chat: bool =
+                        ui.ctx().data(|d| d.get_temp(egui::Id::new("show_game_chat"))).unwrap_or(false);
+                    let response = ui.add_enabled(
+                        has_chat,
+                        egui::Button::new(wt_translations::icon_t(icons::CHAT_TEXT, &t!("ui.replay.chat")))
+                            .selected(show_chat),
+                    );
                     if !has_chat {
                         response.on_disabled_hover_text(t!("ui.replay.no_chat"));
                     } else if response.clicked() {
@@ -2896,11 +2992,16 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 if self.tab_state.settings.debug_mode && ui.button(t!("ui.replay.debug.raw_metadata")).clicked() {
-                    let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta).expect("failed to parse replay metadata");
-                    let pretty_meta = serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
+                    let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta)
+                        .expect("failed to parse replay metadata");
+                    let pretty_meta =
+                        serde_json::to_string_pretty(&parsed_meta).expect("failed to serialize replay metadata");
                     let viewer = plaintext_viewer::PlaintextFileViewer {
                         title: Arc::new("metadata.json".to_owned()),
-                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty_meta })),
+                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                            ext: ".json".to_owned(),
+                            contents: pretty_meta,
+                        })),
                         open: Arc::new(AtomicBool::new(true)),
                     };
                     self.tab_state.file_viewer.lock().push(viewer);
@@ -2909,25 +3010,44 @@ impl ToolkitTabViewer<'_> {
                     let has_results = report.battle_results().is_some();
                     ui.add_enabled_ui(has_results, |ui| {
                         ui.menu_button(t!("ui.replay.debug.view_results"), |ui| {
-                            if ui.button(t!("ui.replay.debug.raw_json")).on_hover_text(t!("ui.replay.debug.raw_json_tooltip")).clicked() {
+                            if ui
+                                .button(t!("ui.replay.debug.raw_json"))
+                                .on_hover_text(t!("ui.replay.debug.raw_json_tooltip"))
+                                .clicked()
+                            {
                                 if let Some(results_json) = report.battle_results() {
-                                    let parsed_results: serde_json::Value = serde_json::from_str(results_json).expect("failed to parse battle results");
-                                    let pretty = serde_json::to_string_pretty(&parsed_results).expect("failed to serialize battle results");
+                                    let parsed_results: serde_json::Value =
+                                        serde_json::from_str(results_json).expect("failed to parse battle results");
+                                    let pretty = serde_json::to_string_pretty(&parsed_results)
+                                        .expect("failed to serialize battle results");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("results_raw.json".to_owned()),
-                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty,
+                                        })),
                                         open: Arc::new(AtomicBool::new(true)),
                                     };
                                     self.tab_state.file_viewer.lock().push(viewer);
                                 }
                                 ui.close_kind(UiKind::Menu);
                             }
-                            if ui.button(t!("ui.replay.debug.mapped_json")).on_hover_text(t!("ui.replay.debug.mapped_json_tooltip")).clicked() {
-                                if let Some(resolved) = replay_file.ui_report.as_ref().and_then(|r| r.resolved_results.as_ref()) {
-                                    let pretty = serde_json::to_string_pretty(resolved).expect("failed to serialize resolved results");
+                            if ui
+                                .button(t!("ui.replay.debug.mapped_json"))
+                                .on_hover_text(t!("ui.replay.debug.mapped_json_tooltip"))
+                                .clicked()
+                            {
+                                if let Some(resolved) =
+                                    replay_file.ui_report.as_ref().and_then(|r| r.resolved_results.as_ref())
+                                {
+                                    let pretty = serde_json::to_string_pretty(resolved)
+                                        .expect("failed to serialize resolved results");
                                     let viewer = plaintext_viewer::PlaintextFileViewer {
                                         title: Arc::new("results_mapped.json".to_owned()),
-                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile { ext: ".json".to_owned(), contents: pretty })),
+                                        file_info: Arc::new(Mutex::new(FileType::PlainTextFile {
+                                            ext: ".json".to_owned(),
+                                            contents: pretty,
+                                        })),
                                         open: Arc::new(AtomicBool::new(true)),
                                     };
                                     self.tab_state.file_viewer.lock().push(viewer);
@@ -2938,9 +3058,7 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
-                if !self.tab_state.settings.wows_dir.is_empty()
-                    && replay_file.source_path.is_some()
-                {
+                if !self.tab_state.settings.wows_dir.is_empty() && replay_file.source_path.is_some() {
                     let alt_held = ui.input(|i| i.modifiers.alt);
                     let label = if alt_held {
                         wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
@@ -2973,7 +3091,9 @@ impl ToolkitTabViewer<'_> {
                     let map_name = replay_file.replay_file.meta.mapName.clone();
                     let translated_map = replay_file.map_name(metadata_provider);
                     let base = format!("{} - {}", replay_file.replay_file.meta.playerName, translated_map);
-                    let replay_name = if let Some(stem) = replay_file.source_path.as_ref()
+                    let replay_name = if let Some(stem) = replay_file
+                        .source_path
+                        .as_ref()
                         .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
                     {
                         format!("{} - {}", base, stem)
@@ -2983,11 +3103,8 @@ impl ToolkitTabViewer<'_> {
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
-                    let Some(wows_data) = self
-                        .tab_state
-                        .wows_data_map
-                        .as_ref()
-                        .and_then(|map| map.resolve(&replay_version))
+                    let Some(wows_data) =
+                        self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
                     else {
                         tracing::warn!("No data for build {}", replay_version.build);
                         return;
@@ -3384,7 +3501,10 @@ impl ToolkitTabViewer<'_> {
             ui.checkbox(&mut self.tab_state.auto_load_latest_replay, t!("ui.replay.autoload_latest"));
 
             ComboBox::from_id_salt("replay_grouping")
-                .selected_text(t!("ui.replay.group.prefix", label = self.tab_state.settings.replay_settings.grouping.label()))
+                .selected_text(t!(
+                    "ui.replay.group.prefix",
+                    label = self.tab_state.settings.replay_settings.grouping.label()
+                ))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.tab_state.settings.replay_settings.grouping,
@@ -3407,12 +3527,27 @@ impl ToolkitTabViewer<'_> {
                 .selected_text(t!("ui.replay.column_filters"))
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_raw_xp, t!("ui.replay.filter.raw_xp"));
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_entity_id, t!("ui.replay.filter.entity_id"));
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_observed_damage, t!("ui.replay.filter.observed_damage"));
+                    ui.checkbox(
+                        &mut self.tab_state.settings.replay_settings.show_raw_xp,
+                        t!("ui.replay.filter.raw_xp"),
+                    );
+                    ui.checkbox(
+                        &mut self.tab_state.settings.replay_settings.show_entity_id,
+                        t!("ui.replay.filter.entity_id"),
+                    );
+                    ui.checkbox(
+                        &mut self.tab_state.settings.replay_settings.show_observed_damage,
+                        t!("ui.replay.filter.observed_damage"),
+                    );
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, t!("ui.replay.filter.fires"));
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_floods, t!("ui.replay.filter.floods"));
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_citadels, t!("ui.replay.filter.citadels"));
+                    ui.checkbox(
+                        &mut self.tab_state.settings.replay_settings.show_floods,
+                        t!("ui.replay.filter.floods"),
+                    );
+                    ui.checkbox(
+                        &mut self.tab_state.settings.replay_settings.show_citadels,
+                        t!("ui.replay.filter.citadels"),
+                    );
                     ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, t!("ui.replay.filter.crits"));
                 });
 
@@ -3525,7 +3660,11 @@ impl ToolkitTabViewer<'_> {
                 } else if host_active {
                     // ── Active host session controls ──
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(t!("ui.collab.session_active").as_ref()).strong().color(Color32::from_rgb(220, 50, 50)));
+                        ui.label(
+                            RichText::new(t!("ui.collab.session_active").as_ref())
+                                .strong()
+                                .color(Color32::from_rgb(220, 50, 50)),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(t!("ui.buttons.stop")).clicked() {
                                 if let Some(ref handle) = self.tab_state.host_session {
@@ -3716,7 +3855,9 @@ impl ToolkitTabViewer<'_> {
                     // Display name (shared for host + join)
                     if self.tab_state.show_display_name_error {
                         ui.label(
-                            RichText::new(t!("ui.collab.display_name_error").as_ref()).color(Color32::from_rgb(220, 50, 50)).small(),
+                            RichText::new(t!("ui.collab.display_name_error").as_ref())
+                                .color(Color32::from_rgb(220, 50, 50))
+                                .small(),
                         );
                     }
                     ui.label(t!("ui.collab.display_name"));

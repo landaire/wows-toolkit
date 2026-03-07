@@ -10,12 +10,12 @@ use wowsunpack::game_params::types::Meters;
 use wowsunpack::game_params::types::PlaneCategory;
 use wowsunpack::game_params::types::Species;
 
-use wowsunpack::game_types::BattleResult;
 use wows_replays::analyzer::decoder::BattleStage;
 use wows_replays::analyzer::decoder::BuoyancyState;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::analyzer::decoder::WeaponType;
+use wowsunpack::game_types::BattleResult;
 
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
@@ -29,13 +29,13 @@ use wows_replays::types::Relation;
 use wows_replays::types::WorldPos;
 
 use crate::assets::GameFonts;
+use crate::draw_command::BuildingIconType;
+use crate::draw_command::BuildingRelation;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::ShipConfigCircleKind;
-use crate::draw_command::BuildingIconType;
-use crate::draw_command::BuildingRelation;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
 
@@ -367,14 +367,10 @@ impl<'a> MinimapRenderer<'a> {
             }
             let param = GameParamProvider::game_param_by_id(self.game_params, plane.params_id);
             let aircraft = param.as_ref().and_then(|p| p.aircraft());
-            let species = param
-                .as_ref()
-                .and_then(|p| p.species())
-                .and_then(|sp| sp.known().cloned());
+            let species = param.as_ref().and_then(|p| p.species()).and_then(|sp| sp.known().cloned());
             let ammo_type = aircraft.map(|a| a.ammo_type()).unwrap_or("");
-            let category = aircraft
-                .map(|a| a.effective_category(species.as_ref()))
-                .unwrap_or(PlaneCategory::Consumable);
+            let category =
+                aircraft.map(|a| a.effective_category(species.as_ref())).unwrap_or(PlaneCategory::Consumable);
             let is_consumable = matches!(category, PlaneCategory::Consumable);
             let icon_base = species
                 .map(|sp| species_to_icon_base(sp, is_consumable, ammo_type))
@@ -973,7 +969,13 @@ impl<'a> MinimapRenderer<'a> {
                         .and_then(|s| s.known().cloned())
                         .and_then(|s| species_to_building_icon_type(&s));
 
-                    commands.push(DrawCommand::Building { pos: px, color, is_alive: building.is_alive, icon_type, relation });
+                    commands.push(DrawCommand::Building {
+                        pos: px,
+                        color,
+                        is_alive: building.is_alive,
+                        icon_type,
+                        relation,
+                    });
                 }
             }
         }

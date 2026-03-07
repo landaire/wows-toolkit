@@ -1591,10 +1591,7 @@ where
                 }
             }
 
-            DecodedPacketPayload::NewPlayerSpawnedInBattle {
-                player_states: players_out,
-                bot_states: bots_out,
-            }
+            DecodedPacketPayload::NewPlayerSpawnedInBattle { player_states: players_out, bot_states: bots_out }
         } else if *method == "onArenaStateReceived" {
             let (arg0, arg1) = unpack_rpc_args!(args, i64, i8);
 

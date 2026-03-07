@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::icons;
 use crate::task;
 use crate::util;
-use rust_i18n::t;
 use egui::Color32;
 use egui::RichText;
 use egui_extras::Column;
@@ -18,6 +17,7 @@ use jiff::ToSpan;
 use jiff::Unit;
 use jiff::ZonedDifference;
 use jiff::tz::TimeZone;
+use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
@@ -251,7 +251,11 @@ impl ToolkitTabViewer<'_> {
                     .selected_text(selected.description())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(selected, TimePeriod::LastHour, t!("ui.player_tracker.period.past_hour"));
-                        ui.selectable_value(selected, TimePeriod::LastSixHours, t!("ui.player_tracker.period.past_six_hours"));
+                        ui.selectable_value(
+                            selected,
+                            TimePeriod::LastSixHours,
+                            t!("ui.player_tracker.period.past_six_hours"),
+                        );
                         ui.selectable_value(selected, TimePeriod::LastDay, t!("ui.player_tracker.period.past_day"));
                         ui.selectable_value(selected, TimePeriod::LastWeek, t!("ui.player_tracker.period.past_week"));
                         ui.selectable_value(selected, TimePeriod::LastMonth, t!("ui.player_tracker.period.past_month"));
@@ -322,7 +326,10 @@ impl ToolkitTabViewer<'_> {
                                                             delta.total(jiff::Unit::Minute).unwrap_or(0.0) as i64
                                                         })
                                                         .join(", ");
-                                                    ui.label(participant).on_hover_text(t!("ui.player_tracker.seen_minutes", minutes = minutes_str));
+                                                    ui.label(participant).on_hover_text(t!(
+                                                        "ui.player_tracker.seen_minutes",
+                                                        minutes = minutes_str
+                                                    ));
                                                 }
                                             });
                                         } else {

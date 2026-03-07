@@ -16,7 +16,8 @@ use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wt_translations::{TextResolver, TranslatableText};
+use wt_translations::TextResolver;
+use wt_translations::TranslatableText;
 
 use crate::rendering::game_font;
 use crate::rendering::make_rotated_icon_mesh;
@@ -216,11 +217,7 @@ fn render_glow_text_overlay(
         let glow_font = game_font(font_size);
         for &(dx, dy) in offsets {
             let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), glow_font.clone(), layer_color));
-            shapes.push(Shape::galley(
-                Pos2::new(text_x + dx * dist, text_y + dy * dist),
-                galley,
-                Color32::TRANSPARENT,
-            ));
+            shapes.push(Shape::galley(Pos2::new(text_x + dx * dist, text_y + dy * dist), galley, Color32::TRANSPARENT));
         }
     }
 
@@ -240,11 +237,7 @@ fn render_glow_text_overlay(
                     Color32::from_rgba_premultiplied(0, 0, 0, 180),
                 )
             });
-            shapes.push(Shape::galley(
-                Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0),
-                outline,
-                Color32::TRANSPARENT,
-            ));
+            shapes.push(Shape::galley(Pos2::new(sub_x + dx * 2.0, sub_y + dy * 2.0), outline, Color32::TRANSPARENT));
         }
 
         shapes.push(Shape::galley(Pos2::new(sub_x, sub_y), sub_galley, Color32::TRANSPARENT));
@@ -315,18 +308,28 @@ pub fn draw_command_to_shapes(
                 let fallback_key = match (*visibility, *is_self) {
                     (wows_minimap_renderer::ShipVisibility::Visible, true) => "Auxiliary_self",
                     (wows_minimap_renderer::ShipVisibility::Visible, false) => "Auxiliary",
-                    (wows_minimap_renderer::ShipVisibility::MinimapOnly | wows_minimap_renderer::ShipVisibility::Undetected, _) => "Auxiliary_invisible",
+                    (
+                        wows_minimap_renderer::ShipVisibility::MinimapOnly
+                        | wows_minimap_renderer::ShipVisibility::Undetected,
+                        _,
+                    ) => "Auxiliary_invisible",
                 };
 
                 let (variant_key, texture) = if let Some(sp) = species {
                     let variant_key = match (*visibility, *is_self) {
                         (wows_minimap_renderer::ShipVisibility::Visible, true) => format!("{}_self", sp),
                         (wows_minimap_renderer::ShipVisibility::Visible, false) => sp.clone(),
-                        (wows_minimap_renderer::ShipVisibility::MinimapOnly | wows_minimap_renderer::ShipVisibility::Undetected, _) => {
+                        (
+                            wows_minimap_renderer::ShipVisibility::MinimapOnly
+                            | wows_minimap_renderer::ShipVisibility::Undetected,
+                            _,
+                        ) => {
                             format!("{}_invisible", sp)
                         }
                     };
-                    let tex = textures.ship_icons.get(&variant_key)
+                    let tex = textures
+                        .ship_icons
+                        .get(&variant_key)
                         .or_else(|| textures.ship_icons.get(sp))
                         .or_else(|| textures.ship_icons.get(fallback_key));
                     (Some(variant_key), tex)
@@ -336,7 +339,8 @@ pub fn draw_command_to_shapes(
 
                 // Gold icon-shaped outline for detected teammates (drawn before icon)
                 if *is_detected_teammate && let Some(outlines) = textures.ship_icon_outlines {
-                    let outline_tex = variant_key.as_ref()
+                    let outline_tex = variant_key
+                        .as_ref()
                         .and_then(|vk| outlines.get(vk))
                         .or_else(|| species.as_ref().and_then(|sp| outlines.get(sp)));
                     if let Some(otex) = outline_tex {
@@ -389,9 +393,9 @@ pub fn draw_command_to_shapes(
             let icon_size = transform.scale_distance(ICON_SIZE);
             {
                 let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
-                let variant_key = species.as_ref().map(|sp| {
-                    if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) }
-                });
+                let variant_key = species
+                    .as_ref()
+                    .map(|sp| if *is_self { format!("{}_dead_self", sp) } else { format!("{}_dead", sp) });
 
                 let texture = variant_key
                     .as_ref()
@@ -699,14 +703,7 @@ pub fn draw_command_to_shapes(
             let subtitle = text_resolver.resolve(&TranslatableText::PreBattleLabel);
             let color: [u8; 3] = [255, 200, 50];
             let subtitle_above = true;
-            shapes.extend(render_glow_text_overlay(
-                &text,
-                Some(&subtitle),
-                &color,
-                subtitle_above,
-                transform,
-                ctx,
-            ));
+            shapes.extend(render_glow_text_overlay(&text, Some(&subtitle), &color, subtitle_above, transform, ctx));
         }
 
         DrawCommand::TeamAdvantage { .. } => {
@@ -965,9 +962,7 @@ pub fn draw_command_to_shapes(
         DrawCommand::Building { pos, color, is_alive, icon_type, relation } => {
             let center = transform.minimap_to_screen(pos);
             let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
-            let icon = icon_key
-                .as_ref()
-                .and_then(|k| textures.building_icons.and_then(|icons| icons.get(k)));
+            let icon = icon_key.as_ref().and_then(|k| textures.building_icons.and_then(|icons| icons.get(k)));
             if let Some(tex) = icon {
                 let size = transform.scale_distance(ICON_SIZE);
                 shapes.push(make_icon_mesh(tex.id(), center, size, size));
@@ -1157,17 +1152,10 @@ pub fn draw_command_to_shapes(
 
         DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
             let text = text_resolver.resolve(&TranslatableText::BattleResult(*result));
-            let subtitle = finish_type.as_ref().map(|ft| {
-                text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase()
-            });
-            shapes.extend(render_glow_text_overlay(
-                &text,
-                subtitle.as_deref(),
-                color,
-                *subtitle_above,
-                transform,
-                ctx,
-            ));
+            let subtitle = finish_type
+                .as_ref()
+                .map(|ft| text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase());
+            shapes.extend(render_glow_text_overlay(&text, subtitle.as_deref(), color, *subtitle_above, transform, ctx));
         }
 
         DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {

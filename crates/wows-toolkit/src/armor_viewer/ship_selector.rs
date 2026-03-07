@@ -109,9 +109,7 @@ impl ShipCatalog {
             let tier = vehicle.level();
             let nation = param.nation().to_string();
 
-            let display_name = metadata
-                .localized_name_from_param(param)
-                .unwrap_or_else(|| param.name().to_string());
+            let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
 
             let search_name = unidecode::unidecode(&display_name).to_lowercase();
             let entry = ShipEntry { param_index: param.index().to_string(), display_name, search_name, tier };

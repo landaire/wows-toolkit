@@ -3,7 +3,9 @@
 //! The minimap renderer and other consumers use this trait to convert
 //! translatable items into display strings without depending on i18n directly.
 
-use wowsunpack::game_types::{AdvantageLevel, BattleResult, FinishType};
+use wowsunpack::game_types::AdvantageLevel;
+use wowsunpack::game_types::BattleResult;
+use wowsunpack::game_types::FinishType;
 use wowsunpack::recognized::Recognized;
 
 use crate::keys;

@@ -1,6 +1,8 @@
 //! Const fn mappings from game enums to translation key strings.
 
-use wowsunpack::game_types::{AdvantageLevel, BattleResult, FinishType};
+use wowsunpack::game_types::AdvantageLevel;
+use wowsunpack::game_types::BattleResult;
+use wowsunpack::game_types::FinishType;
 
 // -- Battle result keys --
 

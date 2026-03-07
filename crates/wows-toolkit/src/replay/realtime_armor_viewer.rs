@@ -33,11 +33,11 @@ use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::SidebarHighlightKey;
 use crate::armor_viewer::state::StoredTrajectory;
 use crate::icons;
-use rust_i18n::t;
 use crate::replay::renderer::RealtimeArmorBridge;
 use crate::replay::renderer::ReplayPlayerInfo;
 use crate::viewport_3d::GpuPipeline;
 use crate::viewport_3d::Vec3;
+use rust_i18n::t;
 
 /// A realtime armor viewer window spawned from the replay renderer.
 pub struct RealtimeArmorViewer {
@@ -1345,8 +1345,9 @@ impl RealtimeArmorViewer {
             if !armor.zone_parts.is_empty() {
                 ui.horizontal(|ui| {
                     // Armor Zones button
-                    let armor_btn =
-                        ui.button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle"))).on_hover_text(t!("ui.armor.armor_tooltip"));
+                    let armor_btn = ui
+                        .button(wt_translations::icon_t(icons::SHIELD, &t!("ui.armor.armor_toggle")))
+                        .on_hover_text(t!("ui.armor.armor_tooltip"));
                     egui::Popup::from_toggle_button_response(&armor_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1418,8 +1419,9 @@ impl RealtimeArmorViewer {
                     }
 
                     // Display settings button
-                    let display_btn =
-                        ui.button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display"))).on_hover_text(t!("ui.armor.display_tooltip"));
+                    let display_btn = ui
+                        .button(wt_translations::icon_t(icons::GEAR_FINE, &t!("ui.armor.display")))
+                        .on_hover_text(t!("ui.armor.display_tooltip"));
                     egui::Popup::from_toggle_button_response(&display_btn)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
@@ -1856,7 +1858,11 @@ impl RealtimeArmorViewer {
                                     click_action = Some(ClickAction::SeekTo(group.first_clock));
                                 }
                                 // Select All / Deselect button
-                                let btn_label = if group_selected { t!("ui.armor.realtime.deselect") } else { t!("ui.armor.realtime.select_all") };
+                                let btn_label = if group_selected {
+                                    t!("ui.armor.realtime.deselect")
+                                } else {
+                                    t!("ui.armor.realtime.select_all")
+                                };
                                 if ui.small_button(btn_label.as_ref()).clicked() {
                                     click_action = Some(ClickAction::SelectAllInGroup(group_key.clone()));
                                 }
@@ -2058,7 +2064,11 @@ impl RealtimeArmorViewer {
             // Verdict line
             match &cmp.verdict {
                 ComparisonVerdict::Match => {
-                    ui.label(egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref()).small().color(egui::Color32::from_rgb(80, 220, 80)));
+                    ui.label(
+                        egui::RichText::new(t!("ui.armor.realtime.sim_agrees").as_ref())
+                            .small()
+                            .color(egui::Color32::from_rgb(80, 220, 80)),
+                    );
                 }
                 ComparisonVerdict::RicochetRngDefer { angle_deg, range_start_deg, range_end_deg } => {
                     ui.label(

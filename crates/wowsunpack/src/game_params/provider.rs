@@ -1305,7 +1305,12 @@ impl GameMetadataProvider {
 
         let specs = Arc::new(parse_scripts(&data_file_loader).unwrap());
 
-        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: RwLock::new(None), specs })
+        Ok(GameMetadataProvider {
+            params: params.into(),
+            param_id_to_translation_id,
+            translations: RwLock::new(None),
+            specs,
+        })
     }
 
     /// Similar to [`Self::from_params`], but does not allow looking up specs. Useful for scenarios where you
@@ -1316,7 +1321,12 @@ impl GameMetadataProvider {
 
         let specs = Arc::new(Vec::new());
 
-        Ok(GameMetadataProvider { params: params.into(), param_id_to_translation_id, translations: RwLock::new(None), specs })
+        Ok(GameMetadataProvider {
+            params: params.into(),
+            param_id_to_translation_id,
+            translations: RwLock::new(None),
+            specs,
+        })
     }
 
     pub fn set_translations(&self, catalog: Catalog) {

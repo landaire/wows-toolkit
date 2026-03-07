@@ -37,12 +37,11 @@ impl SerializableAchievement {
     /// Resolve display name dynamically from the current locale, falling back
     /// to the persisted `display_name`.
     pub fn resolved_name(&self, provider: Option<&dyn ResourceLoader>) -> String {
-        if let Some(provider) = provider {
-            if let Some(name) =
+        if let Some(provider) = provider
+            && let Some(name) =
                 wowsunpack::game_params::translations::translate_achievement_name(&self.icon_key, provider)
-            {
-                return name;
-            }
+        {
+            return name;
         }
         self.display_name.clone()
     }
@@ -50,12 +49,11 @@ impl SerializableAchievement {
     /// Resolve description dynamically from the current locale, falling back
     /// to the persisted `description`.
     pub fn resolved_description(&self, provider: Option<&dyn ResourceLoader>) -> String {
-        if let Some(provider) = provider {
-            if let Some(desc) =
+        if let Some(provider) = provider
+            && let Some(desc) =
                 wowsunpack::game_params::translations::translate_achievement_description(&self.icon_key, provider)
-            {
-                return desc;
-            }
+        {
+            return desc;
         }
         self.description.clone()
     }
@@ -457,12 +455,11 @@ impl PrStats {
 
 /// Resolve a ship's display name from the provider, falling back to ID.
 pub fn resolve_ship_name(ship_id: GameParamId, provider: Option<&GameMetadataProvider>) -> String {
-    if let Some(provider) = provider {
-        if let Some(param) = provider.game_param_by_id(ship_id) {
-            if let Some(name) = provider.localized_name_from_param(&param) {
-                return name;
-            }
-        }
+    if let Some(provider) = provider
+        && let Some(param) = provider.game_param_by_id(ship_id)
+        && let Some(name) = provider.localized_name_from_param(&param)
+    {
+        return name;
     }
     format!("[{ship_id}]")
 }

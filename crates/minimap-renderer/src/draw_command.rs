@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 #[cfg(feature = "rendering")]
 use image::RgbaImage;
-use wowsunpack::game_types::{AdvantageLevel, BattleResult, FinishType};
 use wows_replays::analyzer::decoder::DeathCause;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::PlaneId;
+use wowsunpack::game_types::AdvantageLevel;
+use wowsunpack::game_types::BattleResult;
+use wowsunpack::game_types::FinishType;
 
 use crate::map_data::MinimapPos;
 

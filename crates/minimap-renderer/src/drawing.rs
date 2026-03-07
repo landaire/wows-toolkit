@@ -30,7 +30,9 @@ use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RenderTarget;
 use crate::draw_command::ShipVisibility;
 use wows_replays::types::ElapsedClock;
-use wt_translations::{DefaultTextResolver, TextResolver, TranslatableText};
+use wt_translations::DefaultTextResolver;
+use wt_translations::TextResolver;
+use wt_translations::TranslatableText;
 
 // ── Pixmap conversion helpers ──────────────────────────────────────────────
 
@@ -685,12 +687,7 @@ fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedCloc
     }
 }
 
-fn draw_pre_battle_countdown(
-    pm: &mut Pixmap,
-    seconds: i64,
-    fonts: &GameFonts,
-    resolver: &dyn TextResolver,
-) {
+fn draw_pre_battle_countdown(pm: &mut Pixmap, seconds: i64, fonts: &GameFonts, resolver: &dyn TextResolver) {
     let text = format!("{}", seconds);
     let subtitle = resolver.resolve(&TranslatableText::PreBattleLabel);
     let glow_color: [u8; 3] = [255, 200, 50]; // gold
@@ -1778,9 +1775,9 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
                 let text = self.text_resolver.resolve(&TranslatableText::BattleResult(*result));
-                let subtitle = finish_type.as_ref().map(|ft| {
-                    self.text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase()
-                });
+                let subtitle = finish_type
+                    .as_ref()
+                    .map(|ft| self.text_resolver.resolve(&TranslatableText::FinishType(ft.clone())).to_uppercase());
                 draw_battle_result_overlay(
                     &mut self.canvas,
                     &text,

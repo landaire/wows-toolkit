@@ -312,10 +312,7 @@ pub fn render_bar_chart(
             ChartableStat::PersonalRating => perf_info.calculate_pr(pr_data).map(|r| r.pr).unwrap_or_default(),
         };
 
-        let color = perf_info
-            .ship_id()
-            .map(color_from_id)
-            .unwrap_or_else(|| Color32::from_rgb(100, 180, 255));
+        let color = perf_info.ship_id().map(color_from_id).unwrap_or_else(|| Color32::from_rgb(100, 180, 255));
         bar_data.push((i, ship_name.to_string(), value, color));
     }
 
