@@ -235,7 +235,10 @@ async fn try_connect_and_handshake(
         conn.open_bi().await.map_err(|e| ConnectError::Transient(format!("Failed to open bi stream: {e}")))?;
 
     // Send Join message.
-    let join_msg = PeerMessage::Join { name: display_name.to_string(), client_type: ClientType::Web };
+    let join_msg = PeerMessage::Join {
+        name: display_name.to_string(),
+        client_type: ClientType::Web { client_version: env!("CARGO_PKG_VERSION").to_string() },
+    };
     write_peer_message(&mut send, &join_msg)
         .await
         .map_err(|e| ConnectError::Transient(format!("Failed to send Join: {e}")))?;

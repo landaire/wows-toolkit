@@ -1,16 +1,10 @@
 name: Deploy site to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "site/**"
-      - "crates/wt-web/**"
-      - "crates/wt-collab-egui/**"
-      - "crates/wt-collab-protocol/**"
-      - "crates/minimap-renderer/**"
-      - ".github/workflows/pages.yml"
-  # Allow manual trigger
+  # Auto-deploy when a toolkit release is published (keeps web in sync).
+  release:
+    types: [published]
+  # Manual trigger for web-only fixes or coordinated deploys.
   workflow_dispatch:
 
 permissions:

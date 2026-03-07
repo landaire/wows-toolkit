@@ -777,10 +777,11 @@ async fn host_accept_peer(
 
     let color = color_from_name(&client_name);
 
-    // Validate version (desktop clients only — web clients have no version).
-    if let ClientType::Desktop { toolkit_version: client_ver } = &client_type
-        && client_ver != toolkit_version
-    {
+    // Validate version — reject clients whose protocol version doesn't match.
+    let client_ver = match &client_type {
+        ClientType::Desktop { toolkit_version: v } | ClientType::Web { client_version: v } => v,
+    };
+    if client_ver != toolkit_version {
         let msg = PeerMessage::Rejected {
             reason: format!("Version mismatch: host is v{toolkit_version}, you have v{client_ver}"),
         };
@@ -881,7 +882,7 @@ async fn host_accept_peer(
     // tactics boards). If any send fails, we fall through to cleanup below.
     let setup_ok = async {
         // Send asset bundle to web clients (pre-serialized bytes, written directly).
-        if matches!(&client_type, ClientType::Web) {
+        if matches!(&client_type, ClientType::Web { .. }) {
             if let Some(ref bundle_bytes) = web_asset_bundle {
                 debug!("Sending AssetBundle ({} bytes) to web peer {user_id}", bundle_bytes.len());
                 if send.write_all(bundle_bytes).await.is_err() {
@@ -1961,7 +1962,7 @@ fn handle_incoming_message(
                 debug!("Dropping UserJoined from non-host {sender_id}");
                 return;
             }
-            // TODO: UserJoined doesn't carry client_type yet — default to Desktop.
+            // UserJoined doesn't carry client_type — default to Desktop with unknown version.
             let user = ConnectedUser {
                 id: user_id,
                 name: name.clone(),

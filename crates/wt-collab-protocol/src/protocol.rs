@@ -12,7 +12,12 @@ pub use wows_minimap_renderer::map_data::MapInfo;
 pub use wowsunpack::game_types::EntityId;
 
 /// ALPN protocol identifier for the collab session.
-pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/1";
+///
+/// Bump this whenever the wire format changes (new/removed/reordered enum
+/// variants, changed struct fields, etc.).  Mismatched clients will fail
+/// cleanly at the QUIC handshake instead of hitting rkyv deserialization
+/// errors.
+pub const COLLAB_ALPN: &[u8] = b"/wows-toolkit-collab/2";
 
 /// Maximum total message size (16 MB — generous for SessionInfo with map PNG).
 pub const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -91,8 +96,8 @@ pub struct WireCapPoint {
 pub enum ClientType {
     /// Desktop toolkit client with a specific version.
     Desktop { toolkit_version: String },
-    /// Web browser client (WASM).
-    Web,
+    /// Web browser client (WASM) with a specific build version.
+    Web { client_version: String },
 }
 
 // ─── Asset bundle types ─────────────────────────────────────────────────────
