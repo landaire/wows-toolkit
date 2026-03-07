@@ -1,0 +1,778 @@
+---
+source: crates/wows-replays/tests/battle_controller.rs
+expression: "&packets"
+---
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 5
+    total: 23967.75
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 5
+    total: 23967.75
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 6
+    total: 25660.875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 6
+    total: 117000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 15
+    total: 250200
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 28
+    total: 410100
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 30
+    total: 449100
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 30
+    total: 449100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 9
+    total: 34440.78125
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 34
+    total: 527100
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 36
+    total: 566100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 9
+    total: 34440.78125
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 45
+    total: 699300
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 11
+    total: 37827.03125
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 51
+    total: 816300
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 60
+    total: 949500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 60
+    total: 949500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 60
+    total: 949500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 60
+    total: 949500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 63
+    total: 993900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 69
+    total: 1082700
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 69
+    total: 1082700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 75
+    total: 1199700
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 75
+    total: 1199700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 81
+    total: 1288500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 84
+    total: 1332900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 90
+    total: 1449900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 100
+    total: 1597900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 103
+    total: 1642300
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 42
+    total: 155400
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 106
+    total: 1686700
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 112
+    total: 1775500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 116
+    total: 1853500
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 42
+    total: 155400
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 118
+    total: 1892500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 13
+    total: 45107.46875
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 14
+    total: 50694.78125
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 124
+    total: 1947100
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 65
+    total: 240500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 130
+    total: 2035900
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 133
+    total: 2063200
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 139
+    total: 2152000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 145
+    total: 2240800
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 65
+    total: 240500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 145
+    total: 2240800
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 14
+    total: 50694.78125
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 147
+    total: 2279800
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 65
+    total: 240500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 153
+    total: 2334400
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 16
+    total: 57787.90625
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 156
+    total: 2378800
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 159
+    total: 2423200
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 161
+    total: 2441400
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 119
+    total: 440300
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 164
+    total: 2485800
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 170
+    total: 2540400
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 119
+    total: 440300
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 170
+    total: 2540400
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 16
+    total: 57787.90625
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 18
+    total: 61174.15625
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 173
+    total: 2567700
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 179
+    total: 2656500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 185
+    total: 2711100
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 188
+    total: 2755500
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 194
+    total: 2827200
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 1
+    total: 15000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 200
+    total: 2916000
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 3
+    total: 45000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 206
+    total: 2970600
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 218
+    total: 3131100
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 119
+    total: 440300
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 218
+    total: 3131100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 18
+    total: 61174.15625
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 3
+    total: 45000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 220
+    total: 3149300
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 224
+    total: 3185700
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 6
+    total: 90000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 161
+    total: 595700
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 161
+    total: 595700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 224
+    total: 3185700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 18
+    total: 61174.15625
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 6
+    total: 90000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 161
+    total: 595700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 224
+    total: 3185700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 18
+    total: 61174.15625
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 6
+    total: 90000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 23
+    total: 91421.82294301156
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 163
+    total: 603100
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 203
+    total: 751100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 7
+    total: 105000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 263
+    total: 973100
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 120000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 263
+    total: 973100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 224
+    total: 3185700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 28
+    total: 103091.60677036883
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 120000
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 11
+    total: 165000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 263
+    total: 973100
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 224
+    total: 3185700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 28
+    total: 103091.60677036883
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 11
+    total: 165000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 230
+    total: 3274500
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 311
+    total: 1150700
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 311
+    total: 1150700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 230
+    total: 3274500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 28
+    total: 103091.60677036883
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 11
+    total: 165000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 311
+    total: 1150700
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 230
+    total: 3274500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 28
+    total: 103091.60677036883
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 11
+    total: 165000
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 359
+    total: 1328300
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 359
+    total: 1328300
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 230
+    total: 3274500
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Enemy
+    count: 28
+    total: 103091.60677036883
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 1
+    total: 1480
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 11
+    total: 165000
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 236
+    total: 3363300

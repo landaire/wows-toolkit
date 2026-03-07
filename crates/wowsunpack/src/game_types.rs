@@ -1771,3 +1771,351 @@ impl fmt::Display for ControlPointType {
         f.write_str(self.name())
     }
 }
+
+// =============================================================================
+// Damage Stat Types (from mc15a2792.pyc, game version 15.1)
+// =============================================================================
+
+/// Weapon/damage source for damage stat tracking.
+///
+/// These correspond to the `enum_weapon = idGenerator(0)` constants from the game's
+/// internal `mc15a2792` module. Each value represents a specific combination of weapon
+/// system and ammo type. Sent as the first element of the `(weapon, category)` key in
+/// the `receiveDamageStat` pickle dict on the Avatar entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum DamageStatWeapon {
+    Default,
+    MainAp,
+    MainHe,
+    AtbaAp,
+    AtbaHe,
+    MainAiAp,
+    MainAiHe,
+    Torpedo,
+    Antiair,
+    Scout,
+    BomberAp,
+    BomberHe,
+    TBomber,
+    Fighter,
+    SFighter,
+    Turret,
+    Spot,
+    Burn,
+    Ram,
+    Terrain,
+    Flood,
+    Mirror,
+    Radar,
+    Xray,
+    ConsSpot,
+    SeaMine,
+    Fel,
+    DepthCharge,
+    RocketHe,
+    AaNear,
+    AaMedium,
+    AaFar,
+    MainCs,
+    AtbaCs,
+    Portal,
+    TorpedoAcc,
+    TorpedoMag,
+    Ping,
+    PingSlow,
+    PingFast,
+    TorpedoAccOff,
+    RocketAp,
+    SkipHe,
+    SkipAp,
+    Acid,
+    SectorWave,
+    Match,
+    Timer,
+    ChargeLaser,
+    PulseLaser,
+    AxisLaser,
+    BomberApAsup,
+    BomberHeAsup,
+    TBomberAsup,
+    RocketHeAsup,
+    RocketApAsup,
+    SkipHeAsup,
+    SkipApAsup,
+    DepthChargeAsup,
+    TorpedoDeep,
+    TorpedoAlter,
+    AirSupport,
+    BomberApAlter,
+    BomberHeAlter,
+    TBomberAlter,
+    RocketHeAlter,
+    RocketApAlter,
+    SkipHeAlter,
+    SkipApAlter,
+    DepthChargeAlter,
+    Recon,
+    BomberApTc,
+    BomberHeTc,
+    TBomberTc,
+    RocketHeTc,
+    RocketApTc,
+    SkipHeTc,
+    SkipApTc,
+    DepthChargeTc,
+    PhaserLaser,
+    Event1,
+    Event2,
+    TorpedoPhoton,
+    Missile,
+    AntiMissile,
+}
+
+impl DamageStatWeapon {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Default => "DEFAULT",
+            Self::MainAp => "MAIN_AP",
+            Self::MainHe => "MAIN_HE",
+            Self::AtbaAp => "ATBA_AP",
+            Self::AtbaHe => "ATBA_HE",
+            Self::MainAiAp => "MAIN_AI_AP",
+            Self::MainAiHe => "MAIN_AI_HE",
+            Self::Torpedo => "TORPEDO",
+            Self::Antiair => "ANTIAIR",
+            Self::Scout => "SCOUT",
+            Self::BomberAp => "BOMBER_AP",
+            Self::BomberHe => "BOMBER_HE",
+            Self::TBomber => "TBOMBER",
+            Self::Fighter => "FIGHTER",
+            Self::SFighter => "SFIGHTER",
+            Self::Turret => "TURRET",
+            Self::Spot => "SPOT",
+            Self::Burn => "BURN",
+            Self::Ram => "RAM",
+            Self::Terrain => "TERRAIN",
+            Self::Flood => "FLOOD",
+            Self::Mirror => "MIRROR",
+            Self::Radar => "RADAR",
+            Self::Xray => "XRAY",
+            Self::ConsSpot => "CONS_SPOT",
+            Self::SeaMine => "SEA_MINE",
+            Self::Fel => "FEL",
+            Self::DepthCharge => "DBOMB",
+            Self::RocketHe => "ROCKET_HE",
+            Self::AaNear => "AA_NEAR",
+            Self::AaMedium => "AA_MEDIUM",
+            Self::AaFar => "AA_FAR",
+            Self::MainCs => "MAIN_CS",
+            Self::AtbaCs => "ATBA_CS",
+            Self::Portal => "PORTAL",
+            Self::TorpedoAcc => "TORPEDO_ACC",
+            Self::TorpedoMag => "TORPEDO_MAG",
+            Self::Ping => "PING",
+            Self::PingSlow => "PING_SLOW",
+            Self::PingFast => "PING_FAST",
+            Self::TorpedoAccOff => "TORPEDO_ACC_OFF",
+            Self::RocketAp => "ROCKET_AP",
+            Self::SkipHe => "SKIP_HE",
+            Self::SkipAp => "SKIP_AP",
+            Self::Acid => "ACID",
+            Self::SectorWave => "SECTOR_WAVE",
+            Self::Match => "MATCH",
+            Self::Timer => "TIMER",
+            Self::ChargeLaser => "CHARGE_LASER",
+            Self::PulseLaser => "PULSE_LASER",
+            Self::AxisLaser => "AXIS_LASER",
+            Self::BomberApAsup => "BOMBER_AP_ASUP",
+            Self::BomberHeAsup => "BOMBER_HE_ASUP",
+            Self::TBomberAsup => "TBOMBER_ASUP",
+            Self::RocketHeAsup => "ROCKET_HE_ASUP",
+            Self::RocketApAsup => "ROCKET_AP_ASUP",
+            Self::SkipHeAsup => "SKIP_HE_ASUP",
+            Self::SkipApAsup => "SKIP_AP_ASUP",
+            Self::DepthChargeAsup => "DBOMB_ASUP",
+            Self::TorpedoDeep => "TORPEDO_DEEP",
+            Self::TorpedoAlter => "TORPEDO_ALTER",
+            Self::AirSupport => "AIR_SUPPORT",
+            Self::BomberApAlter => "BOMBER_AP_ALTER",
+            Self::BomberHeAlter => "BOMBER_HE_ALTER",
+            Self::TBomberAlter => "TBOMBER_ALTER",
+            Self::RocketHeAlter => "ROCKET_HE_ALTER",
+            Self::RocketApAlter => "ROCKET_AP_ALTER",
+            Self::SkipHeAlter => "SKIP_HE_ALTER",
+            Self::SkipApAlter => "SKIP_AP_ALTER",
+            Self::DepthChargeAlter => "DBOMB_ALTER",
+            Self::Recon => "RECON",
+            Self::BomberApTc => "BOMBER_AP_TC",
+            Self::BomberHeTc => "BOMBER_HE_TC",
+            Self::TBomberTc => "TBOMBER_TC",
+            Self::RocketHeTc => "ROCKET_HE_TC",
+            Self::RocketApTc => "ROCKET_AP_TC",
+            Self::SkipHeTc => "SKIP_HE_TC",
+            Self::SkipApTc => "SKIP_AP_TC",
+            Self::DepthChargeTc => "DBOMB_TC",
+            Self::PhaserLaser => "PHASER_LASER",
+            Self::Event1 => "EVENT_1",
+            Self::Event2 => "EVENT_2",
+            Self::TorpedoPhoton => "TORPEDO_PHOTON",
+            Self::Missile => "MISSILE",
+            Self::AntiMissile => "ANTI_MISSILE",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl DamageStatWeapon {
+    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.damage_stat_weapon(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "DEFAULT" => Recognized::Known(Self::Default),
+            "MAIN_AP" => Recognized::Known(Self::MainAp),
+            "MAIN_HE" => Recognized::Known(Self::MainHe),
+            "ATBA_AP" => Recognized::Known(Self::AtbaAp),
+            "ATBA_HE" => Recognized::Known(Self::AtbaHe),
+            "MAIN_AI_AP" => Recognized::Known(Self::MainAiAp),
+            "MAIN_AI_HE" => Recognized::Known(Self::MainAiHe),
+            "TORPEDO" => Recognized::Known(Self::Torpedo),
+            "ANTIAIR" => Recognized::Known(Self::Antiair),
+            "SCOUT" => Recognized::Known(Self::Scout),
+            "BOMBER_AP" => Recognized::Known(Self::BomberAp),
+            "BOMBER_HE" => Recognized::Known(Self::BomberHe),
+            "TBOMBER" => Recognized::Known(Self::TBomber),
+            "FIGHTER" => Recognized::Known(Self::Fighter),
+            "SFIGHTER" => Recognized::Known(Self::SFighter),
+            "TURRET" => Recognized::Known(Self::Turret),
+            "SPOT" => Recognized::Known(Self::Spot),
+            "BURN" => Recognized::Known(Self::Burn),
+            "RAM" => Recognized::Known(Self::Ram),
+            "TERRAIN" => Recognized::Known(Self::Terrain),
+            "FLOOD" => Recognized::Known(Self::Flood),
+            "MIRROR" => Recognized::Known(Self::Mirror),
+            "RADAR" => Recognized::Known(Self::Radar),
+            "XRAY" => Recognized::Known(Self::Xray),
+            "CONS_SPOT" => Recognized::Known(Self::ConsSpot),
+            "SEA_MINE" => Recognized::Known(Self::SeaMine),
+            "FEL" => Recognized::Known(Self::Fel),
+            "DBOMB" => Recognized::Known(Self::DepthCharge),
+            "ROCKET_HE" => Recognized::Known(Self::RocketHe),
+            "AA_NEAR" => Recognized::Known(Self::AaNear),
+            "AA_MEDIUM" => Recognized::Known(Self::AaMedium),
+            "AA_FAR" => Recognized::Known(Self::AaFar),
+            "MAIN_CS" => Recognized::Known(Self::MainCs),
+            "ATBA_CS" => Recognized::Known(Self::AtbaCs),
+            "PORTAL" => Recognized::Known(Self::Portal),
+            "TORPEDO_ACC" => Recognized::Known(Self::TorpedoAcc),
+            "TORPEDO_MAG" => Recognized::Known(Self::TorpedoMag),
+            "PING" => Recognized::Known(Self::Ping),
+            "PING_SLOW" => Recognized::Known(Self::PingSlow),
+            "PING_FAST" => Recognized::Known(Self::PingFast),
+            "TORPEDO_ACC_OFF" => Recognized::Known(Self::TorpedoAccOff),
+            "ROCKET_AP" => Recognized::Known(Self::RocketAp),
+            "SKIP_HE" => Recognized::Known(Self::SkipHe),
+            "SKIP_AP" => Recognized::Known(Self::SkipAp),
+            "ACID" => Recognized::Known(Self::Acid),
+            "SECTOR_WAVE" => Recognized::Known(Self::SectorWave),
+            "MATCH" => Recognized::Known(Self::Match),
+            "TIMER" => Recognized::Known(Self::Timer),
+            "CHARGE_LASER" => Recognized::Known(Self::ChargeLaser),
+            "PULSE_LASER" => Recognized::Known(Self::PulseLaser),
+            "AXIS_LASER" => Recognized::Known(Self::AxisLaser),
+            "BOMBER_AP_ASUP" => Recognized::Known(Self::BomberApAsup),
+            "BOMBER_HE_ASUP" => Recognized::Known(Self::BomberHeAsup),
+            "TBOMBER_ASUP" => Recognized::Known(Self::TBomberAsup),
+            "ROCKET_HE_ASUP" => Recognized::Known(Self::RocketHeAsup),
+            "ROCKET_AP_ASUP" => Recognized::Known(Self::RocketApAsup),
+            "SKIP_HE_ASUP" => Recognized::Known(Self::SkipHeAsup),
+            "SKIP_AP_ASUP" => Recognized::Known(Self::SkipApAsup),
+            "DBOMB_ASUP" => Recognized::Known(Self::DepthChargeAsup),
+            "TORPEDO_DEEP" => Recognized::Known(Self::TorpedoDeep),
+            "TORPEDO_ALTER" => Recognized::Known(Self::TorpedoAlter),
+            "AIR_SUPPORT" => Recognized::Known(Self::AirSupport),
+            "BOMBER_AP_ALTER" => Recognized::Known(Self::BomberApAlter),
+            "BOMBER_HE_ALTER" => Recognized::Known(Self::BomberHeAlter),
+            "TBOMBER_ALTER" => Recognized::Known(Self::TBomberAlter),
+            "ROCKET_HE_ALTER" => Recognized::Known(Self::RocketHeAlter),
+            "ROCKET_AP_ALTER" => Recognized::Known(Self::RocketApAlter),
+            "SKIP_HE_ALTER" => Recognized::Known(Self::SkipHeAlter),
+            "SKIP_AP_ALTER" => Recognized::Known(Self::SkipApAlter),
+            "DBOMB_ALTER" => Recognized::Known(Self::DepthChargeAlter),
+            "RECON" => Recognized::Known(Self::Recon),
+            "BOMBER_AP_TC" => Recognized::Known(Self::BomberApTc),
+            "BOMBER_HE_TC" => Recognized::Known(Self::BomberHeTc),
+            "TBOMBER_TC" => Recognized::Known(Self::TBomberTc),
+            "ROCKET_HE_TC" => Recognized::Known(Self::RocketHeTc),
+            "ROCKET_AP_TC" => Recognized::Known(Self::RocketApTc),
+            "SKIP_HE_TC" => Recognized::Known(Self::SkipHeTc),
+            "SKIP_AP_TC" => Recognized::Known(Self::SkipApTc),
+            "DBOMB_TC" => Recognized::Known(Self::DepthChargeTc),
+            "PHASER_LASER" => Recognized::Known(Self::PhaserLaser),
+            "EVENT_1" => Recognized::Known(Self::Event1),
+            "EVENT_2" => Recognized::Known(Self::Event2),
+            "TORPEDO_PHOTON" => Recognized::Known(Self::TorpedoPhoton),
+            "MISSILE" => Recognized::Known(Self::Missile),
+            "ANTI_MISSILE" => Recognized::Known(Self::AntiMissile),
+            other => Recognized::Unknown(other.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for DamageStatWeapon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// Category of damage stat tracking.
+///
+/// These correspond to the `DamageStatsType` constants from the game's internal modules
+/// (mc15a2792.pyc, Avatar.pyc). Sent as the second element of the `(weapon, category)`
+/// key in the `receiveDamageStat` pickle dict on the Avatar entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum DamageStatCategory {
+    /// Damage dealt to enemies (sub_type=0).
+    Enemy,
+    /// Damage dealt to allied ships (sub_type=1).
+    Ally,
+    /// Spotting damage — damage dealt by teammates to targets you spotted (sub_type=2).
+    Spot,
+    /// Potential damage / "agro" — incoming fire aimed at you (sub_type=3).
+    Agro,
+}
+
+impl DamageStatCategory {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Enemy => "ENEMY",
+            Self::Ally => "ALLY",
+            Self::Spot => "SPOT",
+            Self::Agro => "AGRO",
+        }
+    }
+}
+
+#[cfg(feature = "parsing")]
+impl DamageStatCategory {
+    pub fn from_id(id: i32, constants: &BattleConstants, version: Version) -> Option<Recognized<Self>> {
+        constants.damage_stat_category(id).map(|name| Self::from_name(name, version))
+    }
+
+    pub fn from_name(name: &str, _version: Version) -> Recognized<Self> {
+        match name {
+            "ENEMY" => Recognized::Known(Self::Enemy),
+            "ALLY" => Recognized::Known(Self::Ally),
+            "SPOT" => Recognized::Known(Self::Spot),
+            "AGRO" => Recognized::Known(Self::Agro),
+            other => Recognized::Unknown(other.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for DamageStatCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}

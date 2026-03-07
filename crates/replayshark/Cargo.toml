@@ -7,7 +7,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-wows_replays = { workspace = true, features = ["arc"] }
+wows_replays = { workspace = true, features = ["arc", "parsing"] }
 rootcause = { workspace = true }
 clap = { workspace = true }
 walkdir = { workspace = true }

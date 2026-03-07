@@ -8,6 +8,8 @@ use crate::game_types::CameraMode;
 use crate::game_types::CollisionType;
 use crate::game_types::Consumable;
 use crate::game_types::ControlPointType;
+use crate::game_types::DamageStatCategory;
+use crate::game_types::DamageStatWeapon;
 use crate::game_types::DeathCause;
 use crate::game_types::FinishType;
 use crate::game_types::InteractiveZoneType;
@@ -51,6 +53,8 @@ pub struct BattleConstants {
     torpedo_marker_types: HashMap<i32, Cow<'static, str>>,
     interactive_zone_types: HashMap<i32, Cow<'static, str>>,
     control_point_types: HashMap<i32, Cow<'static, str>>,
+    damage_stat_weapons: HashMap<i32, Cow<'static, str>>,
+    damage_stat_categories: HashMap<i32, Cow<'static, str>>,
 }
 
 impl BattleConstants {
@@ -89,6 +93,8 @@ impl BattleConstants {
                 .unwrap_or(defaults.torpedo_marker_types),
             interactive_zone_types: defaults.interactive_zone_types,
             control_point_types: defaults.control_point_types,
+            damage_stat_weapons: defaults.damage_stat_weapons,
+            damage_stat_categories: defaults.damage_stat_categories,
         }
     }
 
@@ -409,6 +415,101 @@ impl BattleConstants {
                 (5, Cow::Borrowed(ControlPointType::BaseWithPoints.name())),
                 (6, Cow::Borrowed(ControlPointType::EpicenterCp.name())),
             ]),
+            // DamageStatWeapon: from mc15a2792.pyc enum_weapon = idGenerator(0), game version 15.1
+            damage_stat_weapons: HashMap::from([
+                (0, Cow::Borrowed(DamageStatWeapon::Default.name())),
+                (1, Cow::Borrowed(DamageStatWeapon::MainAp.name())),
+                (2, Cow::Borrowed(DamageStatWeapon::MainHe.name())),
+                (3, Cow::Borrowed(DamageStatWeapon::AtbaAp.name())),
+                (4, Cow::Borrowed(DamageStatWeapon::AtbaHe.name())),
+                (5, Cow::Borrowed(DamageStatWeapon::MainAiAp.name())),
+                (6, Cow::Borrowed(DamageStatWeapon::MainAiHe.name())),
+                (7, Cow::Borrowed(DamageStatWeapon::Torpedo.name())),
+                (8, Cow::Borrowed(DamageStatWeapon::Antiair.name())),
+                (9, Cow::Borrowed(DamageStatWeapon::Scout.name())),
+                (10, Cow::Borrowed(DamageStatWeapon::BomberAp.name())),
+                (11, Cow::Borrowed(DamageStatWeapon::BomberHe.name())),
+                (12, Cow::Borrowed(DamageStatWeapon::TBomber.name())),
+                (13, Cow::Borrowed(DamageStatWeapon::Fighter.name())),
+                (14, Cow::Borrowed(DamageStatWeapon::SFighter.name())),
+                (15, Cow::Borrowed(DamageStatWeapon::Turret.name())),
+                (16, Cow::Borrowed(DamageStatWeapon::Spot.name())),
+                (17, Cow::Borrowed(DamageStatWeapon::Burn.name())),
+                (18, Cow::Borrowed(DamageStatWeapon::Ram.name())),
+                (19, Cow::Borrowed(DamageStatWeapon::Terrain.name())),
+                (20, Cow::Borrowed(DamageStatWeapon::Flood.name())),
+                (21, Cow::Borrowed(DamageStatWeapon::Mirror.name())),
+                (22, Cow::Borrowed(DamageStatWeapon::Radar.name())),
+                (23, Cow::Borrowed(DamageStatWeapon::Xray.name())),
+                (24, Cow::Borrowed(DamageStatWeapon::ConsSpot.name())),
+                (25, Cow::Borrowed(DamageStatWeapon::SeaMine.name())),
+                (26, Cow::Borrowed(DamageStatWeapon::Fel.name())),
+                (27, Cow::Borrowed(DamageStatWeapon::DepthCharge.name())),
+                (28, Cow::Borrowed(DamageStatWeapon::RocketHe.name())),
+                (29, Cow::Borrowed(DamageStatWeapon::AaNear.name())),
+                (30, Cow::Borrowed(DamageStatWeapon::AaMedium.name())),
+                (31, Cow::Borrowed(DamageStatWeapon::AaFar.name())),
+                (32, Cow::Borrowed(DamageStatWeapon::MainCs.name())),
+                (33, Cow::Borrowed(DamageStatWeapon::AtbaCs.name())),
+                (34, Cow::Borrowed(DamageStatWeapon::Portal.name())),
+                (35, Cow::Borrowed(DamageStatWeapon::TorpedoAcc.name())),
+                (36, Cow::Borrowed(DamageStatWeapon::TorpedoMag.name())),
+                (37, Cow::Borrowed(DamageStatWeapon::Ping.name())),
+                (38, Cow::Borrowed(DamageStatWeapon::PingSlow.name())),
+                (39, Cow::Borrowed(DamageStatWeapon::PingFast.name())),
+                (40, Cow::Borrowed(DamageStatWeapon::TorpedoAccOff.name())),
+                (41, Cow::Borrowed(DamageStatWeapon::RocketAp.name())),
+                (42, Cow::Borrowed(DamageStatWeapon::SkipHe.name())),
+                (43, Cow::Borrowed(DamageStatWeapon::SkipAp.name())),
+                (44, Cow::Borrowed(DamageStatWeapon::Acid.name())),
+                (45, Cow::Borrowed(DamageStatWeapon::SectorWave.name())),
+                (46, Cow::Borrowed(DamageStatWeapon::Match.name())),
+                (47, Cow::Borrowed(DamageStatWeapon::Timer.name())),
+                (48, Cow::Borrowed(DamageStatWeapon::ChargeLaser.name())),
+                (49, Cow::Borrowed(DamageStatWeapon::PulseLaser.name())),
+                (50, Cow::Borrowed(DamageStatWeapon::AxisLaser.name())),
+                (51, Cow::Borrowed(DamageStatWeapon::BomberApAsup.name())),
+                (52, Cow::Borrowed(DamageStatWeapon::BomberHeAsup.name())),
+                (53, Cow::Borrowed(DamageStatWeapon::TBomberAsup.name())),
+                (54, Cow::Borrowed(DamageStatWeapon::RocketHeAsup.name())),
+                (55, Cow::Borrowed(DamageStatWeapon::RocketApAsup.name())),
+                (56, Cow::Borrowed(DamageStatWeapon::SkipHeAsup.name())),
+                (57, Cow::Borrowed(DamageStatWeapon::SkipApAsup.name())),
+                (58, Cow::Borrowed(DamageStatWeapon::DepthChargeAsup.name())),
+                (59, Cow::Borrowed(DamageStatWeapon::TorpedoDeep.name())),
+                (60, Cow::Borrowed(DamageStatWeapon::TorpedoAlter.name())),
+                (61, Cow::Borrowed(DamageStatWeapon::AirSupport.name())),
+                (62, Cow::Borrowed(DamageStatWeapon::BomberApAlter.name())),
+                (63, Cow::Borrowed(DamageStatWeapon::BomberHeAlter.name())),
+                (64, Cow::Borrowed(DamageStatWeapon::TBomberAlter.name())),
+                (65, Cow::Borrowed(DamageStatWeapon::RocketHeAlter.name())),
+                (66, Cow::Borrowed(DamageStatWeapon::RocketApAlter.name())),
+                (67, Cow::Borrowed(DamageStatWeapon::SkipHeAlter.name())),
+                (68, Cow::Borrowed(DamageStatWeapon::SkipApAlter.name())),
+                (69, Cow::Borrowed(DamageStatWeapon::DepthChargeAlter.name())),
+                (70, Cow::Borrowed(DamageStatWeapon::Recon.name())),
+                (71, Cow::Borrowed(DamageStatWeapon::BomberApTc.name())),
+                (72, Cow::Borrowed(DamageStatWeapon::BomberHeTc.name())),
+                (73, Cow::Borrowed(DamageStatWeapon::TBomberTc.name())),
+                (74, Cow::Borrowed(DamageStatWeapon::RocketHeTc.name())),
+                (75, Cow::Borrowed(DamageStatWeapon::RocketApTc.name())),
+                (76, Cow::Borrowed(DamageStatWeapon::SkipHeTc.name())),
+                (77, Cow::Borrowed(DamageStatWeapon::SkipApTc.name())),
+                (78, Cow::Borrowed(DamageStatWeapon::DepthChargeTc.name())),
+                (79, Cow::Borrowed(DamageStatWeapon::PhaserLaser.name())),
+                (80, Cow::Borrowed(DamageStatWeapon::Event1.name())),
+                (81, Cow::Borrowed(DamageStatWeapon::Event2.name())),
+                (82, Cow::Borrowed(DamageStatWeapon::TorpedoPhoton.name())),
+                (83, Cow::Borrowed(DamageStatWeapon::Missile.name())),
+                (84, Cow::Borrowed(DamageStatWeapon::AntiMissile.name())),
+            ]),
+            // DamageStatCategory: from DamageStatsType in mc15a2792.pyc, game version 15.1
+            damage_stat_categories: HashMap::from([
+                (0, Cow::Borrowed(DamageStatCategory::Enemy.name())),
+                (1, Cow::Borrowed(DamageStatCategory::Ally.name())),
+                (2, Cow::Borrowed(DamageStatCategory::Spot.name())),
+                (3, Cow::Borrowed(DamageStatCategory::Agro.name())),
+            ]),
         }
     }
 
@@ -562,6 +663,30 @@ impl BattleConstants {
 
     pub fn control_point_types_mut(&mut self) -> &mut HashMap<i32, Cow<'static, str>> {
         &mut self.control_point_types
+    }
+
+    pub fn damage_stat_weapon(&self, id: i32) -> Option<&str> {
+        self.damage_stat_weapons.get(&id).map(|s| s.as_ref())
+    }
+
+    pub fn damage_stat_weapons(&self) -> &HashMap<i32, Cow<'static, str>> {
+        &self.damage_stat_weapons
+    }
+
+    pub fn damage_stat_weapons_mut(&mut self) -> &mut HashMap<i32, Cow<'static, str>> {
+        &mut self.damage_stat_weapons
+    }
+
+    pub fn damage_stat_category(&self, id: i32) -> Option<&str> {
+        self.damage_stat_categories.get(&id).map(|s| s.as_ref())
+    }
+
+    pub fn damage_stat_categories(&self) -> &HashMap<i32, Cow<'static, str>> {
+        &self.damage_stat_categories
+    }
+
+    pub fn damage_stat_categories_mut(&mut self) -> &mut HashMap<i32, Cow<'static, str>> {
+        &mut self.damage_stat_categories
     }
 
     pub fn camera_modes(&self) -> &HashMap<i32, Cow<'static, str>> {

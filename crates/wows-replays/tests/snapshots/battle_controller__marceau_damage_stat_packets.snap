@@ -1,0 +1,2698 @@
+---
+source: crates/wows-replays/tests/battle_controller.rs
+expression: "&packets"
+---
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 4
+    total: 2442
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 4
+    total: 2442
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 6
+    total: 3663
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 17
+    total: 62900
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 2
+    total: 4300
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 42
+    total: 155400
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 5
+    total: 9400
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 10
+    total: 17900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 11
+    total: 6715.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 11
+    total: 6715.5
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 11
+    total: 6715.5
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 11
+    total: 6715.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 1
+    total: 261.15
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 14
+    total: 8547
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 3
+    total: 783.4499999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 5
+    total: 1305.75
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 17
+    total: 10378.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 7
+    total: 1828.0500000000002
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 9
+    total: 2350.3500000000004
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 18
+    total: 10989
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 11
+    total: 2872.6500000000005
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 22
+    total: 13431
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 13
+    total: 3394.9500000000007
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 15
+    total: 3917.250000000001
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 23
+    total: 14041.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 17
+    total: 4439.55
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 19
+    total: 4961.849999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 21
+    total: 5484.149999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 23
+    total: 6006.449999999998
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 25
+    total: 6528.749999999997
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 27
+    total: 7051.0499999999965
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 29
+    total: 7573.349999999996
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 31
+    total: 8095.649999999995
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 33
+    total: 8617.949999999995
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 35
+    total: 9140.249999999995
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 37
+    total: 9662.549999999994
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 39
+    total: 10184.849999999993
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 41
+    total: 10654.919999999995
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 41
+    total: 10654.919999999995
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 23
+    total: 14041.5
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 41
+    total: 10654.919999999995
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 23
+    total: 14041.5
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 41
+    total: 10654.919999999995
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 3
+    total: 8432.3
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 26
+    total: 15873
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 27
+    total: 16438.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 22
+    total: 74000
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 31
+    total: 17659.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 35
+    total: 18880.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 37
+    total: 19491
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 40
+    total: 20406.75
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 43
+    total: 21322.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 43
+    total: 11177.219999999994
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 8
+    total: 31200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 48
+    total: 22848.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 45
+    total: 11699.519999999993
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 28
+    total: 117200
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 47
+    total: 12221.819999999992
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 49
+    total: 12744.119999999992
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 32
+    total: 124000
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 52
+    total: 24069.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 51
+    total: 13266.419999999991
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 36
+    total: 130800
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 53
+    total: 13788.71999999999
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 55
+    total: 14311.01999999999
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 8
+    total: 31200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 36
+    total: 130800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 52
+    total: 24069.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 57
+    total: 14833.319999999989
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 44
+    total: 144400
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 59
+    total: 15355.619999999988
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 54
+    total: 24680.25
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 61
+    total: 15877.919999999987
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 63
+    total: 16400.219999999987
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 48
+    total: 151200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 55
+    total: 24985.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 65
+    total: 16922.51999999999
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 56
+    total: 25290.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 67
+    total: 17444.819999999992
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 69
+    total: 17967.119999999995
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 8
+    total: 31200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 48
+    total: 151200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 63
+    total: 27427.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 71
+    total: 18489.42
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 70
+    total: 221600
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 67
+    total: 28648.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 73
+    total: 19011.72
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 68
+    total: 28953.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 75
+    total: 19534.020000000004
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 75
+    total: 31090.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 77
+    total: 20056.320000000007
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 79
+    total: 32311.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 79
+    total: 20578.62000000001
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 86
+    total: 248800
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 81
+    total: 21100.920000000013
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 83
+    total: 33532.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 83
+    total: 21570.990000000016
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 84
+    total: 33837.75
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 85
+    total: 22093.29000000002
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 8
+    total: 31200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 90
+    total: 255600
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 84
+    total: 33837.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 87
+    total: 22615.590000000022
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 102
+    total: 276000
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 86
+    total: 34448.25
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 89
+    total: 23137.890000000025
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 88
+    total: 35058.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 91
+    total: 23660.190000000028
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 89
+    total: 35364
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 93
+    total: 24182.49000000003
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 117
+    total: 301500
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 95
+    total: 24704.790000000034
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 118
+    total: 303200
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 97
+    total: 25227.090000000037
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 99
+    total: 25749.39000000004
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 101
+    total: 26271.690000000042
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 133
+    total: 328700
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 93
+    total: 36585
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 103
+    total: 26793.990000000045
+- - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 105
+    total: 27316.290000000048
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 139
+    total: 371900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 96
+    total: 37500.75
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 107
+    total: 27838.59000000005
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 97
+    total: 37806
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 109
+    total: 28360.890000000054
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 155
+    total: 399100
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 99
+    total: 38416.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 111
+    total: 28883.190000000057
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 101
+    total: 39027
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 113
+    total: 29405.49000000006
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 177
+    total: 469500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 103
+    total: 39637.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 115
+    total: 29927.790000000063
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 105
+    total: 40858.5
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 1
+    total: 1900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 117
+    total: 30450.090000000066
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 3
+    total: 5700
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 119
+    total: 30972.39000000007
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 178
+    total: 471200
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 121
+    total: 31494.69000000007
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 193
+    total: 496700
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 5
+    total: 9500
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 5
+    total: 10396.870662345134
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 193
+    total: 496700
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 7
+    total: 13300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 209
+    total: 523900
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 215
+    total: 567100
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 10
+    total: 19000
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 12
+    total: 22800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 231
+    total: 594300
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 14
+    total: 26600
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 15
+    total: 28500
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 237
+    total: 637500
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+- - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 12
+    total: 76800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 245
+    total: 651100
+- - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 18
+    total: 115200
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 246
+    total: 658300
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 258
+    total: 706200
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 18
+    total: 115200
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 259
+    total: 707900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 267
+    total: 721500
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 18
+    total: 115200
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 273
+    total: 764700
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 18
+    total: 115200
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 273
+    total: 764700
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 281
+    total: 778300
+- - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 287
+    total: 788500
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 291
+    total: 795300
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 295
+    total: 802100
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 301
+    total: 845300
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 301
+    total: 845300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 301
+    total: 845300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 123
+    total: 31964.760000000075
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 301
+    total: 845300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 110
+    total: 43911
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 111
+    total: 44521.5
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 112
+    total: 45132
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 125
+    total: 32346.660000000076
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 127
+    total: 32728.560000000078
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 113
+    total: 45742.5
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 129
+    total: 33110.46000000007
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 131
+    total: 33492.360000000066
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 133
+    total: 33874.26000000006
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 135
+    total: 34256.160000000054
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 137
+    total: 34638.06000000005
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 139
+    total: 35019.96000000004
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 118
+    total: 48795
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 141
+    total: 35401.86000000004
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 123
+    total: 51266.72908331341
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 143
+    total: 35783.76000000003
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 145
+    total: 36165.660000000025
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 147
+    total: 36547.56000000002
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 149
+    total: 36929.460000000014
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 151
+    total: 37311.36000000001
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 153
+    total: 37693.26
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 155
+    total: 38075.159999999996
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 157
+    total: 38457.05999999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 159
+    total: 38838.959999999985
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 161
+    total: 39220.85999999998
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 163
+    total: 39602.75999999997
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 165
+    total: 39984.65999999997
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 167
+    total: 40366.55999999996
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 169
+    total: 40748.459999999955
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 171
+    total: 41130.35999999995
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 173
+    total: 41512.259999999944
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 174
+    total: 41703.20999999994
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 174
+    total: 41703.20999999994
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 301
+    total: 845300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 123
+    total: 51266.72908331341
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 2
+    total: 15666
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 3
+    total: 36733
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 129
+    total: 53412.524954423454
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 4
+    total: 57800
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 175
+    total: 41894.15999999994
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 131
+    total: 54179.20151214681
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 5
+    total: 78867
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 135
+    total: 55558.89843372706
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 306
+    total: 875800
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 136
+    total: 55966.137605679454
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 307
+    total: 881900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 141
+    total: 57544.055346251946
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 177
+    total: 42276.05999999993
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 144
+    total: 58560.22673667379
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 179
+    total: 42657.95999999993
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 145
+    total: 59015.731845766924
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 181
+    total: 43039.85999999992
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 307
+    total: 881900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 145
+    total: 59015.731845766924
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 5
+    total: 78867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 183
+    total: 43421.759999999915
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 185
+    total: 43803.65999999991
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 187
+    total: 44185.5599999999
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 146
+    total: 59626.231845766924
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 189
+    total: 44567.4599999999
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 191
+    total: 44949.35999999989
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 148
+    total: 60334.311927285176
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 193
+    total: 45331.259999999886
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 153
+    total: 61860.561927285176
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 195
+    total: 45713.15999999988
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 158
+    total: 63386.811927285176
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 197
+    total: 46095.059999999874
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 160
+    total: 63997.311927285176
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 199
+    total: 46476.95999999987
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 201
+    total: 47240.75999999987
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 166
+    total: 65828.81192728518
+- - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 313
+    total: 918500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 168
+    total: 66151.97622910266
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 313
+    total: 918500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 168
+    total: 66151.97622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 5
+    total: 78867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 313
+    total: 918500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 168
+    total: 66151.97622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 5
+    total: 78867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 319
+    total: 931400
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 171
+    total: 67067.72622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 173
+    total: 67678.22622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 7
+    total: 108867
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 177
+    total: 68899.22622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 123867
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 325
+    total: 944300
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 179
+    total: 69509.72622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 181
+    total: 70120.22622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 329
+    total: 952900
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 183
+    total: 70730.72622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 184
+    total: 71035.97622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 331
+    total: 957200
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 187
+    total: 71951.72622910266
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 190
+    total: 72688.97622910266
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 190
+    total: 72688.97622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 123867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 190
+    total: 72688.97622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 123867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 190
+    total: 72688.97622910266
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 123867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 196
+    total: 74352.17622910265
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 200
+    total: 75878.42622910265
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 204
+    total: 78015.17622910265
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 208
+    total: 79236.17622910265
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 209
+    total: 79541.42622910265
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 209
+    total: 79541.42622910265
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 8
+    total: 123867
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 12
+    total: 162103
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 213
+    total: 80762.42622910265
+- - weapon:
+      Known: AtbaHe
+    category:
+      Known: Agro
+    count: 16
+    total: 30400
+  - weapon:
+      Known: BomberHe
+    category:
+      Known: Agro
+    count: 24
+    total: 153600
+  - weapon:
+      Known: BomberHeAsup
+    category:
+      Known: Agro
+    count: 47
+    total: 173900
+  - weapon:
+      Known: Burn
+    category:
+      Known: Enemy
+    count: 202
+    total: 47622.65999999987
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Agro
+    count: 14
+    total: 94200
+  - weapon:
+      Known: MainAp
+    category:
+      Known: Spot
+    count: 7
+    total: 17238.170662345135
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Agro
+    count: 333
+    total: 961500
+  - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 213
+    total: 80762.42622910265
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Agro
+    count: 12
+    total: 162103
+  - weapon:
+      Known: Torpedo
+    category:
+      Known: Enemy
+    count: 1
+    total: 11370.39255319149
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 217
+    total: 81983.42622910265
+- - weapon:
+      Known: MainHe
+    category:
+      Known: Enemy
+    count: 221
+    total: 83204.42622910265
+- - weapon:
+      Known: Ram
+    category:
+      Known: Enemy
+    count: 1
+    total: 2891.5402098174836

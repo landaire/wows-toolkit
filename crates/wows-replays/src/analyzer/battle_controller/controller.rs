@@ -31,6 +31,9 @@ use crate::RwCellExt;
 use crate::analyzer::analyzer::Analyzer;
 use crate::analyzer::decoder::BuoyancyState;
 use crate::analyzer::decoder::ChatMessageExtra;
+use crate::analyzer::decoder::DamageStatCategory;
+use crate::analyzer::decoder::DamageStatEntry;
+use crate::analyzer::decoder::DamageStatWeapon;
 use crate::analyzer::decoder::DeathCause;
 use crate::analyzer::decoder::FinishType;
 use crate::analyzer::decoder::PlayerStateData;
@@ -425,6 +428,7 @@ pub struct BattleReport {
     buildings: Vec<BuildingEntity>,
     local_weather_zones: Vec<LocalWeatherZone>,
     battle_start_clock: Option<GameClock>,
+    self_damage_stats: Vec<DamageStatEntry>,
 }
 
 impl BattleReport {
@@ -506,6 +510,12 @@ impl BattleReport {
         self.finish_type.as_ref()
     }
 
+    /// Server-authoritative per-weapon damage stats for the self player.
+    /// Only populated from `receiveDamageStat` on the Avatar entity.
+    pub fn self_damage_stats(&self) -> &[DamageStatEntry] {
+        &self.self_damage_stats
+    }
+
     /// Convert an absolute game clock to elapsed time since battle start.
     /// If battle start is unknown, treats clock 0.0 as battle start.
     pub fn game_clock_to_elapsed(&self, clock: GameClock) -> ElapsedClock {
@@ -525,6 +535,7 @@ impl BattleReport {
 struct DamageEvent {
     amount: f32,
     victim: EntityId,
+    clock: GameClock,
 }
 
 pub struct BattleController<'res, 'replay, G> {
@@ -603,6 +614,12 @@ pub struct BattleController<'res, 'replay, G> {
     /// Optional game constants loaded from game data for resolving
     /// death causes, camera modes, entity types, etc.
     game_constants: Option<&'res GameConstants>,
+
+    /// Server-authoritative cumulative damage stats for the self player,
+    /// from `receiveDamageStat` on the Avatar entity.
+    /// Only `DamageStatCategory::Enemy` entries represent actual damage dealt.
+    self_damage_stats: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
+
 }
 
 impl<'res, 'replay, G> BattleController<'res, 'replay, G>
@@ -671,6 +688,7 @@ where
             battle_stage: None,
             battle_start_clock: None,
             game_constants,
+            self_damage_stats: HashMap::default(),
         }
     }
 
@@ -711,6 +729,7 @@ where
         self.time_left = None;
         self.battle_stage = None;
         self.battle_start_clock = None;
+        self.self_damage_stats.clear();
         // Note: track_shots is config, not state -- preserved across reset.
     }
 
@@ -834,7 +853,8 @@ where
     }
 
     pub fn build_report(mut self) -> BattleReport {
-        // Update vehicle damage from damage events
+        // Update vehicle damage from damage events (receiveDamagesOnShip).
+        // For non-self players, this is the only damage source available.
         for (aggressor, damage_events) in &self.damage_dealt {
             if let Some(aggressor_entity) = self.entities_by_id.get_mut(aggressor) {
                 let Some(vehicle) = aggressor_entity.vehicle_ref() else {
@@ -843,11 +863,33 @@ where
                 };
 
                 let mut vehicle = vehicle.borrow_mut();
-                vehicle.damage += damage_events.iter().fold(0.0, |mut accum, event| {
-                    accum += event.amount;
-                    accum
+                vehicle.damage += damage_events.iter().fold(0.0f64, |accum, event| {
+                    accum + event.amount as f64
                 });
             }
+        }
+
+        // Override the self player's damage with the server-authoritative total
+        // from receiveDamageStat (Avatar method). DamageReceived events only cover
+        // visible targets, missing DoT on ships that left the client's AoI.
+        // Only Enemy category entries represent actual damage dealt.
+        if !self.self_damage_stats.is_empty() {
+            let authoritative_damage: f64 = self
+                .self_damage_stats
+                .values()
+                .filter(|entry| entry.category == Recognized::Known(DamageStatCategory::Enemy))
+                .map(|entry| entry.total)
+                .sum();
+
+            if let Some(self_entity_id) = self
+                .player_entities
+                .iter()
+                .find(|(_, p)| p.relation().is_self())
+                .map(|(eid, _)| *eid)
+                && let Some(entity) = self.entities_by_id.get_mut(&self_entity_id)
+                    && let Some(vehicle) = entity.vehicle_ref() {
+                        vehicle.borrow_mut().damage = authoritative_damage;
+                    }
         }
 
         // Update vehicle death info
@@ -951,6 +993,7 @@ where
             buildings,
             local_weather_zones: self.local_weather_zones,
             battle_start_clock: self.battle_start_clock,
+            self_damage_stats: self.self_damage_stats.into_values().collect(),
         }
     }
 
@@ -2238,7 +2281,7 @@ pub struct VehicleEntity {
     visibility_changed_at: f32,
     props: VehicleProps,
     captain: Option<Rc<Param>>,
-    damage: f32,
+    damage: f64,
     death_info: Option<DeathInfo>,
     results_info: Option<serde_json::Value>,
     frags: Vec<DeathInfo>,
@@ -2294,7 +2337,7 @@ impl VehicleEntity {
         self.captain.as_ref().map(|rc| rc.as_ref())
     }
 
-    pub fn damage(&self) -> f32 {
+    pub fn damage(&self) -> f64 {
         self.damage
     }
 
@@ -2569,8 +2612,10 @@ where
                     self.ship_positions.insert(orientation.pid, ship_pos);
                 }
             }
-            crate::analyzer::decoder::DecodedPacketPayload::DamageStat(_damage) => {
-                trace!("DAMAGE STAT")
+            crate::analyzer::decoder::DecodedPacketPayload::DamageStat(ref entries) => {
+                for entry in entries {
+                    self.self_damage_stats.insert((entry.weapon.clone(), entry.category.clone()), entry.clone());
+                }
             }
             crate::analyzer::decoder::DecodedPacketPayload::ShipDestroyed { killer, victim, cause } => {
                 self.frags.entry(killer).or_default().push(Death {
@@ -2759,7 +2804,7 @@ where
                     self.damage_dealt
                         .entry(damage.aggressor)
                         .or_default()
-                        .push(DamageEvent { amount: damage.damage, victim });
+                        .push(DamageEvent { amount: damage.damage, victim, clock: packet.clock });
                 }
             }
             crate::analyzer::decoder::DecodedPacketPayload::MinimapUpdate { ref updates, arg1: _ } => {

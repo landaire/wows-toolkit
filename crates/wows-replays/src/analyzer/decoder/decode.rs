@@ -25,6 +25,8 @@ use winnow::binary::le_u8;
 use winnow::binary::le_u16;
 use winnow::binary::le_u64;
 use wowsunpack::data::Version;
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
 use wowsunpack::game_constants::DEFAULT_COMMON_CONSTANTS;
 use wowsunpack::game_constants::DEFAULT_SHIPS_CONSTANTS;
@@ -852,6 +854,24 @@ pub struct ChatMessageExtra {
     player_name: String,
 }
 
+/// A single entry from a `receiveDamageStat` update.
+///
+/// The game server sends cumulative damage statistics as a pickled dict keyed by
+/// `(weapon_type: i64, category: i64)` with values `[count: i64, total: f64]`.
+/// Each entry represents cumulative totals (not incremental deltas) — later updates
+/// for the same key replace earlier values.
+#[derive(Debug, Clone, Serialize)]
+pub struct DamageStatEntry {
+    /// Which weapon/damage source this stat tracks.
+    pub weapon: Recognized<DamageStatWeapon>,
+    /// Which category of damage (enemy, ally, spotting, potential).
+    pub category: Recognized<DamageStatCategory>,
+    /// Cumulative hit count for this weapon+category combination.
+    pub count: i64,
+    /// Cumulative damage total for this weapon+category combination.
+    pub total: f64,
+}
+
 #[derive(Debug, Serialize, Kinded)]
 #[kinded(derive(Serialize))]
 pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
@@ -883,16 +903,11 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
     Position(crate::packet2::PositionPacket),
     /// Indicates the position of the player's object or camera.
     PlayerOrientation(crate::packet2::PlayerOrientationPacket),
-    /// Indicates updating a damage statistic. The first tuple, `(i64,i64)`, is a two-part
-    /// label indicating what type of damage this refers to. The second tuple, `(i64,f64)`,
-    /// indicates the actual damage counter increment.
+    /// Server-authoritative cumulative damage statistics from `receiveDamageStat`.
     ///
-    /// Some known keys include:
-    /// - (1, 0) key is (# AP hits that dealt damage, total AP damage dealt)
-    /// - (1, 3) is (# artillery fired, total possible damage) ?
-    /// - (2, 0) is (# HE penetrations, total HE damage)
-    /// - (17, 0) is (# fire tick marks, total fire damage)
-    DamageStat(Vec<((i64, i64), (i64, f64))>),
+    /// Each entry represents cumulative totals for a (weapon, category) pair.
+    /// Only `DamageStatCategory::Enemy` entries represent actual damage dealt.
+    DamageStat(Vec<DamageStatEntry>),
     /// Sent when a ship is destroyed.
     ShipDestroyed {
         /// The ship ID (note: Not the avatar ID) of the killer
@@ -1694,7 +1709,7 @@ where
             match value {
                 pickled::value::Value::Dict(d) => {
                     for (k, v) in d.inner().iter() {
-                        let k = match k {
+                        let (weapon_raw, category_raw) = match k {
                             pickled::value::HashableValue::Tuple(t) => {
                                 let t = t.inner();
                                 assert!(t.len() == 2);
@@ -1711,7 +1726,7 @@ where
                             }
                             _ => panic!("foo"),
                         };
-                        let v = match v {
+                        let (count, total) = match v {
                             pickled::value::Value::List(t) => {
                                 let t = t.inner();
                                 assert!(t.len() == 2);
@@ -1722,8 +1737,7 @@ where
                                     },
                                     match &t[1] {
                                         pickled::value::Value::F64(i) => *i,
-                                        // TODO: This appears in the (17,2) key,
-                                        // it is unknown what it means
+                                        // Spotting damage can be sent as integer 0
                                         pickled::value::Value::I64(i) => *i as f64,
                                         _ => panic!("foo"),
                                     },
@@ -1731,9 +1745,17 @@ where
                             }
                             _ => panic!("foo"),
                         };
-                        //println!("{:?}: {:?}", k, v);
 
-                        stats.push((k, v));
+                        let weapon = DamageStatWeapon::from_id(weapon_raw as i32, battle_constants, *version)
+                            .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
+                        let category = DamageStatCategory::from_id(category_raw as i32, battle_constants, *version)
+                            .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
+                        stats.push(DamageStatEntry {
+                            weapon,
+                            category,
+                            count,
+                            total,
+                        });
                     }
                 }
                 _ => panic!("foo"),

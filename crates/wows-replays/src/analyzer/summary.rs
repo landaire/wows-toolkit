@@ -1,5 +1,9 @@
 use wowsunpack::rpc::typedefs::ArgValue;
 
+use wowsunpack::data::Version;
+use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
+
+use crate::analyzer::decoder::{DamageStatCategory, DamageStatEntry, DamageStatWeapon, Recognized};
 use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
@@ -61,7 +65,7 @@ pub enum Ribbon {
 
 struct Summary {
     ribbons: HashMap<Ribbon, usize>,
-    damage: HashMap<(i64, i64), (i64, f64)>,
+    damage: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 }
 
 impl Analyzer for Summary {
@@ -70,12 +74,14 @@ impl Analyzer for Summary {
             println!("{:?}: {}", ribbon, count);
         }
         println!();
-        println!(
-            "Total damage: {:.0}",
-            self.damage.get(&(1, 0)).unwrap_or(&(0, 0.)).1
-                + self.damage.get(&(2, 0)).unwrap_or(&(0, 0.)).1
-                + self.damage.get(&(17, 0)).unwrap_or(&(0, 0.)).1
-        );
+
+        let enemy_damage: f64 = self
+            .damage
+            .values()
+            .filter(|entry| entry.category == Recognized::Known(DamageStatCategory::Enemy))
+            .map(|entry| entry.total)
+            .sum();
+        println!("Total damage: {:.0}", enemy_damage);
     }
 
     fn process(&mut self, packet: &Packet<'_, '_>) {
@@ -135,7 +141,7 @@ impl Analyzer for Summary {
                 match value {
                     pickled::value::Value::Dict(d) => {
                         for (k, v) in d.inner().iter() {
-                            let k = match k {
+                            let (weapon_raw, category_raw) = match k {
                                 pickled::value::HashableValue::Tuple(t) => {
                                     let t = t.inner();
                                     assert!(t.len() == 2);
@@ -152,7 +158,7 @@ impl Analyzer for Summary {
                                 }
                                 _ => panic!("foo"),
                             };
-                            let v = match v {
+                            let (count, total) = match v {
                                 pickled::value::Value::List(t) => {
                                     let t = t.inner();
                                     assert!(t.len() == 2);
@@ -163,8 +169,7 @@ impl Analyzer for Summary {
                                         },
                                         match t[1] {
                                             pickled::value::Value::F64(i) => i,
-                                            // TODO: This appears in the (17,2) key,
-                                            // it is unknown what it means
+                                            // Spotting damage can be sent as integer 0
                                             pickled::value::Value::I64(i) => i as f64,
                                             _ => panic!("foo"),
                                         },
@@ -172,13 +177,15 @@ impl Analyzer for Summary {
                                 }
                                 _ => panic!("foo"),
                             };
-                            //println!("{:?}: {:?}", k, v);
 
-                            // The (1,0) key is (# AP hits that dealt damage, total AP damage dealt)
-                            // (1,3) is (# artillery fired, total possible damage) ?
-                            // (2, 0) is (# HE penetrations, total HE damage)
-                            // (17, 0) is (# fire tick marks, total fire damage)
-                            self.damage.insert(k, v);
+                            let version = Version::from_client_exe("0,0,0,0");
+                            let weapon = DamageStatWeapon::from_id(weapon_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
+                                .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
+                            let category = DamageStatCategory::from_id(category_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
+                                .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
+                            let key = (weapon.clone(), category.clone());
+                            let entry = DamageStatEntry { weapon, category, count, total };
+                            self.damage.insert(key, entry);
                         }
                     }
                     _ => panic!("foo"),
