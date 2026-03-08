@@ -1,6 +1,6 @@
 [package]
 name = "wows_replays"
-version = "0.26.0"
+version = "0.27.0"
 authors = ["landaire"]
 description = "A parser for World of Warships replay files"
 repository = "https://github.com/landaire/wows-toolkit"
@@ -31,7 +31,7 @@ toml = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 sha2 = { workspace = true }
-wows-data-mgr = { path = "../wows-data-mgr" }
+wows-data-mgr = { workspace = true }
 
 [features]
 default = ["arc", "parsing"]

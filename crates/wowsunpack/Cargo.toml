@@ -1,7 +1,7 @@
 [package]
 name = "wowsunpack"
 description = "Utility for interacting with World of Warships game assets"
-version = "0.25.0"
+version = "0.26.0"
 repository = "https://github.com/landaire/wows-toolkit"
 documentation = "https://docs.rs/wowsunpack/"
 exclude = ["format_templates/"]
@@ -64,7 +64,7 @@ toml = { workspace = true }
 insta = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-wows-data-mgr = { path = "../wows-data-mgr" }
+wows-data-mgr = { workspace = true }
 
 [features]
 arc = []
