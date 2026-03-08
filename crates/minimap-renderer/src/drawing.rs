@@ -1995,7 +1995,16 @@ impl RenderTarget for ImageTarget {
                     &hp_text,
                 );
             }
-            DrawCommand::StatsDamage { x, y, width, breakdowns, damage_spotting, damage_potential } => {
+            DrawCommand::StatsDamage {
+                x,
+                y,
+                width,
+                breakdowns,
+                damage_spotting,
+                spotting_breakdowns,
+                damage_potential,
+                potential_breakdowns,
+            } => {
                 let padding = 8;
                 let inner_x = *x + padding;
                 let indent_x = inner_x + 12;
@@ -2057,10 +2066,13 @@ impl RenderTarget for ImageTarget {
                     cur_y += breakdown_row_h;
                 }
 
-                // Spotting + Potential
-                let summary_rows =
-                    [("SPOT", *damage_spotting, [120u8, 200, 255]), ("POT", *damage_potential, [180, 180, 180])];
-                for (label, value, color) in &summary_rows {
+                // Spotting + Potential with sub-breakdowns
+                let summary_sections: [(&str, f64, &[_], [u8; 3]); 2] = [
+                    ("SPOT", *damage_spotting, spotting_breakdowns, [120u8, 200, 255]),
+                    ("POT", *damage_potential, potential_breakdowns, [180, 180, 180]),
+                ];
+                for (label, total, sub_breakdowns, color) in &summary_sections {
+                    // Header row
                     draw_text_shadow(
                         &mut self.canvas,
                         [140, 140, 140],
@@ -2070,7 +2082,7 @@ impl RenderTarget for ImageTarget {
                         &self.fonts.primary,
                         label,
                     );
-                    let val_str = format_number(*value as i64);
+                    let val_str = format_number(*total as i64);
                     let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &val_str);
                     draw_text_shadow(
                         &mut self.canvas,
@@ -2082,6 +2094,32 @@ impl RenderTarget for ImageTarget {
                         &val_str,
                     );
                     cur_y += breakdown_row_h;
+
+                    // Sub-breakdown rows
+                    for entry in sub_breakdowns.iter() {
+                        let sub_color = damage_label_color_rgb(&entry.label);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [140, 140, 140],
+                            indent_x,
+                            cur_y,
+                            breakdown_scale,
+                            &self.fonts.primary,
+                            &entry.label,
+                        );
+                        let sub_val_str = format_number(entry.damage as i64);
+                        let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &sub_val_str);
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            sub_color,
+                            right_x - tw as i32,
+                            cur_y,
+                            breakdown_scale,
+                            &self.fonts.primary,
+                            &sub_val_str,
+                        );
+                        cur_y += breakdown_row_h;
+                    }
                 }
             }
             DrawCommand::StatsRibbons { x, y, width, ribbons } => {

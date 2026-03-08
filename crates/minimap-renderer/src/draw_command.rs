@@ -560,7 +560,9 @@ pub enum DrawCommand {
         /// Per-weapon-group enemy damage breakdown (sorted by damage desc)
         breakdowns: Vec<DamageBreakdownEntry>,
         damage_spotting: f64,
+        spotting_breakdowns: Vec<DamageBreakdownEntry>,
         damage_potential: f64,
+        potential_breakdowns: Vec<DamageBreakdownEntry>,
     },
     /// Compact ribbon summary in the stats panel
     StatsRibbons { x: i32, y: i32, width: i32, ribbons: Vec<RibbonCount> },

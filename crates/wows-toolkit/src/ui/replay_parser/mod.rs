@@ -92,10 +92,13 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::AccountId;
 
 use itertools::Itertools;
+use wows_minimap_renderer::renderer::weapon_group_label;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::recognized::Recognized;
 
 use crate::app::ReplayParserTabState;
 use crate::app::ToolkitTabViewer;
@@ -695,12 +698,22 @@ impl UiReport {
                     })
                     .unwrap_or_default();
 
-            // Spotting damage
-            let (spotting_damage, spotting_damage_text) =
+            // Spotting damage — prefer battle results, fall back to controller for self player
+            let (spotting_damage, spotting_damage_text, spotting_damage_hover_text) =
                 if let Some(damage_number) = player_results.and_then(|pr| pr.get("scouting_damage")?.as_u64()) {
-                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))))
+                    let hover = if player.relation().is_self() {
+                        build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale)
+                    } else {
+                        None
+                    };
+                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))), hover)
+                } else if player.relation().is_self() {
+                    // Fallback: build from controller data
+                    let (total, text, hover) =
+                        build_damage_stat_total(report.self_damage_stats(), DamageStatCategory::Spot, locale);
+                    (total, text, hover)
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
 
             let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
@@ -748,7 +761,14 @@ impl UiReport {
                             }),
                         )
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        // Fallback: for self player, build potential from battle controller data
+                        if player.relation().is_self() {
+                            build_damage_stat_fallback(report.self_damage_stats(), DamageStatCategory::Agro, locale)
+                        } else {
+                            Default::default()
+                        }
+                    });
 
             let (time_lived, time_lived_text) = vehicle
                 .and_then(|v| v.death_info())
@@ -970,6 +990,7 @@ impl UiReport {
                 ship_name,
                 spotting_damage,
                 spotting_damage_text,
+                spotting_damage_hover_text,
                 potential_damage,
                 potential_damage_hover_text,
                 potential_damage_report,
@@ -1635,7 +1656,10 @@ impl UiReport {
                     }
                     ReplayColumn::SpottingDamage => {
                         if let Some(spotting_damage_text) = report.spotting_damage_text.clone() {
-                            ui.label(spotting_damage_text);
+                            let response = ui.label(spotting_damage_text);
+                            if let Some(hover_text) = report.spotting_damage_hover_text.as_ref() {
+                                response.on_hover_text(hover_text.clone());
+                            }
                         } else {
                             ui.label("-");
                         }
@@ -1991,6 +2015,11 @@ impl UiReport {
                             ui.label(t!("ui.replay.nda"));
                         } else if let Some(damage_extended_info) = report.potential_damage_hover_text.clone() {
                             ui.label(damage_extended_info);
+                        }
+                    }
+                    ReplayColumn::SpottingDamage => {
+                        if let Some(hover_text) = report.spotting_damage_hover_text.clone() {
+                            ui.label(hover_text);
                         }
                     }
                     ReplayColumn::ReceivedDamage => {
@@ -4398,6 +4427,69 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
         false
     }
+}
+
+/// Groups `DamageStatEntry` items by weapon for a given category, returning hover text.
+fn build_damage_stat_hover_text(
+    stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
+    category: DamageStatCategory,
+    locale: &str,
+) -> Option<RichText> {
+    let mut groups: Vec<(&str, f64)> = Vec::new();
+    for entry in stats {
+        if entry.category == Recognized::Known(category) && entry.total > 0.0 {
+            let label = weapon_group_label(&entry.weapon);
+            if let Some(existing) = groups.iter_mut().find(|(l, _)| *l == label) {
+                existing.1 += entry.total;
+            } else {
+                groups.push((label, entry.total));
+            }
+        }
+    }
+    if groups.is_empty() {
+        return None;
+    }
+    groups.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let longest = groups.iter().map(|(l, _)| l.len()).max().unwrap_or(0) + 1;
+    let lines: Vec<String> = groups
+        .iter()
+        .map(|(label, dmg)| {
+            let num_str = separate_number(*dmg as u64, Some(locale));
+            format!("{label:<longest$}: {num_str}")
+        })
+        .collect();
+    Some(RichText::new(lines.join("\n")).font(FontId::monospace(12.0)))
+}
+
+/// Builds total + text + hover text from controller data for a damage stat category.
+/// Used as fallback when battle results are unavailable.
+fn build_damage_stat_total(
+    stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
+    category: DamageStatCategory,
+    locale: &str,
+) -> (Option<u64>, Option<String>, Option<RichText>) {
+    let mut total = 0.0f64;
+    for entry in stats {
+        if entry.category == Recognized::Known(category) {
+            total += entry.total;
+        }
+    }
+    if total > 0.0 {
+        let hover = build_damage_stat_hover_text(stats, category, locale);
+        (Some(total as u64), Some(separate_number(total as u64, Some(locale))), hover)
+    } else {
+        (None, None, None)
+    }
+}
+
+/// Builds a full potential damage fallback tuple from controller data.
+fn build_damage_stat_fallback(
+    stats: &[wows_replays::analyzer::decoder::DamageStatEntry],
+    category: DamageStatCategory,
+    locale: &str,
+) -> (Option<u64>, Option<String>, Option<RichText>, Option<PotentialDamage>) {
+    let (total, text, hover) = build_damage_stat_total(stats, category, locale);
+    (total, text, hover, None)
 }
 
 /// Renders chat messages into a `Ui`. Used by both the inline chat view and the chat window.

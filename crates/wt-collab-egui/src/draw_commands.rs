@@ -15,6 +15,7 @@ use egui::TextureHandle;
 use egui::Vec2;
 
 use wows_minimap_renderer::HUD_HEIGHT;
+use wows_minimap_renderer::draw_command::DamageBreakdownEntry;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wt_translations::TextResolver;
 use wt_translations::TranslatableText;
@@ -1455,7 +1456,16 @@ pub fn draw_command_to_shapes(
             shapes.push(Shape::galley(Pos2::new(hp_x, hp_y), hp_galley, Color32::TRANSPARENT));
         }
 
-        DrawCommand::StatsDamage { x, y, width, breakdowns, damage_spotting, damage_potential } => {
+        DrawCommand::StatsDamage {
+            x,
+            y,
+            width,
+            breakdowns,
+            damage_spotting,
+            spotting_breakdowns,
+            damage_potential,
+            potential_breakdowns,
+        } => {
             let padding = 8.0 * ws;
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
@@ -1507,21 +1517,36 @@ pub fn draw_command_to_shapes(
                 cur_y += 2.0 * ws;
             }
 
-            // Spotting + Potential rows
-            let summary_rows: [(&str, f64, Color32); 2] = [
-                ("SPOT", *damage_spotting, Color32::from_rgb(120, 200, 255)),
-                ("POT", *damage_potential, Color32::from_rgb(180, 180, 180)),
+            // Spotting + Potential: header row with total, then indented sub-breakdowns
+            let summary_sections: [(&str, f64, &[DamageBreakdownEntry], Color32); 2] = [
+                ("SPOT", *damage_spotting, spotting_breakdowns, Color32::from_rgb(120, 200, 255)),
+                ("POT", *damage_potential, potential_breakdowns, Color32::from_rgb(180, 180, 180)),
             ];
-            for (label, value, color) in &summary_rows {
+            for (label, total, sub_breakdowns, color) in &summary_sections {
+                // Header row
                 let label_galley =
                     ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), breakdown_font.clone(), label_color));
                 shapes.push(Shape::galley(Pos2::new(inner_x, cur_y), label_galley, Color32::TRANSPARENT));
 
-                let val_str = format_number_egui(*value as i64);
+                let val_str = format_number_egui(*total as i64);
                 let val_galley = ctx.fonts_mut(|f| f.layout_no_wrap(val_str, breakdown_font.clone(), *color));
                 let val_x = right_x - val_galley.size().x;
                 shapes.push(Shape::galley(Pos2::new(val_x, cur_y), val_galley, Color32::TRANSPARENT));
                 cur_y += breakdown_row_h;
+
+                // Sub-breakdown rows (indented, dimmer)
+                for entry in sub_breakdowns.iter() {
+                    let sub_color = damage_label_color(&entry.label);
+                    let sub_label =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), breakdown_font.clone(), label_color));
+                    shapes.push(Shape::galley(Pos2::new(indent_x, cur_y), sub_label, Color32::TRANSPARENT));
+
+                    let sub_val_str = format_number_egui(entry.damage as i64);
+                    let sub_val = ctx.fonts_mut(|f| f.layout_no_wrap(sub_val_str, breakdown_font.clone(), sub_color));
+                    let sub_val_x = right_x - sub_val.size().x;
+                    shapes.push(Shape::galley(Pos2::new(sub_val_x, cur_y), sub_val, Color32::TRANSPARENT));
+                    cur_y += breakdown_row_h;
+                }
             }
         }
 

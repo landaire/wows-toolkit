@@ -81,6 +81,64 @@ fn consumable_radius_color(consumable: &Recognized<Consumable>, is_friendly: boo
     }
 }
 
+/// Map a `DamageStatWeapon` to a short display group label for stats breakdown.
+pub fn weapon_group_label(weapon: &Recognized<DamageStatWeapon>) -> &'static str {
+    match weapon.known() {
+        Some(DamageStatWeapon::MainAp | DamageStatWeapon::MainAiAp) => "AP",
+        Some(DamageStatWeapon::MainHe | DamageStatWeapon::MainAiHe) => "HE",
+        Some(DamageStatWeapon::MainCs) => "SAP",
+        Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => "SEC",
+        Some(
+            DamageStatWeapon::Torpedo
+            | DamageStatWeapon::TorpedoAcc
+            | DamageStatWeapon::TorpedoDeep
+            | DamageStatWeapon::TorpedoAlter
+            | DamageStatWeapon::TorpedoMag
+            | DamageStatWeapon::TorpedoAccOff
+            | DamageStatWeapon::TorpedoPhoton,
+        ) => "TORP",
+        Some(DamageStatWeapon::Burn) => "FIRE",
+        Some(DamageStatWeapon::Flood) => "FLOOD",
+        Some(
+            DamageStatWeapon::BomberAp
+            | DamageStatWeapon::BomberHe
+            | DamageStatWeapon::SkipHe
+            | DamageStatWeapon::SkipAp
+            | DamageStatWeapon::BomberApAsup
+            | DamageStatWeapon::BomberHeAsup
+            | DamageStatWeapon::SkipHeAsup
+            | DamageStatWeapon::SkipApAsup
+            | DamageStatWeapon::BomberApAlter
+            | DamageStatWeapon::BomberHeAlter
+            | DamageStatWeapon::SkipHeAlter
+            | DamageStatWeapon::SkipApAlter
+            | DamageStatWeapon::BomberApTc
+            | DamageStatWeapon::BomberHeTc
+            | DamageStatWeapon::SkipHeTc
+            | DamageStatWeapon::SkipApTc,
+        ) => "BOMB",
+        Some(
+            DamageStatWeapon::RocketHe
+            | DamageStatWeapon::RocketAp
+            | DamageStatWeapon::RocketHeAsup
+            | DamageStatWeapon::RocketApAsup
+            | DamageStatWeapon::RocketHeAlter
+            | DamageStatWeapon::RocketApAlter
+            | DamageStatWeapon::RocketHeTc
+            | DamageStatWeapon::RocketApTc,
+        ) => "ROCKET",
+        Some(
+            DamageStatWeapon::DepthCharge
+            | DamageStatWeapon::DepthChargeAsup
+            | DamageStatWeapon::DepthChargeAlter
+            | DamageStatWeapon::DepthChargeTc,
+        ) => "DC",
+        Some(DamageStatWeapon::Ram) => "RAM",
+        Some(DamageStatWeapon::Missile) => "MISSILE",
+        _ => "OTHER",
+    }
+}
+
 // Re-export for backward compatibility — canonical definition is in config.rs
 pub use crate::config::RenderOptions;
 
@@ -1798,86 +1856,42 @@ impl<'a> MinimapRenderer<'a> {
                 silhouette: self.self_silhouette.clone(),
             });
 
-            // Damage breakdown: group by weapon type for enemy damage, sum spot + potential
+            // Damage breakdown: group by weapon type for enemy, spotting, and potential
             let damage_stats = controller.self_damage_stats();
-            let mut damage_spotting = 0.0f64;
-            let mut damage_potential = 0.0f64;
-            let mut weapon_groups: HashMap<&str, f64> = HashMap::new();
+            let mut enemy_groups: HashMap<&str, f64> = HashMap::new();
+            let mut spot_groups: HashMap<&str, f64> = HashMap::new();
+            let mut agro_groups: HashMap<&str, f64> = HashMap::new();
             for ((weapon, cat), entry) in damage_stats {
-                match cat.known() {
-                    Some(DamageStatCategory::Enemy) => {
-                        let group = match weapon.known() {
-                            Some(DamageStatWeapon::MainAp | DamageStatWeapon::MainAiAp) => "AP",
-                            Some(DamageStatWeapon::MainHe | DamageStatWeapon::MainAiHe) => "HE",
-                            Some(DamageStatWeapon::MainCs) => "SAP",
-                            Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => {
-                                "SEC"
-                            }
-                            Some(
-                                DamageStatWeapon::Torpedo
-                                | DamageStatWeapon::TorpedoAcc
-                                | DamageStatWeapon::TorpedoDeep
-                                | DamageStatWeapon::TorpedoAlter
-                                | DamageStatWeapon::TorpedoMag
-                                | DamageStatWeapon::TorpedoAccOff
-                                | DamageStatWeapon::TorpedoPhoton,
-                            ) => "TORP",
-                            Some(DamageStatWeapon::Burn) => "FIRE",
-                            Some(DamageStatWeapon::Flood) => "FLOOD",
-                            Some(
-                                DamageStatWeapon::BomberAp
-                                | DamageStatWeapon::BomberHe
-                                | DamageStatWeapon::SkipHe
-                                | DamageStatWeapon::SkipAp
-                                | DamageStatWeapon::BomberApAsup
-                                | DamageStatWeapon::BomberHeAsup
-                                | DamageStatWeapon::SkipHeAsup
-                                | DamageStatWeapon::SkipApAsup
-                                | DamageStatWeapon::BomberApAlter
-                                | DamageStatWeapon::BomberHeAlter
-                                | DamageStatWeapon::SkipHeAlter
-                                | DamageStatWeapon::SkipApAlter
-                                | DamageStatWeapon::BomberApTc
-                                | DamageStatWeapon::BomberHeTc
-                                | DamageStatWeapon::SkipHeTc
-                                | DamageStatWeapon::SkipApTc,
-                            ) => "BOMB",
-                            Some(
-                                DamageStatWeapon::RocketHe
-                                | DamageStatWeapon::RocketAp
-                                | DamageStatWeapon::RocketHeAsup
-                                | DamageStatWeapon::RocketApAsup
-                                | DamageStatWeapon::RocketHeAlter
-                                | DamageStatWeapon::RocketApAlter
-                                | DamageStatWeapon::RocketHeTc
-                                | DamageStatWeapon::RocketApTc,
-                            ) => "ROCKET",
-                            Some(
-                                DamageStatWeapon::DepthCharge
-                                | DamageStatWeapon::DepthChargeAsup
-                                | DamageStatWeapon::DepthChargeAlter
-                                | DamageStatWeapon::DepthChargeTc,
-                            ) => "DC",
-                            Some(DamageStatWeapon::Ram) => "RAM",
-                            Some(DamageStatWeapon::Missile) => "MISSILE",
-                            _ => "OTHER",
-                        };
-                        *weapon_groups.entry(group).or_default() += entry.total;
-                    }
-                    Some(DamageStatCategory::Spot) => damage_spotting += entry.total,
-                    Some(DamageStatCategory::Agro) => damage_potential += entry.total,
-                    _ => {}
-                }
+                let groups = match cat.known() {
+                    Some(DamageStatCategory::Enemy) => &mut enemy_groups,
+                    Some(DamageStatCategory::Spot) => &mut spot_groups,
+                    Some(DamageStatCategory::Agro) => &mut agro_groups,
+                    _ => continue,
+                };
+                let group = weapon_group_label(weapon);
+                *groups.entry(group).or_default() += entry.total;
             }
-            let mut breakdowns: Vec<DamageBreakdownEntry> = weapon_groups
-                .into_iter()
-                .filter(|(_, dmg)| *dmg > 0.0)
-                .map(|(label, damage)| DamageBreakdownEntry { label: label.to_string(), damage })
-                .collect();
-            breakdowns.sort_by(|a, b| b.damage.partial_cmp(&a.damage).unwrap_or(std::cmp::Ordering::Equal));
 
-            // Dynamic layout: header (22px) + breakdown rows (18px each) + 2 summary rows (18px each) + padding
-            let damage_section_height = 22 + breakdowns.len() as i32 * 18 + 2 * 18 + 12;
+            fn build_sorted_breakdowns(groups: HashMap<&str, f64>) -> Vec<DamageBreakdownEntry> {
+                let mut v: Vec<DamageBreakdownEntry> = groups
+                    .into_iter()
+                    .filter(|(_, dmg)| *dmg > 0.0)
+                    .map(|(label, damage)| DamageBreakdownEntry { label: label.to_string(), damage })
+                    .collect();
+                v.sort_by(|a, b| b.damage.partial_cmp(&a.damage).unwrap_or(std::cmp::Ordering::Equal));
+                v
+            }
+
+            let breakdowns = build_sorted_breakdowns(enemy_groups);
+            let spotting_breakdowns = build_sorted_breakdowns(spot_groups);
+            let potential_breakdowns = build_sorted_breakdowns(agro_groups);
+            let damage_spotting: f64 = spotting_breakdowns.iter().map(|e| e.damage).sum();
+            let damage_potential: f64 = potential_breakdowns.iter().map(|e| e.damage).sum();
+
+            // Dynamic layout: header (22px) + breakdown rows (18px each) + spot/pot headers+breakdowns + padding
+            let spot_rows = 1 + spotting_breakdowns.len() as i32;
+            let pot_rows = 1 + potential_breakdowns.len() as i32;
+            let damage_section_height = 22 + breakdowns.len() as i32 * 18 + (spot_rows + pot_rows) * 18 + 12;
 
             commands.push(DrawCommand::StatsDamage {
                 x: panel_x,
@@ -1885,7 +1899,9 @@ impl<'a> MinimapRenderer<'a> {
                 width: panel_w,
                 breakdowns,
                 damage_spotting,
+                spotting_breakdowns,
                 damage_potential,
+                potential_breakdowns,
             });
 
             // Ribbons: sort by count descending, resolve localized display names

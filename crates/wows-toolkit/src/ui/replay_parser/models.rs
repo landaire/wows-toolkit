@@ -257,6 +257,7 @@ pub struct PlayerReport {
     pub ship_name: String,
     pub spotting_damage: Option<u64>,
     pub spotting_damage_text: Option<String>,
+    pub spotting_damage_hover_text: Option<RichText>,
     pub potential_damage: Option<u64>,
     pub potential_damage_text: Option<String>,
     pub potential_damage_hover_text: Option<RichText>,
@@ -295,6 +296,7 @@ impl PlayerReport {
         self.actual_damage = Some(0);
         self.actual_damage_text = Some("NDA".into());
         self.actual_damage_hover_text = None;
+        self.spotting_damage_hover_text = None;
         self.potential_damage = Some(0);
         self.potential_damage_text = Some("NDA".into());
         self.potential_damage_hover_text = None;
@@ -389,6 +391,10 @@ impl PlayerReport {
 
     pub fn spotting_damage_text(&self) -> Option<&String> {
         self.spotting_damage_text.as_ref()
+    }
+
+    pub fn spotting_damage_hover_text(&self) -> Option<&RichText> {
+        self.spotting_damage_hover_text.as_ref()
     }
 
     pub fn potential_damage(&self) -> Option<u64> {
