@@ -91,7 +91,13 @@ impl VideoEncoder {
     /// (e.g. 1200s for a 20-minute mode). The actual battle may end earlier.
     /// Call `set_battle_duration()` with the true end time for accurate
     /// progress reporting.
-    pub fn new(output_path: &str, dump_mode: Option<DumpMode>, match_time_limit: f32, canvas_width: u32, canvas_height: u32) -> Self {
+    pub fn new(
+        output_path: &str,
+        dump_mode: Option<DumpMode>,
+        match_time_limit: f32,
+        canvas_width: u32,
+        canvas_height: u32,
+    ) -> Self {
         let total_frames = (OUTPUT_DURATION * FPS) as usize;
         Self {
             output_path: output_path.to_string(),

@@ -267,25 +267,20 @@ pub(super) fn render_video_blocking(
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     // Load self player's ship silhouette for the stats panel
-    let self_silhouette = replay_file
-        .meta
-        .vehicles
-        .iter()
-        .find(|v| v.relation == 0)
-        .and_then(|v| {
-            use wowsunpack::game_params::types::GameParamProvider;
-            let param = GameParamProvider::game_param_by_id(&*game_metadata, v.shipId)?;
-            let path = format!("gui/ships_silhouettes/{}.png", param.index());
-            let img = wows_minimap_renderer::assets::load_packed_image(&path, &vfs)?;
-            let mut rgba = img.into_rgba8();
-            // Normalize to white pixels with original alpha for correct tint multiplication.
-            for px in rgba.pixels_mut() {
-                px[0] = 255;
-                px[1] = 255;
-                px[2] = 255;
-            }
-            Some(rgba)
-        });
+    let self_silhouette = replay_file.meta.vehicles.iter().find(|v| v.relation == 0).and_then(|v| {
+        use wowsunpack::game_params::types::GameParamProvider;
+        let param = GameParamProvider::game_param_by_id(&*game_metadata, v.shipId)?;
+        let path = format!("gui/ships_silhouettes/{}.png", param.index());
+        let img = wows_minimap_renderer::assets::load_packed_image(&path, &vfs)?;
+        let mut rgba = img.into_rgba8();
+        // Normalize to white pixels with original alpha for correct tint multiplication.
+        for px in rgba.pixels_mut() {
+            px[0] = 255;
+            px[1] = 255;
+            px[2] = 255;
+        }
+        Some(rgba)
+    });
 
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options.clone());
     renderer.set_fonts(game_fonts.clone());

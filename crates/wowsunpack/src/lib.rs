@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+/// Utilities for resolving raw battle results arrays into named JSON objects.
+#[cfg(feature = "json")]
+pub mod battle_results;
 /// Utilities for interacting with the game's data files
 #[cfg(feature = "parsing")]
 pub mod data;
@@ -18,9 +21,6 @@ pub mod game_data;
 /// Utilities for interacting with the `content/GameParams.data` file
 #[cfg(feature = "parsing")]
 pub mod game_params;
-/// Utilities for resolving raw battle results arrays into named JSON objects.
-#[cfg(feature = "json")]
-pub mod battle_results;
 /// Game concept types (entities, positions, enums) useful across WoWS tools.
 pub mod game_types;
 /// 3D model formats (geometry, visual, etc.)

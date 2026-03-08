@@ -23,10 +23,10 @@ use wows_minimap_renderer::assets::load_building_icons;
 use wows_minimap_renderer::assets::load_consumable_icons;
 use wows_minimap_renderer::assets::load_death_cause_icons;
 use wows_minimap_renderer::assets::load_flag_icons;
-use wows_minimap_renderer::assets::load_packed_image;
 use wows_minimap_renderer::assets::load_game_fonts;
 use wows_minimap_renderer::assets::load_map_image;
 use wows_minimap_renderer::assets::load_map_info;
+use wows_minimap_renderer::assets::load_packed_image;
 use wows_minimap_renderer::assets::load_plane_icons;
 use wows_minimap_renderer::assets::load_powerup_icons;
 use wows_minimap_renderer::assets::load_ship_icons;
@@ -230,17 +230,12 @@ fn main() -> Result<(), Report> {
     );
 
     // Load self player's ship silhouette for the stats panel
-    let self_silhouette = replay_file
-        .meta
-        .vehicles
-        .iter()
-        .find(|v| v.relation == 0)
-        .and_then(|v| {
-            let param = GameParamProvider::game_param_by_id(&game_params, v.shipId)?;
-            let path = format!("gui/ships_silhouettes/{}.png", param.index());
-            let img = load_packed_image(&path, vfs)?;
-            Some(img.into_rgba8())
-        });
+    let self_silhouette = replay_file.meta.vehicles.iter().find(|v| v.relation == 0).and_then(|v| {
+        let param = GameParamProvider::game_param_by_id(&game_params, v.shipId)?;
+        let path = format!("gui/ships_silhouettes/{}.png", param.index());
+        let img = load_packed_image(&path, vfs)?;
+        Some(img.into_rgba8())
+    });
 
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_params, replay_version, options);
     renderer.set_fonts(game_fonts);

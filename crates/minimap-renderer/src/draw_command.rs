@@ -7,8 +7,8 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
-use wows_replays::types::PlaneId;
 use wows_replays::types::GameParamId;
+use wows_replays::types::PlaneId;
 use wowsunpack::game_types::AdvantageLevel;
 use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::FinishType;
@@ -536,10 +536,7 @@ pub enum DrawCommand {
         subtitle_above: bool,
     },
     /// Stats panel background
-    StatsPanel {
-        x: i32,
-        width: i32,
-    },
+    StatsPanel { x: i32, width: i32 },
     /// Ship silhouette with HP overlay in the stats panel
     StatsSilhouette {
         x: i32,
@@ -566,20 +563,9 @@ pub enum DrawCommand {
         damage_potential: f64,
     },
     /// Compact ribbon summary in the stats panel
-    StatsRibbons {
-        x: i32,
-        y: i32,
-        width: i32,
-        ribbons: Vec<RibbonCount>,
-    },
+    StatsRibbons { x: i32, y: i32, width: i32, ribbons: Vec<RibbonCount> },
     /// Merged kill feed + chat activity log in the stats panel
-    StatsActivityFeed {
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        entries: Vec<ActivityFeedEntry>,
-    },
+    StatsActivityFeed { x: i32, y: i32, width: i32, height: i32, entries: Vec<ActivityFeedEntry> },
 }
 
 impl DrawCommand {

@@ -662,7 +662,7 @@ impl Ribbon {
             Ribbon::ShotDownByAircraft => Some("RIBBON_SPLANE"),
             Ribbon::BuffSeized => None, // No known results key
             Ribbon::SonarOneHit => Some("RIBBON_ACOUSTIC_HIT"),
-            Ribbon::SonarTwoHits => None, // No known results key
+            Ribbon::SonarTwoHits => None,     // No known results key
             Ribbon::SonarNeutralized => None, // No known results key
             Ribbon::Unknown(_) => None,
         }

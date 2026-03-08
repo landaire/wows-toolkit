@@ -10,9 +10,11 @@ use std::path::PathBuf;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::{BattleController, BattleReport};
+use wows_replays::analyzer::battle_controller::BattleController;
+use wows_replays::analyzer::battle_controller::BattleReport;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
-use wows_replays::analyzer::decoder::{DecodedPacketPayload, PacketDecoder};
+use wows_replays::analyzer::decoder::DecodedPacketPayload;
+use wows_replays::analyzer::decoder::PacketDecoder;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wowsunpack::battle_results::resolve_battle_results;
@@ -411,11 +413,8 @@ fn constants() -> serde_json::Value {
 fn self_player_reported_damage(report: &BattleReport, constants: &serde_json::Value) -> u64 {
     let db_id_str = report.self_player().initial_state().db_id().0.to_string();
 
-    let raw_results = report
-        .battle_results()
-        .expect("replay should have battle results");
-    let parsed: serde_json::Value =
-        serde_json::from_str(raw_results).expect("battle results should be valid JSON");
+    let raw_results = report.battle_results().expect("replay should have battle results");
+    let parsed: serde_json::Value = serde_json::from_str(raw_results).expect("battle results should be valid JSON");
     let resolved = resolve_battle_results(parsed, constants);
 
     resolved
@@ -432,18 +431,14 @@ fn self_player_reported_damage(report: &BattleReport, constants: &serde_json::Va
 /// server is not consistent (sometimes ceil-of-total, sometimes ceil-per-type).
 /// The result may differ from the battle results integer by ±1.
 fn self_player_observed_damage(report: &BattleReport) -> u64 {
-    let vehicle = report
-        .self_player()
-        .vehicle_entity()
-        .expect("self player should have a vehicle entity");
+    let vehicle = report.self_player().vehicle_entity().expect("self player should have a vehicle entity");
     vehicle.damage().ceil() as u64
 }
 
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn vermont_observed_damage_matches_reported() {
-    let (replay, report) =
-        run_replay_report("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+    let (replay, report) = run_replay_report("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
     let constants = constants();
 
     let reported = self_player_reported_damage(&report, &constants);
@@ -461,8 +456,7 @@ fn vermont_observed_damage_matches_reported() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn marceau_observed_damage_matches_reported() {
-    let (replay, report) =
-        run_replay_report("20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay");
+    let (replay, report) = run_replay_report("20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay");
     let constants = constants();
 
     let reported = self_player_reported_damage(&report, &constants);
@@ -480,8 +474,7 @@ fn marceau_observed_damage_matches_reported() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn narai_observed_damage_matches_reported() {
-    let (replay, report) =
-        run_replay_report("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay");
+    let (replay, report) = run_replay_report("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay");
     let constants = constants();
 
     let reported = self_player_reported_damage(&report, &constants);
@@ -513,9 +506,7 @@ fn narai_observed_damage_matches_reported() {
 ///
 /// Uses `PacketDecoder` with default constants (what we're testing hasn't drifted).
 /// Returns entries sorted by (weapon, category) for deterministic snapshots.
-fn collect_damage_stat_packets(
-    filename: &str,
-) -> Vec<Vec<wows_replays::analyzer::decoder::DamageStatEntry>> {
+fn collect_damage_stat_packets(filename: &str) -> Vec<Vec<wows_replays::analyzer::decoder::DamageStatEntry>> {
     let path = fixtures_dir().join(filename);
     let replay = ReplayFile::from_file(&path).expect("should parse replay");
     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
@@ -551,9 +542,7 @@ fn collect_damage_stat_packets(
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn vermont_damage_stat_packets() {
-    let packets = collect_damage_stat_packets(
-        "20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay",
-    );
+    let packets = collect_damage_stat_packets("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
 
     assert!(!packets.is_empty(), "should have DamageStat packets");
 
@@ -578,9 +567,7 @@ fn vermont_damage_stat_packets() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn marceau_damage_stat_packets() {
-    let packets = collect_damage_stat_packets(
-        "20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay",
-    );
+    let packets = collect_damage_stat_packets("20260213_203056_PFSD210-Marceau_22_tierra_del_fuego.wowsreplay");
 
     assert!(!packets.is_empty(), "should have DamageStat packets");
     insta::assert_yaml_snapshot!("marceau_damage_stat_packets", &packets);
@@ -601,9 +588,7 @@ fn marceau_damage_stat_packets() {
 #[test]
 #[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
 fn narai_damage_stat_packets() {
-    let packets = collect_damage_stat_packets(
-        "20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay",
-    );
+    let packets = collect_damage_stat_packets("20260223_115252_PZSC718-Narai_s06_Atoll.wowsreplay");
 
     assert!(!packets.is_empty(), "should have DamageStat packets");
     insta::assert_yaml_snapshot!("narai_damage_stat_packets", &packets);

@@ -47,7 +47,11 @@ pub(super) fn generate_icon_outline(data: &[u8], w: u32, h: u32, thickness: i32)
     out
 }
 
-pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets, silhouette_raw: Option<&(u32, u32, Vec<u8>)>) -> RendererTextures {
+pub(super) fn upload_textures(
+    ctx: &egui::Context,
+    assets: &ReplayRendererAssets,
+    silhouette_raw: Option<&(u32, u32, Vec<u8>)>,
+) -> RendererTextures {
     let map_texture = assets.map_image.as_ref().map(|asset| {
         let image =
             egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);

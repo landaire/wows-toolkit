@@ -3,7 +3,10 @@ use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::data::Version;
 use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
 
-use crate::analyzer::decoder::{DamageStatCategory, DamageStatEntry, DamageStatWeapon, Recognized};
+use crate::analyzer::decoder::DamageStatCategory;
+use crate::analyzer::decoder::DamageStatEntry;
+use crate::analyzer::decoder::DamageStatWeapon;
+use crate::analyzer::decoder::Recognized;
 use crate::packet2::EntityMethodPacket;
 use crate::packet2::Packet;
 use crate::packet2::PacketType;
@@ -179,10 +182,12 @@ impl Analyzer for Summary {
                             };
 
                             let version = Version::from_client_exe("0,0,0,0");
-                            let weapon = DamageStatWeapon::from_id(weapon_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
-                                .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
-                            let category = DamageStatCategory::from_id(category_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
-                                .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
+                            let weapon =
+                                DamageStatWeapon::from_id(weapon_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
+                                    .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
+                            let category =
+                                DamageStatCategory::from_id(category_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
+                                    .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
                             let key = (weapon.clone(), category.clone());
                             let entry = DamageStatEntry { weapon, category, count, total };
                             self.damage.insert(key, entry);

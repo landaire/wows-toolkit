@@ -48,21 +48,12 @@ pub fn resolve_battle_results(mut results: Value, constants: &Value) -> Value {
     }
 
     // Resolve each player in playersPublicInfo: array → object using CLIENT_PUBLIC_RESULTS_INDICES
-    let indices = constants
-        .pointer("/CLIENT_PUBLIC_RESULTS_INDICES")
-        .and_then(|v| v.as_object())
-        .cloned();
-    let interaction_fields = constants
-        .pointer("/CLIENT_VEH_INTERACTION_DETAILS")
-        .and_then(|v| v.as_array())
-        .cloned();
+    let indices = constants.pointer("/CLIENT_PUBLIC_RESULTS_INDICES").and_then(|v| v.as_object()).cloned();
+    let interaction_fields = constants.pointer("/CLIENT_VEH_INTERACTION_DETAILS").and_then(|v| v.as_array()).cloned();
 
-    if let (Some(indices), Some(players)) = (
-        indices.as_ref(),
-        results
-            .get_mut("playersPublicInfo")
-            .and_then(|v| v.as_object_mut()),
-    ) {
+    if let (Some(indices), Some(players)) =
+        (indices.as_ref(), results.get_mut("playersPublicInfo").and_then(|v| v.as_object_mut()))
+    {
         for (_db_id, player_val) in players.iter_mut() {
             if let Some(arr) = player_val.as_array() {
                 let mut obj = serde_json::Map::new();

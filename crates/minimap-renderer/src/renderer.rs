@@ -16,7 +16,8 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::analyzer::decoder::WeaponType;
 use wowsunpack::game_types::BattleResult;
-use wowsunpack::game_types::{DamageStatCategory, DamageStatWeapon};
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::game_types::DamageStatWeapon;
 
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
@@ -30,10 +31,10 @@ use wows_replays::types::Relation;
 use wows_replays::types::WorldPos;
 
 use crate::assets::GameFonts;
-use crate::draw_command::BuildingIconType;
-use crate::draw_command::BuildingRelation;
 use crate::draw_command::ActivityFeedEntry;
 use crate::draw_command::ActivityFeedKind;
+use crate::draw_command::BuildingIconType;
+use crate::draw_command::BuildingRelation;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DamageBreakdownEntry;
 use crate::draw_command::DrawCommand;
@@ -44,9 +45,9 @@ use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
 
+use crate::HUD_HEIGHT;
 use crate::MINIMAP_SIZE;
 use crate::STATS_PANEL_WIDTH;
-use crate::HUD_HEIGHT;
 
 // How long various effects persist in game-seconds
 const TRACER_LEN: f32 = 0.12; // fraction of total shot path length
@@ -1780,11 +1781,7 @@ impl<'a> MinimapRenderer<'a> {
                     let max = v.props().max_health();
                     let cur = v.props().health();
                     let param_id = self.ship_param_ids.get(&eid).copied();
-                    if max > 0.0 {
-                        Some(((cur / max).clamp(0.0, 1.0), cur, max, param_id))
-                    } else {
-                        None
-                    }
+                    if max > 0.0 { Some(((cur / max).clamp(0.0, 1.0), cur, max, param_id)) } else { None }
                 })
                 .unwrap_or((1.0, 0.0, 0.0, None));
 
@@ -1813,25 +1810,54 @@ impl<'a> MinimapRenderer<'a> {
                             Some(DamageStatWeapon::MainAp | DamageStatWeapon::MainAiAp) => "AP",
                             Some(DamageStatWeapon::MainHe | DamageStatWeapon::MainAiHe) => "HE",
                             Some(DamageStatWeapon::MainCs) => "SAP",
-                            Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => "SEC",
-                            Some(DamageStatWeapon::Torpedo | DamageStatWeapon::TorpedoAcc | DamageStatWeapon::TorpedoDeep
-                                | DamageStatWeapon::TorpedoAlter | DamageStatWeapon::TorpedoMag
-                                | DamageStatWeapon::TorpedoAccOff | DamageStatWeapon::TorpedoPhoton) => "TORP",
+                            Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => {
+                                "SEC"
+                            }
+                            Some(
+                                DamageStatWeapon::Torpedo
+                                | DamageStatWeapon::TorpedoAcc
+                                | DamageStatWeapon::TorpedoDeep
+                                | DamageStatWeapon::TorpedoAlter
+                                | DamageStatWeapon::TorpedoMag
+                                | DamageStatWeapon::TorpedoAccOff
+                                | DamageStatWeapon::TorpedoPhoton,
+                            ) => "TORP",
                             Some(DamageStatWeapon::Burn) => "FIRE",
                             Some(DamageStatWeapon::Flood) => "FLOOD",
-                            Some(DamageStatWeapon::BomberAp | DamageStatWeapon::BomberHe | DamageStatWeapon::SkipHe
-                                | DamageStatWeapon::SkipAp | DamageStatWeapon::BomberApAsup | DamageStatWeapon::BomberHeAsup
-                                | DamageStatWeapon::SkipHeAsup | DamageStatWeapon::SkipApAsup
-                                | DamageStatWeapon::BomberApAlter | DamageStatWeapon::BomberHeAlter
-                                | DamageStatWeapon::SkipHeAlter | DamageStatWeapon::SkipApAlter
-                                | DamageStatWeapon::BomberApTc | DamageStatWeapon::BomberHeTc
-                                | DamageStatWeapon::SkipHeTc | DamageStatWeapon::SkipApTc) => "BOMB",
-                            Some(DamageStatWeapon::RocketHe | DamageStatWeapon::RocketAp
-                                | DamageStatWeapon::RocketHeAsup | DamageStatWeapon::RocketApAsup
-                                | DamageStatWeapon::RocketHeAlter | DamageStatWeapon::RocketApAlter
-                                | DamageStatWeapon::RocketHeTc | DamageStatWeapon::RocketApTc) => "ROCKET",
-                            Some(DamageStatWeapon::DepthCharge | DamageStatWeapon::DepthChargeAsup
-                                | DamageStatWeapon::DepthChargeAlter | DamageStatWeapon::DepthChargeTc) => "DC",
+                            Some(
+                                DamageStatWeapon::BomberAp
+                                | DamageStatWeapon::BomberHe
+                                | DamageStatWeapon::SkipHe
+                                | DamageStatWeapon::SkipAp
+                                | DamageStatWeapon::BomberApAsup
+                                | DamageStatWeapon::BomberHeAsup
+                                | DamageStatWeapon::SkipHeAsup
+                                | DamageStatWeapon::SkipApAsup
+                                | DamageStatWeapon::BomberApAlter
+                                | DamageStatWeapon::BomberHeAlter
+                                | DamageStatWeapon::SkipHeAlter
+                                | DamageStatWeapon::SkipApAlter
+                                | DamageStatWeapon::BomberApTc
+                                | DamageStatWeapon::BomberHeTc
+                                | DamageStatWeapon::SkipHeTc
+                                | DamageStatWeapon::SkipApTc,
+                            ) => "BOMB",
+                            Some(
+                                DamageStatWeapon::RocketHe
+                                | DamageStatWeapon::RocketAp
+                                | DamageStatWeapon::RocketHeAsup
+                                | DamageStatWeapon::RocketApAsup
+                                | DamageStatWeapon::RocketHeAlter
+                                | DamageStatWeapon::RocketApAlter
+                                | DamageStatWeapon::RocketHeTc
+                                | DamageStatWeapon::RocketApTc,
+                            ) => "ROCKET",
+                            Some(
+                                DamageStatWeapon::DepthCharge
+                                | DamageStatWeapon::DepthChargeAsup
+                                | DamageStatWeapon::DepthChargeAlter
+                                | DamageStatWeapon::DepthChargeTc,
+                            ) => "DC",
                             Some(DamageStatWeapon::Ram) => "RAM",
                             Some(DamageStatWeapon::Missile) => "MISSILE",
                             _ => "OTHER",
@@ -1883,12 +1909,7 @@ impl<'a> MinimapRenderer<'a> {
             ribbons.sort_by(|a, b| b.count.cmp(&a.count));
             let ribbon_y = HUD_HEIGHT as i32 + 80 + damage_section_height;
             let ribbon_count = ribbons.len();
-            commands.push(DrawCommand::StatsRibbons {
-                x: panel_x,
-                y: ribbon_y,
-                width: panel_w,
-                ribbons,
-            });
+            commands.push(DrawCommand::StatsRibbons { x: panel_x, y: ribbon_y, width: panel_w, ribbons });
 
             // Activity feed: merge kills + chat sorted by game clock
             let mut activity_entries: Vec<ActivityFeedEntry> = Vec::new();

@@ -1,27 +1,38 @@
 [tasks.fmt]
-description = "Runs rust-nightly fmt"
-run = "cargo +nightly fmt"
+description = "Runs rustfmt with unstable features"
+run = "cargo fmt -- --config unstable_features=true --config imports_granularity=Item --config imports_layout=Vertical"
 
 [tasks.check]
 description = "Runs cargo-check against all features and WASM target"
-run = """
-cargo check --all-features
-cargo check -p wt-web --target wasm32-unknown-unknown
-"""
+run = [
+    "cargo check --all-features",
+    "cargo check -p wt-web --target wasm32-unknown-unknown",
+]
 
 [tasks.fix]
 description = "Runs cargo-fix against all features"
 run = "cargo fix --all-features --allow-dirty"
+depends_post = ["fmt"]
 
 [tasks.clippy-fix]
 description = "Runs cargo-clippy-fix against all features"
 run = "cargo clippy --fix --all-features --allow-dirty"
+depends_post = ["fmt"]
 
 [tasks.fix-all]
 description = "Runs clippy fix, fmt, and checks WASM target"
-run = """
-cargo clippy --fix --all-features --allow-dirty
-cargo +nightly fmt
-cargo check -p wt-web --target wasm32-unknown-unknown
-cargo +nightly fmt --target wasm32-unknown-unknown
-"""
+run = [
+    "cargo clippy --fix --all-features --allow-dirty",
+    "cargo check -p wt-web --target wasm32-unknown-unknown",
+]
+depends_post = ["fmt"]
+
+[tasks.bump]
+description = "Bump versions for published crates and sync workspace deps (usage: mise run bump -- minor)"
+run = [
+    "cargo set-version -p wowsunpack --bump {{arg(name=\"level\", i=0)}}",
+    "cargo set-version -p wows_replays --bump {{arg(name=\"level\", i=0)}}",
+    "cargo set-version -p wows_minimap_renderer --bump {{arg(name=\"level\", i=0)}}",
+    "cargo set-version -p wows-data-mgr --bump {{arg(name=\"level\", i=0)}}",
+    "cargo upgrade -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-data-mgr --incompatible allow --pinned allow",
+]

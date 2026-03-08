@@ -22,6 +22,7 @@ use tiny_skia::Transform;
 
 use std::sync::Arc;
 
+use crate::STATS_PANEL_WIDTH;
 use crate::assets::GameFonts;
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::ChatEntry;
@@ -30,7 +31,6 @@ use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
 use crate::draw_command::RenderTarget;
 use crate::draw_command::ShipVisibility;
-use crate::STATS_PANEL_WIDTH;
 use wows_replays::types::ElapsedClock;
 use wt_translations::DefaultTextResolver;
 use wt_translations::TextResolver;
@@ -690,7 +690,13 @@ fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedCloc
     }
 }
 
-fn draw_pre_battle_countdown(pm: &mut Pixmap, seconds: i64, fonts: &GameFonts, resolver: &dyn TextResolver, map_width: u32) {
+fn draw_pre_battle_countdown(
+    pm: &mut Pixmap,
+    seconds: i64,
+    fonts: &GameFonts,
+    resolver: &dyn TextResolver,
+    map_width: u32,
+) {
     let text = format!("{}", seconds);
     let subtitle = resolver.resolve(&TranslatableText::PreBattleLabel);
     let glow_color: [u8; 3] = [255, 200, 50]; // gold
@@ -1299,32 +1305,17 @@ fn hp_bar_color_lerp(fraction: f32) -> [u8; 3] {
         [0, 255, 0] // green
     } else if fraction > 0.33 {
         let t = (fraction - 0.33) / 0.33;
-        [
-            (255.0 * (1.0 - t)) as u8,
-            255,
-            0,
-        ]
+        [(255.0 * (1.0 - t)) as u8, 255, 0]
     } else {
         let t = fraction / 0.33;
-        [
-            255,
-            (255.0 * t) as u8,
-            0,
-        ]
+        [255, (255.0 * t) as u8, 0]
     }
 }
 
 /// Draw an RGBA image at a non-centered position (top-left corner).
 fn draw_icon_at(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32) {
     let icon_pm = rgba_to_pixmap(icon);
-    pm.draw_pixmap(
-        x,
-        y,
-        icon_pm.as_ref(),
-        &PixmapPaint::default(),
-        Transform::identity(),
-        None,
-    );
+    pm.draw_pixmap(x, y, icon_pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
 }
 
 /// Format a number with thousands separators (e.g. 12345 → "12,345").
@@ -1362,8 +1353,6 @@ fn damage_label_color_rgb(label: &str) -> [u8; 3] {
         _ => [180, 180, 180],
     }
 }
-
-
 
 // ── ImageTarget (RenderTarget implementation) ──────────────────────────────
 
@@ -1409,7 +1398,17 @@ impl ImageTarget {
         death_cause_icons: HashMap<String, RgbaImage>,
         powerup_icons: HashMap<String, RgbaImage>,
     ) -> Self {
-        Self::with_stats_panel(map_image, fonts, ship_icons, plane_icons, building_icons, consumable_icons, death_cause_icons, powerup_icons, false)
+        Self::with_stats_panel(
+            map_image,
+            fonts,
+            ship_icons,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            death_cause_icons,
+            powerup_icons,
+            false,
+        )
     }
 
     pub fn with_stats_panel(
@@ -1735,7 +1734,13 @@ impl RenderTarget for ImageTarget {
                 draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.map_width);
             }
             DrawCommand::PreBattleCountdown { seconds } => {
-                draw_pre_battle_countdown(&mut self.canvas, *seconds, &self.fonts, &*self.text_resolver, self.map_width);
+                draw_pre_battle_countdown(
+                    &mut self.canvas,
+                    *seconds,
+                    &self.fonts,
+                    &*self.text_resolver,
+                    self.map_width,
+                );
             }
             DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
                 let icon_size = 16i32;
@@ -1883,7 +1888,14 @@ impl RenderTarget for ImageTarget {
                 }
             }
             DrawCommand::KillFeed { entries } => {
-                draw_kill_feed(&mut self.canvas, entries, &self.fonts, &self.ship_icons, &self.death_cause_icons, self.map_width);
+                draw_kill_feed(
+                    &mut self.canvas,
+                    entries,
+                    &self.fonts,
+                    &self.ship_icons,
+                    &self.death_cause_icons,
+                    self.map_width,
+                );
             }
             DrawCommand::ChatOverlay { entries } => {
                 draw_chat_overlay(&mut self.canvas, entries, &self.fonts, &self.ship_icons, HUD_HEIGHT);
@@ -1905,11 +1917,29 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::StatsPanel { x, width } => {
                 // Dark background for the stats panel area
-                draw_filled_rect(&mut self.canvas, *x as f32, 0.0, *width as f32, CANVAS_HEIGHT as f32, [30, 34, 42], 0.96);
+                draw_filled_rect(
+                    &mut self.canvas,
+                    *x as f32,
+                    0.0,
+                    *width as f32,
+                    CANVAS_HEIGHT as f32,
+                    [30, 34, 42],
+                    0.96,
+                );
                 // Subtle left border
                 draw_line(&mut self.canvas, *x as f32, 0.0, *x as f32, CANVAS_HEIGHT as f32, [55, 60, 72], 0.8, 1.0);
             }
-            DrawCommand::StatsSilhouette { x, y, width, height, ship_param_id: _, hp_fraction, hp_current, hp_max, silhouette } => {
+            DrawCommand::StatsSilhouette {
+                x,
+                y,
+                width,
+                height,
+                ship_param_id: _,
+                hp_fraction,
+                hp_current,
+                hp_max,
+                silhouette,
+            } => {
                 let padding = 8;
                 let inner_x = *x + padding;
                 let inner_w = *width - padding * 2;
@@ -1932,7 +1962,8 @@ impl RenderTarget for ImageTarget {
 
                     // Gray silhouette (background / lost HP)
                     let gray_sil = tint_silhouette(sil_img, [200, 200, 200]);
-                    let resized_gray = image::imageops::resize(&gray_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                    let resized_gray =
+                        image::imageops::resize(&gray_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
                     let sil_x = inner_x + (inner_w - draw_w as i32) / 2;
                     let sil_cy = sil_y + (sil_h - draw_h as i32) / 2;
                     draw_icon_at(&mut self.canvas, &resized_gray, sil_x, sil_cy);
@@ -1940,7 +1971,8 @@ impl RenderTarget for ImageTarget {
                     // Yellow HP overlay: mask to hp_fraction width
                     let hp_color = hp_bar_color_lerp(*hp_fraction);
                     let hp_sil = tint_silhouette(sil_img, hp_color);
-                    let resized_hp = image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
+                    let resized_hp =
+                        image::imageops::resize(&hp_sil, draw_w, draw_h, image::imageops::FilterType::Triangle);
                     let hp_px = (draw_w as f32 * hp_fraction) as u32;
                     if hp_px > 0 {
                         let cropped = image::imageops::crop_imm(&resized_hp, 0, 0, hp_px, draw_h).to_image();
@@ -1953,7 +1985,15 @@ impl RenderTarget for ImageTarget {
                 let hp_scale = self.fonts.scale(14.0);
                 let (tw, _) = text_size(hp_scale, &self.fonts.primary, &hp_text);
                 let hp_text_x = inner_x + (inner_w - tw as i32) / 2;
-                draw_text_shadow(&mut self.canvas, [220, 220, 220], hp_text_x, *y + *height - 14, hp_scale, &self.fonts.primary, &hp_text);
+                draw_text_shadow(
+                    &mut self.canvas,
+                    [220, 220, 220],
+                    hp_text_x,
+                    *y + *height - 14,
+                    hp_scale,
+                    &self.fonts.primary,
+                    &hp_text,
+                );
             }
             DrawCommand::StatsDamage { x, y, width, breakdowns, damage_spotting, damage_potential } => {
                 let padding = 8;
@@ -1969,32 +2009,78 @@ impl RenderTarget for ImageTarget {
 
                 // Total enemy damage header
                 let total_damage: f64 = breakdowns.iter().map(|e| e.damage).sum();
-                draw_text_shadow(&mut self.canvas, [200, 200, 200], inner_x, cur_y, header_scale, &self.fonts.primary, "DMG");
+                draw_text_shadow(
+                    &mut self.canvas,
+                    [200, 200, 200],
+                    inner_x,
+                    cur_y,
+                    header_scale,
+                    &self.fonts.primary,
+                    "DMG",
+                );
                 let total_str = format_number(total_damage as i64);
                 let (tw, _) = text_size(header_scale, &self.fonts.primary, &total_str);
-                draw_text_shadow(&mut self.canvas, [255, 220, 100], right_x - tw as i32, cur_y, header_scale, &self.fonts.primary, &total_str);
+                draw_text_shadow(
+                    &mut self.canvas,
+                    [255, 220, 100],
+                    right_x - tw as i32,
+                    cur_y,
+                    header_scale,
+                    &self.fonts.primary,
+                    &total_str,
+                );
                 cur_y += header_row_h;
 
                 // Indented breakdown rows
                 for entry in breakdowns.iter() {
                     let color = damage_label_color_rgb(&entry.label);
-                    draw_text_shadow(&mut self.canvas, [140, 140, 140], indent_x, cur_y, breakdown_scale, &self.fonts.primary, &entry.label);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [140, 140, 140],
+                        indent_x,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &entry.label,
+                    );
                     let val_str = format_number(entry.damage as i64);
                     let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &val_str);
-                    draw_text_shadow(&mut self.canvas, color, right_x - tw as i32, cur_y, breakdown_scale, &self.fonts.primary, &val_str);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        color,
+                        right_x - tw as i32,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &val_str,
+                    );
                     cur_y += breakdown_row_h;
                 }
 
                 // Spotting + Potential
-                let summary_rows = [
-                    ("SPOT", *damage_spotting, [120u8, 200, 255]),
-                    ("POT", *damage_potential, [180, 180, 180]),
-                ];
+                let summary_rows =
+                    [("SPOT", *damage_spotting, [120u8, 200, 255]), ("POT", *damage_potential, [180, 180, 180])];
                 for (label, value, color) in &summary_rows {
-                    draw_text_shadow(&mut self.canvas, [140, 140, 140], inner_x, cur_y, breakdown_scale, &self.fonts.primary, label);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [140, 140, 140],
+                        inner_x,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        label,
+                    );
                     let val_str = format_number(*value as i64);
                     let (tw, _) = text_size(breakdown_scale, &self.fonts.primary, &val_str);
-                    draw_text_shadow(&mut self.canvas, *color, right_x - tw as i32, cur_y, breakdown_scale, &self.fonts.primary, &val_str);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        *color,
+                        right_x - tw as i32,
+                        cur_y,
+                        breakdown_scale,
+                        &self.fonts.primary,
+                        &val_str,
+                    );
                     cur_y += breakdown_row_h;
                 }
             }
@@ -2013,9 +2099,25 @@ impl RenderTarget for ImageTarget {
                     let ry = *y + row as i32 * row_h;
 
                     let count_str = format!("x{}", rc.count);
-                    draw_text_shadow(&mut self.canvas, [180, 180, 180], rx, ry, scale, &self.fonts.primary, &rc.display_name);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [180, 180, 180],
+                        rx,
+                        ry,
+                        scale,
+                        &self.fonts.primary,
+                        &rc.display_name,
+                    );
                     let (tw, _) = text_size(scale, &self.fonts.primary, &count_str);
-                    draw_text_shadow(&mut self.canvas, [255, 220, 100], rx + col_w - tw as i32, ry, scale, &self.fonts.primary, &count_str);
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [255, 220, 100],
+                        rx + col_w - tw as i32,
+                        ry,
+                        scale,
+                        &self.fonts.primary,
+                        &count_str,
+                    );
                 }
             }
             DrawCommand::StatsActivityFeed { x, y, width, height, entries } => {
@@ -2032,9 +2134,26 @@ impl RenderTarget for ImageTarget {
                 let font = &self.fonts.primary;
 
                 // Fixed-size box background
-                draw_filled_rect(&mut self.canvas, *x as f32, *y as f32, *width as f32, *height as f32, [24, 28, 36], 0.8);
+                draw_filled_rect(
+                    &mut self.canvas,
+                    *x as f32,
+                    *y as f32,
+                    *width as f32,
+                    *height as f32,
+                    [24, 28, 36],
+                    0.8,
+                );
                 // Top border
-                draw_line(&mut self.canvas, *x as f32 + 4.0, *y as f32, (*x + *width - 4) as f32, *y as f32, [55, 60, 72], 0.6, 1.0);
+                draw_line(
+                    &mut self.canvas,
+                    *x as f32 + 4.0,
+                    *y as f32,
+                    (*x + *width - 4) as f32,
+                    *y as f32,
+                    [55, 60, 72],
+                    0.6,
+                    1.0,
+                );
 
                 // Pre-compute entry heights
                 let mut entry_heights: Vec<i32> = Vec::new();
@@ -2073,7 +2192,6 @@ impl RenderTarget for ImageTarget {
                     }
                     match &entry.kind {
                         ActivityFeedKind::Kill(kill) => {
-
                             let (_, text_h) = text_size(name_scale, font, "Ag");
                             let icon_y = ey + (text_h as i32 - icon_size) / 2;
                             let mut cx = inner_x;
@@ -2085,14 +2203,31 @@ impl RenderTarget for ImageTarget {
                             cx += pw as i32;
 
                             // Killer name
-                            draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, name_scale, font, &kill.killer_name);
+                            draw_text_shadow(
+                                &mut self.canvas,
+                                kill.killer_color,
+                                cx,
+                                ey,
+                                name_scale,
+                                font,
+                                &kill.killer_name,
+                            );
                             let (kw, _) = text_size(name_scale, font, &kill.killer_name);
                             cx += kw as i32 + gap;
 
                             // Killer ship icon (friendly=left, enemy=right)
                             if let Some(ref species) = kill.killer_species
-                                && let Some(icon) = self.ship_icons.get(species) {
-                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, kill.killer_color, !kill.killer_is_friendly);
+                                && let Some(icon) = self.ship_icons.get(species)
+                            {
+                                draw_kill_feed_icon(
+                                    &mut self.canvas,
+                                    icon,
+                                    cx,
+                                    icon_y,
+                                    icon_size,
+                                    kill.killer_color,
+                                    !kill.killer_is_friendly,
+                                );
                                 cx += icon_size + gap;
                             }
 
@@ -2105,14 +2240,31 @@ impl RenderTarget for ImageTarget {
                             }
 
                             // Victim name
-                            draw_text_shadow(&mut self.canvas, kill.victim_color, cx, ey, name_scale, font, &kill.victim_name);
+                            draw_text_shadow(
+                                &mut self.canvas,
+                                kill.victim_color,
+                                cx,
+                                ey,
+                                name_scale,
+                                font,
+                                &kill.victim_name,
+                            );
                             let (vw, _) = text_size(name_scale, font, &kill.victim_name);
                             cx += vw as i32 + gap;
 
                             // Victim ship icon (friendly=left, enemy=right)
                             if let Some(ref species) = kill.victim_species
-                                && let Some(icon) = self.ship_icons.get(species) {
-                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, kill.victim_color, !kill.victim_is_friendly);
+                                && let Some(icon) = self.ship_icons.get(species)
+                            {
+                                draw_kill_feed_icon(
+                                    &mut self.canvas,
+                                    icon,
+                                    cx,
+                                    icon_y,
+                                    icon_size,
+                                    kill.victim_color,
+                                    !kill.victim_is_friendly,
+                                );
                             }
 
                             ey += kill_row_h;
@@ -2130,21 +2282,46 @@ impl RenderTarget for ImageTarget {
                             }
 
                             // Player name
-                            draw_text_shadow(&mut self.canvas, chat.team_color, cx, ey, name_scale, font, &chat.player_name);
+                            draw_text_shadow(
+                                &mut self.canvas,
+                                chat.team_color,
+                                cx,
+                                ey,
+                                name_scale,
+                                font,
+                                &chat.player_name,
+                            );
                             let (nw, text_h) = text_size(name_scale, font, &chat.player_name);
                             cx += nw as i32 + gap;
 
                             // Ship icon
                             let icon_y = ey + (text_h as i32 - icon_size) / 2;
                             if let Some(ref species) = chat.ship_species
-                                && let Some(icon) = self.ship_icons.get(species.as_str()) {
-                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, chat.team_color, false);
+                                && let Some(icon) = self.ship_icons.get(species.as_str())
+                            {
+                                draw_kill_feed_icon(
+                                    &mut self.canvas,
+                                    icon,
+                                    cx,
+                                    icon_y,
+                                    icon_size,
+                                    chat.team_color,
+                                    false,
+                                );
                                 cx += icon_size + gap;
                             }
 
                             // Ship name
                             if let Some(ref ship_name) = chat.ship_name {
-                                draw_text_shadow(&mut self.canvas, chat.team_color, cx, ey, name_scale, font, ship_name);
+                                draw_text_shadow(
+                                    &mut self.canvas,
+                                    chat.team_color,
+                                    cx,
+                                    ey,
+                                    name_scale,
+                                    font,
+                                    ship_name,
+                                );
                             }
 
                             ey += chat_header_h;
@@ -2156,7 +2333,15 @@ impl RenderTarget for ImageTarget {
                             };
                             let msg_lines = word_wrap(&chat.message, inner_w as u32, msg_scale, msg_font);
                             for line in &msg_lines {
-                                draw_text_shadow(&mut self.canvas, chat.message_color, inner_x, ey, msg_scale, msg_font, line);
+                                draw_text_shadow(
+                                    &mut self.canvas,
+                                    chat.message_color,
+                                    inner_x,
+                                    ey,
+                                    msg_scale,
+                                    msg_font,
+                                    line,
+                                );
                                 ey += chat_line_h;
                             }
                             if msg_lines.is_empty() {

@@ -648,10 +648,7 @@ where
             .iter()
             .filter_map(|vehicle| {
                 let vehicle_param = game_resources.game_param_by_id(vehicle.shipId).or_else(|| {
-                    warn!(
-                        "skipping unknown vehicle shipId={} for player {:?}",
-                        vehicle.shipId, vehicle.name
-                    );
+                    warn!("skipping unknown vehicle shipId={} for player {:?}", vehicle.shipId, vehicle.name);
                     None
                 })?;
                 Some(Rc::new(MetadataPlayer {
@@ -884,9 +881,7 @@ where
                 };
 
                 let mut vehicle = vehicle.borrow_mut();
-                vehicle.damage += damage_events.iter().fold(0.0f64, |accum, event| {
-                    accum + event.amount as f64
-                });
+                vehicle.damage += damage_events.iter().fold(0.0f64, |accum, event| accum + event.amount as f64);
             }
         }
 
@@ -902,15 +897,13 @@ where
                 .map(|entry| entry.total)
                 .sum();
 
-            if let Some(self_entity_id) = self
-                .player_entities
-                .iter()
-                .find(|(_, p)| p.relation().is_self())
-                .map(|(eid, _)| *eid)
+            if let Some(self_entity_id) =
+                self.player_entities.iter().find(|(_, p)| p.relation().is_self()).map(|(eid, _)| *eid)
                 && let Some(entity) = self.entities_by_id.get_mut(&self_entity_id)
-                    && let Some(vehicle) = entity.vehicle_ref() {
-                        vehicle.borrow_mut().damage = authoritative_damage;
-                    }
+                && let Some(vehicle) = entity.vehicle_ref()
+            {
+                vehicle.borrow_mut().damage = authoritative_damage;
+            }
         }
 
         // Update vehicle death info
@@ -2778,10 +2771,8 @@ where
                 debug!("OnArenaStateReceived");
                 self.arena_id = arg0;
                 for player in players.iter().chain(bots.iter()) {
-                    let Some(metadata_player) = self
-                        .metadata_players
-                        .iter()
-                        .find(|meta_player| meta_player.id == player.meta_ship_id())
+                    let Some(metadata_player) =
+                        self.metadata_players.iter().find(|meta_player| meta_player.id == player.meta_ship_id())
                     else {
                         warn!("could not map arena player to metadata player (meta_ship_id={})", player.meta_ship_id());
                         continue;
@@ -2843,10 +2834,11 @@ where
             crate::analyzer::decoder::DecodedPacketPayload::CheckPing(_) => trace!("CHECK PING"),
             crate::analyzer::decoder::DecodedPacketPayload::DamageReceived { victim, ref aggressors } => {
                 for damage in aggressors {
-                    self.damage_dealt
-                        .entry(damage.aggressor)
-                        .or_default()
-                        .push(DamageEvent { amount: damage.damage, victim, clock: packet.clock });
+                    self.damage_dealt.entry(damage.aggressor).or_default().push(DamageEvent {
+                        amount: damage.damage,
+                        victim,
+                        clock: packet.clock,
+                    });
                 }
             }
             crate::analyzer::decoder::DecodedPacketPayload::MinimapUpdate { ref updates, arg1: _ } => {

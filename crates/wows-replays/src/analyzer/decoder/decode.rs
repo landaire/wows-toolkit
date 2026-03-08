@@ -25,13 +25,13 @@ use winnow::binary::le_u8;
 use winnow::binary::le_u16;
 use winnow::binary::le_u64;
 use wowsunpack::data::Version;
-use wowsunpack::game_types::DamageStatCategory;
-use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::game_constants::DEFAULT_BATTLE_CONSTANTS;
 use wowsunpack::game_constants::DEFAULT_COMMON_CONSTANTS;
 use wowsunpack::game_constants::DEFAULT_SHIPS_CONSTANTS;
 use wowsunpack::game_params::convert::pickle_to_json;
 use wowsunpack::game_params::types::BigWorldDistance;
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::game_types::DamageStatWeapon;
 use wowsunpack::rpc::typedefs::ArgValue;
 use wowsunpack::unpack_rpc_args;
 
@@ -1750,12 +1750,7 @@ where
                             .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
                         let category = DamageStatCategory::from_id(category_raw as i32, battle_constants, *version)
                             .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
-                        stats.push(DamageStatEntry {
-                            weapon,
-                            category,
-                            count,
-                            total,
-                        });
+                        stats.push(DamageStatEntry { weapon, category, count, total });
                     }
                 }
                 _ => panic!("foo"),

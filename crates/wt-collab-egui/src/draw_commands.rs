@@ -1364,7 +1364,10 @@ pub fn draw_command_to_shapes(
         }
         DrawCommand::StatsPanel { x, width } => {
             let origin = transform.hud_pos(*x as f32, 0.0);
-            let size = Vec2::new(*width as f32 * ws, transform.hud_pos(0.0, wows_minimap_renderer::CANVAS_HEIGHT as f32).y - origin.y);
+            let size = Vec2::new(
+                *width as f32 * ws,
+                transform.hud_pos(0.0, wows_minimap_renderer::CANVAS_HEIGHT as f32).y - origin.y,
+            );
             // Dark panel background
             shapes.push(Shape::rect_filled(
                 Rect::from_min_size(origin, size),
@@ -1378,7 +1381,9 @@ pub fn draw_command_to_shapes(
             });
         }
 
-        DrawCommand::StatsSilhouette { x, y, width, height, ship_param_id: _, hp_fraction, hp_current, hp_max, .. } => {
+        DrawCommand::StatsSilhouette {
+            x, y, width, height, ship_param_id: _, hp_fraction, hp_current, hp_max, ..
+        } => {
             let padding = 8.0 * ws;
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
@@ -1441,7 +1446,8 @@ pub fn draw_command_to_shapes(
             }
 
             // HP text: "12,345 / 42,750"
-            let hp_text = format!("{} / {}", format_number_egui(*hp_current as i64), format_number_egui(*hp_max as i64));
+            let hp_text =
+                format!("{} / {}", format_number_egui(*hp_current as i64), format_number_egui(*hp_max as i64));
             let hp_font = game_font(16.0 * ws);
             let hp_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_text, hp_font, Color32::from_rgb(220, 220, 220)));
             let hp_x = inner_x + (inner_w - hp_galley.size().x) / 2.0;
@@ -1466,10 +1472,13 @@ pub fn draw_command_to_shapes(
 
             // Total enemy damage header
             let total_damage: f64 = breakdowns.iter().map(|e| e.damage).sum();
-            let header_galley = ctx.fonts_mut(|f| f.layout_no_wrap("DMG".to_string(), header_font.clone(), Color32::from_rgb(200, 200, 200)));
+            let header_galley = ctx.fonts_mut(|f| {
+                f.layout_no_wrap("DMG".to_string(), header_font.clone(), Color32::from_rgb(200, 200, 200))
+            });
             shapes.push(Shape::galley(Pos2::new(inner_x, cur_y), header_galley, Color32::TRANSPARENT));
             let total_str = format_number_egui(total_damage as i64);
-            let total_galley = ctx.fonts_mut(|f| f.layout_no_wrap(total_str, header_font.clone(), Color32::from_rgb(255, 220, 100)));
+            let total_galley =
+                ctx.fonts_mut(|f| f.layout_no_wrap(total_str, header_font.clone(), Color32::from_rgb(255, 220, 100)));
             let total_x = right_x - total_galley.size().x;
             shapes.push(Shape::galley(Pos2::new(total_x, cur_y), total_galley, Color32::TRANSPARENT));
             cur_y += header_row_h;
@@ -1477,7 +1486,8 @@ pub fn draw_command_to_shapes(
             // Indented breakdown rows (smaller font)
             for entry in breakdowns.iter() {
                 let color = damage_label_color(&entry.label);
-                let label_galley = ctx.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), breakdown_font.clone(), label_color));
+                let label_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(entry.label.clone(), breakdown_font.clone(), label_color));
                 shapes.push(Shape::galley(Pos2::new(indent_x, cur_y), label_galley, Color32::TRANSPARENT));
 
                 let val_str = format_number_egui(entry.damage as i64);
@@ -1491,10 +1501,7 @@ pub fn draw_command_to_shapes(
             if !breakdowns.is_empty() {
                 let sep_y = cur_y - 1.0 * ws;
                 shapes.push(Shape::LineSegment {
-                    points: [
-                        Pos2::new(inner_x, sep_y),
-                        Pos2::new(right_x, sep_y),
-                    ],
+                    points: [Pos2::new(inner_x, sep_y), Pos2::new(right_x, sep_y)],
                     stroke: Stroke::new(ws * 0.5, Color32::from_rgba_unmultiplied(60, 60, 60, 150)),
                 });
                 cur_y += 2.0 * ws;
@@ -1506,7 +1513,8 @@ pub fn draw_command_to_shapes(
                 ("POT", *damage_potential, Color32::from_rgb(180, 180, 180)),
             ];
             for (label, value, color) in &summary_rows {
-                let label_galley = ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), breakdown_font.clone(), label_color));
+                let label_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(label.to_string(), breakdown_font.clone(), label_color));
                 shapes.push(Shape::galley(Pos2::new(inner_x, cur_y), label_galley, Color32::TRANSPARENT));
 
                 let val_str = format_number_egui(*value as i64);
@@ -1533,7 +1541,8 @@ pub fn draw_command_to_shapes(
                 let rx = inner_x + col as f32 * inner_w;
                 let ry = origin.y + row as f32 * row_h;
 
-                let name_galley = ctx.fonts_mut(|f| f.layout_no_wrap(rc.display_name.clone(), font.clone(), name_color));
+                let name_galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(rc.display_name.clone(), font.clone(), name_color));
                 shapes.push(Shape::galley(Pos2::new(rx, ry), name_galley, Color32::TRANSPARENT));
 
                 let count_str = format!("x{}", rc.count);
@@ -1588,8 +1597,10 @@ pub fn draw_command_to_shapes(
                     wows_minimap_renderer::draw_command::ActivityFeedKind::Chat(chat) => {
                         let msg_galley = ctx.fonts_mut(|f| {
                             let job = egui::text::LayoutJob::simple(
-                                chat.message.clone(), msg_font.clone(),
-                                Color32::WHITE, inner_w,
+                                chat.message.clone(),
+                                msg_font.clone(),
+                                Color32::WHITE,
+                                inner_w,
                             );
                             f.layout_job(job)
                         });
@@ -1622,8 +1633,6 @@ pub fn draw_command_to_shapes(
                         let killer_color = color_from_rgb(kill.killer_color);
                         let victim_color = color_from_rgb(kill.victim_color);
 
-
-
                         let mut cx = inner_x;
 
                         // Kill prefix
@@ -1634,66 +1643,69 @@ pub fn draw_command_to_shapes(
                         cx += prefix_galley.size().x;
 
                         // Killer name
-                        let killer_galley = ctx.fonts_mut(|f| {
-                            f.layout_no_wrap(kill.killer_name.clone(), name_font.clone(), killer_color)
-                        });
+                        let killer_galley = ctx
+                            .fonts_mut(|f| f.layout_no_wrap(kill.killer_name.clone(), name_font.clone(), killer_color));
                         let row_center_y = ey + killer_galley.size().y / 2.0;
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), killer_galley.clone(), Color32::TRANSPARENT));
                         cx += killer_galley.size().x + gap;
 
                         // Killer ship icon (friendly=points left (PI), enemy=points right (0))
                         if let Some(ref species) = kill.killer_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                                let tint = Color32::from_rgb(kill.killer_color[0], kill.killer_color[1], kill.killer_color[2]);
-                                let angle = if kill.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
-                                feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                    tex.id(),
-                                    Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                    icon_size,
-                                    angle,
-                                    tint,
-                                ));
-                                cx += icon_size + gap;
-                            }
+                            && let Some(tex) = textures.ship_icons.get(species.as_str())
+                        {
+                            let tint =
+                                Color32::from_rgb(kill.killer_color[0], kill.killer_color[1], kill.killer_color[2]);
+                            let angle = if kill.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
+                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
+                                tex.id(),
+                                Pos2::new(cx + icon_size / 2.0, row_center_y),
+                                icon_size,
+                                angle,
+                                tint,
+                            ));
+                            cx += icon_size + gap;
+                        }
 
                         // Death cause icon
                         let cause_key = death_cause_icon_key(kill);
                         if let Some(icons) = textures.death_cause_icons.as_ref()
-                            && let Some(tex) = icons.get(cause_key) {
-                                let half = icon_size / 2.0;
-                                let mut mesh = egui::Mesh::with_texture(tex.id());
-                                mesh.add_rect_with_uv(
-                                    Rect::from_min_max(
-                                        Pos2::new(cx, row_center_y - half),
-                                        Pos2::new(cx + icon_size, row_center_y + half),
-                                    ),
-                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    Color32::WHITE,
-                                );
-                                feed_shapes.push(Shape::Mesh(mesh.into()));
-                                cx += icon_size + gap;
-                            }
+                            && let Some(tex) = icons.get(cause_key)
+                        {
+                            let half = icon_size / 2.0;
+                            let mut mesh = egui::Mesh::with_texture(tex.id());
+                            mesh.add_rect_with_uv(
+                                Rect::from_min_max(
+                                    Pos2::new(cx, row_center_y - half),
+                                    Pos2::new(cx + icon_size, row_center_y + half),
+                                ),
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                            feed_shapes.push(Shape::Mesh(mesh.into()));
+                            cx += icon_size + gap;
+                        }
 
                         // Victim name
-                        let victim_galley = ctx.fonts_mut(|f| {
-                            f.layout_no_wrap(kill.victim_name.clone(), name_font.clone(), victim_color)
-                        });
+                        let victim_galley = ctx
+                            .fonts_mut(|f| f.layout_no_wrap(kill.victim_name.clone(), name_font.clone(), victim_color));
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), victim_galley.clone(), Color32::TRANSPARENT));
                         cx += victim_galley.size().x + gap;
 
                         // Victim ship icon (friendly=points left (PI), enemy=points right (0))
                         if let Some(ref species) = kill.victim_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                                let tint = Color32::from_rgb(kill.victim_color[0], kill.victim_color[1], kill.victim_color[2]);
-                                let angle = if kill.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
-                                feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                    tex.id(),
-                                    Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                    icon_size,
-                                    angle,
-                                    tint,
-                                ));
-                            }
+                            && let Some(tex) = textures.ship_icons.get(species.as_str())
+                        {
+                            let tint =
+                                Color32::from_rgb(kill.victim_color[0], kill.victim_color[1], kill.victim_color[2]);
+                            let angle = if kill.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
+                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
+                                tex.id(),
+                                Pos2::new(cx + icon_size / 2.0, row_center_y),
+                                icon_size,
+                                angle,
+                                tint,
+                            ));
+                        }
 
                         ey += kill_row_h;
                     }
@@ -1709,49 +1721,55 @@ pub fn draw_command_to_shapes(
                             let clan_galley = ctx.fonts_mut(|f| {
                                 f.layout_no_wrap(format!("[{}] ", chat.clan_tag), name_font.clone(), clan_c)
                             });
-                            feed_shapes.push(Shape::galley(Pos2::new(cx, ey), clan_galley.clone(), Color32::TRANSPARENT));
+                            feed_shapes.push(Shape::galley(
+                                Pos2::new(cx, ey),
+                                clan_galley.clone(),
+                                Color32::TRANSPARENT,
+                            ));
                             cx += clan_galley.size().x;
                         }
 
                         // Player name
-                        let name_galley = ctx.fonts_mut(|f| {
-                            f.layout_no_wrap(chat.player_name.clone(), name_font.clone(), team_c)
-                        });
+                        let name_galley =
+                            ctx.fonts_mut(|f| f.layout_no_wrap(chat.player_name.clone(), name_font.clone(), team_c));
                         let row_center_y = ey + name_galley.size().y / 2.0;
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), name_galley.clone(), Color32::TRANSPARENT));
                         cx += name_galley.size().x + gap;
 
                         // Ship icon
                         if let Some(ref species) = chat.ship_species
-                            && let Some(tex) = textures.ship_icons.get(species.as_str()) {
-                                let tint = Color32::from_rgb(chat.team_color[0], chat.team_color[1], chat.team_color[2]);
-                                feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
-                                    tex.id(),
-                                    Pos2::new(cx + icon_size / 2.0, row_center_y),
-                                    icon_size,
-                                    0.0,
-                                    tint,
-                                ));
-                                cx += icon_size + gap;
-                            }
+                            && let Some(tex) = textures.ship_icons.get(species.as_str())
+                        {
+                            let tint = Color32::from_rgb(chat.team_color[0], chat.team_color[1], chat.team_color[2]);
+                            feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
+                                tex.id(),
+                                Pos2::new(cx + icon_size / 2.0, row_center_y),
+                                icon_size,
+                                0.0,
+                                tint,
+                            ));
+                            cx += icon_size + gap;
+                        }
 
                         // Ship name
                         if let Some(ref ship_name) = chat.ship_name {
-                            let sn_galley = ctx.fonts_mut(|f| {
-                                f.layout_no_wrap(ship_name.clone(), name_font.clone(), team_c)
-                            });
+                            let sn_galley =
+                                ctx.fonts_mut(|f| f.layout_no_wrap(ship_name.clone(), name_font.clone(), team_c));
                             feed_shapes.push(Shape::galley(Pos2::new(cx, ey), sn_galley, Color32::TRANSPARENT));
                         }
                         ey += chat_header_h;
 
                         // Message body
                         let msg_galley = ctx.fonts_mut(|f| {
-                            let job = egui::text::LayoutJob::simple(
-                                chat.message.clone(), msg_font.clone(), msg_c, inner_w,
-                            );
+                            let job =
+                                egui::text::LayoutJob::simple(chat.message.clone(), msg_font.clone(), msg_c, inner_w);
                             f.layout_job(job)
                         });
-                        feed_shapes.push(Shape::galley(Pos2::new(inner_x, ey), msg_galley.clone(), Color32::TRANSPARENT));
+                        feed_shapes.push(Shape::galley(
+                            Pos2::new(inner_x, ey),
+                            msg_galley.clone(),
+                            Color32::TRANSPARENT,
+                        ));
                         ey += msg_galley.rows.len().max(1) as f32 * chat_msg_h + 2.0 * ws;
                     }
                 }
@@ -1812,4 +1830,3 @@ fn hp_bar_color_egui(fraction: f32) -> Color32 {
         Color32::from_rgb(255, (255.0 * t) as u8, 0)
     }
 }
-

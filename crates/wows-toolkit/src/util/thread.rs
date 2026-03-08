@@ -1,4 +1,5 @@
-use std::thread::{self, JoinHandle};
+use std::thread;
+use std::thread::JoinHandle;
 
 /// Spawn a thread that logs panics instead of silently dying.
 ///

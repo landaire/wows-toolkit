@@ -1848,24 +1848,25 @@ impl ToolkitTabViewer<'_> {
                                         if !is_loaded {
                                             let map = map.clone();
                                             let (tx, rx) = std::sync::mpsc::channel();
-                                            crate::util::thread::spawn_logged("resolve-build", move || match map.resolve_build(build) {
-                                                Some(_) => {
-                                                    let _ = tx.send(Ok(
-                                                        crate::task::BackgroundTaskCompletion::BuildDataLoaded {
-                                                            build,
-                                                        },
-                                                    ));
-                                                }
-                                                None => {
-                                                    let report: rootcause::Report =
-                                                        crate::util::error::ToolkitError::ReplayBuildUnavailable {
-                                                            build,
-                                                            version: format!("{}", build),
-                                                        }
-                                                        .into();
-                                                    let _ = tx
-                                                        .send(Err(report
+                                            crate::util::thread::spawn_logged("resolve-build", move || {
+                                                match map.resolve_build(build) {
+                                                    Some(_) => {
+                                                        let _ = tx.send(Ok(
+                                                            crate::task::BackgroundTaskCompletion::BuildDataLoaded {
+                                                                build,
+                                                            },
+                                                        ));
+                                                    }
+                                                    None => {
+                                                        let report: rootcause::Report =
+                                                            crate::util::error::ToolkitError::ReplayBuildUnavailable {
+                                                                build,
+                                                                version: format!("{}", build),
+                                                            }
+                                                            .into();
+                                                        let _ = tx.send(Err(report
                                                             .attach("game data could not be loaded for this build")));
+                                                    }
                                                 }
                                             });
                                             let _ = self.tab_state.background_task_sender.send(

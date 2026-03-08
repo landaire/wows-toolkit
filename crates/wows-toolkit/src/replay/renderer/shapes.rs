@@ -122,7 +122,9 @@ pub(super) fn render_tool_preview(
 }
 
 /// Build the shared `DrawCommandTextures` from a desktop `RendererTextures`.
-pub(super) fn make_shared_textures<'a>(textures: &'a RendererTextures) -> wt_collab_egui::draw_commands::DrawCommandTextures<'a> {
+pub(super) fn make_shared_textures<'a>(
+    textures: &'a RendererTextures,
+) -> wt_collab_egui::draw_commands::DrawCommandTextures<'a> {
     wt_collab_egui::draw_commands::DrawCommandTextures {
         ship_icons: &textures.ship_icons,
         ship_icon_outlines: Some(&textures.ship_icon_outlines),

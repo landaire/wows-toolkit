@@ -150,6 +150,8 @@
               # Development tools
               depotdownloader
               trunk
+              mise
+              cargo-edit
 
               # WASM build (ring C crypto → wasm32)
               # Use unwrapped clang — the nix wrapper adds hardening flags
@@ -180,6 +182,7 @@
           LD_LIBRARY_PATH =
             lib.optionalString stdenv.hostPlatform.isLinux
             "${lib.makeLibraryPath buildInputs}";
+
         };
       });
 }
