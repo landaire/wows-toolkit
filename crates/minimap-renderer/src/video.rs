@@ -9,8 +9,6 @@ use tracing::info;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::types::GameClock;
 
-use crate::CANVAS_HEIGHT;
-use crate::MINIMAP_SIZE;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
 use crate::encoder::EncoderBackend;
@@ -81,6 +79,9 @@ pub struct VideoEncoder {
     expected_frames: u64,
     /// Optional callback invoked after each frame is encoded or muxed.
     progress_callback: Option<Box<dyn Fn(RenderProgress)>>,
+    /// Actual canvas dimensions (may include stats panel width).
+    canvas_width: u32,
+    canvas_height: u32,
 }
 
 impl VideoEncoder {
@@ -90,7 +91,7 @@ impl VideoEncoder {
     /// (e.g. 1200s for a 20-minute mode). The actual battle may end earlier.
     /// Call `set_battle_duration()` with the true end time for accurate
     /// progress reporting.
-    pub fn new(output_path: &str, dump_mode: Option<DumpMode>, match_time_limit: f32) -> Self {
+    pub fn new(output_path: &str, dump_mode: Option<DumpMode>, match_time_limit: f32, canvas_width: u32, canvas_height: u32) -> Self {
         let total_frames = (OUTPUT_DURATION * FPS) as usize;
         Self {
             output_path: output_path.to_string(),
@@ -103,6 +104,8 @@ impl VideoEncoder {
             prefer_cpu: false,
             expected_frames: total_frames as u64,
             progress_callback: None,
+            canvas_width,
+            canvas_height,
         }
     }
 
@@ -155,11 +158,11 @@ impl VideoEncoder {
         if self.backend.is_some() {
             return Ok(());
         }
-        self.backend = Some(EncoderBackend::create(MINIMAP_SIZE, CANVAS_HEIGHT, self.prefer_cpu)?);
+        self.backend = Some(EncoderBackend::create(self.canvas_width, self.canvas_height, self.prefer_cpu)?);
         info!(
             frames = self.total_frames(),
-            width = MINIMAP_SIZE,
-            height = CANVAS_HEIGHT,
+            width = self.canvas_width,
+            height = self.canvas_height,
             duration = self.game_duration,
             fps = FPS,
             "Rendering"
@@ -173,7 +176,7 @@ impl VideoEncoder {
             self.backend.as_mut().ok_or_else(|| report!(VideoError::EncodeFailed("Encoder not initialized".into())))?;
         let frame_image = target.frame();
         let rgb_data = frame_image.as_raw();
-        let encoded = backend.encode_frame(rgb_data, MINIMAP_SIZE, CANVAS_HEIGHT)?;
+        let encoded = backend.encode_frame(rgb_data, self.canvas_width, self.canvas_height)?;
         self.h264_frames.push(encoded);
         Ok(())
     }
@@ -350,8 +353,8 @@ impl VideoEncoder {
             timescale: 1000,
             language: "und".to_string(),
             media_conf: mp4::MediaConfig::AvcConfig(mp4::AvcConfig {
-                width: MINIMAP_SIZE as u16,
-                height: CANVAS_HEIGHT as u16,
+                width: self.canvas_width as u16,
+                height: self.canvas_height as u16,
                 seq_param_set: sps.to_vec(),
                 pic_param_set: pps.to_vec(),
             }),

@@ -32,8 +32,11 @@ pub struct MapTransform {
     pub pan: Vec2,
     /// HUD height in logical pixels.
     pub hud_height: f32,
-    /// Logical canvas width (768).
+    /// Logical canvas width (includes stats panel when enabled).
     pub canvas_width: f32,
+    /// Logical width available for HUD elements (excludes stats panel area).
+    /// When no stats panel, equals `canvas_width`.
+    pub hud_width: f32,
 }
 
 impl MapTransform {
@@ -66,9 +69,14 @@ impl MapTransform {
         Pos2::new(self.origin.x + x * self.window_scale, self.origin.y + y * self.window_scale)
     }
 
-    /// The HUD-scaled canvas width in screen pixels.
+    /// The full canvas width in screen pixels (including stats panel if present).
     pub fn screen_canvas_width(&self) -> f32 {
         self.canvas_width * self.window_scale
+    }
+
+    /// The HUD-usable width in screen pixels (excludes stats panel area).
+    pub fn screen_hud_width(&self) -> f32 {
+        self.hud_width * self.window_scale
     }
 
     /// Convert a screen Pos2 to minimap logical coords (inverse of minimap_to_screen).
@@ -115,10 +123,18 @@ pub fn compute_canvas_layout(available: Vec2, logical_canvas: Vec2, zoom: f32, r
 ///
 /// For viewports with a HUD (replay, web replay view), pass the HUD height in logical pixels.
 /// For viewports without a HUD (tactics board), pass 0.0.
-pub fn compute_map_clip_rect(layout: &CanvasLayout, hud_height: f32) -> Rect {
+///
+/// `map_width` restricts the horizontal extent of the clip rect (in logical pixels).
+/// Pass `None` to use the full canvas width, or `Some(MINIMAP_SIZE)` when a stats panel
+/// is present to prevent map elements from bleeding into the panel area.
+pub fn compute_map_clip_rect(layout: &CanvasLayout, hud_height: f32, map_width: Option<f32>) -> Rect {
     let hud_screen_height = hud_height * layout.window_scale;
+    let right = match map_width {
+        Some(w) => layout.origin.x + w * layout.window_scale,
+        None => layout.origin.x + layout.scaled_canvas.x,
+    };
     Rect::from_min_max(
         Pos2::new(layout.origin.x, layout.origin.y + hud_screen_height),
-        Pos2::new(layout.origin.x + layout.scaled_canvas.x, layout.origin.y + layout.scaled_canvas.y),
+        Pos2::new(right, layout.origin.y + layout.scaled_canvas.y),
     )
 }

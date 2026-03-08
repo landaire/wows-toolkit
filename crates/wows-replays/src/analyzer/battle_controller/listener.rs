@@ -2,9 +2,13 @@ use std::collections::HashMap;
 
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::BattleType;
+use wowsunpack::game_types::DamageStatCategory;
+use wowsunpack::game_types::DamageStatWeapon;
+use wowsunpack::game_types::Ribbon;
 use wowsunpack::recognized::Recognized;
 
 use crate::Rc;
+use crate::analyzer::decoder::DamageStatEntry;
 use crate::analyzer::decoder::FinishType;
 use crate::types::ElapsedClock;
 use crate::types::EntityId;
@@ -147,4 +151,12 @@ pub trait BattleControllerState {
     /// Convert elapsed time since battle start back to an absolute game clock value.
     /// If battle start is unknown, treats clock 0.0 as battle start.
     fn elapsed_to_game_clock(&self, elapsed: ElapsedClock) -> GameClock;
+
+    /// Ribbon counts for the self (recording) player from live `onRibbon` packets.
+    fn self_ribbons(&self) -> &HashMap<Ribbon, usize>;
+
+    /// Cumulative damage stats for the self player from `receiveDamageStat` packets.
+    fn self_damage_stats(
+        &self,
+    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>;
 }

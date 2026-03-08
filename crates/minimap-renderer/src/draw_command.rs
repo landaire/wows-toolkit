@@ -6,10 +6,13 @@ use wows_replays::analyzer::decoder::DeathCause;
 use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::types::ElapsedClock;
 use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_replays::types::PlaneId;
+use wows_replays::types::GameParamId;
 use wowsunpack::game_types::AdvantageLevel;
 use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::FinishType;
+pub use wowsunpack::game_types::Ribbon;
 
 use crate::map_data::MinimapPos;
 
@@ -244,6 +247,42 @@ pub struct KillFeedEntry {
     pub victim_color: [u8; 3],
     /// How the victim died
     pub cause: Recognized<DeathCause>,
+}
+
+/// A single ribbon type with its accumulated count.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RibbonCount {
+    pub ribbon: Ribbon,
+    pub count: usize,
+    /// Localized display name (resolved via translate_ribbon, falls back to English).
+    pub display_name: String,
+}
+
+/// An entry in the merged activity feed (kills + chat), sorted by game clock.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ActivityFeedEntry {
+    pub clock: GameClock,
+    pub kind: ActivityFeedKind,
+}
+
+/// The payload of an activity feed entry.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ActivityFeedKind {
+    Kill(KillFeedEntry),
+    Chat(ChatEntry),
+}
+
+/// A single weapon-group damage entry for the stats panel breakdown.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct DamageBreakdownEntry {
+    /// Short display label (e.g. "MAIN", "TORP", "FIRE")
+    pub label: String,
+    /// Accumulated enemy damage for this weapon group
+    pub damage: f64,
 }
 
 /// A high-level draw command emitted by the renderer.
@@ -492,6 +531,51 @@ pub enum DrawCommand {
         /// If true, subtitle is drawn above the main text; otherwise below.
         subtitle_above: bool,
     },
+    /// Stats panel background
+    StatsPanel {
+        x: i32,
+        width: i32,
+    },
+    /// Ship silhouette with HP overlay in the stats panel
+    StatsSilhouette {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        /// Ship GameParamId — renderers resolve to localized name
+        ship_param_id: Option<GameParamId>,
+        hp_fraction: f32,
+        hp_current: f32,
+        hp_max: f32,
+        #[cfg(feature = "rendering")]
+        #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
+        silhouette: Option<RgbaImage>,
+    },
+    /// Damage breakdown numbers in the stats panel
+    StatsDamage {
+        x: i32,
+        y: i32,
+        width: i32,
+        /// Per-weapon-group enemy damage breakdown (sorted by damage desc)
+        breakdowns: Vec<DamageBreakdownEntry>,
+        damage_spotting: f64,
+        damage_potential: f64,
+    },
+    /// Compact ribbon summary in the stats panel
+    StatsRibbons {
+        x: i32,
+        y: i32,
+        width: i32,
+        ribbons: Vec<RibbonCount>,
+    },
+    /// Merged kill feed + chat activity log in the stats panel
+    StatsActivityFeed {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        entries: Vec<ActivityFeedEntry>,
+    },
 }
 
 impl DrawCommand {
@@ -508,6 +592,24 @@ impl DrawCommand {
                 | Self::TeamBuffs { .. }
                 | Self::TeamAdvantage { .. }
                 | Self::ChatOverlay { .. }
+                | Self::StatsPanel { .. }
+                | Self::StatsSilhouette { .. }
+                | Self::StatsDamage { .. }
+                | Self::StatsRibbons { .. }
+                | Self::StatsActivityFeed { .. }
+        )
+    }
+
+    /// Returns true if this is a stats-panel element that should be rendered
+    /// in the side panel rather than on the main canvas.
+    pub fn is_stats(&self) -> bool {
+        matches!(
+            self,
+            Self::StatsPanel { .. }
+                | Self::StatsSilhouette { .. }
+                | Self::StatsDamage { .. }
+                | Self::StatsRibbons { .. }
+                | Self::StatsActivityFeed { .. }
         )
     }
 }

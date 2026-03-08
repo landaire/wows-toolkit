@@ -10,6 +10,7 @@ use tracing::warn;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
@@ -22,6 +23,7 @@ use wows_minimap_renderer::assets::load_building_icons;
 use wows_minimap_renderer::assets::load_consumable_icons;
 use wows_minimap_renderer::assets::load_death_cause_icons;
 use wows_minimap_renderer::assets::load_flag_icons;
+use wows_minimap_renderer::assets::load_packed_image;
 use wows_minimap_renderer::assets::load_game_fonts;
 use wows_minimap_renderer::assets::load_map_image;
 use wows_minimap_renderer::assets::load_map_info;
@@ -186,17 +188,6 @@ fn main() -> Result<(), Report> {
 
     let game_duration = replay_file.meta.duration as f32;
 
-    let mut target = ImageTarget::new(
-        map_image,
-        game_fonts.clone(),
-        ship_icons,
-        plane_icons,
-        building_icons,
-        consumable_icons,
-        death_cause_icons,
-        powerup_icons,
-    );
-
     // Load config: --config path > exe-adjacent minimap_renderer.toml > defaults
     let mut config = if let Some(config_path) = &args.config {
         RendererConfig::load(config_path)?
@@ -226,11 +217,40 @@ fn main() -> Result<(), Report> {
     let mut options = config.into_render_options();
     options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
 
+    let mut target = ImageTarget::with_stats_panel(
+        map_image,
+        game_fonts.clone(),
+        ship_icons,
+        plane_icons,
+        building_icons,
+        consumable_icons,
+        death_cause_icons,
+        powerup_icons,
+        options.show_stats_panel,
+    );
+
+    // Load self player's ship silhouette for the stats panel
+    let self_silhouette = replay_file
+        .meta
+        .vehicles
+        .iter()
+        .find(|v| v.relation == 0)
+        .and_then(|v| {
+            let param = GameParamProvider::game_param_by_id(&game_params, v.shipId)?;
+            let path = format!("gui/ships_silhouettes/{}.png", param.index());
+            let img = load_packed_image(&path, vfs)?;
+            Some(img.into_rgba8())
+        });
+
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_params, replay_version, options);
     renderer.set_fonts(game_fonts);
     renderer.set_flag_icons(flag_icons);
+    if let Some(sil) = self_silhouette {
+        renderer.set_self_silhouette(sil);
+    }
 
-    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, game_duration);
+    let (cw, ch) = target.canvas_size();
+    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, game_duration, cw, ch);
     if args.cpu {
         encoder.set_prefer_cpu(true);
     }

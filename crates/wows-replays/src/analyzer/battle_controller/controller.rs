@@ -21,6 +21,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::game_types::BattleStage;
 use wowsunpack::game_types::BattleType;
+use wowsunpack::game_types::Ribbon;
 use wowsunpack::rpc::typedefs::ArgValue;
 
 static TIME_UNTIL_GAME_START: Duration = Duration::from_secs(30);
@@ -620,6 +621,9 @@ pub struct BattleController<'res, 'replay, G> {
     /// Only `DamageStatCategory::Enemy` entries represent actual damage dealt.
     self_damage_stats: HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry>,
 
+    /// Ribbon counts for the self player, from `onRibbon` Avatar RPC.
+    /// All ribbon packets in a replay are for the recording player.
+    self_ribbons: HashMap<Ribbon, usize>,
 }
 
 impl<'res, 'replay, G> BattleController<'res, 'replay, G>
@@ -689,6 +693,7 @@ where
             battle_start_clock: None,
             game_constants,
             self_damage_stats: HashMap::default(),
+            self_ribbons: HashMap::default(),
         }
     }
 
@@ -730,6 +735,7 @@ where
         self.battle_stage = None;
         self.battle_start_clock = None;
         self.self_damage_stats.clear();
+        self.self_ribbons.clear();
         // Note: track_shots is config, not state -- preserved across reset.
     }
 
@@ -2545,6 +2551,16 @@ where
         let start = self.battle_start_clock.unwrap_or(GameClock(0.0));
         elapsed.to_absolute(start)
     }
+
+    fn self_ribbons(&self) -> &HashMap<Ribbon, usize> {
+        &self.self_ribbons
+    }
+
+    fn self_damage_stats(
+        &self,
+    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry> {
+        &self.self_damage_stats
+    }
 }
 
 impl<'res, 'replay, G> Analyzer for BattleController<'res, 'replay, G>
@@ -2582,7 +2598,9 @@ where
             crate::analyzer::decoder::DecodedPacketPayload::VoiceLine { .. } => {
                 trace!("HANDLE VOICE LINE");
             }
-            crate::analyzer::decoder::DecodedPacketPayload::Ribbon(_ribbon) => {}
+            crate::analyzer::decoder::DecodedPacketPayload::Ribbon(ribbon) => {
+                *self.self_ribbons.entry(ribbon).or_insert(0) += 1;
+            }
             crate::analyzer::decoder::DecodedPacketPayload::Position(pos) => {
                 let world_pos = WorldPos { x: pos.position.x, y: pos.position.y, z: pos.position.z };
                 let ship_pos = ShipPosition {

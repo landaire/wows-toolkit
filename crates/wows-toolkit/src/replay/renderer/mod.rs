@@ -21,6 +21,7 @@ use wows_minimap_renderer::CANVAS_HEIGHT;
 use wows_minimap_renderer::GameFonts;
 use wows_minimap_renderer::HUD_HEIGHT;
 use wows_minimap_renderer::MINIMAP_SIZE;
+use wows_minimap_renderer::STATS_PANEL_WIDTH;
 use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::assets;
@@ -256,6 +257,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_chat: saved.show_chat,
         show_advantage: saved.show_advantage,
         show_score_timer: saved.show_score_timer,
+        show_stats_panel: saved.show_stats_panel,
         // UI does its own per-ship filtering in the draw loop, so emit all circles
         ship_config_visibility: ShipConfigVisibility::Filtered(Arc::new(|_| Some(ShipConfigFilter::all_enabled()))),
     }
@@ -317,6 +319,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_chat: opts.show_chat,
         show_advantage: opts.show_advantage,
         show_score_timer: opts.show_score_timer,
+        show_stats_panel: opts.show_stats_panel,
         prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
     }
 }
@@ -411,6 +414,7 @@ struct RendererTextures {
     consumable_icons: HashMap<String, TextureHandle>,
     death_cause_icons: HashMap<String, TextureHandle>,
     powerup_icons: HashMap<String, TextureHandle>,
+    silhouette_texture: Option<TextureHandle>,
 }
 
 /// Status of the background renderer.
@@ -487,6 +491,8 @@ pub struct SharedRendererState {
     pub collab_map_name: Option<String>,
     /// Map space size in BigWorld units (from MapInfo), used for px->km conversion.
     pub map_space_size: Option<f32>,
+    /// Raw self-player ship silhouette (set by playback thread, converted to TextureHandle on UI thread).
+    pub self_silhouette_raw: Option<(u32, u32, Vec<u8>)>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -604,6 +610,7 @@ pub fn launch_replay_renderer(
         collab_replay_name: Some(replay_name.clone()),
         collab_map_name: Some(map_name.clone()),
         map_space_size: None,
+        self_silhouette_raw: None,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -755,6 +762,7 @@ pub fn launch_client_renderer(
         collab_replay_name: None,
         collab_map_name: None,
         map_space_size: None,
+        self_silhouette_raw: None,
     }));
 
     let title = Arc::new(format!("Collab Viewer - {replay_name}"));
@@ -1019,9 +1027,18 @@ impl ReplayRendererViewer {
                     if tex_guard.is_none() && has_assets {
                         let state = shared_state.lock();
                         if let Some(assets) = &state.assets {
-                            *tex_guard = Some(upload_textures(ctx, assets));
+                            *tex_guard = Some(upload_textures(ctx, assets, state.self_silhouette_raw.as_ref()));
                         }
                     }
+                    // Lazy silhouette upload: raw data may arrive after initial texture upload
+                    if let Some(textures) = tex_guard.as_mut()
+                        && textures.silhouette_texture.is_none() {
+                            let state = shared_state.lock();
+                            if let Some((w, h, data)) = state.self_silhouette_raw.as_ref() {
+                                let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+                                textures.silhouette_texture = Some(ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR));
+                            }
+                        }
                 }
 
                 // ── Annotation toolbar ──
@@ -1052,6 +1069,8 @@ impl ReplayRendererViewer {
                     });
                 }
 
+                let show_stats_panel = !status_is_loading && shared_state.lock().options.show_stats_panel;
+
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
@@ -1067,8 +1086,13 @@ impl ReplayRendererViewer {
                         return;
                     }
 
-                    // Canvas layout
-                    let logical_canvas = Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
+                    // Canvas layout — include stats panel width so layout aligns them
+                    let canvas_w = if show_stats_panel {
+                        (MINIMAP_SIZE + STATS_PANEL_WIDTH) as f32
+                    } else {
+                        MINIMAP_SIZE as f32
+                    };
+                    let logical_canvas = Vec2::new(canvas_w, CANVAS_HEIGHT as f32);
                     let available = ui.available_size();
                     let current_zoom = zoom_pan_arc.lock().zoom;
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
@@ -1096,13 +1120,15 @@ impl ReplayRendererViewer {
 
                     // Build transform for this frame
                     let zp = zoom_pan_arc.lock();
+                    let hud_w = MINIMAP_SIZE as f32;
                     let transform = MapTransform {
                         origin: layout.origin,
                         window_scale,
                         zoom: zp.zoom,
                         pan: zp.pan,
                         hud_height: HUD_HEIGHT as f32,
-                        canvas_width: MINIMAP_SIZE as f32,
+                        canvas_width: canvas_w,
+                        hud_width: hud_w,
                     };
                     let current_zoom = zp.zoom;
                     drop(zp);
@@ -1161,8 +1187,10 @@ impl ReplayRendererViewer {
                     // Draw dark background
                     painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
 
-                    // Clipped painter for map-region content (below HUD)
-                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32);
+                    // Clipped painter for map-region content (below HUD).
+                    // When stats panel is active, clip map to MINIMAP_SIZE to prevent bleed into stats area.
+                    let map_clip_width = if show_stats_panel { Some(MINIMAP_SIZE as f32) } else { None };
+                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_clip_width);
                     let map_painter = painter.with_clip_rect(map_clip);
 
                     let tex_guard = textures_arc.lock();
@@ -1201,6 +1229,10 @@ impl ReplayRendererViewer {
                             // Separate HUD and map commands so HUD draws on unclipped painter
                             let mut placed_labels: Vec<Rect> = Vec::new();
                             for cmd in &frame.commands {
+                                // Stats commands are rendered in the egui SidePanel, not here
+                                if show_stats_panel && cmd.is_stats() {
+                                    continue;
+                                }
                                 if !should_draw_command(cmd, &options, show_dead_ships) {
                                     continue;
                                 }
@@ -1232,6 +1264,34 @@ impl ReplayRendererViewer {
                                 }
                             }
 
+                            // ── Stats panel (unzoomed, aligned to canvas) ──
+                            if show_stats_panel {
+                                let stats_transform = MapTransform {
+                                    origin: layout.origin,
+                                    window_scale,
+                                    zoom: 1.0,
+                                    pan: Vec2::ZERO,
+                                    hud_height: HUD_HEIGHT as f32,
+                                    canvas_width: canvas_w,
+                                    hud_width: hud_w,
+                                };
+                                let shared_tex = make_shared_textures(textures);
+                                let label_opts = make_label_opts(&options);
+                                let mut stats_placed = Vec::new();
+                                for cmd in &frame.commands {
+                                    if !cmd.is_stats() {
+                                        continue;
+                                    }
+                                    let cmd_shapes = wt_collab_egui::draw_commands::draw_command_to_shapes(
+                                        cmd, &stats_transform, &shared_tex, ctx, &label_opts,
+                                        Some(&mut stats_placed), &LocalizedTextResolver,
+                                    );
+                                    for shape in cmd_shapes {
+                                        painter.add(shape);
+                                    }
+                                }
+                            }
+
                             // Hover tooltip for TeamAdvantage
                             let ws = transform.window_scale;
                             // Find ScoreBar to compute advantage label position
@@ -1255,7 +1315,7 @@ impl ReplayRendererViewer {
                                         break;
                                     };
                                     let label = adv_level.label().to_string();
-                                    let canvas_w = transform.screen_canvas_width();
+                                    let canvas_w = transform.screen_hud_width();
                                     let bar_height = HUD_HEIGHT as f32 * ws;
                                     let bar_origin = transform.hud_pos(0.0, 0.0);
 
@@ -2447,6 +2507,7 @@ impl ReplayRendererViewer {
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_advantage, t!("ui.renderer.settings.team_advantage")).changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, t!("ui.renderer.settings.timer")).changed();
+                                                changed |= ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed();
                                             });
 
                                             // ── Export Settings ──

@@ -47,7 +47,7 @@ pub(super) fn generate_icon_outline(data: &[u8], w: u32, h: u32, thickness: i32)
     out
 }
 
-pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets) -> RendererTextures {
+pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets, silhouette_raw: Option<&(u32, u32, Vec<u8>)>) -> RendererTextures {
     let map_texture = assets.map_image.as_ref().map(|asset| {
         let image =
             egui::ColorImage::from_rgba_unmultiplied([asset.width as usize, asset.height as usize], &asset.data);
@@ -125,6 +125,11 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
         })
         .collect();
 
+    let silhouette_texture = silhouette_raw.map(|(w, h, data)| {
+        let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
+        ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR)
+    });
+
     RendererTextures {
         map_texture,
         ship_icons,
@@ -134,5 +139,6 @@ pub(super) fn upload_textures(ctx: &egui::Context, assets: &ReplayRendererAssets
         consumable_icons,
         death_cause_icons,
         powerup_icons,
+        silhouette_texture,
     }
 }

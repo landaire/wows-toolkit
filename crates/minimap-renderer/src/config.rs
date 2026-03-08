@@ -32,6 +32,7 @@ pub struct RenderOptions {
     pub show_chat: bool,
     pub show_advantage: bool,
     pub show_score_timer: bool,
+    pub show_stats_panel: bool,
     /// Controls which ships have their config circles rendered when show_ship_config is true.
     /// Defaults to SelfOnly (only the replay owner's circles).
     pub ship_config_visibility: ShipConfigVisibility,
@@ -47,7 +48,7 @@ impl Default for RenderOptions {
             show_smoke: true,
             show_score: true,
             show_timer: true,
-            show_kill_feed: true,
+            show_kill_feed: false,
             show_player_names: true,
             show_ship_names: true,
             show_capture_points: true,
@@ -63,9 +64,10 @@ impl Default for RenderOptions {
             show_dead_ship_names: false,
             show_battle_result: true,
             show_buffs: true,
-            show_chat: true,
+            show_chat: false,
             show_advantage: true,
             show_score_timer: true,
+            show_stats_panel: true,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }
@@ -120,6 +122,7 @@ pub struct RendererConfig {
     pub show_ship_config: bool,
     pub show_advantage: bool,
     pub show_score_timer: bool,
+    pub show_stats_panel: bool,
 }
 
 impl Default for RendererConfig {
@@ -137,8 +140,8 @@ impl Default for RendererConfig {
             show_smoke: true,
             show_score: true,
             show_timer: true,
-            show_kill_feed: true,
-            show_chat: true,
+            show_kill_feed: false,
+            show_chat: false,
             show_consumables: true,
             show_armament: true,
             show_trails: false,
@@ -147,6 +150,7 @@ impl Default for RendererConfig {
             show_ship_config: false,
             show_advantage: true,
             show_score_timer: true,
+            show_stats_panel: true,
         }
     }
 }
@@ -190,6 +194,7 @@ impl RendererConfig {
             show_weather: true,
             show_advantage: true,
             show_score_timer: true,
+            show_stats_panel: self.show_stats_panel,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }

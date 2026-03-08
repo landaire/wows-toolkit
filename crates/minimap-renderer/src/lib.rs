@@ -22,13 +22,17 @@ pub const MINIMAP_SIZE: u32 = 768;
 pub const HUD_HEIGHT: u32 = 32;
 /// Total canvas height: minimap + HUD.
 pub const CANVAS_HEIGHT: u32 = MINIMAP_SIZE + HUD_HEIGHT;
+/// Width of the stats side panel when enabled.
+pub const STATS_PANEL_WIDTH: u32 = 280;
 
 #[cfg(feature = "rendering")]
 pub use assets::GameFonts;
 pub use config::RenderOptions;
+pub use draw_command::ActivityFeedEntry;
 pub use draw_command::DrawCommand;
 pub use draw_command::FontHint;
 pub use draw_command::RenderTarget;
+pub use draw_command::RibbonCount;
 pub use draw_command::ShipConfigFilter;
 pub use draw_command::ShipConfigVisibility;
 pub use draw_command::ShipVisibility;

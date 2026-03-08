@@ -53,7 +53,7 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         DrawCommand::ScoreBar { .. } => opts.show_score,
         DrawCommand::Timer { .. } => opts.show_timer,
         DrawCommand::PreBattleCountdown { .. } => opts.show_timer,
-        DrawCommand::KillFeed { .. } => opts.show_kill_feed,
+        DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.show_stats_panel,
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
         DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
@@ -65,9 +65,14 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         DrawCommand::BuffZone { .. } => opts.show_capture_points,
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
-        DrawCommand::ChatOverlay { .. } => opts.show_chat,
+        DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.show_stats_panel,
         DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
         DrawCommand::WeatherZone { .. } => opts.show_weather,
+        DrawCommand::StatsPanel { .. }
+        | DrawCommand::StatsSilhouette { .. }
+        | DrawCommand::StatsDamage { .. }
+        | DrawCommand::StatsRibbons { .. }
+        | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
     }
 }
 
@@ -117,7 +122,7 @@ pub(super) fn render_tool_preview(
 }
 
 /// Build the shared `DrawCommandTextures` from a desktop `RendererTextures`.
-fn make_shared_textures<'a>(textures: &'a RendererTextures) -> wt_collab_egui::draw_commands::DrawCommandTextures<'a> {
+pub(super) fn make_shared_textures<'a>(textures: &'a RendererTextures) -> wt_collab_egui::draw_commands::DrawCommandTextures<'a> {
     wt_collab_egui::draw_commands::DrawCommandTextures {
         ship_icons: &textures.ship_icons,
         ship_icon_outlines: Some(&textures.ship_icon_outlines),
@@ -126,11 +131,12 @@ fn make_shared_textures<'a>(textures: &'a RendererTextures) -> wt_collab_egui::d
         consumable_icons: Some(&textures.consumable_icons),
         death_cause_icons: Some(&textures.death_cause_icons),
         powerup_icons: Some(&textures.powerup_icons),
+        silhouette_texture: textures.silhouette_texture.as_ref(),
     }
 }
 
 /// Build the shared label options from desktop `RenderOptions`.
-fn make_label_opts(opts: &RenderOptions) -> wt_collab_egui::draw_commands::DrawCommandLabelOptions {
+pub(super) fn make_label_opts(opts: &RenderOptions) -> wt_collab_egui::draw_commands::DrawCommandLabelOptions {
     wt_collab_egui::draw_commands::DrawCommandLabelOptions {
         show_player_names: opts.show_player_names,
         show_ship_names: opts.show_ship_names,

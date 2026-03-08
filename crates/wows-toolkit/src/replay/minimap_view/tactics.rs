@@ -1205,11 +1205,12 @@ impl TacticsBoardViewer {
             pan: zp.pan,
             hud_height: 0.0,
             canvas_width: canvas_size,
+            hud_width: canvas_size,
         };
         drop(zp);
 
         // Clip to map area
-        let map_clip = compute_map_clip_rect(&layout, 0.0);
+        let map_clip = compute_map_clip_rect(&layout, 0.0, None);
         let map_painter = painter.with_clip_rect(map_clip);
 
         // Draw map background

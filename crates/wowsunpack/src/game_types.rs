@@ -628,6 +628,47 @@ pub enum Ribbon {
     Unknown(i8),
 }
 
+impl Ribbon {
+    /// Returns the player-results key for this ribbon (e.g. `"RIBBON_MAIN_CALIBER_PENETRATION"`).
+    ///
+    /// This key can be passed to [`translations::translate_ribbon()`] to get localized
+    /// display names, descriptions, and icon keys.
+    ///
+    /// Returns `None` for `Unknown` variants or ribbons without a known results key.
+    pub fn translation_key(&self) -> Option<&'static str> {
+        match self {
+            Ribbon::PlaneShotDown => Some("RIBBON_PLANE"),
+            Ribbon::Incapacitation => Some("RIBBON_CRIT"),
+            Ribbon::SetFire => Some("RIBBON_BURN"),
+            Ribbon::Citadel => Some("RIBBON_CITADEL"),
+            Ribbon::SecondaryHit => Some("RIBBON_SECONDARY_CALIBER"),
+            Ribbon::OverPenetration => Some("RIBBON_MAIN_CALIBER_OVER_PENETRATION"),
+            Ribbon::Penetration => Some("RIBBON_MAIN_CALIBER_PENETRATION"),
+            Ribbon::NonPenetration => Some("RIBBON_MAIN_CALIBER_NO_PENETRATION"),
+            Ribbon::Ricochet => Some("RIBBON_MAIN_CALIBER_RICOCHET"),
+            Ribbon::TorpedoProtectionHit => Some("RIBBON_BULGE"),
+            Ribbon::Captured => Some("RIBBON_BASE_CAPTURE"),
+            Ribbon::AssistedInCapture => Some("RIBBON_BASE_CAPTURE_ASSIST"),
+            Ribbon::Spotted => Some("RIBBON_DETECTED"),
+            Ribbon::Destroyed => Some("RIBBON_FRAG"),
+            Ribbon::TorpedoHit => Some("RIBBON_TORPEDO"),
+            Ribbon::Defended => Some("RIBBON_BASE_DEFENSE"),
+            Ribbon::Flooding => Some("RIBBON_FLOOD"),
+            Ribbon::DiveBombPenetration => Some("RIBBON_BOMB_PENETRATION"),
+            Ribbon::RocketPenetration => Some("RIBBON_ROCKET_PENETRATION"),
+            Ribbon::RocketNonPenetration => Some("RIBBON_ROCKET_NO_PENETRATION"),
+            Ribbon::RocketTorpedoProtectionHit => Some("RIBBON_ROCKET_BULGE"),
+            Ribbon::DepthChargeHit => Some("RIBBON_DBOMB"),
+            Ribbon::ShotDownByAircraft => Some("RIBBON_SPLANE"),
+            Ribbon::BuffSeized => None, // No known results key
+            Ribbon::SonarOneHit => Some("RIBBON_ACOUSTIC_HIT"),
+            Ribbon::SonarTwoHits => None, // No known results key
+            Ribbon::SonarNeutralized => None, // No known results key
+            Ribbon::Unknown(_) => None,
+        }
+    }
+}
+
 /// Cause of a ship's destruction.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -664,10 +664,11 @@ impl WebApp {
             pan: self.viewport.pan,
             hud_height,
             canvas_width: MINIMAP_SIZE as f32,
+            hud_width: MINIMAP_SIZE as f32,
         };
 
         // Clip rect for map elements (excludes HUD area above)
-        let map_clip = compute_map_clip_rect(&layout, hud_height);
+        let map_clip = compute_map_clip_rect(&layout, hud_height, None);
         let map_painter = painter.with_clip_rect(map_clip);
 
         // Draw map background
@@ -692,6 +693,7 @@ impl WebApp {
                 consumable_icons: Some(&self.assets.consumable_icons),
                 death_cause_icons: Some(&self.assets.death_cause_icons),
                 powerup_icons: Some(&self.assets.powerup_icons),
+                silhouette_texture: None,
             };
             let label_opts = DrawCommandLabelOptions::default();
             let text_resolver = DefaultTextResolver;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use image::RgbaImage;
-use wowsunpack::data::ResourceLoader as _;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -16,6 +16,7 @@ use wows_replays::analyzer::decoder::Recognized;
 use wows_replays::analyzer::decoder::TorpedoData;
 use wows_replays::analyzer::decoder::WeaponType;
 use wowsunpack::game_types::BattleResult;
+use wowsunpack::game_types::{DamageStatCategory, DamageStatWeapon};
 
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
@@ -31,15 +32,21 @@ use wows_replays::types::WorldPos;
 use crate::assets::GameFonts;
 use crate::draw_command::BuildingIconType;
 use crate::draw_command::BuildingRelation;
+use crate::draw_command::ActivityFeedEntry;
+use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::ChatEntry;
+use crate::draw_command::DamageBreakdownEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
 use crate::draw_command::KillFeedEntry;
+use crate::draw_command::RibbonCount;
 use crate::draw_command::ShipConfigCircleKind;
 use crate::draw_command::ShipVisibility;
 use crate::map_data;
 
 use crate::MINIMAP_SIZE;
+use crate::STATS_PANEL_WIDTH;
+use crate::HUD_HEIGHT;
 
 // How long various effects persist in game-seconds
 const TRACER_LEN: f32 = 0.12; // fraction of total shot path length
@@ -126,6 +133,11 @@ pub struct MinimapRenderer<'a> {
 
     /// Flag icons for base-type capture points, keyed by "ally"/"enemy"/"neutral".
     flag_icons: HashMap<String, RgbaImage>,
+
+    /// Ship silhouette for the self player's stats panel.
+    self_silhouette: Option<RgbaImage>,
+    /// Cached self player entity ID (populated from controller state).
+    self_entity_id: Option<EntityId>,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -157,7 +169,14 @@ impl<'a> MinimapRenderer<'a> {
             position_history: HashMap::new(),
             fonts: None,
             flag_icons: HashMap::new(),
+            self_silhouette: None,
+            self_entity_id: None,
         }
+    }
+
+    /// Set the ship silhouette image for the self player's stats panel.
+    pub fn set_self_silhouette(&mut self, silhouette: RgbaImage) {
+        self.self_silhouette = Some(silhouette);
     }
 
     /// Set the flag icons for base-type capture points.
@@ -187,6 +206,8 @@ impl<'a> MinimapRenderer<'a> {
         self.players_populated = false;
         self.self_team_id = None;
         self.position_history.clear();
+        // Note: self_silhouette is an asset, not frame state — preserved across reset.
+        self.self_entity_id = None;
     }
 
     /// Populate player info from controller state (once).
@@ -265,10 +286,11 @@ impl<'a> MinimapRenderer<'a> {
                 }
             }
         }
-        // Determine the recording player's raw team_id for relative coloring
+        // Determine the recording player's raw team_id and entity_id
         if self.self_team_id.is_none() {
             for (entity_id, player) in players {
                 if player.relation().is_self() {
+                    self.self_entity_id = Some(*entity_id);
                     if let Some(entity) = controller.entities_by_id().get(entity_id)
                         && let Some(vehicle) = entity.vehicle_ref()
                     {
@@ -1738,7 +1760,267 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above: false });
         }
 
+        // 12. Stats panel (right side panel with ship HP, damage, ribbons, activity)
+        if self.options.show_stats_panel {
+            let panel_x = MINIMAP_SIZE as i32;
+            let panel_w = STATS_PANEL_WIDTH as i32;
+
+            // Panel background
+            commands.push(DrawCommand::StatsPanel { x: panel_x, width: panel_w });
+
+            // Ship silhouette + HP
+            let (hp_fraction, hp_current, hp_max, ship_param_id) = self
+                .self_entity_id
+                .and_then(|eid| {
+                    let entity = controller.entities_by_id().get(&eid)?;
+                    let v = entity.vehicle_ref()?;
+                    let v = v.borrow();
+                    let max = v.props().max_health();
+                    let cur = v.props().health();
+                    let param_id = self.ship_param_ids.get(&eid).copied();
+                    if max > 0.0 {
+                        Some(((cur / max).clamp(0.0, 1.0), cur, max, param_id))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or((1.0, 0.0, 0.0, None));
+
+            commands.push(DrawCommand::StatsSilhouette {
+                x: panel_x,
+                y: HUD_HEIGHT as i32,
+                width: panel_w,
+                height: 80,
+                ship_param_id,
+                hp_fraction,
+                hp_current,
+                hp_max,
+                #[cfg(feature = "rendering")]
+                silhouette: self.self_silhouette.clone(),
+            });
+
+            // Damage breakdown: group by weapon type for enemy damage, sum spot + potential
+            let damage_stats = controller.self_damage_stats();
+            let mut damage_spotting = 0.0f64;
+            let mut damage_potential = 0.0f64;
+            let mut weapon_groups: HashMap<&str, f64> = HashMap::new();
+            for ((weapon, cat), entry) in damage_stats {
+                match cat.known() {
+                    Some(DamageStatCategory::Enemy) => {
+                        let group = match weapon.known() {
+                            Some(DamageStatWeapon::MainAp | DamageStatWeapon::MainAiAp) => "AP",
+                            Some(DamageStatWeapon::MainHe | DamageStatWeapon::MainAiHe) => "HE",
+                            Some(DamageStatWeapon::MainCs) => "SAP",
+                            Some(DamageStatWeapon::AtbaAp | DamageStatWeapon::AtbaHe | DamageStatWeapon::AtbaCs) => "SEC",
+                            Some(DamageStatWeapon::Torpedo | DamageStatWeapon::TorpedoAcc | DamageStatWeapon::TorpedoDeep
+                                | DamageStatWeapon::TorpedoAlter | DamageStatWeapon::TorpedoMag
+                                | DamageStatWeapon::TorpedoAccOff | DamageStatWeapon::TorpedoPhoton) => "TORP",
+                            Some(DamageStatWeapon::Burn) => "FIRE",
+                            Some(DamageStatWeapon::Flood) => "FLOOD",
+                            Some(DamageStatWeapon::BomberAp | DamageStatWeapon::BomberHe | DamageStatWeapon::SkipHe
+                                | DamageStatWeapon::SkipAp | DamageStatWeapon::BomberApAsup | DamageStatWeapon::BomberHeAsup
+                                | DamageStatWeapon::SkipHeAsup | DamageStatWeapon::SkipApAsup
+                                | DamageStatWeapon::BomberApAlter | DamageStatWeapon::BomberHeAlter
+                                | DamageStatWeapon::SkipHeAlter | DamageStatWeapon::SkipApAlter
+                                | DamageStatWeapon::BomberApTc | DamageStatWeapon::BomberHeTc
+                                | DamageStatWeapon::SkipHeTc | DamageStatWeapon::SkipApTc) => "BOMB",
+                            Some(DamageStatWeapon::RocketHe | DamageStatWeapon::RocketAp
+                                | DamageStatWeapon::RocketHeAsup | DamageStatWeapon::RocketApAsup
+                                | DamageStatWeapon::RocketHeAlter | DamageStatWeapon::RocketApAlter
+                                | DamageStatWeapon::RocketHeTc | DamageStatWeapon::RocketApTc) => "ROCKET",
+                            Some(DamageStatWeapon::DepthCharge | DamageStatWeapon::DepthChargeAsup
+                                | DamageStatWeapon::DepthChargeAlter | DamageStatWeapon::DepthChargeTc) => "DC",
+                            Some(DamageStatWeapon::Ram) => "RAM",
+                            Some(DamageStatWeapon::Missile) => "MISSILE",
+                            _ => "OTHER",
+                        };
+                        *weapon_groups.entry(group).or_default() += entry.total;
+                    }
+                    Some(DamageStatCategory::Spot) => damage_spotting += entry.total,
+                    Some(DamageStatCategory::Agro) => damage_potential += entry.total,
+                    _ => {}
+                }
+            }
+            let mut breakdowns: Vec<DamageBreakdownEntry> = weapon_groups
+                .into_iter()
+                .filter(|(_, dmg)| *dmg > 0.0)
+                .map(|(label, damage)| DamageBreakdownEntry { label: label.to_string(), damage })
+                .collect();
+            breakdowns.sort_by(|a, b| b.damage.partial_cmp(&a.damage).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Dynamic layout: header (22px) + breakdown rows (18px each) + 2 summary rows (18px each) + padding
+            let damage_section_height = 22 + breakdowns.len() as i32 * 18 + 2 * 18 + 12;
+
+            commands.push(DrawCommand::StatsDamage {
+                x: panel_x,
+                y: HUD_HEIGHT as i32 + 80,
+                width: panel_w,
+                breakdowns,
+                damage_spotting,
+                damage_potential,
+            });
+
+            // Ribbons: sort by count descending, resolve localized display names
+            let self_ribbons = controller.self_ribbons();
+            let mut ribbons: Vec<RibbonCount> = self_ribbons
+                .iter()
+                .map(|(ribbon, &count)| {
+                    let display_name = ribbon
+                        .translation_key()
+                        .and_then(|key| {
+                            wowsunpack::game_params::translations::translate_ribbon(
+                                key,
+                                self.game_params as &dyn ResourceLoader,
+                            )
+                        })
+                        .map(|t| t.display_name)
+                        .unwrap_or_else(|| ribbon_fallback_name(ribbon).to_string());
+                    RibbonCount { ribbon: *ribbon, count, display_name }
+                })
+                .collect();
+            ribbons.sort_by(|a, b| b.count.cmp(&a.count));
+            let ribbon_y = HUD_HEIGHT as i32 + 80 + damage_section_height;
+            let ribbon_count = ribbons.len();
+            commands.push(DrawCommand::StatsRibbons {
+                x: panel_x,
+                y: ribbon_y,
+                width: panel_w,
+                ribbons,
+            });
+
+            // Activity feed: merge kills + chat sorted by game clock
+            let mut activity_entries: Vec<ActivityFeedEntry> = Vec::new();
+            for kill in controller.kills() {
+                if !self.player_names.contains_key(&kill.victim) {
+                    continue;
+                }
+                let killer_name =
+                    self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
+                let victim_name =
+                    self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
+                let killer_relation = self.player_relations.get(&kill.killer).copied().unwrap_or(Relation::new(2));
+                let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
+                activity_entries.push(ActivityFeedEntry {
+                    clock: kill.clock,
+                    kind: ActivityFeedKind::Kill(KillFeedEntry {
+                        killer_name,
+                        killer_species: self.player_species.get(&kill.killer).cloned(),
+                        killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
+                        killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
+                        victim_name,
+                        victim_species: self.player_species.get(&kill.victim).cloned(),
+                        victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
+                        victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
+                        cause: kill.cause.clone(),
+                    }),
+                });
+            }
+            // Add chat messages
+            for msg in controller.game_chat() {
+                if msg.clock > clock {
+                    continue;
+                }
+                let sender_entity = msg.player.as_ref().map(|p| p.initial_state().entity_id());
+                let is_div_mate = sender_entity.map(|eid| self.division_mates.contains(&eid)).unwrap_or(false);
+                let team_color = msg.sender_relation.map(|r| ship_color_rgb(r, is_div_mate)).unwrap_or([255, 255, 255]);
+                let (clan_tag, clan_color, ship_species, ship_name) = if let Some(ref player) = msg.player {
+                    let state = player.initial_state();
+                    let tag = state.clan().to_string();
+                    let color_raw = state.clan_color();
+                    let color = if color_raw != 0 {
+                        Some([
+                            ((color_raw & 0xFF0000) >> 16) as u8,
+                            ((color_raw & 0xFF00) >> 8) as u8,
+                            (color_raw & 0xFF) as u8,
+                        ])
+                    } else {
+                        None
+                    };
+                    let species = player.vehicle().species().and_then(species_key);
+                    let name = self.game_params.localized_name_from_param(player.vehicle());
+                    (tag, color, species, name)
+                } else {
+                    (String::new(), None, None, None)
+                };
+                let message_color = match msg.channel {
+                    ChatChannel::Division => [255, 215, 0],
+                    ChatChannel::Team => [140, 255, 140],
+                    ChatChannel::Global => [255, 255, 255],
+                    _ => [200, 200, 200],
+                };
+                let font_hint = self
+                    .fonts
+                    .as_ref()
+                    .and_then(|f| f.font_hint_for_text(&msg.message))
+                    .map(FontHint::Fallback)
+                    .unwrap_or(FontHint::Primary);
+                activity_entries.push(ActivityFeedEntry {
+                    clock: msg.clock,
+                    kind: ActivityFeedKind::Chat(ChatEntry {
+                        clan_tag,
+                        clan_color,
+                        player_name: msg.sender_name.clone(),
+                        team_color,
+                        ship_species,
+                        ship_name,
+                        message: msg.message.clone(),
+                        message_color,
+                        opacity: 1.0,
+                        font_hint,
+                    }),
+                });
+            }
+            // Sort merged entries by game clock
+            activity_entries.sort_by(|a, b| a.clock.cmp(&b.clock));
+
+            let ribbon_section_height = (ribbon_count.min(12) as i32 + 1) / 2 * 20 + 8; // 2-column grid
+            let feed_y = ribbon_y + ribbon_section_height;
+            let feed_height = (MINIMAP_SIZE as i32 + HUD_HEIGHT as i32) - feed_y;
+            commands.push(DrawCommand::StatsActivityFeed {
+                x: panel_x,
+                y: feed_y,
+                width: panel_w,
+                height: feed_height.max(0),
+                entries: activity_entries,
+            });
+        }
+
         commands
+    }
+}
+
+/// English fallback name for a ribbon when translation is unavailable.
+fn ribbon_fallback_name(ribbon: &wowsunpack::game_types::Ribbon) -> &'static str {
+    use wowsunpack::game_types::Ribbon;
+    match ribbon {
+        Ribbon::Penetration => "Pen",
+        Ribbon::Citadel => "Citadel",
+        Ribbon::OverPenetration => "Overpen",
+        Ribbon::NonPenetration => "Shatter",
+        Ribbon::Ricochet => "Ricochet",
+        Ribbon::SecondaryHit => "Sec Hit",
+        Ribbon::TorpedoHit => "Torp Hit",
+        Ribbon::TorpedoProtectionHit => "Torp Belt",
+        Ribbon::SetFire => "Fire",
+        Ribbon::Flooding => "Flood",
+        Ribbon::PlaneShotDown => "Plane",
+        Ribbon::Incapacitation => "Incap",
+        Ribbon::Spotted => "Spotted",
+        Ribbon::Captured => "Cap",
+        Ribbon::AssistedInCapture => "Assist Cap",
+        Ribbon::Defended => "Defended",
+        Ribbon::Destroyed => "Destroyed",
+        Ribbon::DiveBombPenetration => "Bomb Pen",
+        Ribbon::RocketPenetration => "Rocket Pen",
+        Ribbon::RocketNonPenetration => "Rocket Sht",
+        Ribbon::RocketTorpedoProtectionHit => "Rocket Belt",
+        Ribbon::DepthChargeHit => "DC Hit",
+        Ribbon::ShotDownByAircraft => "Air Kill",
+        Ribbon::BuffSeized => "Buff",
+        Ribbon::SonarOneHit => "Sonar 1",
+        Ribbon::SonarTwoHits => "Sonar 2",
+        Ribbon::SonarNeutralized => "Sonar Neut",
+        Ribbon::Unknown(_) => "???",
     }
 }
 

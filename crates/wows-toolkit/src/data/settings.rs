@@ -162,6 +162,8 @@ pub struct SavedRenderOptions {
     pub show_advantage: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_score_timer: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_stats_panel: bool,
     /// Prefer CPU (software) encoder for video export instead of GPU hardware encoder.
     #[serde(default)]
     pub prefer_cpu_encoder: bool,
@@ -199,9 +201,10 @@ impl Default for SavedRenderOptions {
             show_self_torpedo_range: false,
             show_self_radar_range: false,
             show_self_hydro_range: false,
-            show_chat: true,
+            show_chat: false,
             show_advantage: true,
             show_score_timer: true,
+            show_stats_panel: true,
             prefer_cpu_encoder: false,
         }
     }

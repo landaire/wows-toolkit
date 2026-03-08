@@ -20,6 +20,7 @@ use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::collab::peer::FrameBroadcast;
 use crate::data::wows_data::SharedWoWsData;
@@ -153,6 +154,27 @@ pub(super) fn playback_thread(
         }
     }
 
+    // Load self player's ship silhouette from VFS before dropping it.
+    // Parse raw_meta JSON to find self player (relation == 0) and their shipId,
+    // then look up the vehicle index in GameParams to find the silhouette PNG.
+    let self_silhouette = (|| -> Option<image::RgbaImage> {
+        let meta: wows_replays::ReplayMeta = serde_json::from_slice(&raw_meta).ok()?;
+        let self_vehicle = meta.vehicles.iter().find(|v| v.relation == 0)?;
+        let param = GameParamProvider::game_param_by_id(&*game_metadata, self_vehicle.shipId)?;
+        let index = param.index();
+        let path = format!("gui/ships_silhouettes/{index}.png");
+        let img = wows_minimap_renderer::assets::load_packed_image(&path, &vfs)?;
+        let mut rgba = img.into_rgba8();
+        // Normalize to white pixels with original alpha — source silhouettes are dark,
+        // and tint multiplication needs white (255) to produce the desired tint color.
+        for px in rgba.pixels_mut() {
+            px[0] = 255;
+            px[1] = 255;
+            px[2] = 255;
+        }
+        Some(rgba)
+    })();
+
     // Drop VFS early — no longer needed
     drop(vfs);
 
@@ -172,6 +194,11 @@ pub(super) fn playback_thread(
     let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
     renderer.set_fonts(game_fonts.clone());
+    if let Some(ref sil) = self_silhouette {
+        renderer.set_self_silhouette(sil.clone());
+        // Store raw silhouette for the UI thread to convert to an egui TextureHandle
+        shared_state.lock().self_silhouette_raw = Some((sil.width(), sil.height(), sil.as_raw().clone()));
+    }
 
     // Parse all packets, tracking frame boundaries
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
@@ -335,6 +362,9 @@ pub(super) fn playback_thread(
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
+    if let Some(ref sil) = self_silhouette {
+        live_renderer.set_self_silhouette(sil.clone());
+    }
 
     // Tracks how many entries in `controller.shot_hits()` we've already pushed
     // to bridges. Reset to 0 whenever the controller is rebuilt.
@@ -612,6 +642,9 @@ pub(super) fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
+            if let Some(ref sil) = self_silhouette {
+                live_renderer.set_self_silhouette(sil.clone());
+            }
             // Reset parser and tracking state for full re-parse
             live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
             hit_cursor = 0;
@@ -800,6 +833,7 @@ pub(super) fn playback_thread(
                 || live_renderer.options.show_chat != new_opts.show_chat
                 || live_renderer.options.show_advantage != new_opts.show_advantage
                 || live_renderer.options.show_score_timer != new_opts.show_score_timer
+                || live_renderer.options.show_stats_panel != new_opts.show_stats_panel
             {
                 live_renderer.options = new_opts;
                 let commands = live_renderer.draw_frame(&live_controller);
