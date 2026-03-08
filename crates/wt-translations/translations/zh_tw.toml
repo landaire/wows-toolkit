@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "繁體中文"
 
@@ -72,7 +75,6 @@ p2p_warning = "協作工作階段使用 P2P 網路。工作階段中的其他使
 # -- 標籤 --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "發生了一個錯誤："
 made_by = "由 landaire 開發。"
 credits = "感謝 Trackpad、TTaro、lkolbly 的貢獻。"

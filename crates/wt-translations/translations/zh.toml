@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "简体中文"
 
@@ -72,7 +75,6 @@ p2p_warning = "协作会话使用 P2P 网络。会话中的其他用户可能能
 # -- 标签 --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "发生错误："
 made_by = "由 landaire 制作。"
 credits = "感谢 Trackpad、TTaro、lkolbly 的贡献。"

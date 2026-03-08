@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Français"
 
@@ -72,7 +75,6 @@ p2p_warning = "Les sessions collaboratives utilisent un réseau pair-à-pair. Le
 # -- Libellés --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Une erreur est survenue :"
 made_by = "Créé par landaire."
 credits = "Merci à Trackpad, TTaro, lkolbly pour leurs contributions."

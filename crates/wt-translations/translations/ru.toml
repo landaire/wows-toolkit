@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Русский"
 
@@ -58,7 +61,6 @@ update_windows_only = "Доступно обновление, но в насто
 p2p_warning = "Совместные сессии используют одноранговую сеть. Другие пользователи в сессии могут видеть ваш IP-адрес."
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Произошла ошибка:"
 made_by = "Автор: landaire."
 credits = "Благодарности Trackpad, TTaro, lkolbly за их вклад."

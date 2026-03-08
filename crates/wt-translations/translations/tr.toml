@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Türkçe"
 
@@ -58,7 +61,6 @@ update_windows_only = "Güncelleme mevcut, ancak şu anda yalnızca Windows dest
 p2p_warning = "İş birliği oturumları P2P ağı kullanır. Oturumdaki diğer kullanıcılar IP adresinizi görebilir."
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Bir hata oluştu:"
 made_by = "landaire tarafından yapılmıştır."
 credits = "Trackpad, TTaro, lkolbly'ye katkıları için teşekkürler."

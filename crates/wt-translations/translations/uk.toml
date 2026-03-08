@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Українська"
 
@@ -58,7 +61,6 @@ update_windows_only = "Доступне оновлення, але наразі 
 p2p_warning = "Спільні сесії використовують однорангову мережу. Інші користувачі в сесії можуть бачити вашу IP-адресу."
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Сталася помилка:"
 made_by = "Автор: landaire."
 credits = "Подяка Trackpad, TTaro, lkolbly за їхній внесок."

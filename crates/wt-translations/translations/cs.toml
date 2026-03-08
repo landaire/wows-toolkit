@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Čeština"
 
@@ -58,7 +61,6 @@ update_windows_only = "Aktualizace dostupná, ale momentálně je podporován po
 p2p_warning = "Spolupracující relace používají P2P síť. Ostatní uživatelé v relaci mohou vidět vaši IP adresu."
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Došlo k chybě:"
 made_by = "Vytvořil landaire."
 credits = "Díky Trackpad, TTaro, lkolbly za jejich příspěvky."

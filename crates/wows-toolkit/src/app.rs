@@ -522,7 +522,7 @@ impl WowsToolkitApp {
         }
 
         if self.tab_state.settings.debug_mode {
-            ui.label(RichText::new(t!("ui.labels.debug_build")).heading().color(ui.visuals().warn_fg_color));
+            ui.label(RichText::new("⚠ Debug build ⚠").heading().color(ui.visuals().warn_fg_color));
         }
 
         ui.horizontal(|ui| {

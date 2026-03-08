@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "日本語"
 
@@ -72,7 +75,6 @@ p2p_warning = "コラボレーションセッションは P2P ネットワーク
 # -- ラベル --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "エラーが発生しました："
 made_by = "landaire 作。"
 credits = "Trackpad、TTaro、lkolbly の貢献に感謝します。"

@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Español"
 
@@ -58,7 +61,6 @@ update_windows_only = "Actualización disponible, pero solo Windows es compatibl
 p2p_warning = "Las sesiones colaborativas utilizan redes P2P. Otros usuarios en la sesión pueden ver su dirección IP."
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Se produjo un error:"
 made_by = "Hecho por landaire."
 credits = "Gracias a Trackpad, TTaro, lkolbly por sus contribuciones."

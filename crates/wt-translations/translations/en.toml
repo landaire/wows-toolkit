@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "English"
 
@@ -72,7 +75,6 @@ p2p_warning = "Collaborative sessions use peer-to-peer networking. Other users i
 # -- Labels --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "An error occurred:"
 made_by = "Made by landaire."
 credits = "Thanks to Trackpad, TTaro, lkolbly for their contributions."

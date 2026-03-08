@@ -1,3 +1,6 @@
+# You are encouraged to suggest edits to this file on GitHub by either filing
+# an issue, editing the file directly and creating a pull request, or just
+# mentioning it in the Discord.
 [meta]
 language_name = "Nederlands"
 
@@ -72,7 +75,6 @@ p2p_warning = "Samenwerkingssessies gebruiken P2P-netwerken. Andere gebruikers i
 # -- Labels --
 
 [ui.labels]
-debug_build = "⚠ Debug build ⚠"
 error_occurred = "Er is een fout opgetreden:"
 made_by = "Gemaakt door landaire."
 credits = "Met dank aan Trackpad, TTaro, lkolbly voor hun bijdragen."
