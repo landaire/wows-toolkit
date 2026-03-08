@@ -1,11 +1,19 @@
 name: Deploy site to GitHub Pages
 
 on:
-  # Auto-deploy when a toolkit release is published (keeps web in sync).
+  # Deploy on every push to main (site content updates).
+  push:
+    branches: [main]
+  # Rebuild tactics WASM when a release is published.
   release:
     types: [published]
-  # Manual trigger for web-only fixes or coordinated deploys.
+  # Manual trigger — optionally rebuild tactics.
   workflow_dispatch:
+    inputs:
+      build_tactics:
+        description: "Rebuild tactics WASM app"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,6 +25,9 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  BUILD_TACTICS: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.build_tactics == 'true') }}
+
 jobs:
   deploy:
     environment:
@@ -26,25 +37,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --- Tactics WASM build (release or manual opt-in) ---
       - name: Install Nix
+        if: env.BUILD_TACTICS == 'true'
         uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Nix cache
+        if: env.BUILD_TACTICS == 'true'
         uses: DeterminateSystems/magic-nix-cache-action@v8
         with:
           use-flakehub: false
 
       - name: Build wt-web WASM app
+        if: env.BUILD_TACTICS == 'true'
         run: nix develop --command trunk build --release --public-url /wows-toolkit/tactics/
         working-directory: crates/wt-web
 
+      - name: Save tactics build to cache
+        if: env.BUILD_TACTICS == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: crates/wt-web/dist
+          key: tactics-dist-${{ github.sha }}
+
+      # --- Restore cached tactics when not building fresh ---
+      - name: Restore tactics build from cache
+        if: env.BUILD_TACTICS != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: crates/wt-web/dist
+          key: tactics-dist-will-not-match
+          restore-keys: tactics-dist-
+
+      # --- Assemble and deploy ---
       - name: Assemble deploy directory
         run: |
           mkdir -p _deploy/tactics
           cp -r site/* _deploy/
-          cp -r crates/wt-web/dist/* _deploy/tactics/
+          if [ -d crates/wt-web/dist ] && [ "$(ls -A crates/wt-web/dist)" ]; then
+            cp -r crates/wt-web/dist/* _deploy/tactics/
+          else
+            echo "::warning::No tactics build found in cache. Deploying site without tactics."
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
