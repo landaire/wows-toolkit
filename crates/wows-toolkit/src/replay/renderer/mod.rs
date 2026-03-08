@@ -654,7 +654,7 @@ pub fn launch_replay_renderer(
 
     let open = Arc::clone(&viewer.open);
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("replay-playback", move || {
         playback_thread(
             raw_meta,
             packet_data,

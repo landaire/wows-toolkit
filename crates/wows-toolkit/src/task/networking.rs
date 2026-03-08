@@ -467,7 +467,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
 
 pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("load-constants", move || {
         let result: Result<BackgroundTaskCompletion, Report> = serde_json::from_slice(&constants)
             .map(BackgroundTaskCompletion::ConstantsLoaded)
             .map_err(|err| Report::from(ToolkitError::from(err)));
@@ -479,7 +479,7 @@ pub fn load_constants(constants: Vec<u8>) -> BackgroundTask {
 
 pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("load-personal-rating", move || {
         let result: Result<BackgroundTaskCompletion, Report> = serde_json::from_slice(&data)
             .map(BackgroundTaskCompletion::PersonalRatingDataLoaded)
             .map_err(|err| Report::from(ToolkitError::from(err)));

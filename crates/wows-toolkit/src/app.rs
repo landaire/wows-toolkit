@@ -1388,7 +1388,7 @@ impl WowsToolkitApp {
                         let game_metadata = wd.game_metadata.clone();
                         drop(wd);
                         let (tx, rx) = std::sync::mpsc::channel();
-                        std::thread::spawn(move || {
+                        crate::util::thread::spawn_logged("load-ship-assets", move || {
                             let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                                 let metadata =
                                     game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;

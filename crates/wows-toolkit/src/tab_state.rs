@@ -902,7 +902,7 @@ impl TabState {
         let (tx, rx) = mpsc::channel();
         let locale = self.settings.locale.clone().unwrap();
         let fallback_constants = self.game_constants.read().clone();
-        let _join_handle = std::thread::spawn(move || {
+        let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
             let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));
         });
 

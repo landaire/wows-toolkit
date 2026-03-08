@@ -1443,7 +1443,7 @@ impl ToolkitTabViewer<'_> {
         let filtered_files = active_files;
         let vfs = active_vfs;
 
-        std::thread::spawn(move || {
+        crate::util::thread::spawn_logged("vfs-search", move || {
             let regex = match regex::bytes::Regex::new(&query) {
                 Ok(r) => r,
                 Err(_) => match regex::bytes::Regex::new(&regex::escape(&query)) {
@@ -1525,7 +1525,7 @@ impl ToolkitTabViewer<'_> {
         if !items_to_unpack.is_empty() {
             let output_dir = output_dir.to_owned();
             let mut file_queue = items_to_unpack.to_vec();
-            let _unpacker_thread = Some(std::thread::spawn(move || {
+            let _unpacker_thread = Some(crate::util::thread::spawn_logged("vfs-extract", move || {
                 let mut files_to_extract: Vec<VfsPath> = Vec::new();
                 let mut folders_created: HashSet<PathBuf> = HashSet::default();
                 while let Some(file) = file_queue.pop() {
@@ -1605,7 +1605,7 @@ impl ToolkitTabViewer<'_> {
 
             let game_params_path = vfs.join("content/GameParams.data");
             if let Ok(game_params_vfs) = game_params_path {
-                let _unpacker_thread = Some(std::thread::spawn(move || {
+                let _unpacker_thread = Some(crate::util::thread::spawn_logged("load-game-params", move || {
                     let mut game_params_data = Vec::new();
 
                     game_params_vfs
@@ -1716,7 +1716,7 @@ impl ToolkitTabViewer<'_> {
         let (tx, rx) = mpsc::channel();
         self.tab_state.browser_state.assets_bin_rx = Some(rx);
 
-        std::thread::spawn(move || {
+        crate::util::thread::spawn_logged("load-assets-bin", move || {
             let result = (|| -> Result<AssetsBinLoadResult, String> {
                 let assets_bin_path = vfs.join("content/assets.bin").map_err(|e| format!("{}", e))?;
                 let mut assets_data = Vec::new();
@@ -1848,7 +1848,7 @@ impl ToolkitTabViewer<'_> {
                                         if !is_loaded {
                                             let map = map.clone();
                                             let (tx, rx) = std::sync::mpsc::channel();
-                                            std::thread::spawn(move || match map.resolve_build(build) {
+                                            crate::util::thread::spawn_logged("resolve-build", move || match map.resolve_build(build) {
                                                 Some(_) => {
                                                     let _ = tx.send(Ok(
                                                         crate::task::BackgroundTaskCompletion::BuildDataLoaded {

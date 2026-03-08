@@ -6,6 +6,7 @@ pub(crate) mod formatting;
 pub(crate) mod game_params;
 pub(crate) mod personal_rating;
 pub(crate) mod replay_export;
+pub(crate) mod thread;
 
 // Re-export formatting helpers so `crate::util::separate_number` etc. still work.
 pub(crate) use formatting::*;

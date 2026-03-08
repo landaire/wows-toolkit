@@ -274,15 +274,23 @@ impl Player {
         player: &PlayerStateData,
         metadata_player: &MetadataPlayer,
         resources: &G,
-    ) -> Player {
-        Player {
+    ) -> Option<Player> {
+        let vehicle = resources.game_param_by_id(metadata_player.vehicle().id()).or_else(|| {
+            warn!(
+                "could not find vehicle for player {:?} (shipId={})",
+                metadata_player.name(),
+                metadata_player.vehicle().id()
+            );
+            None
+        })?;
+        Some(Player {
             initial_state: player.clone(),
             end_state: crate::RwCell::new(player.clone()),
             vehicle_entity: None,
             connection_change_info: crate::RwCell::new(Vec::new()),
-            vehicle: resources.game_param_by_id(metadata_player.vehicle().id()).expect("could not find player vehicle"),
+            vehicle,
             relation: metadata_player.relation(),
-        }
+        })
     }
 
     /// Create a Player from a mid-battle spawn (e.g. Operations reinforcement wave).
@@ -638,13 +646,20 @@ where
         let players: Vec<SharedPlayer> = game_meta
             .vehicles
             .iter()
-            .map(|vehicle| {
-                Rc::new(MetadataPlayer {
+            .filter_map(|vehicle| {
+                let vehicle_param = game_resources.game_param_by_id(vehicle.shipId).or_else(|| {
+                    warn!(
+                        "skipping unknown vehicle shipId={} for player {:?}",
+                        vehicle.shipId, vehicle.name
+                    );
+                    None
+                })?;
+                Some(Rc::new(MetadataPlayer {
                     id: vehicle.id,
                     name: vehicle.name.clone(),
                     relation: Relation::new(vehicle.relation),
-                    vehicle: game_resources.game_param_by_id(vehicle.shipId).expect("could not find vehicle"),
-                })
+                    vehicle: vehicle_param,
+                }))
             })
             .collect();
 
@@ -1197,7 +1212,10 @@ where
 
                 let captain_id = props.crew_modifiers_compact_params.params_id;
                 let captain = if captain_id.raw() != 0 {
-                    Some(self.game_resources.game_param_by_id(captain_id).expect("failed to get captain"))
+                    self.game_resources.game_param_by_id(captain_id).or_else(|| {
+                        warn!("failed to get captain param for id={}", captain_id);
+                        None
+                    })
                 } else {
                     None
                 };
@@ -2760,14 +2778,20 @@ where
                 debug!("OnArenaStateReceived");
                 self.arena_id = arg0;
                 for player in players.iter().chain(bots.iter()) {
-                    let metadata_player = self
+                    let Some(metadata_player) = self
                         .metadata_players
                         .iter()
                         .find(|meta_player| meta_player.id == player.meta_ship_id())
-                        .expect("could not map arena player to metadata player");
+                    else {
+                        warn!("could not map arena player to metadata player (meta_ship_id={})", player.meta_ship_id());
+                        continue;
+                    };
 
-                    let battle_player =
-                        Player::from_arena_player(player, metadata_player.as_ref(), self.game_resources);
+                    let Some(battle_player) =
+                        Player::from_arena_player(player, metadata_player.as_ref(), self.game_resources)
+                    else {
+                        continue;
+                    };
 
                     let player_has_died = self
                         .entities_by_id

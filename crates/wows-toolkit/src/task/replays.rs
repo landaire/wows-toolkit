@@ -437,29 +437,34 @@ fn parse_replay_data_in_background(
                     (wows_data.game_metadata.clone(), wows_data.patch_version, wows_data.game_constants.clone())
                 };
                 if let Some(metadata_provider) = metadata_provider {
-                    // Try to populate cap layout cache from this replay (lightweight
-                    // parse of first ~50 packets only).
+                    // Populate cap layout cache in a separate thread so it
+                    // cannot interfere with the background parser thread.
                     {
                         let key = crate::data::cap_layout::CapLayoutKey {
                             map_id: replay_file.meta.mapId,
                             scenario_config_id: replay_file.meta.scenarioConfigId,
                         };
                         let needs_extract = !data.cap_layout_db.lock().contains(&key);
-                        if needs_extract
-                            && let Some(layout) = crate::data::cap_layout::extract_cap_layout_from_replay(
-                                path,
-                                metadata_provider.as_ref(),
-                                Some(gc.as_ref()),
-                            )
-                        {
-                            let mut db = data.cap_layout_db.lock();
-                            if db.insert(layout) {
-                                debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
-                                // Save is best-effort; ignore errors.
-                                if let Some(cache_path) = crate::data::cap_layout::cache_path() {
-                                    let _ = db.save(&cache_path);
+                        if needs_extract {
+                            let cap_path = path.to_path_buf();
+                            let cap_provider = Arc::clone(&metadata_provider);
+                            let cap_gc = Arc::clone(&gc);
+                            let cap_db = Arc::clone(&data.cap_layout_db);
+                            crate::util::thread::spawn_logged("cap-layout-extract", move || {
+                                if let Some(layout) = crate::data::cap_layout::extract_cap_layout_from_replay(
+                                    &cap_path,
+                                    cap_provider.as_ref(),
+                                    Some(cap_gc.as_ref()),
+                                ) {
+                                    let mut db = cap_db.lock();
+                                    if db.insert(layout) {
+                                        debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
+                                        if let Some(cache_path) = crate::data::cap_layout::cache_path() {
+                                            let _ = db.save(&cache_path);
+                                        }
+                                    }
                                 }
-                            }
+                            });
                         }
                     }
 
@@ -672,7 +677,7 @@ pub struct BackgroundParserThread {
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
     debug!("starting background parsing thread");
-    let _join_handle = std::thread::spawn(move || {
+    let _join_handle = crate::util::thread::spawn_logged("background-replay-parser", move || {
         let client = reqwest::blocking::Client::new();
 
         #[cfg(not(feature = "shipbuilds_debugging"))]
@@ -772,7 +777,7 @@ pub fn start_populating_player_inspector(
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("player-inspector", move || {
         for path in replays {
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {

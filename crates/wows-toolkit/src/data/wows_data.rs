@@ -383,7 +383,7 @@ impl ReplayLoader {
         let deps = self.deps;
         let replay = self.replay;
 
-        let _join_handle = std::thread::spawn(move || {
+        let _join_handle = crate::util::thread::spawn_logged("load-replay", move || {
             // Determine the replay's build and get version-matched data
             let replay_version = {
                 let r = replay.read();

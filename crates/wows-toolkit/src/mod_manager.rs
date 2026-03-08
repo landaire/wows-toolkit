@@ -37,7 +37,7 @@ pub enum ModTaskInfo {
 // Used in mod manager feature
 pub fn load_mods_db() -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("load-mods-db", move || {
         let mods_db = std::fs::read_to_string("../mods.toml").unwrap();
         let result = toml::from_str::<ModManagerIndex>(&mods_db)
             .context("failed to deserialize mods db")
@@ -285,7 +285,7 @@ pub fn start_mod_manager_thread(
     receiver: mpsc::Receiver<ModInfo>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
 ) {
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("mod-watcher", move || {
         while let Ok(mod_info) = receiver.recv() {
             eprintln!("mod was changed: {:?}", mod_info.meta.name());
 

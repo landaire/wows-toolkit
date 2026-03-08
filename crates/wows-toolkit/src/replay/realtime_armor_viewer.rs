@@ -298,7 +298,7 @@ impl RealtimeArmorViewer {
         let (tx, rx) = mpsc::channel();
         let requested_lod = lod;
 
-        std::thread::spawn(move || {
+        crate::util::thread::spawn_logged("load-ship-model", move || {
             let result = (|| {
                 use wowsunpack::game_params::types::GameParamProvider;
                 let param = ship_assets.metadata().game_param_by_index(vehicle.index());

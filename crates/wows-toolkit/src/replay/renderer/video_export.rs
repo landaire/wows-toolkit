@@ -86,7 +86,7 @@ pub(super) fn save_as_video(
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("video-export", move || {
         let result = render_video_blocking(
             &output_path,
             &raw_meta,
@@ -129,7 +129,7 @@ pub(super) fn render_video_to_clipboard(
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("video-export-images", move || {
         let temp_dir = match tempfile::tempdir() {
             Ok(d) => d,
             Err(e) => {

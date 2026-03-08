@@ -135,7 +135,7 @@ impl ToolkitTabViewer<'_> {
             let game_metadata = wd.game_metadata.clone();
             drop(wd);
             let (tx, rx) = mpsc::channel();
-            std::thread::spawn(move || {
+            crate::util::thread::spawn_logged("load-ship-assets", move || {
                 let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                     let metadata = game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
                     let assets = wowsunpack::export::ship::ShipAssets::from_vfs_with_metadata(&vfs, metadata)
@@ -959,7 +959,7 @@ impl ToolkitTabViewer<'_> {
                                 let ship_name = display_name.clone();
                                 let param_idx = param_index.clone();
                                 let hull = selected_hull.clone();
-                                std::thread::spawn(move || {
+                                crate::util::thread::spawn_logged("load-ship-model", move || {
                                     let result = (|| -> Result<(), String> {
                                         use wowsunpack::game_params::types::GameParamProvider;
                                         let param = assets.metadata().game_param_by_index(&param_idx);
@@ -2134,7 +2134,7 @@ fn load_ship_for_pane_with_lod(
         })
         .unwrap_or_default();
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("load-ship-model", move || {
         let result = match vehicle {
             Some(v) => {
                 let load_opts = crate::armor_viewer::common::ShipLoadOptions {
@@ -2179,7 +2179,7 @@ pub(crate) fn start_hull_lod_reload(
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("update-ship-model", move || {
         let result = (|| {
             let vehicle = vehicle.ok_or_else(|| "No vehicle found for param index".to_string())?;
             let options = wowsunpack::export::ship::ShipExportOptions {
@@ -2282,7 +2282,7 @@ fn start_upgrade_reload(
     let param = ship_assets.metadata().game_param_by_index(param_index);
     let vehicle = param.as_ref().and_then(|p| p.vehicle().cloned());
 
-    std::thread::spawn(move || {
+    crate::util::thread::spawn_logged("generate-ship-model", move || {
         let result = (|| {
             let vehicle = vehicle.ok_or_else(|| "No vehicle found for param index".to_string())?;
             let options = wowsunpack::export::ship::ShipExportOptions {
