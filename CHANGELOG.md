@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.58] - 2026-03-08
+
+### 🚀 Features
+
+- Multi-language support
+
+### App
+
+- Possibly fix background thread crashing, failing to ipck up new replays
+- Reduce some inefficient checks in the hot path
+
+### Renderer
+
+- Fix operation building icons + improper ship icon states + crash for unsupported plane icons
+- Add stat panel and translate common messages
+- Fix zoom clipping canvas under stats panel
+- Fix some lingering issues with the stat panel in the renderer
+
+### Replay_inspector
+
+- Fix players missing from received damage (#27)
+
+### Replays
+
+- Fix self observed damage stats
+
+### Translations
+
+- Fix slightly improper Polish translation for spotting damage
+
 ## [0.1.57] - 2026-03-05
 
 ### 🚀 Features
