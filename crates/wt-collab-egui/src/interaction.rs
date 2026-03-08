@@ -519,6 +519,10 @@ pub struct ZoomPanConfig {
     /// Whether to route scroll events to tool yaw rotation when a PlacingShip
     /// tool is active. Desktop tactics/replay: `true`. Web: `false`.
     pub handle_tool_yaw: bool,
+    /// Logical width of the zoomable map area. When set, pan clamping uses this
+    /// instead of the full canvas width, preventing the map from panning into
+    /// non-map areas (e.g. a stats panel). `None` = use full canvas width.
+    pub map_width: Option<f32>,
 }
 
 /// Handle scroll-to-zoom, drag-to-pan, double-click-to-reset, and pan clamping.
@@ -606,8 +610,11 @@ pub fn handle_viewport_zoom_pan(
         changed = true;
     }
 
-    // Clamp pan so the map can't scroll past its edges
-    let visible_w = logical_canvas.x.min(layout.scaled_canvas.x) / layout.window_scale;
+    // Clamp pan so the map can't scroll past its edges.
+    // When map_width is set, use it instead of the full canvas width so the map
+    // can't pan into side-panel areas.
+    let effective_w = config.map_width.unwrap_or(logical_canvas.x);
+    let visible_w = (effective_w * layout.window_scale).min(layout.scaled_canvas.x) / layout.window_scale;
     let visible_h =
         (logical_canvas.y.min(layout.scaled_canvas.y) - config.hud_height * layout.window_scale) / layout.window_scale;
     let map_zoomed = MINIMAP_SIZE as f32 * zoom_pan.zoom;

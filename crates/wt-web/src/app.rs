@@ -642,7 +642,7 @@ impl WebApp {
         let logical_canvas = egui::Vec2::new(MINIMAP_SIZE as f32, CANVAS_HEIGHT as f32);
         let available = ui.available_size();
         let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-        let layout = compute_canvas_layout(available, logical_canvas, self.viewport.zoom, response.rect.min);
+        let layout = compute_canvas_layout(available, logical_canvas, self.viewport.zoom, response.rect.min, None);
         let window_scale = layout.window_scale;
 
         // Zoom/pan input handling
@@ -652,7 +652,7 @@ impl WebApp {
             &mut self.viewport,
             &layout,
             logical_canvas,
-            &ZoomPanConfig { allow_left_drag_pan: true, hud_height, handle_tool_yaw: false },
+            &ZoomPanConfig { allow_left_drag_pan: true, hud_height, handle_tool_yaw: false, map_width: None },
             None,
             false,
         );

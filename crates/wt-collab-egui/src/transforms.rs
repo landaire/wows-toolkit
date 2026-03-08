@@ -103,11 +103,33 @@ pub struct CanvasLayout {
 ///
 /// Smoothly blends between fit-scale (entire canvas visible, letterboxed) at zoom 1.0
 /// and fill-scale (no empty borders) at zoom 2.0+, centering within the available rect.
-pub fn compute_canvas_layout(available: Vec2, logical_canvas: Vec2, zoom: f32, rect_min: Pos2) -> CanvasLayout {
+///
+/// `map_width` optionally restricts the fill-scale calculation to a narrower region
+/// (e.g. only the minimap area, excluding the stats panel). When set, zooming fills
+/// the viewport based on the map width rather than the full canvas width, preventing
+/// zoomed content from spilling into side panels.
+pub fn compute_canvas_layout(
+    available: Vec2,
+    logical_canvas: Vec2,
+    zoom: f32,
+    rect_min: Pos2,
+    map_width: Option<f32>,
+) -> CanvasLayout {
     let scale_x = available.x / logical_canvas.x;
     let scale_y = available.y / logical_canvas.y;
     let fit_scale = scale_x.min(scale_y);
-    let fill_scale = scale_x.max(scale_y);
+
+    // For fill-scale, use the map-only width when provided so that zooming
+    // fills only the map area rather than the full canvas (which may include
+    // a stats panel).
+    let fill_scale = match map_width {
+        Some(mw) => {
+            let map_scale_x = available.x / mw;
+            map_scale_x.max(scale_y)
+        }
+        None => scale_x.max(scale_y),
+    };
+
     let t = ((zoom - 1.0) / 1.0).clamp(0.0, 1.0);
     let window_scale = (fit_scale + t * (fill_scale - fit_scale)).max(0.1);
 

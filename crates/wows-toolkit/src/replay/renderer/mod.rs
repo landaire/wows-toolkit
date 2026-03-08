@@ -1096,7 +1096,8 @@ impl ReplayRendererViewer {
                     let available = ui.available_size();
                     let current_zoom = zoom_pan_arc.lock().zoom;
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min);
+                    let map_w = if show_stats_panel { Some(MINIMAP_SIZE as f32) } else { None };
+                    let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min, map_w);
                     let window_scale = layout.window_scale;
 
                     // Zoom/pan input handling
@@ -1112,6 +1113,7 @@ impl ReplayRendererViewer {
                                 allow_left_drag_pan: true,
                                 hud_height: HUD_HEIGHT as f32,
                                 handle_tool_yaw: true,
+                                map_width: map_w,
                             },
                             Some(&mut annotation_arc.lock()),
                             false,

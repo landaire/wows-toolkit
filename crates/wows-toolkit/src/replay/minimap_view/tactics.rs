@@ -1178,7 +1178,7 @@ impl TacticsBoardViewer {
         let available = ui.available_size();
         let current_zoom = zoom_pan_arc.lock().zoom;
         let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-        let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min);
+        let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min, None);
         let window_scale = layout.window_scale;
 
         // Zoom/pan input (scroll + middle-click)
@@ -1191,7 +1191,7 @@ impl TacticsBoardViewer {
                 &mut zp,
                 &layout,
                 logical_canvas,
-                &ZoomPanConfig { allow_left_drag_pan: true, hud_height: 0.0, handle_tool_yaw: true },
+                &ZoomPanConfig { allow_left_drag_pan: true, hud_height: 0.0, handle_tool_yaw: true, map_width: None },
                 Some(&mut annotation_state_arc.lock()),
                 left_pan_blocked,
             );
