@@ -524,8 +524,9 @@ fn draw_score_bar(
     advantage_label: &str,
     advantage_team: i32,
     fonts: &GameFonts,
+    map_width: u32,
 ) {
-    let width = pm.width() as f32;
+    let width = map_width as f32;
     let bar_height = crate::HUD_HEIGHT as f32;
     let max_score = max_score as f32;
     let half = width / 2.0;
@@ -656,9 +657,9 @@ fn draw_score_bar(
 }
 
 /// Draw the game timer.
-fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts) {
+fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedClock, fonts: &GameFonts, map_width: u32) {
     let font = &fonts.primary;
-    let center_x = pm.width() as i32 / 2;
+    let center_x = map_width as i32 / 2;
     let main_scale = fonts.scale(16.0);
     let small_scale = fonts.scale(11.0);
 
@@ -689,11 +690,11 @@ fn draw_timer(pm: &mut Pixmap, time_remaining: Option<i64>, elapsed: ElapsedCloc
     }
 }
 
-fn draw_pre_battle_countdown(pm: &mut Pixmap, seconds: i64, fonts: &GameFonts, resolver: &dyn TextResolver) {
+fn draw_pre_battle_countdown(pm: &mut Pixmap, seconds: i64, fonts: &GameFonts, resolver: &dyn TextResolver, map_width: u32) {
     let text = format!("{}", seconds);
     let subtitle = resolver.resolve(&TranslatableText::PreBattleLabel);
     let glow_color: [u8; 3] = [255, 200, 50]; // gold
-    draw_battle_result_overlay(pm, &text, Some(&subtitle), glow_color, true, fonts);
+    draw_battle_result_overlay(pm, &text, Some(&subtitle), glow_color, true, fonts, map_width);
 }
 
 /// Map a DeathCause to the icon key used in the death_cause_icons HashMap.
@@ -731,6 +732,7 @@ fn draw_kill_feed(
     fonts: &GameFonts,
     ship_icons: &HashMap<String, ShipIcon>,
     death_cause_icons: &HashMap<String, RgbaImage>,
+    map_width: u32,
 ) {
     let font = &fonts.primary;
     let name_scale = fonts.scale(12.0);
@@ -740,7 +742,7 @@ fn draw_kill_feed(
     let icon_size = crate::assets::ICON_SIZE as i32;
     let cause_icon_size = icon_size;
     let gap = 2i32; // gap between elements
-    let width = pm.width() as i32;
+    let width = map_width as i32;
 
     let (_, text_h) = text_size(name_scale, font, "Ag");
     let text_h = text_h as i32;
@@ -808,11 +810,11 @@ fn draw_kill_feed(
         draw_text_shadow(pm, entry.killer_color, x, y, name_scale, font, &entry.killer_name);
         x += killer_name_w as i32;
 
-        // Killer ship icon (facing left = flipped horizontally)
+        // Killer ship icon (friendly=left, enemy=right)
         if has_killer_icon {
             x += gap;
             let icon = &ship_icons[entry.killer_species.as_ref().unwrap()];
-            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.killer_color, true);
+            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.killer_color, !entry.killer_is_friendly);
             x += icon_size + gap;
         } else if killer_ship_w > 0 {
             x += gap;
@@ -837,11 +839,11 @@ fn draw_kill_feed(
         draw_text_shadow(pm, entry.victim_color, x, y, name_scale, font, &entry.victim_name);
         x += victim_name_w as i32;
 
-        // Victim ship icon (facing right = normal orientation)
+        // Victim ship icon (friendly=left, enemy=right)
         if has_victim_icon {
             x += gap;
             let icon = &ship_icons[entry.victim_species.as_ref().unwrap()];
-            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.victim_color, false);
+            draw_kill_feed_icon(pm, icon, x, icon_y, icon_size, entry.victim_color, !entry.victim_is_friendly);
             x += icon_size + gap;
         } else if victim_ship_w > 0 {
             x += gap;
@@ -1217,9 +1219,10 @@ fn draw_battle_result_overlay(
     glow_color: [u8; 3],
     subtitle_above: bool,
     fonts: &GameFonts,
+    map_width: u32,
 ) {
     let font = &fonts.primary;
-    let w = pm.width();
+    let w = map_width;
     let h = pm.height();
 
     let font_height = w as f32 / 8.0;
@@ -1379,6 +1382,9 @@ pub struct ImageTarget {
     canvas: Pixmap,
     /// Pre-built background: map image + grid overlay. Cloned at start of each frame.
     base_canvas: Pixmap,
+    /// Width of the minimap area (excludes the stats panel).
+    /// HUD elements (score bar, timer, kill feed) are confined to this width.
+    map_width: u32,
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
     plane_icons: HashMap<String, RgbaImage>,
@@ -1434,6 +1440,7 @@ impl ImageTarget {
         Self {
             canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
             base_canvas: base,
+            map_width: MINIMAP_SIZE,
             fonts,
             ship_icons,
             plane_icons,
@@ -1717,6 +1724,7 @@ impl RenderTarget for ImageTarget {
                     &advantage_label,
                     advantage_team,
                     &self.fonts,
+                    self.map_width,
                 );
             }
             DrawCommand::TeamAdvantage { .. } => {
@@ -1724,10 +1732,10 @@ impl RenderTarget for ImageTarget {
                 // this command is retained for consumers that want the breakdown data.
             }
             DrawCommand::Timer { time_remaining, elapsed } => {
-                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts);
+                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.map_width);
             }
             DrawCommand::PreBattleCountdown { seconds } => {
-                draw_pre_battle_countdown(&mut self.canvas, *seconds, &self.fonts, &*self.text_resolver);
+                draw_pre_battle_countdown(&mut self.canvas, *seconds, &self.fonts, &*self.text_resolver, self.map_width);
             }
             DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
                 let icon_size = 16i32;
@@ -1765,8 +1773,8 @@ impl RenderTarget for ImageTarget {
                     }
                 }
 
-                // Enemy buffs: right side, starting from right edge
-                let width = self.canvas.width() as i32;
+                // Enemy buffs: right side, starting from right edge of map area
+                let width = self.map_width as i32;
                 let mut x = width - 4;
                 for (marker, count) in enemy_buffs {
                     if let Some(icon) = self.powerup_icons.get(marker.as_str()) {
@@ -1875,7 +1883,7 @@ impl RenderTarget for ImageTarget {
                 }
             }
             DrawCommand::KillFeed { entries } => {
-                draw_kill_feed(&mut self.canvas, entries, &self.fonts, &self.ship_icons, &self.death_cause_icons);
+                draw_kill_feed(&mut self.canvas, entries, &self.fonts, &self.ship_icons, &self.death_cause_icons, self.map_width);
             }
             DrawCommand::ChatOverlay { entries } => {
                 draw_chat_overlay(&mut self.canvas, entries, &self.fonts, &self.ship_icons, HUD_HEIGHT);
@@ -1892,13 +1900,14 @@ impl RenderTarget for ImageTarget {
                     *color,
                     *subtitle_above,
                     &self.fonts,
+                    self.map_width,
                 );
             }
             DrawCommand::StatsPanel { x, width } => {
                 // Dark background for the stats panel area
-                draw_filled_rect(&mut self.canvas, *x as f32, 0.0, *width as f32, CANVAS_HEIGHT as f32, [15, 18, 25], 1.0);
+                draw_filled_rect(&mut self.canvas, *x as f32, 0.0, *width as f32, CANVAS_HEIGHT as f32, [30, 34, 42], 0.96);
                 // Subtle left border
-                draw_line(&mut self.canvas, *x as f32, 0.0, *x as f32, CANVAS_HEIGHT as f32, [50, 55, 65], 0.8, 1.0);
+                draw_line(&mut self.canvas, *x as f32, 0.0, *x as f32, CANVAS_HEIGHT as f32, [55, 60, 72], 0.8, 1.0);
             }
             DrawCommand::StatsSilhouette { x, y, width, height, ship_param_id: _, hp_fraction, hp_current, hp_max, silhouette } => {
                 let padding = 8;
@@ -2023,9 +2032,9 @@ impl RenderTarget for ImageTarget {
                 let font = &self.fonts.primary;
 
                 // Fixed-size box background
-                draw_filled_rect(&mut self.canvas, *x as f32, *y as f32, *width as f32, *height as f32, [10, 12, 18], 0.8);
+                draw_filled_rect(&mut self.canvas, *x as f32, *y as f32, *width as f32, *height as f32, [24, 28, 36], 0.8);
                 // Top border
-                draw_line(&mut self.canvas, *x as f32 + 4.0, *y as f32, (*x + *width - 4) as f32, *y as f32, [50, 55, 65], 0.6, 1.0);
+                draw_line(&mut self.canvas, *x as f32 + 4.0, *y as f32, (*x + *width - 4) as f32, *y as f32, [55, 60, 72], 0.6, 1.0);
 
                 // Pre-compute entry heights
                 let mut entry_heights: Vec<i32> = Vec::new();
@@ -2064,22 +2073,26 @@ impl RenderTarget for ImageTarget {
                     }
                     match &entry.kind {
                         ActivityFeedKind::Kill(kill) => {
-                            // Background pill
-                            draw_filled_rect(&mut self.canvas, (inner_x - 2) as f32, (ey - 1) as f32, (inner_w + 4) as f32, kill_row_h as f32, [0, 0, 0], 0.4);
 
                             let (_, text_h) = text_size(name_scale, font, "Ag");
                             let icon_y = ey + (text_h as i32 - icon_size) / 2;
                             let mut cx = inner_x;
+
+                            // Kill prefix
+                            let prefix = " | ";
+                            draw_text_shadow(&mut self.canvas, [140, 140, 140], cx, ey, name_scale, font, prefix);
+                            let (pw, _) = text_size(name_scale, font, prefix);
+                            cx += pw as i32;
 
                             // Killer name
                             draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, name_scale, font, &kill.killer_name);
                             let (kw, _) = text_size(name_scale, font, &kill.killer_name);
                             cx += kw as i32 + gap;
 
-                            // Killer ship icon
+                            // Killer ship icon (friendly=left, enemy=right)
                             if let Some(ref species) = kill.killer_species
                                 && let Some(icon) = self.ship_icons.get(species) {
-                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, kill.killer_color, true);
+                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, kill.killer_color, !kill.killer_is_friendly);
                                 cx += icon_size + gap;
                             }
 
@@ -2093,6 +2106,14 @@ impl RenderTarget for ImageTarget {
 
                             // Victim name
                             draw_text_shadow(&mut self.canvas, kill.victim_color, cx, ey, name_scale, font, &kill.victim_name);
+                            let (vw, _) = text_size(name_scale, font, &kill.victim_name);
+                            cx += vw as i32 + gap;
+
+                            // Victim ship icon (friendly=left, enemy=right)
+                            if let Some(ref species) = kill.victim_species
+                                && let Some(icon) = self.ship_icons.get(species) {
+                                draw_kill_feed_icon(&mut self.canvas, icon, cx, icon_y, icon_size, kill.victim_color, !kill.victim_is_friendly);
+                            }
 
                             ey += kill_row_h;
                         }

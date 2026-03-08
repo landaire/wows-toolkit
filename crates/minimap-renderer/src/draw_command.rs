@@ -237,6 +237,8 @@ pub struct KillFeedEntry {
     pub killer_ship_name: Option<String>,
     /// Killer's team color
     pub killer_color: [u8; 3],
+    /// True if killer is self or ally
+    pub killer_is_friendly: bool,
     /// Victim's player name
     pub victim_name: String,
     /// Victim's ship species for icon lookup
@@ -245,6 +247,8 @@ pub struct KillFeedEntry {
     pub victim_ship_name: Option<String>,
     /// Victim's team color
     pub victim_color: [u8; 3],
+    /// True if victim is self or ally
+    pub victim_is_friendly: bool,
     /// How the victim died
     pub cause: Recognized<DeathCause>,
 }

@@ -828,18 +828,19 @@ pub fn draw_command_to_shapes(
                 shapes.push(Shape::galley(Pos2::new(x, y), killer_galley, Color32::TRANSPARENT));
                 x += killer_name_w;
 
-                // Killer ship icon
+                // Killer ship icon (friendly=points left (PI), enemy=points right (0))
                 if has_killer_icon {
                     x += gap;
                     let sp = entry.killer_species.as_ref().unwrap();
                     if let Some(tex) = textures.ship_icons.get(sp.as_str()) {
                         let tint =
                             Color32::from_rgb(entry.killer_color[0], entry.killer_color[1], entry.killer_color[2]);
+                        let angle = if entry.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
                         shapes.push(make_rotated_icon_mesh(
                             tex.id(),
                             Pos2::new(x + icon_size / 2.0, icon_center_y),
                             icon_size,
-                            std::f32::consts::PI,
+                            angle,
                             tint,
                         ));
                     }
@@ -878,18 +879,19 @@ pub fn draw_command_to_shapes(
                 shapes.push(Shape::galley(Pos2::new(x, y), victim_galley, Color32::TRANSPARENT));
                 x += victim_name_w;
 
-                // Victim ship icon
+                // Victim ship icon (friendly=points left (PI), enemy=points right (0))
                 if has_victim_icon {
                     x += gap;
                     let sp = entry.victim_species.as_ref().unwrap();
                     if let Some(tex) = textures.ship_icons.get(sp.as_str()) {
                         let tint =
                             Color32::from_rgb(entry.victim_color[0], entry.victim_color[1], entry.victim_color[2]);
+                        let angle = if entry.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
                         shapes.push(make_rotated_icon_mesh(
                             tex.id(),
                             Pos2::new(x + icon_size / 2.0, icon_center_y),
                             icon_size,
-                            0.0,
+                            angle,
                             tint,
                         ));
                     }
@@ -1367,12 +1369,12 @@ pub fn draw_command_to_shapes(
             shapes.push(Shape::rect_filled(
                 Rect::from_min_size(origin, size),
                 CornerRadius::ZERO,
-                Color32::from_rgba_unmultiplied(15, 18, 25, 255),
+                Color32::from_rgba_unmultiplied(30, 34, 42, 245),
             ));
             // Left border line
             shapes.push(Shape::LineSegment {
                 points: [origin, Pos2::new(origin.x, origin.y + size.y)],
-                stroke: Stroke::new(ws, Color32::from_rgba_unmultiplied(50, 55, 65, 200)),
+                stroke: Stroke::new(ws, Color32::from_rgba_unmultiplied(55, 60, 72, 200)),
             });
         }
 
@@ -1557,7 +1559,7 @@ pub fn draw_command_to_shapes(
             shapes.push(Shape::rect_filled(
                 box_rect,
                 CornerRadius::same(2),
-                Color32::from_rgba_unmultiplied(10, 12, 18, 200),
+                Color32::from_rgba_unmultiplied(24, 28, 36, 200),
             ));
             // Top border
             shapes.push(Shape::LineSegment {
@@ -1565,7 +1567,7 @@ pub fn draw_command_to_shapes(
                     Pos2::new(origin.x + 4.0 * ws, origin.y),
                     Pos2::new(origin.x + (*width as f32 - 4.0) * ws, origin.y),
                 ],
-                stroke: Stroke::new(ws * 0.5, Color32::from_rgba_unmultiplied(50, 55, 65, 150)),
+                stroke: Stroke::new(ws * 0.5, Color32::from_rgba_unmultiplied(55, 60, 72, 150)),
             });
 
             // All feed content goes into a clipped group
@@ -1620,17 +1622,16 @@ pub fn draw_command_to_shapes(
                         let killer_color = color_from_rgb(kill.killer_color);
                         let victim_color = color_from_rgb(kill.victim_color);
 
-                        // Background pill
-                        feed_shapes.push(Shape::rect_filled(
-                            Rect::from_min_size(
-                                Pos2::new(inner_x - 2.0 * ws, ey - 1.0 * ws),
-                                Vec2::new(inner_w + 4.0 * ws, kill_row_h),
-                            ),
-                            CornerRadius::ZERO,
-                            Color32::from_black_alpha(100),
-                        ));
+
 
                         let mut cx = inner_x;
+
+                        // Kill prefix
+                        let prefix_galley = ctx.fonts_mut(|f| {
+                            f.layout_no_wrap(" | ".into(), name_font.clone(), Color32::from_rgb(140, 140, 140))
+                        });
+                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), prefix_galley.clone(), Color32::TRANSPARENT));
+                        cx += prefix_galley.size().x;
 
                         // Killer name
                         let killer_galley = ctx.fonts_mut(|f| {
@@ -1640,15 +1641,16 @@ pub fn draw_command_to_shapes(
                         feed_shapes.push(Shape::galley(Pos2::new(cx, ey), killer_galley.clone(), Color32::TRANSPARENT));
                         cx += killer_galley.size().x + gap;
 
-                        // Killer ship icon
+                        // Killer ship icon (friendly=points left (PI), enemy=points right (0))
                         if let Some(ref species) = kill.killer_species
                             && let Some(tex) = textures.ship_icons.get(species.as_str()) {
                                 let tint = Color32::from_rgb(kill.killer_color[0], kill.killer_color[1], kill.killer_color[2]);
+                                let angle = if kill.killer_is_friendly { std::f32::consts::PI } else { 0.0 };
                                 feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
                                     tex.id(),
                                     Pos2::new(cx + icon_size / 2.0, row_center_y),
                                     icon_size,
-                                    std::f32::consts::PI,
+                                    angle,
                                     tint,
                                 ));
                                 cx += icon_size + gap;
@@ -1676,7 +1678,22 @@ pub fn draw_command_to_shapes(
                         let victim_galley = ctx.fonts_mut(|f| {
                             f.layout_no_wrap(kill.victim_name.clone(), name_font.clone(), victim_color)
                         });
-                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), victim_galley, Color32::TRANSPARENT));
+                        feed_shapes.push(Shape::galley(Pos2::new(cx, ey), victim_galley.clone(), Color32::TRANSPARENT));
+                        cx += victim_galley.size().x + gap;
+
+                        // Victim ship icon (friendly=points left (PI), enemy=points right (0))
+                        if let Some(ref species) = kill.victim_species
+                            && let Some(tex) = textures.ship_icons.get(species.as_str()) {
+                                let tint = Color32::from_rgb(kill.victim_color[0], kill.victim_color[1], kill.victim_color[2]);
+                                let angle = if kill.victim_is_friendly { std::f32::consts::PI } else { 0.0 };
+                                feed_shapes.push(crate::rendering::make_rotated_icon_mesh(
+                                    tex.id(),
+                                    Pos2::new(cx + icon_size / 2.0, row_center_y),
+                                    icon_size,
+                                    angle,
+                                    tint,
+                                ));
+                            }
 
                         ey += kill_row_h;
                     }

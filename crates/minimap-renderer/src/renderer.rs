@@ -1608,8 +1608,8 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
-        // 9. Kill feed
-        if self.options.show_kill_feed {
+        // 9. Kill feed (disabled when stats panel is active — activity feed replaces it)
+        if self.options.show_kill_feed && !self.options.show_stats_panel {
             let kills = controller.kills();
             let mut recent_kills = Vec::new();
             for kill in kills.iter().rev() {
@@ -1629,10 +1629,12 @@ impl<'a> MinimapRenderer<'a> {
                         killer_species: self.player_species.get(&kill.killer).cloned(),
                         killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
                         killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
+                        killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
                         victim_name,
                         victim_species: self.player_species.get(&kill.victim).cloned(),
                         victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
                         victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
+                        victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
                         cause: kill.cause.clone(),
                     });
                     if recent_kills.len() >= 5 {
@@ -1646,8 +1648,8 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
-        // 9b. Chat overlay
-        if self.options.show_chat {
+        // 9b. Chat overlay (disabled when stats panel is active — activity feed replaces it)
+        if self.options.show_chat && !self.options.show_stats_panel {
             let chat = controller.game_chat();
             let fade_duration = 5.0f32; // seconds to fade out
             let visible_duration = 30.0f32; // seconds before fading starts
@@ -1907,10 +1909,12 @@ impl<'a> MinimapRenderer<'a> {
                         killer_species: self.player_species.get(&kill.killer).cloned(),
                         killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
                         killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
+                        killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
                         victim_name,
                         victim_species: self.player_species.get(&kill.victim).cloned(),
                         victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
                         victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
+                        victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
                         cause: kill.cause.clone(),
                     }),
                 });
