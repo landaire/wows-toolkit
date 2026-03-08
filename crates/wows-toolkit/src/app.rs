@@ -410,6 +410,8 @@ impl WowsToolkitApp {
             *state.tab_state.cap_layout_db.lock() = db;
         }
 
+        state.tab_state.revalidate_wows_dir();
+
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
         state.begin_startup_tasks(rx);
@@ -1527,21 +1529,8 @@ impl WowsToolkitApp {
 
         self.poll_network_results();
 
-        // Update settings_needs_attention based on WoWs directory validity and twitch token state
+        // Update settings_needs_attention based on cached WoWs directory validity and twitch token state
         {
-            let wows_dir = Path::new(&self.tab_state.settings.wows_dir);
-            let wows_dir_invalid = if self.tab_state.settings.wows_dir.is_empty() {
-                false
-            } else if !wows_dir.exists() {
-                true
-            } else {
-                // Must have at least one of: WorldOfWarships.exe, bin/, replays/
-                let has_exe = wows_dir.join("WorldOfWarships.exe").exists();
-                let has_bin = wows_dir.join("bin").exists();
-                let has_replays = wows_dir.join("replays").exists();
-                !has_exe && !has_bin && !has_replays
-            };
-
             let twitch_token_failed = self.tab_state.settings.twitch_token.is_some()
                 && self.tab_state.twitch_state.read().token_validation_failed;
 
@@ -1553,7 +1542,7 @@ impl WowsToolkitApp {
                 self.shown_twitch_token_error = false;
             }
 
-            self.tab_state.settings_needs_attention = wows_dir_invalid || twitch_token_failed;
+            self.tab_state.settings_needs_attention = self.tab_state.wows_dir_invalid || twitch_token_failed;
         }
 
         if self.build_consent_window_open {

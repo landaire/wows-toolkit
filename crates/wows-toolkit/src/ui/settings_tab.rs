@@ -103,19 +103,7 @@ impl ToolkitTabViewer<'_> {
                             }
                         }
 
-                        let show_text_error = {
-                            let path = Path::new(&self.tab_state.settings.wows_dir);
-                            if self.tab_state.settings.wows_dir.is_empty() {
-                                false
-                            } else if !path.exists() {
-                                true
-                            } else {
-                                let has_exe = path.join("WorldOfWarships.exe").exists();
-                                let has_bin = path.join("bin").exists();
-                                let has_replays = path.join("replays").exists();
-                                !has_exe && !has_bin && !has_replays
-                            }
-                        };
+                        let show_text_error = self.tab_state.wows_dir_invalid;
 
                         let response = ui.add_sized(
                             ui.available_size(),
@@ -125,13 +113,11 @@ impl ToolkitTabViewer<'_> {
                                 .text_color_opt(show_text_error.then_some(Color32::LIGHT_RED)),
                         );
 
-                        // If someone pastes a path in, let's do some basic validation to see if this
-                        // can be a WoWs path. If so, reload game data.
+                        // If someone pastes or types a path, revalidate and reload if valid.
                         if response.changed() {
-                            let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
-                            let has_exe = path.join("WorldOfWarships.exe").exists();
-                            let has_bin = path.join("bin").exists();
-                            if path.exists() && (has_bin || has_exe) {
+                            self.tab_state.revalidate_wows_dir();
+                            if !self.tab_state.wows_dir_invalid && !self.tab_state.settings.wows_dir.is_empty() {
+                                let path = Path::new(&self.tab_state.settings.wows_dir).to_owned();
                                 self.tab_state.prevent_changing_wows_dir();
                                 update_background_task!(
                                     self.tab_state.background_tasks,

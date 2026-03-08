@@ -386,6 +386,11 @@ pub struct TabState {
     #[serde(skip)]
     pub settings_needs_attention: bool,
 
+    /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
+    /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
+    #[serde(skip)]
+    pub wows_dir_invalid: bool,
+
     /// wgpu render state for 3D viewport rendering (captured at app init).
     #[serde(skip)]
     pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
@@ -516,6 +521,7 @@ impl Default for TabState {
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
             settings_needs_attention: false,
+            wows_dir_invalid: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
             armor_viewer_defaults: Default::default(),
@@ -895,6 +901,26 @@ impl TabState {
 
         self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
         self.settings.replays_dir = Some(replay_dir.to_owned());
+        self.revalidate_wows_dir();
+    }
+
+    /// Re-check whether `settings.wows_dir` points to a valid WoWs installation.
+    /// Call this on startup and whenever the directory setting changes.
+    pub(crate) fn revalidate_wows_dir(&mut self) {
+        let dir = &self.settings.wows_dir;
+        self.wows_dir_invalid = if dir.is_empty() {
+            false
+        } else {
+            let wows_dir = std::path::Path::new(dir);
+            if !wows_dir.exists() {
+                true
+            } else {
+                let has_exe = wows_dir.join("WorldOfWarships.exe").exists();
+                let has_bin = wows_dir.join("bin").exists();
+                let has_replays = wows_dir.join("replays").exists();
+                !has_exe && !has_bin && !has_replays
+            }
+        };
     }
 
     #[must_use]
