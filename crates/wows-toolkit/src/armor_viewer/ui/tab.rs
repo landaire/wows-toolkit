@@ -97,7 +97,7 @@ impl TabViewer for ArmorPaneViewer<'_> {
 
 impl ToolkitTabViewer<'_> {
     pub fn build_armor_viewer_tab(&mut self, ui: &mut egui::Ui) {
-        let armor_defaults = self.tab_state.armor_viewer_defaults.clone();
+        let armor_defaults = self.tab_state.persisted.read().armor_viewer_defaults.clone();
         let state = &mut self.tab_state.armor_viewer;
         let render_state = self.tab_state.wgpu_render_state.clone();
         let wows_data = self.tab_state.world_of_warships_data.clone();
@@ -679,7 +679,7 @@ impl ToolkitTabViewer<'_> {
 
         // Apply saved defaults from Display popover (signal set inside render_armor_pane)
         if let Some(new_defaults) = save_defaults_cell.take() {
-            self.tab_state.armor_viewer_defaults = new_defaults;
+            self.tab_state.persisted.write().armor_viewer_defaults = new_defaults;
         }
 
         // Auto-snapshot active pane's display options so new panes/loads inherit them.
@@ -692,7 +692,8 @@ impl ToolkitTabViewer<'_> {
             let armor_all_on = !active_pane.part_visibility.is_empty()
                 && active_pane.part_visibility.values().all(|&v| v)
                 && !active_pane.plate_visibility.values().any(|&v| !v);
-            let d = &mut self.tab_state.armor_viewer_defaults;
+            let mut p = self.tab_state.persisted.write();
+            let d = &mut p.armor_viewer_defaults;
             d.show_plate_edges = active_pane.show_plate_edges;
             d.show_waterline = active_pane.show_waterline;
             d.show_zero_mm = active_pane.show_zero_mm;

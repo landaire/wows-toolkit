@@ -23,8 +23,8 @@ use wows_replays::types::GameParamId;
 use wowsunpack::vfs::VfsPath;
 
 use crate::data::session_stats::PerGameStat;
-use crate::data::settings::Settings;
-use crate::data::settings::default_bool;
+use crate::data::session_stats::SessionStats;
+use crate::data::settings::AppSettings;
 use crate::data::wows_data::ReplayDependencies;
 use crate::data::wows_data::ReplayLoader;
 use crate::data::wows_data::SharedWoWsData;
@@ -50,6 +50,100 @@ use crate::update_background_task;
 use crate::util::personal_rating::PersonalRatingData;
 
 pub type SharedToasts = Arc<parking_lot::Mutex<egui_notify::Toasts>>;
+
+// ---------------------------------------------------------------------------
+// Window settings persistence (modeled after egui_winit::WindowSettings)
+// ---------------------------------------------------------------------------
+
+/// Identifies which type of window settings to persist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WindowKind {
+    Main,
+    ReplayRenderer,
+    TacticsBoard,
+    ArmorViewer,
+}
+
+/// Persisted window geometry, modeled after `egui_winit::WindowSettings`.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowSettings {
+    pub inner_size_points: Option<[f32; 2]>,
+    pub outer_position_pixels: Option<[f32; 2]>,
+    pub fullscreen: bool,
+    pub maximized: bool,
+}
+
+impl WindowSettings {
+    /// Capture current viewport state from [`egui::ViewportInfo`].
+    pub fn from_viewport_info(info: &egui::ViewportInfo) -> Self {
+        Self {
+            inner_size_points: info.inner_rect.map(|r| [r.width(), r.height()]),
+            outer_position_pixels: info.outer_rect.map(|r| [r.left(), r.top()]),
+            fullscreen: info.fullscreen.unwrap_or(false),
+            maximized: info.maximized.unwrap_or(false),
+        }
+    }
+
+    /// Apply these settings to a [`egui::ViewportBuilder`], falling back to
+    /// `default_size` when no stored size is available.
+    pub fn apply_to_builder(&self, builder: egui::ViewportBuilder, default_size: [f32; 2]) -> egui::ViewportBuilder {
+        let size = self.inner_size_points.unwrap_or(default_size);
+        let builder = builder.with_inner_size(size);
+        if self.fullscreen {
+            builder.with_fullscreen(true)
+        } else if self.maximized {
+            builder.with_maximized(true)
+        } else {
+            builder
+        }
+    }
+}
+
+/// Tracks window settings for persistence.
+#[derive(Default)]
+pub struct WindowSettingsTracker {
+    pub settings: HashMap<WindowKind, WindowSettings>,
+}
+
+pub type SharedWindowSettings = Arc<parking_lot::Mutex<WindowSettingsTracker>>;
+
+// ---------------------------------------------------------------------------
+// Persisted state — shared between UI thread and background save task
+// ---------------------------------------------------------------------------
+
+/// All state that gets persisted to SQLite, collected into a single struct
+/// behind `Arc<RwLock<>>` so the background save task can read it without
+/// blocking the UI thread.
+pub struct PersistedState {
+    pub settings: AppSettings,
+    pub output_dir: String,
+    pub auto_load_latest_replay: bool,
+    pub mod_manager_info: ModManagerInfo,
+    pub stats_dock_state: egui_dock::DockState<StatsSubTab>,
+    pub next_chart_tab_id: u64,
+    pub chart_configs: HashMap<u64, SessionStatsChartConfig>,
+    pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
+    pub session_stats: SessionStats,
+}
+
+impl Default for PersistedState {
+    fn default() -> Self {
+        Self {
+            settings: Default::default(),
+            output_dir: Default::default(),
+            auto_load_latest_replay: true,
+            mod_manager_info: Default::default(),
+            stats_dock_state: default_stats_dock_state(),
+            next_chart_tab_id: 1,
+            chart_configs: HashMap::new(),
+            armor_viewer_defaults: Default::default(),
+            session_stats: Default::default(),
+        }
+    }
+}
+
+pub type SharedPersistedState = Arc<parking_lot::RwLock<PersistedState>>;
 
 /// Sub-tab selection for the Stats tab
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -225,246 +319,133 @@ impl ConfirmableAction {
     }
 }
 
-/// Main application state container
-#[derive(Serialize, Deserialize)]
-#[serde(default)]
+/// Main application state container.
+///
+/// Persisted state lives in `self.persisted` (shared with background save task).
+/// Data stores (`player_tracker`, `sent_replays`) are separate `Arc<RwLock<>>`
+/// fields for independent concurrent access.
 pub struct TabState {
-    #[serde(skip)]
+    // ─── Shared persisted state ──────────────────────────────────────────
+    pub persisted: SharedPersistedState,
+
+    // ─── Data stores (separate from settings, independently locked) ──────
+    pub player_tracker: Arc<RwLock<crate::ui::player_tracker::PlayerTracker>>,
+    pub sent_replays: Arc<RwLock<std::collections::HashSet<String>>>,
+    pub replay_sort: Arc<Mutex<SortOrder>>,
+
+    // ─── Transient / runtime-only state ──────────────────────────────────
     pub world_of_warships_data: Option<SharedWoWsData>,
-
-    #[serde(skip)]
     pub items_to_extract: Mutex<Vec<VfsPath>>,
-
-    pub settings: Settings,
-
-    #[serde(skip)]
     pub translations: Option<gettext::Catalog>,
-
-    pub output_dir: String,
-
-    #[serde(skip)]
+    /// Derived from `settings.game.wows_dir` — not persisted.
+    pub replays_dir: Option<PathBuf>,
     pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
-
-    #[serde(skip)]
     pub last_progress: Option<UnpackerProgress>,
-
-    #[serde(skip)]
     pub replay_parser_tab: SharedReplayParserTabState,
-
-    #[serde(skip)]
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
-
-    #[serde(skip)]
     pub replay_renderers: Mutex<Vec<crate::replay::renderer::ReplayRendererViewer>>,
-
-    #[serde(skip)]
     pub renderer_asset_cache: Arc<parking_lot::Mutex<crate::replay::renderer::RendererAssetCache>>,
-
-    #[serde(skip)]
     pub tactics_boards: Mutex<Vec<crate::replay::minimap_view::tactics::TacticsBoardViewer>>,
     /// Board IDs we've already auto-opened (prevents re-open after user closes them).
-    #[serde(skip)]
     pub tactics_auto_opened_board_ids: std::collections::HashSet<u64>,
-
     /// Shared tokio runtime for collab sessions and async tasks.
-    #[serde(skip)]
     pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
-
-    #[serde(skip)]
+    /// SQLite connection pool for persistence.
+    pub db_pool: Option<sqlx::SqlitePool>,
+    pub window_settings: SharedWindowSettings,
     pub file_watcher: Option<RecommendedWatcher>,
-
-    #[serde(skip)]
     pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
-
-    #[serde(skip)]
     pub replay_files: Option<HashMap<PathBuf, Arc<RwLock<Replay>>>>,
-
-    #[serde(skip)]
     pub background_tasks: Vec<BackgroundTask>,
-
-    #[serde(skip)]
     pub toasts: SharedToasts,
-
-    #[serde(skip)]
     pub can_change_wows_dir: bool,
-
-    #[serde(skip)]
     pub replay_dock_state: egui_dock::DockState<ReplayTab>,
-
-    #[serde(skip)]
     pub next_replay_tab_id: u64,
-
     /// Whether the replay listing panel has been auto-sized to fit content.
     /// Reset when game state is cleared so the panel re-auto-sizes on next load.
-    #[serde(skip)]
     pub replay_listing_auto_sized: bool,
-
-    #[serde(default = "default_bool::<true>")]
-    pub auto_load_latest_replay: bool,
-
-    #[serde(skip)]
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
-
-    #[serde(skip)]
     pub twitch_state: Arc<RwLock<TwitchState>>,
-
-    #[serde(skip)]
     pub markdown_cache: egui_commonmark::CommonMarkCache,
-
-    #[serde(default)]
-    pub replay_sort: Arc<parking_lot::Mutex<SortOrder>>,
-
-    #[serde(skip)]
     pub game_constants: Arc<RwLock<serde_json::Value>>,
-
-    #[serde(default)]
-    pub mod_manager_info: ModManagerInfo,
-
-    #[serde(skip)]
     pub mod_action_sender: Sender<ModInfo>,
-
-    #[serde(skip)]
     /// Used temporarily to store the mod action receiver until the mod manager thread is started
     pub mod_action_receiver: Option<Receiver<ModInfo>>,
-
-    #[serde(skip)]
     pub background_task_receiver: Receiver<BackgroundTask>,
-    #[serde(skip)]
     pub background_task_sender: Sender<BackgroundTask>,
-    #[serde(skip)]
     pub background_parser_tx: Option<Sender<ReplayBackgroundParserThreadMessage>>,
-    #[serde(skip)]
     pub parser_lock: Arc<parking_lot::Mutex<()>>,
-
-    #[serde(default = "default_stats_dock_state")]
-    pub stats_dock_state: egui_dock::DockState<StatsSubTab>,
-    #[serde(default)]
-    pub next_chart_tab_id: u64,
-    #[serde(default)]
-    pub chart_configs: HashMap<u64, SessionStatsChartConfig>,
-    #[serde(skip)]
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
-
     /// Replays selected for session stats update. When Some, they will be
     /// processed and added to session stats. If `clear_before_session_reset` is true,
     /// existing stats are cleared first.
     /// Uses Weak references to avoid retaining stale replays if they're removed from the listing.
-    #[serde(skip)]
     pub replays_for_session_reset: Option<Vec<std::sync::Weak<RwLock<Replay>>>>,
-    #[serde(skip)]
     pub clear_before_session_reset: bool,
-
     /// Pending action awaiting user confirmation.
-    #[serde(skip)]
     pub pending_confirmation: Option<ConfirmableAction>,
-
     /// All loaded version data, keyed by build number.
-    #[serde(skip)]
     pub wows_data_map: Option<WoWsDataMap>,
-
     /// All build numbers available in the game's bin/ directory.
-    #[serde(skip)]
     pub available_builds: Vec<u32>,
-
     /// Currently selected build in the Resource Browser.
-    #[serde(skip)]
     pub selected_browser_build: u32,
-
     /// Explorer-style resource browser state (selected dir, filter, queue popover).
-    #[serde(skip)]
     pub browser_state: ResourceBrowserState,
-
     /// Shared flag for "suppress GPU encoder warning" — synced from Settings on startup.
-    #[serde(skip)]
     pub suppress_gpu_encoder_warning: Arc<std::sync::atomic::AtomicBool>,
-
     /// Sender for submitting jobs to the background networking thread.
-    #[serde(skip)]
     pub network_job_tx: Option<Sender<NetworkJob>>,
-
     /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
-    #[serde(skip)]
     pub settings_needs_attention: bool,
-
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
-    #[serde(skip)]
     pub wows_dir_invalid: bool,
-
     /// wgpu render state for 3D viewport rendering (captured at app init).
-    #[serde(skip)]
     pub wgpu_render_state: Option<eframe::egui_wgpu::RenderState>,
-
     /// State for the Armor Viewer tab.
-    #[serde(skip)]
     pub armor_viewer: crate::armor_viewer::ArmorViewerState,
-
-    /// Persisted display defaults for the Armor Viewer (plate edges, waterline, etc.).
-    pub armor_viewer_defaults: crate::armor_viewer::state::ArmorViewerDefaults,
-
     /// Whether the standalone replay controls reference window is open.
-    #[serde(skip)]
     pub show_replay_controls: bool,
-
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
-    #[serde(skip)]
     pub replay_controls_cache: Option<Vec<crate::util::controls::CommandGroup>>,
 
     // ─── Collaborative session ─────────────────────────────────────────────
     /// Session token text input for joining.
-    #[serde(skip)]
     pub join_session_token: String,
-
     /// Whether the IP disclosure warning dialog is showing.
-    #[serde(skip)]
     pub show_ip_warning: bool,
-
     /// Set by the session popover to trigger `do_join_session()` in the app update loop.
-    #[serde(skip)]
     pub pending_join: bool,
-
     /// Set by the session popover to trigger `do_host_session()` in the app update loop.
-    #[serde(skip)]
     pub pending_host: bool,
-
     /// Active client session handle (when joined as a peer).
-    #[serde(skip)]
     pub client_session: Option<crate::collab::peer::PeerSessionHandle>,
-
     /// Active host session handle.
-    #[serde(skip)]
     pub host_session: Option<crate::collab::peer::PeerSessionHandle>,
-
     /// Shared asset bundle reference (host only). The UI thread can lazily populate
     /// this once game data is loaded, and the host task reads it on `RequestAssets`.
-    #[serde(skip)]
     pub web_asset_bundle: Option<Arc<Mutex<Option<Vec<u8>>>>>,
-
     /// Shared session state for both host and client sessions.
-    #[serde(skip)]
     pub session_state: Arc<Mutex<crate::collab::SessionState>>,
-
     /// Whether the session token is visible (unmasked) in the popover.
-    #[serde(skip)]
     pub session_token_visible: bool,
-
     /// Show red error on the display name field (cleared on next edit).
-    #[serde(skip)]
     pub show_display_name_error: bool,
-
     /// Counter for assigning unique replay IDs to host renderers.
-    #[serde(skip)]
     pub next_replay_id: u64,
-
     /// Rolling timestamps of ReplayOpened events for spam protection (client-side).
-    #[serde(skip)]
     pub replay_open_timestamps: std::collections::VecDeque<std::time::Instant>,
+
     // ─── Tactics Board ────────────────────────────────────────────────────
     /// Local cache of cap layouts extracted from replays. Persisted to disk
     /// via rkyv, loaded on startup, and updated incrementally when new
     /// `(mapId, scenarioConfigId)` combinations are encountered.
-    #[serde(skip)]
     pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
+
+    /// Active viewport IDs for secondary windows, updated each frame.
+    /// The background save task reads this to capture window geometry.
+    pub active_viewports: Arc<parking_lot::Mutex<Vec<(WindowKind, egui::ViewportId)>>>,
 }
 
 impl Default for TabState {
@@ -474,11 +455,14 @@ impl Default for TabState {
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
+            persisted: Arc::new(parking_lot::RwLock::new(PersistedState::default())),
+            player_tracker: Default::default(),
+            sent_replays: Default::default(),
+            replay_sort: Arc::new(Mutex::new(SortOrder::default())),
             world_of_warships_data: None,
             items_to_extract: Default::default(),
-            settings: Default::default(),
             translations: Default::default(),
-            output_dir: Default::default(),
+            replays_dir: None,
             unpacker_progress: Default::default(),
             last_progress: Default::default(),
             replay_parser_tab: Default::default(),
@@ -494,22 +478,16 @@ impl Default for TabState {
             replay_dock_state: egui_dock::DockState::new(vec![]),
             next_replay_tab_id: 0,
             replay_listing_auto_sized: false,
-            auto_load_latest_replay: true,
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
-            replay_sort: Default::default(),
             game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
-            mod_manager_info: Default::default(),
             mod_action_sender,
             mod_action_receiver: Some(mod_action_receiver),
             background_task_receiver,
             background_task_sender,
             background_parser_tx: None,
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
-            stats_dock_state: default_stats_dock_state(),
-            next_chart_tab_id: 1,
-            chart_configs: HashMap::new(),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
             clear_before_session_reset: true,
@@ -524,7 +502,6 @@ impl Default for TabState {
             wows_dir_invalid: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
-            armor_viewer_defaults: Default::default(),
             show_replay_controls: false,
             replay_controls_cache: None,
             tokio_runtime: None,
@@ -543,6 +520,9 @@ impl Default for TabState {
             cap_layout_db: Default::default(),
             tactics_boards: Default::default(),
             tactics_auto_opened_board_ids: Default::default(),
+            db_pool: None,
+            window_settings: Default::default(),
+            active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
         }
     }
 }
@@ -592,7 +572,7 @@ impl TabState {
             twitch_state: Arc::clone(&self.twitch_state),
             replay_sort: Arc::clone(&self.replay_sort),
             background_task_sender: self.background_task_sender.clone(),
-            is_debug_mode: self.settings.debug_mode,
+            is_debug_mode: self.persisted.read().settings.app.debug_mode,
         })
     }
 
@@ -604,9 +584,11 @@ impl TabState {
     }
 
     pub(crate) fn send_replay_consent_changed(&self) {
-        let _ = self.background_parser_tx.as_ref().map(|tx| {
-            tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(self.settings.send_replay_data))
-        });
+        let send = self.persisted.read().settings.integrations.send_replay_data;
+        let _ = self
+            .background_parser_tx
+            .as_ref()
+            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::ShouldSendReplaysToServer(send)));
     }
 
     pub(crate) fn try_update_replays(&mut self) {
@@ -651,7 +633,7 @@ impl TabState {
                             replay_files.insert(new_file.clone(), Arc::clone(&replay));
                         }
 
-                        let source = if self.auto_load_latest_replay {
+                        let source = if self.persisted.read().auto_load_latest_replay {
                             ReplaySource::AutoLoad
                         } else {
                             ReplaySource::SessionStatsOnly
@@ -672,7 +654,7 @@ impl TabState {
                         replay_inner.ui_report = None;
                         drop(replay_inner);
 
-                        let source = if self.auto_load_latest_replay {
+                        let source = if self.persisted.read().auto_load_latest_replay {
                             ReplaySource::AutoLoad
                         } else {
                             ReplaySource::SessionStatsOnly
@@ -704,7 +686,7 @@ impl TabState {
 
                     if let Ok(replay_file) = ReplayFile::from_decrypted_parts(meta_data.unwrap(), Vec::with_capacity(0))
                     {
-                        self.settings.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+                        self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
                     }
                 }
             }
@@ -719,14 +701,9 @@ impl TabState {
         self.can_change_wows_dir = true;
     }
 
-    /// Get (or create) the chart config for a given chart tab ID.
-    pub fn chart_config(&mut self, id: u64) -> &mut SessionStatsChartConfig {
-        self.chart_configs.entry(id).or_default()
-    }
-
     /// Remove the chart config for a closed tab.
-    pub fn remove_chart_config(&mut self, id: u64) {
-        self.chart_configs.remove(&id);
+    pub fn remove_chart_config(&self, id: u64) {
+        self.persisted.write().chart_configs.remove(&id);
     }
 
     /// Clears all game-related state. Called when the WoWs directory changes
@@ -737,8 +714,11 @@ impl TabState {
         self.replay_files = None;
         self.replay_listing_auto_sized = false;
         self.browser_state = Default::default();
-        self.settings.session_stats.clear();
-        self.chart_configs.clear();
+        {
+            let mut p = self.persisted.write();
+            p.session_stats.clear();
+            p.chart_configs.clear();
+        }
         self.replays_for_session_reset = None;
         self.clear_before_session_reset = true;
         self.replay_parser_tab.lock().game_chat.clear();
@@ -758,7 +738,7 @@ impl TabState {
         };
 
         if self.clear_before_session_reset {
-            self.settings.session_stats.clear();
+            self.persisted.write().session_stats.clear();
         }
 
         // Upgrade weak references and add to session stats
@@ -773,7 +753,7 @@ impl TabState {
                 if !needs_parsing
                     && let Some(stat) = PerGameStat::from_replay(&replay_guard, &replay_guard.resource_loader)
                 {
-                    self.settings.session_stats.add_game(stat);
+                    self.persisted.write().session_stats.add_game(stat);
                 }
 
                 drop(replay_guard);
@@ -791,8 +771,9 @@ impl TabState {
         }
 
         // Focus the Overview sub-tab automatically
-        if let Some((surface, node, tab_idx)) = self.stats_dock_state.find_tab(&StatsSubTab::Overview) {
-            self.stats_dock_state.set_active_tab((surface, node, tab_idx));
+        let mut p = self.persisted.write();
+        if let Some((surface, node, tab_idx)) = p.stats_dock_state.find_tab(&StatsSubTab::Overview) {
+            p.stats_dock_state.set_active_tab((surface, node, tab_idx));
         }
     }
 
@@ -811,23 +792,27 @@ impl TabState {
         self.background_parser_tx = Some(background_tx.clone());
 
         if let Some(wows_data_map) = self.wows_data_map.clone() {
+            let p = self.persisted.read();
             let background_thread_data = BackgroundParserThread {
                 rx: background_rx,
-                sent_replays: Arc::clone(&self.settings.sent_replays),
+                sent_replays: Arc::clone(&self.sent_replays),
                 wows_data_map,
                 twitch_state: Arc::clone(&self.twitch_state),
-                should_send_replays: self.settings.send_replay_data,
+                should_send_replays: p.settings.integrations.send_replay_data,
                 data_export_settings: DataExportSettings {
-                    should_auto_export: self.settings.replay_settings.auto_export_data,
-                    export_path: PathBuf::from(self.settings.replay_settings.auto_export_path.clone()),
-                    export_format: self.settings.replay_settings.auto_export_format,
+                    should_auto_export: p.settings.replay.auto_export_data,
+                    export_path: PathBuf::from(p.settings.replay.auto_export_path.clone()),
+                    export_format: p.settings.replay.auto_export_format,
                 },
 
-                player_tracker: Arc::clone(&self.settings.player_tracker),
-                is_debug: self.settings.debug_mode,
+                player_tracker: Arc::clone(&self.player_tracker),
+                is_debug: p.settings.app.debug_mode,
                 parser_lock: Arc::clone(&self.parser_lock),
                 cap_layout_db: Arc::clone(&self.cap_layout_db),
+                db_pool: self.db_pool.clone(),
+                tokio_runtime: self.tokio_runtime.clone(),
             };
+            drop(p);
             crate::task::start_background_parsing_thread(background_thread_data);
         }
 
@@ -899,19 +884,19 @@ impl TabState {
         self.file_watcher = Some(watcher);
         self.file_receiver = Some(rx);
 
-        self.settings.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.settings.replays_dir = Some(replay_dir.to_owned());
+        self.persisted.write().settings.game.wows_dir = wows_dir.to_str().unwrap().to_string();
+        self.replays_dir = Some(replay_dir.to_owned());
         self.revalidate_wows_dir();
     }
 
     /// Re-check whether `settings.wows_dir` points to a valid WoWs installation.
     /// Call this on startup and whenever the directory setting changes.
     pub(crate) fn revalidate_wows_dir(&mut self) {
-        let dir = &self.settings.wows_dir;
+        let dir = self.persisted.read().settings.game.wows_dir.clone();
         self.wows_dir_invalid = if dir.is_empty() {
             false
         } else {
-            let wows_dir = std::path::Path::new(dir);
+            let wows_dir = std::path::Path::new(&dir);
             if !wows_dir.exists() {
                 true
             } else {
@@ -926,7 +911,7 @@ impl TabState {
     #[must_use]
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = mpsc::channel();
-        let locale = self.settings.locale.clone().unwrap();
+        let locale = self.persisted.read().settings.app.locale.clone().unwrap();
         let fallback_constants = self.game_constants.read().clone();
         let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
             let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));

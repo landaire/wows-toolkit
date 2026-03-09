@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
 
-use eframe::APP_KEY;
 use egui::Color32;
 use egui::Context;
 use egui::KeyboardShortcut;
@@ -32,6 +31,7 @@ use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
 use rootcause::prelude::ResultExt;
 use tracing::debug;
 use tracing::error;
+use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
@@ -164,6 +164,7 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     error_to_show: Option<String>,
 
+    #[serde(skip)]
     pub(crate) tab_state: TabState,
     #[serde(skip)]
     dock_state: DockState<Tab>,
@@ -195,6 +196,15 @@ pub struct WowsToolkitApp {
     /// Active realtime armor viewer windows spawned from replay renderers.
     #[serde(skip)]
     realtime_armor_viewers: Vec<Arc<parking_lot::Mutex<crate::replay::realtime_armor_viewer::RealtimeArmorViewer>>>,
+
+    /// SQLite connection pool for persisting app state.
+    #[serde(skip)]
+    db_pool: Option<sqlx::SqlitePool>,
+
+    /// Shutdown signal for the background save task. Dropping or sending
+    /// triggers a final save before the task exits.
+    #[serde(skip)]
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl Default for WowsToolkitApp {
@@ -223,6 +233,8 @@ impl Default for WowsToolkitApp {
             #[cfg(feature = "logging")]
             _log_guard: None,
             realtime_armor_viewers: Vec::new(),
+            db_pool: None,
+            shutdown_tx: None,
         }
     }
 }
@@ -271,64 +283,109 @@ impl WowsToolkitApp {
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_theme(egui::Theme::Dark);
 
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-        let mut had_saved_state = false;
-        let mut state = if let Some(storage) = cc.storage {
-            let mut saved_state: Self = if storage.get_string(APP_KEY).is_some() {
-                // if the app key is present and we get no result back, that means deserialization
-                // failed and we should panic because this is an app bug -- likely caused by
-                // not setting a default value for a persisted field
-                match eframe::get_value(storage, eframe::APP_KEY) {
-                    Some(app) => {
-                        had_saved_state = true;
-                        app
-                    }
-                    None => {
-                        if cfg!(debug_assertions) {
-                            panic!("could not deserialize app state")
-                        } else {
-                            error!("could not deserialize app state -- using default");
-                            Default::default()
-                        }
-                    }
-                }
-            } else {
-                warn!("Creating new default app settings");
-                Default::default()
-            };
+        // Open SQLite database for persisting app state.
+        let default_state: Self = Default::default();
+        let db_pool = match default_state.runtime.block_on(crate::db::open_db()) {
+            Ok(pool) => Some(pool),
+            Err(e) => {
+                error!("Failed to open database: {e}");
+                None
+            }
+        };
 
-            if !saved_state.tab_state.settings.has_052_game_params_fix {
-                saved_state.tab_state.settings.has_052_game_params_fix = true;
-                crate::util::game_params::clear_all_game_params_caches();
+        // Load previous app state.
+        //
+        // Priority:
+        // 1. SQLite (if migration has been completed)
+        // 2. app.ron via eframe (legacy) — then migrate to SQLite
+        // 3. Fresh defaults
+        let mut had_saved_state = false;
+        let mut state = if let Some(ref pool) = db_pool
+            && default_state.runtime.block_on(crate::db::is_migrated(pool))
+        {
+            // Load from SQLite.
+            info!("Loading app state from SQLite");
+            let mut saved_state: Self = Default::default();
+            if let Err(e) =
+                saved_state.runtime.block_on(crate::db::load::load_tab_state_from_db(pool, &mut saved_state.tab_state))
+            {
+                error!("Failed to load state from SQLite: {e}");
+            } else {
+                had_saved_state = true;
+            }
+            saved_state
+        } else if let Some(legacy_app) = load_from_app_ron() {
+            // Legacy: loaded from app.ron on disk — convert to new structure.
+            had_saved_state = true;
+
+            let (persisted, player_tracker, sent_replays, replay_sort) = legacy_app.into_new_state();
+            let mut saved_state: Self = Default::default();
+            *saved_state.tab_state.persisted.write() = persisted;
+            saved_state.tab_state.player_tracker = player_tracker;
+            saved_state.tab_state.sent_replays = sent_replays;
+            saved_state.tab_state.replay_sort = replay_sort;
+
+            // Migrate converted data to SQLite.
+            if let Some(ref pool) = db_pool {
+                info!("Migrating app.ron data to SQLite...");
+                if let Err(e) = saved_state
+                    .runtime
+                    .block_on(crate::db::migrate_ron::migrate_tab_state_to_db(pool, &saved_state.tab_state))
+                {
+                    error!("Failed to migrate app.ron to SQLite: {e}");
+                }
             }
 
-            // Apply persisted armor viewer defaults to the initial pane
-            // (ArmorViewerState is #[serde(skip)] so it gets Default on load)
-            saved_state.tab_state.armor_viewer.apply_defaults(&saved_state.tab_state.armor_viewer_defaults);
-
-            // Sync the GPU encoder warning flag from persisted settings
-            saved_state.tab_state.suppress_gpu_encoder_warning.store(
-                saved_state.tab_state.settings.suppress_gpu_encoder_warning,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-
-            // Ensure session stats are sorted correctly (backfills sort_key for legacy data)
-            saved_state.tab_state.settings.session_stats.sort_games();
-
-            if !saved_state.tab_state.settings.wows_dir.is_empty() {
-                let task = Some(
-                    saved_state
-                        .tab_state
-                        .load_game_data(PathBuf::from(saved_state.tab_state.settings.wows_dir.clone())),
-                );
-                update_background_task!(saved_state.tab_state.background_tasks, task);
+            // Rename app.ron → app.ron.migrated as a backup.
+            if let Some(dir) = crate::storage_dir() {
+                let ron_path = dir.join("app.ron");
+                let migrated_path = dir.join("app.ron.migrated");
+                if ron_path.exists() && !migrated_path.exists() {
+                    if let Err(e) = std::fs::rename(&ron_path, &migrated_path) {
+                        warn!("Failed to rename app.ron to app.ron.migrated: {e}");
+                    } else {
+                        info!("Renamed app.ron to app.ron.migrated");
+                    }
+                }
             }
 
             saved_state
         } else {
+            warn!("Creating new default app settings");
             Default::default()
         };
+
+        // Store the DB pool in the app state.
+        state.db_pool = db_pool;
+
+        if had_saved_state {
+            {
+                let mut p = state.tab_state.persisted.write();
+                if !p.settings.game.has_052_game_params_fix {
+                    p.settings.game.has_052_game_params_fix = true;
+                    crate::util::game_params::clear_all_game_params_caches();
+                }
+
+                // Apply persisted armor viewer defaults to the initial pane
+                // (ArmorViewerState is #[serde(skip)] so it gets Default on load)
+                state.tab_state.armor_viewer.apply_defaults(&p.armor_viewer_defaults);
+
+                // Sync the GPU encoder warning flag from persisted settings
+                state
+                    .tab_state
+                    .suppress_gpu_encoder_warning
+                    .store(p.settings.app.suppress_gpu_encoder_warning, std::sync::atomic::Ordering::Relaxed);
+
+                // Ensure session stats are sorted correctly (backfills sort_key for legacy data)
+                p.session_stats.sort_games();
+            }
+
+            let wows_dir = state.tab_state.persisted.read().settings.game.wows_dir.clone();
+            if !wows_dir.is_empty() {
+                let task = Some(state.tab_state.load_game_data(PathBuf::from(wows_dir)));
+                update_background_task!(state.tab_state.background_tasks, task);
+            }
+        }
 
         const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
 
@@ -337,12 +394,12 @@ impl WowsToolkitApp {
             let detected = sys_locale::get_locale()
                 .and_then(|sys| wt_translations::system_locale_to_wows(&sys).map(String::from))
                 .unwrap_or_else(|| "en".into());
-            this.tab_state.settings.locale = Some(detected);
+            this.tab_state.persisted.write().settings.app.locale = Some(detected);
 
             let default_wows_dir = "C:\\Games\\World_of_Warships";
             let default_wows_path = Path::new(default_wows_dir);
             if default_wows_path.exists() {
-                this.tab_state.settings.wows_dir = default_wows_dir.to_string();
+                this.tab_state.persisted.write().settings.game.wows_dir = default_wows_dir.to_string();
 
                 let task = this.tab_state.load_game_data(default_wows_path.to_path_buf());
                 update_background_task!(this.tab_state.background_tasks, Some(task));
@@ -356,7 +413,7 @@ impl WowsToolkitApp {
         }
 
         // Apply locale to rust-i18n
-        if let Some(locale) = &state.tab_state.settings.locale {
+        if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {
             rust_i18n::set_locale(locale);
         }
 
@@ -370,47 +427,111 @@ impl WowsToolkitApp {
             state.panic_window_open = true;
         }
 
-        if !state.tab_state.settings.build_consent_window_shown {
-            state.build_consent_window_open = true;
-        }
+        {
+            let p = state.tab_state.persisted.read();
+            if !p.settings.app.build_consent_window_shown {
+                state.build_consent_window_open = true;
+            }
 
-        // Show language selection dialog on first launch if a non-English locale was detected
-        if !state.tab_state.settings.language_selection_shown {
-            let locale = state.tab_state.settings.locale.as_deref().unwrap_or("en");
-            if locale != "en" {
-                state.language_selection_open = true;
-            } else {
-                // English detected or default — no need to ask
-                state.tab_state.settings.language_selection_shown = true;
+            // Show language selection dialog on first launch if a non-English locale was detected
+            if !p.settings.app.language_selection_shown {
+                let locale = p.settings.app.locale.as_deref().unwrap_or("en");
+                if locale != "en" {
+                    state.language_selection_open = true;
+                } else {
+                    drop(p);
+                    // English detected or default — no need to ask
+                    state.tab_state.persisted.write().settings.app.language_selection_shown = true;
+                }
             }
         }
 
         // Initialize logging if the feature is enabled and the user hasn't disabled it
         #[cfg(feature = "logging")]
-        if state.tab_state.settings.enable_logging {
+        if state.tab_state.persisted.read().settings.app.enable_logging {
             state._log_guard = Self::init_logging();
         }
 
         // Capture wgpu render state for 3D viewport rendering
         state.tab_state.wgpu_render_state = cc.wgpu_render_state.clone();
 
-        // Share the tokio runtime with tab_state for collab sessions
+        // Share the tokio runtime and DB pool with tab_state for collab sessions and persistence.
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
+        state.tab_state.db_pool = state.db_pool.clone();
 
-        // Load persisted cap layout cache from disk.
-        if let Some(cache_path) = crate::data::cap_layout::cache_path()
-            && let Some(mut db) = crate::data::cap_layout::CapLayoutDb::load(&cache_path)
+        // Restore main window geometry from persisted settings.
+        if let Some(settings) =
+            state.tab_state.window_settings.lock().settings.get(&crate::tab_state::WindowKind::Main).copied()
         {
-            let removed = db.dedup();
-            if removed > 0 {
-                tracing::info!("removed {removed} duplicate cap layouts from cache");
-                let _ = db.save(&cache_path);
+            if let Some([w, h]) = settings.inner_size_points {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
             }
-            tracing::info!("loaded {} cap layouts from cache", db.len());
-            *state.tab_state.cap_layout_db.lock() = db;
+            if settings.fullscreen {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+            } else if settings.maximized {
+                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+        }
+
+        // Load persisted cap layout cache.
+        {
+            let mut loaded = false;
+
+            // Try SQLite first.
+            if let Some(ref pool) = state.db_pool {
+                let mut db = state.runtime.block_on(crate::data::cap_layout::CapLayoutDb::load_from_db(pool));
+                if !db.is_empty() {
+                    let removed = db.dedup();
+                    if removed > 0 {
+                        tracing::info!("removed {removed} duplicate cap layouts from SQLite");
+                        let pool = pool.clone();
+                        let _ = state.runtime.block_on(db.save_to_db(&pool));
+                    }
+                    *state.tab_state.cap_layout_db.lock() = db;
+                    loaded = true;
+                }
+            }
+
+            // Fall back to cap_layouts.bin file.
+            if !loaded
+                && let Some(cache_path) = crate::data::cap_layout::cache_path()
+                && let Some(mut db) = crate::data::cap_layout::CapLayoutDb::load(&cache_path)
+            {
+                let removed = db.dedup();
+                if removed > 0 {
+                    tracing::info!("removed {removed} duplicate cap layouts from cache");
+                    let _ = db.save(&cache_path);
+                }
+                tracing::info!("loaded {} cap layouts from cache", db.len());
+
+                // Migrate file-based cap layouts to SQLite.
+                if let Some(ref pool) = state.db_pool {
+                    let pool = pool.clone();
+                    if let Err(e) = state.runtime.block_on(db.save_to_db(&pool)) {
+                        error!("Failed to migrate cap layouts to SQLite: {e}");
+                    }
+                }
+
+                *state.tab_state.cap_layout_db.lock() = db;
+            }
         }
 
         state.tab_state.revalidate_wows_dir();
+
+        // Spawn the background save task (runs on a 30s timer, independent of painting).
+        if let Some(ref pool) = state.db_pool {
+            let save_ctx = crate::db::save::SaveContext {
+                persisted: state.tab_state.persisted.clone(),
+                player_tracker: state.tab_state.player_tracker.clone(),
+                sent_replays: state.tab_state.sent_replays.clone(),
+                replay_sort: state.tab_state.replay_sort.clone(),
+                window_settings: state.tab_state.window_settings.clone(),
+                active_viewports: state.tab_state.active_viewports.clone(),
+            };
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+            crate::db::save::spawn_save_task(&state.runtime, pool.clone(), save_ctx, cc.egui_ctx.clone(), shutdown_rx);
+            state.shutdown_tx = Some(shutdown_tx);
+        }
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         state.tab_state.twitch_update_sender = Some(tx);
@@ -429,11 +550,15 @@ impl WowsToolkitApp {
         self.tab_state.network_job_tx = Some(network_job_tx);
         self.network_result_rx = Some(network_result_rx);
 
+        let (twitch_channel, twitch_token) = {
+            let p = self.tab_state.persisted.read();
+            (p.settings.integrations.twitch_monitored_channel.clone(), p.settings.integrations.twitch_token.clone())
+        };
         task::start_twitch_task(
             &self.runtime,
             Arc::clone(&self.tab_state.twitch_state),
-            self.tab_state.settings.twitch_monitored_channel.clone(),
-            self.tab_state.settings.twitch_token.clone(),
+            twitch_channel,
+            twitch_token,
             token_rx,
         );
 
@@ -441,7 +566,7 @@ impl WowsToolkitApp {
         update_background_task!(self.tab_state.background_tasks, Some(crate::mod_manager::load_mods_db()));
 
         let mut constants_path = PathBuf::from("constants.json");
-        if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        if let Some(storage_dir) = crate::storage_dir() {
             constants_path = storage_dir.join(constants_path)
         }
 
@@ -521,7 +646,7 @@ impl WowsToolkitApp {
             self.tab_state.background_tasks.push(new_task);
         }
 
-        if self.tab_state.settings.debug_mode {
+        if self.tab_state.persisted.read().settings.app.debug_mode {
             ui.label(RichText::new("⚠ Debug build ⚠").heading().color(ui.visuals().warn_fg_color));
         }
 
@@ -647,7 +772,7 @@ impl WowsToolkitApp {
     fn request_update_checks(&mut self) {
         self.tab_state.send_network_job(NetworkJob::CheckForAppUpdates);
         self.tab_state.send_network_job(NetworkJob::FetchLatestConstants {
-            current_commit: self.tab_state.settings.constants_file_commit.clone(),
+            current_commit: self.tab_state.persisted.read().settings.game.constants_file_commit.clone(),
         });
         if crate::util::personal_rating::needs_update() {
             self.tab_state.send_network_job(NetworkJob::FetchPersonalRatingData);
@@ -675,12 +800,12 @@ impl WowsToolkitApp {
                 }
                 NetworkResult::ConstantsFetched { data, commit } => {
                     let mut constants_path = PathBuf::from("constants.json");
-                    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+                    if let Some(storage_dir) = crate::storage_dir() {
                         constants_path = storage_dir.join(constants_path);
                     }
 
                     if std::fs::write(&constants_path, data.as_slice()).is_ok() {
-                        self.tab_state.settings.constants_file_commit = commit;
+                        self.tab_state.persisted.write().settings.game.constants_file_commit = commit;
                         update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(data)));
                     }
                 }
@@ -738,7 +863,8 @@ impl WowsToolkitApp {
                     let build_number = wows_data.build_number;
 
                     // Detect if the WoWs directory changed
-                    let dir_changed = self.tab_state.settings.wows_dir != new_dir.to_str().unwrap_or_default();
+                    let dir_changed =
+                        self.tab_state.persisted.read().settings.game.wows_dir != new_dir.to_str().unwrap_or_default();
 
                     // Clear all stale game state when directory changes
                     if dir_changed {
@@ -778,7 +904,14 @@ impl WowsToolkitApp {
                     } else {
                         let mut map = crate::data::wows_data::WoWsDataMap::new(
                             PathBuf::from(&new_dir),
-                            self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".to_string()),
+                            self.tab_state
+                                .persisted
+                                .read()
+                                .settings
+                                .app
+                                .locale
+                                .clone()
+                                .unwrap_or_else(|| "en".to_string()),
                         );
                         if let Some(tx) = self.tab_state.network_job_tx.clone() {
                             map.set_network_job_tx(tx);
@@ -833,13 +966,13 @@ impl WowsToolkitApp {
                             &replay_guard,
                             &replay_guard.resource_loader,
                         ) {
-                            self.tab_state.settings.session_stats.add_game(stat);
+                            self.tab_state.persisted.write().session_stats.add_game(stat);
                         }
                         drop(replay_guard);
                     }
                     if update_ui {
                         self.tab_state.replay_parser_tab.lock().game_chat.clear();
-                        self.tab_state.settings.player_tracker.write().update_from_replay(&replay.read());
+                        self.tab_state.player_tracker.write().update_from_replay(&replay.read());
                         if open_tab {
                             self.tab_state.open_replay_in_focused_tab(replay);
                         }
@@ -875,7 +1008,7 @@ impl WowsToolkitApp {
                 }
                 BackgroundTaskCompletion::PopulatePlayerInspectorFromReplays => {
                     // Switch to "All Time" so historical data is visible
-                    self.tab_state.settings.player_tracker.write().filter_time_period =
+                    self.tab_state.player_tracker.write().filter_time_period =
                         crate::ui::player_tracker::TimePeriod::AllTime;
                 }
                 BackgroundTaskCompletion::ConstantsLoaded(constants) => {
@@ -888,7 +1021,7 @@ impl WowsToolkitApp {
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
                     crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
-                        self.tab_state.mod_manager_info.update_index("test".to_string(), index);
+                        self.tab_state.persisted.write().mod_manager_info.update_index("test".to_string(), index);
                     }
                     crate::mod_manager::ModTaskCompletion::ModInstalled(mod_info) => {
                         self.tab_state
@@ -941,12 +1074,12 @@ impl WowsToolkitApp {
             renderer.draw(ctx);
             // Check if renderer wants to save default options
             if let Some(saved) = renderer.pending_defaults_save.lock().take() {
-                self.tab_state.settings.renderer_options = saved;
+                self.tab_state.persisted.write().settings.renderer = saved;
             }
             // Sync GPU warning suppress flag back to settings
             let suppress = renderer.suppress_gpu_warning.load(Ordering::Relaxed);
-            if suppress != self.tab_state.settings.suppress_gpu_encoder_warning {
-                self.tab_state.settings.suppress_gpu_encoder_warning = suppress;
+            if suppress != self.tab_state.persisted.read().settings.app.suppress_gpu_encoder_warning {
+                self.tab_state.persisted.write().settings.app.suppress_gpu_encoder_warning = suppress;
             }
 
             // Auto-wire renderer to host session if active.
@@ -1191,7 +1324,7 @@ impl WowsToolkitApp {
         // open locally.  Each board_id is tracked in `tactics_auto_opened_board_ids`
         // so we don't re-open after the user closes one.
         if is_client
-            && !self.tab_state.settings.disable_auto_open_session_windows
+            && !self.tab_state.persisted.read().settings.collab.disable_auto_open_session_windows
             && let Some(handle) = self.tab_state.client_session.as_ref()
             && let Some(ref wows_data) = self.tab_state.world_of_warships_data
         {
@@ -1217,6 +1350,9 @@ impl WowsToolkitApp {
                     std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                     std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                     std::sync::Arc::clone(wows_data),
+                    self.tab_state.db_pool.clone(),
+                    self.tab_state.tokio_runtime.clone(),
+                    self.tab_state.window_settings.clone(),
                 );
                 board.is_session_board = true;
                 board.collab_local_tx = Some(handle.local_tx.clone());
@@ -1251,6 +1387,9 @@ impl WowsToolkitApp {
                     std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                     std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                     std::sync::Arc::clone(wows_data),
+                    self.tab_state.db_pool.clone(),
+                    self.tab_state.tokio_runtime.clone(),
+                    self.tab_state.window_settings.clone(),
                 );
                 board.is_session_board = true;
                 board.collab_local_tx = Some(handle.local_tx.clone());
@@ -1369,6 +1508,7 @@ impl WowsToolkitApp {
                             gpu_pipeline,
                             render_state,
                             Some(request.command_tx.clone()),
+                            self.tab_state.window_settings.clone(),
                         );
                         drop(bridge);
                         self.realtime_armor_viewers.push(Arc::new(parking_lot::Mutex::new(viewer)));
@@ -1471,13 +1611,10 @@ impl WowsToolkitApp {
             && let Some(path) = &dropped_files[0].path
             && let Some(deps) = self.tab_state.replay_dependencies()
         {
-            self.tab_state.settings.current_replay_path = path.clone();
+            self.tab_state.persisted.write().settings.game.current_replay_path = path.clone();
             update_background_task!(
                 self.tab_state.background_tasks,
-                deps.parse_replay_from_path(
-                    self.tab_state.settings.current_replay_path.clone(),
-                    crate::task::ReplaySource::ManualOpen
-                )
+                deps.parse_replay_from_path(path.clone(), crate::task::ReplaySource::ManualOpen)
             );
         }
     }
@@ -1486,6 +1623,25 @@ impl WowsToolkitApp {
         if mitigate_wgpu_mem_leak(ctx) {
             return;
         }
+
+        // Update active viewport list for the background save task's window geometry capture.
+        {
+            use crate::tab_state::WindowKind;
+            let mut viewports: Vec<(WindowKind, egui::ViewportId)> = Vec::new();
+
+            for r in self.tab_state.replay_renderers.lock().iter() {
+                viewports.push((WindowKind::ReplayRenderer, r.viewport_id()));
+            }
+            for t in self.tab_state.tactics_boards.lock().iter() {
+                viewports.push((WindowKind::TacticsBoard, t.viewport_id()));
+            }
+            for v in &self.realtime_armor_viewers {
+                viewports.push((WindowKind::ArmorViewer, v.lock().viewport_id()));
+            }
+
+            *self.tab_state.active_viewports.lock() = viewports;
+        }
+
         // Register main window context so the peer task can wake us.
         {
             let mut s = self.tab_state.session_state.lock();
@@ -1502,10 +1658,13 @@ impl WowsToolkitApp {
         if ctx
             .input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL | Modifiers::SHIFT, egui::Key::D)))
         {
-            self.tab_state.settings.debug_mode = !self.tab_state.settings.debug_mode;
+            {
+                let mut p = self.tab_state.persisted.write();
+                p.settings.app.debug_mode = !p.settings.app.debug_mode;
+            }
+            let debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
             if let Some(sender) = self.tab_state.background_parser_tx.as_ref() {
-                let _ = sender
-                    .send(ReplayBackgroundParserThreadMessage::DebugStateChange(self.tab_state.settings.debug_mode));
+                let _ = sender.send(ReplayBackgroundParserThreadMessage::DebugStateChange(debug_mode));
             }
         }
 
@@ -1523,7 +1682,7 @@ impl WowsToolkitApp {
 
         self.tab_state.process_session_stats_reset();
 
-        if !self.checked_for_updates && self.tab_state.settings.check_for_updates {
+        if !self.checked_for_updates && self.tab_state.persisted.read().settings.app.check_for_updates {
             self.request_update_checks();
         }
 
@@ -1531,7 +1690,7 @@ impl WowsToolkitApp {
 
         // Update settings_needs_attention based on cached WoWs directory validity and twitch token state
         {
-            let twitch_token_failed = self.tab_state.settings.twitch_token.is_some()
+            let twitch_token_failed = self.tab_state.persisted.read().settings.integrations.twitch_token.is_some()
                 && self.tab_state.twitch_state.read().token_validation_failed;
 
             if twitch_token_failed && !self.shown_twitch_token_error {
@@ -1551,14 +1710,18 @@ impl WowsToolkitApp {
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.buttons.yes")).clicked() {
                         self.build_consent_window_open = false;
-                        self.tab_state.settings.build_consent_window_shown = true;
-                        self.tab_state.settings.send_replay_data = true;
+                        let mut p = self.tab_state.persisted.write();
+                        p.settings.app.build_consent_window_shown = true;
+                        p.settings.integrations.send_replay_data = true;
+                        drop(p);
                         self.tab_state.send_replay_consent_changed();
                     }
                     if ui.button(t!("ui.buttons.no")).clicked() {
                         self.build_consent_window_open = false;
-                        self.tab_state.settings.build_consent_window_shown = true;
-                        self.tab_state.settings.send_replay_data = false;
+                        let mut p = self.tab_state.persisted.write();
+                        p.settings.app.build_consent_window_shown = true;
+                        p.settings.integrations.send_replay_data = false;
+                        drop(p);
                         self.tab_state.send_replay_consent_changed();
                     }
                 });
@@ -1566,7 +1729,8 @@ impl WowsToolkitApp {
         }
 
         if self.language_selection_open {
-            let detected_locale = self.tab_state.settings.locale.clone().unwrap_or_else(|| "en".into());
+            let detected_locale =
+                self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".into());
             let native_name = wt_translations::language_name(&detected_locale).unwrap_or("English");
 
             egui::Window::new(t!("dialog.select_language"))
@@ -1579,9 +1743,11 @@ impl WowsToolkitApp {
                     ui.horizontal(|ui| {
                         // "Continue in English" button
                         if ui.button(t!("dialog.continue_in_english")).clicked() {
-                            self.tab_state.settings.locale = Some("en".into());
+                            let mut p = self.tab_state.persisted.write();
+                            p.settings.app.locale = Some("en".into());
                             rust_i18n::set_locale("en");
-                            self.tab_state.settings.language_selection_shown = true;
+                            p.settings.app.language_selection_shown = true;
+                            drop(p);
                             self.language_selection_open = false;
                         }
                         // "Continue in <detected language>" button
@@ -1595,7 +1761,7 @@ impl WowsToolkitApp {
                         };
                         if ui.button(label).clicked() {
                             // Keep the detected locale
-                            self.tab_state.settings.language_selection_shown = true;
+                            self.tab_state.persisted.write().settings.app.language_selection_shown = true;
                             self.language_selection_open = false;
                         }
                     });
@@ -1765,7 +1931,7 @@ impl WowsToolkitApp {
                             visuals.widgets.active.fg_stroke.color = Color32::WHITE;
 
                             if ui.button(t!("ui.buttons.clear_settings")).clicked() {
-                                self.tab_state.settings = Default::default();
+                                *self.tab_state.persisted.write() = Default::default();
                             }
                         });
                     });
@@ -1827,7 +1993,7 @@ impl WowsToolkitApp {
 
     pub fn panic_log_path() -> PathBuf {
         let mut panic_log_path = PathBuf::from("wows_toolkit_panic.log");
-        if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+        if let Some(storage_dir) = crate::storage_dir() {
             panic_log_path = storage_dir.join(panic_log_path)
         }
         panic_log_path
@@ -1841,7 +2007,7 @@ impl WowsToolkitApp {
         }
 
         self.tab_state.send_network_job(NetworkJob::FetchLatestConstants {
-            current_commit: self.tab_state.settings.constants_file_commit.clone(),
+            current_commit: self.tab_state.persisted.read().settings.game.constants_file_commit.clone(),
         });
     }
 
@@ -1975,7 +2141,8 @@ impl WowsToolkitApp {
     fn execute_confirmed_action(&mut self, action: crate::tab_state::ConfirmableAction, ctx: &egui::Context) {
         match action {
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
-                let exe = std::path::Path::new(&self.tab_state.settings.wows_dir).join("WorldOfWarships.exe");
+                let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+                let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
                 let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
                 // Signal the replay parser to open the controls window
                 ctx.data_mut(|data| {
@@ -1983,10 +2150,10 @@ impl WowsToolkitApp {
                 });
             }
             crate::tab_state::ConfirmableAction::ClearSessionStats => {
-                self.tab_state.settings.session_stats.clear();
+                self.tab_state.persisted.write().session_stats.clear();
             }
             crate::tab_state::ConfirmableAction::ClearShipSessionStats { ship_id } => {
-                self.tab_state.settings.session_stats.clear_ship(ship_id);
+                self.tab_state.persisted.write().session_stats.clear_ship(ship_id);
             }
             crate::tab_state::ConfirmableAction::SetAsSessionStats { replays } => {
                 self.tab_state.clear_before_session_reset = true;
@@ -2012,7 +2179,10 @@ impl WowsToolkitApp {
                 ui.add_space(4.0);
                 ui.hyperlink_to(t!("ui.labels.more_info"), "https://landaire.github.io/wows-toolkit/networking");
                 ui.add_space(8.0);
-                ui.checkbox(&mut self.tab_state.settings.suppress_p2p_ip_warning, t!("ui.labels.suppress_warning"));
+                {
+                    let mut p = self.tab_state.persisted.write();
+                    ui.checkbox(&mut p.settings.collab.suppress_p2p_ip_warning, t!("ui.labels.suppress_warning"));
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui.button(t!("ui.buttons.continue_")).clicked() {
@@ -2039,7 +2209,7 @@ impl WowsToolkitApp {
     fn do_join_session(&mut self) {
         let params = crate::collab::peer::JoinParams {
             token: self.tab_state.join_session_token.trim().to_string(),
-            display_name: self.tab_state.settings.collab_display_name.trim().to_string(),
+            display_name: self.tab_state.persisted.read().settings.collab.display_name.trim().to_string(),
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
@@ -2060,7 +2230,7 @@ impl WowsToolkitApp {
 
         let params = crate::collab::peer::HostParams {
             toolkit_version: env!("CARGO_PKG_VERSION").to_string(),
-            display_name: self.tab_state.settings.collab_display_name.clone(),
+            display_name: self.tab_state.persisted.read().settings.collab.display_name.clone(),
             initial_render_options: crate::collab::protocol::collab_render_options_from_saved(
                 &crate::data::settings::SavedRenderOptions::default(),
             ),
@@ -2242,7 +2412,7 @@ impl WowsToolkitApp {
                 crate::collab::SessionEvent::SessionInfoReceived { open_replays } => {
                     tracing::debug!("SessionInfoReceived: {} open replay(s)", open_replays.len());
                     // Launch client viewer windows for each open replay (up to 2).
-                    let saved_options = &self.tab_state.settings.renderer_options;
+                    let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     for replay in open_replays.into_iter().take(2) {
                         self.tab_state.toasts.lock().info(t!("ui.messages.joined_session", name = &replay.replay_name));
@@ -2250,10 +2420,11 @@ impl WowsToolkitApp {
                             replay.replay_name,
                             replay.map_image_png,
                             replay.game_version,
-                            saved_options,
+                            &saved_options,
                             Arc::clone(&suppress),
                             self.tab_state.world_of_warships_data.as_ref(),
                             &self.tab_state.renderer_asset_cache,
+                            self.tab_state.window_settings.clone(),
                         );
                         if let Some(ref client_handle) = self.tab_state.client_session {
                             let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -2314,17 +2485,18 @@ impl WowsToolkitApp {
                     }
                     drop(renderers);
 
-                    let saved_options = &self.tab_state.settings.renderer_options;
+                    let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                     self.tab_state.toasts.lock().info(t!("ui.messages.host_opened_replay", name = replay_name));
                     let viewer = crate::replay::renderer::launch_client_renderer(
                         replay_name,
                         map_image_png,
                         game_version,
-                        saved_options,
+                        &saved_options,
                         suppress,
                         self.tab_state.world_of_warships_data.as_ref(),
                         &self.tab_state.renderer_asset_cache,
+                        self.tab_state.window_settings.clone(),
                     );
                     // Wire the client viewer to the session.
                     if let Some(ref client_handle) = self.tab_state.client_session {
@@ -2379,12 +2551,47 @@ impl WowsToolkitApp {
 }
 
 impl eframe::App for WowsToolkitApp {
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.update_impl(ctx, frame);
+    }
+
+    fn on_exit(&mut self) {
+        // Signal the background save task to do a final save, then wait for it.
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+            // Give the save task a moment to complete the final save.
+            self.runtime.block_on(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            });
+        }
+    }
+}
+
+/// Load app state from the legacy `app.ron` file on disk.
+///
+/// The file is a RON-serialized `HashMap<String, String>` (eframe's key-value
+/// storage). The app state lives under the `"app"` key as a nested RON string.
+///
+/// Returns a `LegacyWowsToolkitApp` which must be converted via
+/// [`into_new_state()`](crate::data::legacy_settings::LegacyWowsToolkitApp::into_new_state).
+fn load_from_app_ron() -> Option<crate::data::legacy_settings::LegacyWowsToolkitApp> {
+    let dir = crate::storage_dir()?;
+    let ron_path = dir.join("app.ron");
+    let contents = std::fs::read_to_string(&ron_path).ok()?;
+    let kv: std::collections::HashMap<String, String> = ron::from_str(&contents).ok()?;
+    let app_str = kv.get("app")?;
+    if app_str.is_empty() {
+        return None;
+    }
+    match ron::from_str::<crate::data::legacy_settings::LegacyWowsToolkitApp>(app_str) {
+        Ok(app) => {
+            info!("Loaded legacy app state from {}", ron_path.display());
+            Some(app)
+        }
+        Err(e) => {
+            error!("Failed to deserialize app.ron: {e}");
+            None
+        }
     }
 }
 

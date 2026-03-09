@@ -354,7 +354,7 @@ impl NetworkingThread {
 /// Save versioned constants to `constants_{build}.json` on disk.
 #[instrument(skip(data))]
 fn save_versioned_constants(build: u32, data: &serde_json::Value) {
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+    if let Some(storage_dir) = crate::storage_dir() {
         let filename = format!("constants_{build}.json");
         let path = storage_dir.join(filename);
         if let Ok(bytes) = serde_json::to_vec(data) {
@@ -369,7 +369,7 @@ fn save_versioned_constants(build: u32, data: &serde_json::Value) {
 #[instrument]
 pub(crate) fn load_versioned_constants_from_disk(build: u32) -> Option<serde_json::Value> {
     let filename = format!("constants_{build}.json");
-    let storage_dir = eframe::storage_dir(crate::APP_NAME)?;
+    let storage_dir = crate::storage_dir()?;
     let path = storage_dir.join(filename);
     if path.exists() {
         let data = std::fs::read(&path).ok()?;

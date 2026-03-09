@@ -235,7 +235,7 @@ impl TimePeriod {
 
 impl ToolkitTabViewer<'_> {
     pub fn build_player_tracker_tab(&mut self, ui: &mut egui::Ui) {
-        let mut player_tracker_settings = self.tab_state.settings.player_tracker.write();
+        let mut player_tracker_settings = self.tab_state.player_tracker.write();
         let player_tracker_settings = &mut *player_tracker_settings;
         let filter_lower = player_tracker_settings.player_filter.to_ascii_lowercase();
         let now = Timestamp::now();
@@ -272,7 +272,7 @@ impl ToolkitTabViewer<'_> {
                         Some(task::start_populating_player_inspector(
                             replay_files.keys().cloned().collect(),
                             wows_data_map.clone(),
-                            Arc::clone(&self.tab_state.settings.player_tracker)
+                            Arc::clone(&self.tab_state.player_tracker)
                         ))
                     );
                 }

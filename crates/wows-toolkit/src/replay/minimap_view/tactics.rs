@@ -233,7 +233,7 @@ pub struct TacticsPreset {
 
 /// Get the presets directory, creating it if needed.
 fn presets_dir() -> Option<PathBuf> {
-    let storage = eframe::storage_dir(crate::APP_NAME)?;
+    let storage = crate::storage_dir()?;
     let dir = storage.join("tactics_presets");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
@@ -469,6 +469,11 @@ pub struct TacticsBoardViewer {
     asset_cache: Arc<Mutex<RendererAssetCache>>,
     wows_data: SharedWoWsData,
 
+    // Database
+    db_pool: Option<sqlx::SqlitePool>,
+    tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
+    window_settings: crate::tab_state::SharedWindowSettings,
+
     // Collab
     /// Channel to send local UI events (cursors, annotations, pings) to the collab peer task.
     pub collab_local_tx: Option<mpsc::Sender<LocalEvent>>,
@@ -486,6 +491,9 @@ impl TacticsBoardViewer {
         cap_layout_db: Arc<Mutex<CapLayoutDb>>,
         asset_cache: Arc<Mutex<RendererAssetCache>>,
         wows_data: SharedWoWsData,
+        db_pool: Option<sqlx::SqlitePool>,
+        tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
+        window_settings: crate::tab_state::SharedWindowSettings,
     ) -> Self {
         Self {
             board_id,
@@ -498,6 +506,9 @@ impl TacticsBoardViewer {
             cap_layout_db,
             asset_cache,
             wows_data,
+            db_pool,
+            tokio_runtime,
+            window_settings,
             collab_local_tx: None,
             collab_session_state: None,
             collab_command_tx: None,
@@ -515,6 +526,11 @@ impl TacticsBoardViewer {
     }
 
     /// Draw the tactics board viewport as a deferred viewport (separate OS window).
+    /// The [`egui::ViewportId`] used by this viewer's deferred viewport.
+    pub fn viewport_id(&self) -> egui::ViewportId {
+        egui::ViewportId::from_hash_of(("tactics_board", self.board_id))
+    }
+
     pub fn draw(&self, ctx: &egui::Context) {
         let open = self.open.clone();
         let board_id = self.board_id;
@@ -524,6 +540,9 @@ impl TacticsBoardViewer {
         let cap_layout_db = self.cap_layout_db.clone();
         let asset_cache = self.asset_cache.clone();
         let wows_data = self.wows_data.clone();
+        let db_pool = self.db_pool.clone();
+        let tokio_runtime = self.tokio_runtime.clone();
+        let window_settings = self.window_settings.clone();
         let collab_local_tx = self.collab_local_tx.clone();
         let collab_session_state = self.collab_session_state.clone();
         let collab_command_tx = self.collab_command_tx.clone();
@@ -538,218 +557,220 @@ impl TacticsBoardViewer {
                 .or_insert_with(|| crate::collab::ViewportSink { frame_tx: None, viewport_id });
         }
 
-        ctx.show_viewport_deferred(
-            viewport_id,
-            egui::ViewportBuilder::default()
-                .with_title("Tactics Board")
-                .with_inner_size([800.0, 850.0])
-                .with_min_inner_size([400.0, 450.0]),
-            move |ctx, _class| {
-                if !open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
-                    return;
-                }
+        // Apply persisted window size if available.
+        let builder = egui::ViewportBuilder::default().with_title("Tactics Board").with_min_inner_size([400.0, 450.0]);
+        let builder = window_settings
+            .lock()
+            .settings
+            .get(&crate::tab_state::WindowKind::TacticsBoard)
+            .map(|s| s.apply_to_builder(builder.clone(), [800.0, 850.0]))
+            .unwrap_or_else(|| builder.with_inner_size([800.0, 850.0]));
 
-                let mut state = state_arc.lock();
+        ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
+            if !open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
+                return;
+            }
 
-                // ── Collab: apply incoming annotation + cap point sync ──
-                if let Some(session_state) = &collab_session_state {
-                    let s = session_state.lock();
-                    if let Some(board_state) = s.tactics_boards.get(&board_id) {
-                        if board_state.annotation_sync_version > state.applied_annotation_sync_version {
-                            let sync = &board_state.annotation_sync;
-                            let mut ann = annotation_state_arc.lock();
-                            ann.annotations =
-                                sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
-                            ann.annotation_owners = sync.owners.clone();
-                            ann.annotation_ids = sync.ids.clone();
-                            state.applied_annotation_sync_version = board_state.annotation_sync_version;
-                        }
-                        if board_state.cap_point_sync_version > state.applied_cap_sync_version {
+            let mut state = state_arc.lock();
+
+            // ── Collab: apply incoming annotation + cap point sync ──
+            if let Some(session_state) = &collab_session_state {
+                let s = session_state.lock();
+                if let Some(board_state) = s.tactics_boards.get(&board_id) {
+                    if board_state.annotation_sync_version > state.applied_annotation_sync_version {
+                        let sync = &board_state.annotation_sync;
+                        let mut ann = annotation_state_arc.lock();
+                        ann.annotations = sync.annotations.iter().cloned().map(collab_annotation_to_local).collect();
+                        ann.annotation_owners = sync.owners.clone();
+                        ann.annotation_ids = sync.ids.clone();
+                        state.applied_annotation_sync_version = board_state.annotation_sync_version;
+                    }
+                    if board_state.cap_point_sync_version > state.applied_cap_sync_version {
+                        tracing::debug!(
+                            "Applying cap sync: version {} -> {}, sync_data={}",
+                            state.applied_cap_sync_version,
+                            board_state.cap_point_sync_version,
+                            board_state.cap_point_sync.cap_points.len(),
+                        );
+                        state.cap_points = board_state
+                            .cap_point_sync
+                            .cap_points
+                            .iter()
+                            .map(|wcp| TacticsCapPoint {
+                                id: wcp.id,
+                                index: wcp.index as usize,
+                                world_x: wcp.world_x,
+                                world_z: wcp.world_z,
+                                radius: wcp.radius,
+                                team_id: wcp.team_id,
+                                frozen: wcp.frozen,
+                            })
+                            .collect();
+                        state.next_cap_id = state.cap_points.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+                        state.selected_cap = None;
+                        state.dragging_cap = None;
+                        state.applied_cap_sync_version = board_state.cap_point_sync_version;
+                    }
+                    if s.tactics_boards_version > state.applied_tactics_map_version {
+                        let tmap = &board_state.tactics_map;
+                        let map_changed = state.selected_map.as_ref().is_none_or(|(id, _)| *id != tmap.map_id);
+                        tracing::debug!(
+                            "Applying tactics map sync: version {} -> {}, map={}, changed={}",
+                            state.applied_tactics_map_version,
+                            s.tactics_boards_version,
+                            tmap.map_name,
+                            map_changed,
+                        );
+                        if map_changed {
+                            state.selected_map = Some((tmap.map_id, tmap.map_name.clone()));
+                            state.selected_mode = None;
+                            state.selected_mode_label = None;
+                            // Try loading map from local VFS first; fall back to decoding peer's PNG.
+                            load_map_image(&mut state, &tmap.map_name, &asset_cache, &wows_data);
                             tracing::debug!(
-                                "Applying cap sync: version {} -> {}, sync_data={}",
-                                state.applied_cap_sync_version,
-                                board_state.cap_point_sync_version,
-                                board_state.cap_point_sync.cap_points.len(),
+                                "After load_map_image: map_image={}, map_info={}",
+                                state.map_image.is_some(),
+                                state.map_info.is_some(),
                             );
-                            state.cap_points = board_state
-                                .cap_point_sync
-                                .cap_points
-                                .iter()
-                                .map(|wcp| TacticsCapPoint {
-                                    id: wcp.id,
-                                    index: wcp.index as usize,
-                                    world_x: wcp.world_x,
-                                    world_z: wcp.world_z,
-                                    radius: wcp.radius,
-                                    team_id: wcp.team_id,
-                                    frozen: wcp.frozen,
-                                })
-                                .collect();
-                            state.next_cap_id = state.cap_points.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-                            state.selected_cap = None;
-                            state.dragging_cap = None;
-                            state.applied_cap_sync_version = board_state.cap_point_sync_version;
-                        }
-                        if s.tactics_boards_version > state.applied_tactics_map_version {
-                            let tmap = &board_state.tactics_map;
-                            let map_changed = state.selected_map.as_ref().is_none_or(|(id, _)| *id != tmap.map_id);
-                            tracing::debug!(
-                                "Applying tactics map sync: version {} -> {}, map={}, changed={}",
-                                state.applied_tactics_map_version,
-                                s.tactics_boards_version,
-                                tmap.map_name,
-                                map_changed,
-                            );
-                            if map_changed {
-                                state.selected_map = Some((tmap.map_id, tmap.map_name.clone()));
-                                state.selected_mode = None;
-                                state.selected_mode_label = None;
-                                // Try loading map from local VFS first; fall back to decoding peer's PNG.
-                                load_map_image(&mut state, &tmap.map_name, &asset_cache, &wows_data);
-                                tracing::debug!(
-                                    "After load_map_image: map_image={}, map_info={}",
-                                    state.map_image.is_some(),
-                                    state.map_info.is_some(),
-                                );
-                                // Fall back to peer-provided map_info if VFS didn't provide it.
-                                if state.map_info.is_none() {
-                                    state.map_info = tmap.map_info.clone();
-                                }
-                                if state.map_image.is_none()
-                                    && !tmap.map_image_png.is_empty()
-                                    && let Ok(img) = image::load_from_memory(&tmap.map_image_png)
-                                {
-                                    let rgba = img.into_rgba8();
-                                    let (w, h) = (rgba.width(), rgba.height());
-                                    state.map_image = Some(Arc::new(crate::replay::renderer::RgbaAsset {
-                                        data: rgba.into_raw(),
-                                        width: w,
-                                        height: h,
-                                    }));
-                                    state.texture_dirty = true;
-                                }
+                            // Fall back to peer-provided map_info if VFS didn't provide it.
+                            if state.map_info.is_none() {
+                                state.map_info = tmap.map_info.clone();
                             }
-                            state.applied_tactics_map_version = s.tactics_boards_version;
+                            if state.map_image.is_none()
+                                && !tmap.map_image_png.is_empty()
+                                && let Ok(img) = image::load_from_memory(&tmap.map_image_png)
+                            {
+                                let rgba = img.into_rgba8();
+                                let (w, h) = (rgba.width(), rgba.height());
+                                state.map_image = Some(Arc::new(crate::replay::renderer::RgbaAsset {
+                                    data: rgba.into_raw(),
+                                    width: w,
+                                    height: h,
+                                }));
+                                state.texture_dirty = true;
+                            }
                         }
+                        state.applied_tactics_map_version = s.tactics_boards_version;
                     }
-                    drop(s);
                 }
+                drop(s);
+            }
 
-                // ── Dynamic window title ──
-                {
-                    let mut title = String::from("Tactics Board");
-                    if let Some((_, ref map_name)) = state.selected_map {
+            // ── Dynamic window title ──
+            {
+                let mut title = String::from("Tactics Board");
+                if let Some((_, ref map_name)) = state.selected_map {
+                    title.push_str(" \u{2014} ");
+                    title.push_str(&translate_or_pretty(map_name, &wows_data));
+                    if let Some(ref label) = state.selected_mode_label {
                         title.push_str(" \u{2014} ");
-                        title.push_str(&translate_or_pretty(map_name, &wows_data));
-                        if let Some(ref label) = state.selected_mode_label {
-                            title.push_str(" \u{2014} ");
-                            title.push_str(label);
-                        }
-                    }
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-                    // Store in session state so the popover shows the exact same title.
-                    if let Some(ref session_state) = collab_session_state {
-                        let mut s = session_state.lock();
-                        if let Some(board) = s.tactics_boards.get_mut(&board_id)
-                            && board.window_title != title
-                        {
-                            board.window_title = title;
-                        }
+                        title.push_str(label);
                     }
                 }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+                // Store in session state so the popover shows the exact same title.
+                if let Some(ref session_state) = collab_session_state {
+                    let mut s = session_state.lock();
+                    if let Some(board) = s.tactics_boards.get_mut(&board_id)
+                        && board.window_title != title
+                    {
+                        board.window_title = title;
+                    }
+                }
+            }
 
-                // ── Bottom panel: map/mode selector + cap tools + presets ──
-                // Hide for regular peers (non-host, non-co-host) in a collab session.
-                let is_authority = collab_session_state
-                    .as_ref()
-                    .map(|ss| {
-                        let s = ss.lock();
-                        s.role.is_host() || s.role.is_co_host()
-                    })
-                    .unwrap_or(true); // No session -> standalone, show everything.
+            // ── Bottom panel: map/mode selector + cap tools + presets ──
+            // Hide for regular peers (non-host, non-co-host) in a collab session.
+            let is_authority = collab_session_state
+                .as_ref()
+                .map(|ss| {
+                    let s = ss.lock();
+                    s.role.is_host() || s.role.is_co_host()
+                })
+                .unwrap_or(true); // No session -> standalone, show everything.
 
-                if is_authority {
-                    egui::TopBottomPanel::bottom("tactics_bottom_panel").show(ctx, |ui| {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            Self::draw_map_mode_selector(
-                                ui,
-                                &mut state,
-                                &cap_layout_db,
-                                &asset_cache,
-                                &wows_data,
-                                &collab_local_tx,
-                                &collab_command_tx,
-                                board_id,
-                            );
-                        });
-                        ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            Self::draw_preset_controls(
-                                ui,
-                                &mut state,
-                                &annotation_state_arc,
-                                &asset_cache,
-                                &wows_data,
-                                &cap_layout_db,
-                                &collab_command_tx,
-                                board_id,
-                            );
-                            ui.separator();
-                            Self::draw_scan_replays_button(ui, &mut state, &cap_layout_db, &wows_data);
-                        });
-                        ui.add_space(4.0);
+            if is_authority {
+                egui::TopBottomPanel::bottom("tactics_bottom_panel").show(ctx, |ui| {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        Self::draw_map_mode_selector(
+                            ui,
+                            &mut state,
+                            &cap_layout_db,
+                            &asset_cache,
+                            &wows_data,
+                            &collab_local_tx,
+                            &collab_command_tx,
+                            board_id,
+                        );
                     });
-                } // is_authority
-
-                // ── Annotation toolbar ──
-                egui::TopBottomPanel::top("tactics_annotation_toolbar").show(ctx, |ui| {
-                    let locked = collab_session_state
-                        .as_ref()
-                        .map(|ss| ss.lock().permissions.annotations_locked)
-                        .unwrap_or(false);
-                    let mut ann = annotation_state_arc.lock();
-                    let result = wt_collab_egui::toolbar::draw_annotation_toolbar(
-                        ui,
-                        &mut ann,
-                        state.ship_icons.as_ref(),
-                        locked,
-                    );
-                    if result.did_clear {
-                        send_annotation_clear(&collab_local_tx, Some(board_id));
-                    }
-                    if result.did_undo {
-                        drop(ann);
-                        send_annotation_full_sync(&collab_command_tx, &annotation_state_arc.lock(), Some(board_id));
-                    }
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        Self::draw_preset_controls(
+                            ui,
+                            &mut state,
+                            &annotation_state_arc,
+                            &asset_cache,
+                            &wows_data,
+                            &cap_layout_db,
+                            &collab_command_tx,
+                            board_id,
+                        );
+                        ui.separator();
+                        Self::draw_scan_replays_button(
+                            ui,
+                            &mut state,
+                            &cap_layout_db,
+                            &wows_data,
+                            &db_pool,
+                            &tokio_runtime,
+                        );
+                    });
+                    ui.add_space(4.0);
                 });
+            } // is_authority
 
-                // ── Central panel: map viewport ──
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    Self::draw_map_viewport(
-                        ui,
-                        &mut state,
-                        &zoom_pan_arc,
-                        &annotation_state_arc,
-                        &asset_cache,
-                        &wows_data,
-                        &collab_local_tx,
-                        &collab_session_state,
-                        &collab_command_tx,
-                        board_id,
-                    );
-                });
-
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    open.store(false, Ordering::Relaxed);
-                    // Unregister viewport sink.
-                    if let Some(ref session_state) = collab_session_state {
-                        session_state.lock().viewport_sinks.remove(&board_id);
-                    }
-                    ctx.request_repaint();
+            // ── Annotation toolbar ──
+            egui::TopBottomPanel::top("tactics_annotation_toolbar").show(ctx, |ui| {
+                let locked =
+                    collab_session_state.as_ref().map(|ss| ss.lock().permissions.annotations_locked).unwrap_or(false);
+                let mut ann = annotation_state_arc.lock();
+                let result =
+                    wt_collab_egui::toolbar::draw_annotation_toolbar(ui, &mut ann, state.ship_icons.as_ref(), locked);
+                if result.did_clear {
+                    send_annotation_clear(&collab_local_tx, Some(board_id));
                 }
-            },
-        );
+                if result.did_undo {
+                    drop(ann);
+                    send_annotation_full_sync(&collab_command_tx, &annotation_state_arc.lock(), Some(board_id));
+                }
+            });
+
+            // ── Central panel: map viewport ──
+            egui::CentralPanel::default().show(ctx, |ui| {
+                Self::draw_map_viewport(
+                    ui,
+                    &mut state,
+                    &zoom_pan_arc,
+                    &annotation_state_arc,
+                    &asset_cache,
+                    &wows_data,
+                    &collab_local_tx,
+                    &collab_session_state,
+                    &collab_command_tx,
+                    board_id,
+                );
+            });
+
+            if ctx.input(|i| i.viewport().close_requested()) {
+                open.store(false, Ordering::Relaxed);
+                // Unregister viewport sink.
+                if let Some(ref session_state) = collab_session_state {
+                    session_state.lock().viewport_sinks.remove(&board_id);
+                }
+                ctx.request_repaint();
+            }
+        });
     }
 
     /// Draw the map/mode selector and cap tools in the bottom panel.
@@ -1054,6 +1075,8 @@ impl TacticsBoardViewer {
         state: &mut TacticsBoardState,
         cap_layout_db: &Arc<Mutex<CapLayoutDb>>,
         wows_data: &SharedWoWsData,
+        db_pool: &Option<sqlx::SqlitePool>,
+        tokio_runtime: &Option<Arc<tokio::runtime::Runtime>>,
     ) {
         // Check if a scan is in progress and show progress.
         if let Some(ref progress) = state.scan_progress {
@@ -1098,6 +1121,8 @@ impl TacticsBoardViewer {
             };
 
             let db = Arc::clone(cap_layout_db);
+            let scan_pool = db_pool.clone();
+            let scan_rt = tokio_runtime.clone();
             let progress = Arc::new(Mutex::new((0usize, 0usize)));
             state.scan_progress = Some(Arc::clone(&progress));
 
@@ -1131,7 +1156,16 @@ impl TacticsBoardViewer {
                     }
 
                     if inserted > 0 {
-                        if let Some(cache_path) = crate::data::cap_layout::cache_path() {
+                        // Save to SQLite if available, otherwise fall back to file.
+                        if let (Some(pool), Some(rt)) = (&scan_pool, &scan_rt) {
+                            if let Err(e) = rt.block_on(db.lock().save_to_db(pool)) {
+                                tracing::warn!("failed to save cap layouts to db: {e}");
+                            } else {
+                                tracing::info!(
+                                    "scan complete: {inserted} new cap layouts saved to db ({total} replays scanned)"
+                                );
+                            }
+                        } else if let Some(cache_path) = crate::data::cap_layout::cache_path() {
                             if let Err(e) = db.lock().save(&cache_path) {
                                 tracing::warn!("failed to save cap layout db: {e}");
                             } else {

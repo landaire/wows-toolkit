@@ -7,6 +7,7 @@ mod app;
 mod armor_viewer;
 pub mod collab;
 pub(crate) mod data;
+pub(crate) mod db;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
 pub(crate) mod replay;
@@ -99,6 +100,32 @@ fn flatten_toml(prefix: &str, table: &toml::Table, out: &mut std::collections::H
             }
             _ => {}
         }
+    }
+}
+
+/// App data directory, matching eframe's `storage_dir()` layout so existing
+/// data is found after removing the `persistence` feature.
+///
+/// - Windows: `%APPDATA%\APP_NAME\data`
+/// - macOS:   `~/Library/Application Support/APP_NAME`
+/// - Linux:   `$XDG_DATA_HOME/app_name` or `~/.local/share/app_name`
+pub fn storage_dir() -> Option<std::path::PathBuf> {
+    use egui::os::OperatingSystem as OS;
+    use std::path::PathBuf;
+    match OS::from_target_os() {
+        OS::Nix => std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home::home_dir().map(|p| p.join(".local").join("share")))
+            .map(|p| p.join(APP_NAME.to_lowercase().replace(|c: char| c.is_ascii_whitespace(), ""))),
+        OS::Mac => home::home_dir().map(|p| {
+            p.join("Library").join("Application Support").join(APP_NAME.replace(|c: char| c.is_ascii_whitespace(), "-"))
+        }),
+        OS::Windows => {
+            // %APPDATA% = roaming appdata, same as eframe's FOLDERID_RoamingAppData
+            std::env::var_os("APPDATA").map(PathBuf::from).map(|p| p.join(APP_NAME).join("data"))
+        }
+        _ => None,
     }
 }
 

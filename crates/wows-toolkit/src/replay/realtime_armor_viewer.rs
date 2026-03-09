@@ -130,6 +130,9 @@ pub struct RealtimeArmorViewer {
 
     /// Last clock we auto-scrolled to (avoids redundant scrolls).
     last_auto_scroll_clock: GameClock,
+
+    /// Shared window settings tracker for persisting viewport geometry.
+    window_settings: crate::tab_state::SharedWindowSettings,
 }
 
 /// Identifies a salvo firing event. Shells with `salvo: None` get unique unmatched keys.
@@ -216,6 +219,7 @@ impl RealtimeArmorViewer {
         gpu_pipeline: Arc<GpuPipeline>,
         render_state: eframe::egui_wgpu::RenderState,
         command_tx: Option<std::sync::mpsc::Sender<crate::replay::renderer::PlaybackCommand>>,
+        window_settings: crate::tab_state::SharedWindowSettings,
     ) -> Self {
         let title =
             Arc::new(format!("Armor Viewer — {} ({})", target_player.username, target_player.ship_display_name));
@@ -269,6 +273,7 @@ impl RealtimeArmorViewer {
             timeline_ingested: false,
             auto_scroll: true,
             last_auto_scroll_clock: GameClock(0.0),
+            window_settings,
         }
     }
 
@@ -1154,15 +1159,22 @@ impl RealtimeArmorViewer {
     }
 }
 
+impl RealtimeArmorViewer {
+    /// The [`egui::ViewportId`] used by this viewer's deferred viewport.
+    pub fn viewport_id(&self) -> egui::ViewportId {
+        egui::ViewportId::from_hash_of(&*self.title)
+    }
+}
+
 /// Draw a realtime armor viewer as a deferred secondary viewport.
 /// Takes `Arc<Mutex<RealtimeArmorViewer>>` so the closure can be `'static`.
 pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx: &egui::Context) {
-    let (title, open) = {
+    let (title, open, window_settings) = {
         let v = viewer.lock();
         if !v.open.load(Ordering::Relaxed) {
             return;
         }
-        (v.title.clone(), v.open.clone())
+        (v.title.clone(), v.open.clone(), v.window_settings.clone())
     };
 
     let viewport_id = egui::ViewportId::from_hash_of(&*title);
@@ -1170,51 +1182,53 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
     let window_open = open.clone();
     let parent_ctx = ctx.clone();
 
-    ctx.show_viewport_deferred(
-        viewport_id,
-        egui::ViewportBuilder::default()
-            .with_title(&*title)
-            .with_inner_size([900.0, 700.0])
-            .with_min_inner_size([600.0, 400.0]),
-        move |ctx, _class| {
-            if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
-                return;
+    // Apply persisted window size if available.
+    let builder = egui::ViewportBuilder::default().with_title(&*title).with_min_inner_size([600.0, 400.0]);
+    let builder = window_settings
+        .lock()
+        .settings
+        .get(&crate::tab_state::WindowKind::ArmorViewer)
+        .map(|s| s.apply_to_builder(builder.clone(), [900.0, 700.0]))
+        .unwrap_or_else(|| builder.with_inner_size([900.0, 700.0]));
+
+    ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
+        if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
+            return;
+        }
+
+        // Handle window close
+        if ctx.input(|i| i.viewport().close_requested()) {
+            window_open.store(false, Ordering::Relaxed);
+            return;
+        }
+
+        {
+            let mut viewer = viewer_clone.lock();
+
+            // Tick inside the viewport so load-completion is detected here
+            // (cross-window request_repaint doesn't reliably wake deferred
+            // viewports, so we can't depend on the parent's tick alone).
+            viewer.tick();
+
+            egui::CentralPanel::default().show(ctx, |ui| {
+                viewer.draw_content(ui);
+            });
+
+            // Keep the viewport alive while loading so tick() can poll
+            // the load receiver. Only repaint this viewport — do NOT wake
+            // the parent, which causes event-loop starvation on Windows.
+            if viewer.pane.loading {
+                ctx.request_repaint();
             }
 
-            // Handle window close
-            if ctx.input(|i| i.viewport().close_requested()) {
-                window_open.store(false, Ordering::Relaxed);
-                return;
+            // Repaint both this viewport AND the parent so sibling viewports
+            // (e.g. replay renderer) also update while this window has focus.
+            if std::mem::take(&mut viewer.needs_repaint) {
+                ctx.request_repaint();
+                parent_ctx.request_repaint();
             }
-
-            {
-                let mut viewer = viewer_clone.lock();
-
-                // Tick inside the viewport so load-completion is detected here
-                // (cross-window request_repaint doesn't reliably wake deferred
-                // viewports, so we can't depend on the parent's tick alone).
-                viewer.tick();
-
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    viewer.draw_content(ui);
-                });
-
-                // Keep the viewport alive while loading so tick() can poll
-                // the load receiver. Only repaint this viewport — do NOT wake
-                // the parent, which causes event-loop starvation on Windows.
-                if viewer.pane.loading {
-                    ctx.request_repaint();
-                }
-
-                // Repaint both this viewport AND the parent so sibling viewports
-                // (e.g. replay renderer) also update while this window has focus.
-                if std::mem::take(&mut viewer.needs_repaint) {
-                    ctx.request_repaint();
-                    parent_ctx.request_repaint();
-                }
-            }
-        },
-    );
+        }
+    });
 }
 
 impl RealtimeArmorViewer {

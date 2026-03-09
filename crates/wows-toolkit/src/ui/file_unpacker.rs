@@ -1586,7 +1586,7 @@ impl ToolkitTabViewer<'_> {
 
     fn extract_files_clicked(&mut self) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
-        let output_dir = Path::new(self.tab_state.output_dir.as_str()).join("res");
+        let output_dir = Path::new(self.tab_state.persisted.read().output_dir.as_str()).join("res");
         let decode_json = self.tab_state.browser_state.decode_prototypes_as_json;
 
         self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice(), decode_json);
@@ -1936,7 +1936,7 @@ impl ToolkitTabViewer<'_> {
                     } else {
                         format!("{} Extract", icons::DOWNLOAD_SIMPLE)
                     };
-                    let extract_enabled = queue_count > 0 && !self.tab_state.output_dir.is_empty();
+                    let extract_enabled = queue_count > 0 && !self.tab_state.persisted.read().output_dir.is_empty();
                     if ui.add_enabled(extract_enabled, egui::Button::new(extract_label)).clicked() {
                         self.extract_files_clicked();
                     }
@@ -2025,15 +2025,19 @@ impl ToolkitTabViewer<'_> {
                     if ui.button(wt_translations::icon_t(icons::FOLDER, &t!("ui.unpacker.browse"))).clicked()
                         && let Some(folder) = rfd::FileDialog::new().pick_folder()
                     {
-                        self.tab_state.output_dir = folder.to_string_lossy().into_owned();
+                        self.tab_state.persisted.write().output_dir = folder.to_string_lossy().into_owned();
                     }
 
                     // Output path text box fills remaining space
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.tab_state.output_dir)
+                    let mut output_dir = self.tab_state.persisted.read().output_dir.clone();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut output_dir)
                             .hint_text(t!("ui.unpacker.output_dir_hint"))
                             .desired_width(ui.available_width()),
                     );
+                    if response.changed() {
+                        self.tab_state.persisted.write().output_dir = output_dir;
+                    }
                 });
             });
         });

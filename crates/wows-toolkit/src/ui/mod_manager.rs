@@ -1,8 +1,6 @@
 #![allow(dead_code)]
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::icons;
@@ -115,7 +113,7 @@ pub struct ModManagerIndex {
 struct ModManagerCategory {
     name: String,
     enabled: bool,
-    mods: Vec<Rc<RefCell<ModInfo>>>,
+    mods: Vec<Arc<Mutex<ModInfo>>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -126,20 +124,20 @@ pub struct ModManagerInfo {
     categories: Vec<(String, Vec<ModManagerCategory>)>,
 
     #[serde(skip)]
-    selected_mod: Option<Rc<RefCell<ModInfo>>>,
+    selected_mod: Option<Arc<Mutex<ModInfo>>>,
 
     filter_text: String,
 }
 
 impl ModManagerInfo {
     /// Look up a mod by its unique ID
-    pub fn mod_by_id(&self, id: &str) -> Option<Rc<RefCell<ModInfo>>> {
+    pub fn mod_by_id(&self, id: &str) -> Option<Arc<Mutex<ModInfo>>> {
         self.categories
             .iter()
             .flat_map(|(_macro_category, categories)| categories.iter())
             .flat_map(|category| category.mods.iter())
-            .find(|mod_info| mod_info.borrow().meta.unique_id == id)
-            .map(Rc::clone)
+            .find(|mod_info| mod_info.lock().meta.unique_id == id)
+            .map(Arc::clone)
     }
 
     pub fn update_index(&mut self, index_hash: String, index: ModManagerIndex) {
@@ -152,11 +150,11 @@ impl ModManagerInfo {
         let mut unique_categories: HashMap<String, HashMap<String, ModManagerCategory>> = HashMap::new();
 
         // Build a list of known previous mods
-        let mut old_mods: HashMap<String, Rc<RefCell<ModInfo>>> = HashMap::new();
+        let mut old_mods: HashMap<String, Arc<Mutex<ModInfo>>> = HashMap::new();
         for (_macro_group, categories) in &self.categories {
             for category in categories {
                 for modi in &category.mods {
-                    old_mods.insert(modi.borrow().meta.unique_id.clone(), Rc::clone(modi));
+                    old_mods.insert(modi.lock().meta.unique_id.clone(), Arc::clone(modi));
                 }
             }
         }
@@ -176,7 +174,7 @@ impl ModManagerInfo {
                 (Some(macro_group), Some(micro_group)) => {
                     let previous_mod = old_mods.remove(&modi.unique_id);
                     let (enabled, mod_paths) = if let Some(previous) = previous_mod {
-                        let previous = previous.borrow();
+                        let previous = previous.lock();
                         (previous.enabled, previous.mod_paths.clone())
                     } else {
                         Default::default()
@@ -194,7 +192,7 @@ impl ModManagerInfo {
                             mods: Vec::new(),
                         })
                         .mods
-                        .push(Rc::new(RefCell::new(ModInfo { meta: modi, enabled, mod_paths })));
+                        .push(Arc::new(Mutex::new(ModInfo { meta: modi, enabled, mod_paths })));
                 }
                 _ => {
                     continue;
@@ -227,7 +225,8 @@ impl ModManagerInfo {
 
 impl ToolkitTabViewer<'_> {
     pub fn build_mod_manager_tab(&mut self, ui: &mut egui::Ui) {
-        let mod_manager_info = &mut self.tab_state.mod_manager_info;
+        let mut mod_manager_info = std::mem::take(&mut self.tab_state.persisted.write().mod_manager_info);
+        let mod_manager_info = &mut mod_manager_info;
         egui::SidePanel::left("mod_manager_left").show_inside(ui, |ui| {
             ui.heading(t!("ui.mod_manager.category_filters"));
 
@@ -242,7 +241,7 @@ impl ToolkitTabViewer<'_> {
 
         egui::SidePanel::right("mod_manager_right").min_width(400.0).show_inside(ui, |ui| {
             if let Some(selected_mod_arc) = &mod_manager_info.selected_mod {
-                let mut selected_mod = selected_mod_arc.borrow_mut();
+                let mut selected_mod = selected_mod_arc.lock();
 
                 ui.vertical(|ui| {
                     ui.heading(&selected_mod.meta.name);
@@ -317,7 +316,7 @@ impl ToolkitTabViewer<'_> {
                         for (_macro_category, categories) in &mod_manager_info.categories {
                             for category in categories.iter().filter(|category| category.enabled) {
                                 for mod_info_arc in &category.mods {
-                                    let mut mod_info = mod_info_arc.borrow_mut();
+                                    let mut mod_info = mod_info_arc.lock();
                                     // Apply the filter
                                     // TODO: maybe just build a raw list of mods to show so we aren't doing work in the UI thread
                                     if !mod_manager_info.filter_text.is_empty()
@@ -355,7 +354,7 @@ impl ToolkitTabViewer<'_> {
                                         });
 
                                         if row.response().clicked() {
-                                            mod_manager_info.selected_mod = Some(Rc::clone(mod_info_arc));
+                                            mod_manager_info.selected_mod = Some(Arc::clone(mod_info_arc));
                                         }
                                     });
                                 }
@@ -364,5 +363,8 @@ impl ToolkitTabViewer<'_> {
                     });
             })
         });
+
+        // Put mod_manager_info back into persisted state
+        self.tab_state.persisted.write().mod_manager_info = std::mem::take(mod_manager_info);
     }
 }

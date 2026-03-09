@@ -16,7 +16,7 @@ use crate::util::error::ToolkitError;
 #[allow(dead_code)]
 pub fn old_game_params_bin_path() -> PathBuf {
     let old_cache_path = std::path::Path::new("game_params.bin");
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+    if let Some(storage_dir) = crate::storage_dir() {
         storage_dir.join(old_cache_path)
     } else {
         old_cache_path.to_path_buf()
@@ -25,11 +25,7 @@ pub fn old_game_params_bin_path() -> PathBuf {
 
 pub fn game_params_bin_path(build: u32) -> PathBuf {
     let filename = format!("game_params_{build}.bin");
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
-        storage_dir.join(filename)
-    } else {
-        PathBuf::from(filename)
-    }
+    if let Some(storage_dir) = crate::storage_dir() { storage_dir.join(filename) } else { PathBuf::from(filename) }
 }
 
 /// Remove ALL versioned game_params cache files (for schema changes).
@@ -37,7 +33,7 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
 pub fn clear_all_game_params_caches() {
     info!("Clearing gameparams cache");
 
-    let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
+    let Some(storage_dir) = crate::storage_dir() else { return };
     let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));
     let Ok(entries) = std::fs::read_dir(&storage_dir) else { return };
     for entry in entries.flatten() {
@@ -53,7 +49,7 @@ pub fn clear_all_game_params_caches() {
 pub fn cleanup_stale_caches(available_builds: &[u32]) {
     info!("Clearing stale caches");
 
-    let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) else { return };
+    let Some(storage_dir) = crate::storage_dir() else { return };
 
     // Remove the old unversioned cache
     let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));

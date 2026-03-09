@@ -2734,7 +2734,7 @@ impl ToolkitTabViewer<'_> {
             ui_report.sort_players(*replay_sort);
         }
 
-        ui_report.update_visible_columns(&self.tab_state.settings.replay_settings);
+        ui_report.update_visible_columns(&self.tab_state.persisted.read().settings.replay);
 
         let mut columns =
             vec![egui_table::Column::new(100.0).range(10.0..=500.0).resizable(true); ui_report.columns.len()];
@@ -2910,7 +2910,8 @@ impl ToolkitTabViewer<'_> {
                             .save_file()
                         && let Ok(mut file) = std::fs::File::create(path)
                     {
-                        let transformed_results = Match::new(replay_file, self.tab_state.settings.debug_mode);
+                        let transformed_results =
+                            Match::new(replay_file, self.tab_state.persisted.read().settings.app.debug_mode);
                         let result = match format {
                             ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results)
                                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
@@ -2953,7 +2954,9 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if self.tab_state.settings.debug_mode && ui.button(t!("ui.replay.debug.raw_metadata")).clicked() {
+                if self.tab_state.persisted.read().settings.app.debug_mode
+                    && ui.button(t!("ui.replay.debug.raw_metadata")).clicked()
+                {
                     let parsed_meta: serde_json::Value = serde_json::from_str(&replay_file.replay_file.raw_meta)
                         .expect("failed to parse replay metadata");
                     let pretty_meta =
@@ -2968,7 +2971,7 @@ impl ToolkitTabViewer<'_> {
                     };
                     self.tab_state.file_viewer.lock().push(viewer);
                 }
-                if self.tab_state.settings.debug_mode {
+                if self.tab_state.persisted.read().settings.app.debug_mode {
                     let has_results = report.battle_results().is_some();
                     ui.add_enabled_ui(has_results, |ui| {
                         ui.menu_button(t!("ui.replay.debug.view_results"), |ui| {
@@ -3020,7 +3023,9 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
-                if !self.tab_state.settings.wows_dir.is_empty() && replay_file.source_path.is_some() {
+                if !self.tab_state.persisted.read().settings.game.wows_dir.is_empty()
+                    && replay_file.source_path.is_some()
+                {
                     let alt_held = ui.input(|i| i.modifiers.alt);
                     let label = if alt_held {
                         wt_translations::icon_t(icons::KEYBOARD, &t!("ui.replay.context.show_replay_controls"))
@@ -3080,8 +3085,9 @@ impl ToolkitTabViewer<'_> {
                         game_duration,
                         wows_data,
                         asset_cache,
-                        &self.tab_state.settings.renderer_options,
+                        &self.tab_state.persisted.read().settings.renderer,
                         Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
+                        self.tab_state.window_settings.clone(),
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -3128,7 +3134,8 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     ui.label(RichText::new("\u{00B7}").color(weak));
-                    let locale = self.tab_state.settings.locale.as_ref().map(|s| s.as_ref());
+                    let locale_val = self.tab_state.persisted.read().settings.app.locale.clone();
+                    let locale = locale_val.as_ref().map(|s| s.as_ref());
                     let mut job = LayoutJob::default();
                     let weak_fmt = TextFormat { color: weak, ..Default::default() };
                     job.append(&t!("ui.replay.team_damage"), 0.0, weak_fmt.clone());
@@ -3164,7 +3171,7 @@ impl ToolkitTabViewer<'_> {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
                     if let Some(ui_report) = replay_file.ui_report.as_mut() {
-                        ui_report.debug_mode = self.tab_state.settings.debug_mode;
+                        ui_report.debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                         self.build_replay_player_list(ui_report, ui);
                     }
                 });
@@ -3173,7 +3180,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn build_file_listing(&mut self, ui: &mut egui::Ui) {
-        let grouping = self.tab_state.settings.replay_settings.grouping;
+        let grouping = self.tab_state.persisted.read().settings.replay.grouping;
 
         match grouping {
             ReplayGrouping::None => self.build_file_listing_ungrouped(ui),
@@ -3207,7 +3214,7 @@ impl ToolkitTabViewer<'_> {
 
                         let replay_weak = Arc::downgrade(&replay);
                         let path_clone = path.clone();
-                        let wows_dir = self.tab_state.settings.wows_dir.clone();
+                        let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                         let label_response = ui
                             .add(Label::new(label_text).selectable(false).sense(Sense::click()))
                             .on_hover_text(label.as_str());
@@ -3330,7 +3337,7 @@ impl ToolkitTabViewer<'_> {
                     for (path, _replay) in replays {
                         let id = egui::Id::new(path);
                         let path_clone = path.clone();
-                        let wows_dir = self.tab_state.settings.wows_dir.clone();
+                        let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                         let replay_weak = tree_maps.leaf_replays.get(&id).cloned().unwrap();
 
                         let replay_guard = id_to_replay.get(&id).unwrap().read();
@@ -3447,70 +3454,58 @@ impl ToolkitTabViewer<'_> {
             if ui.button(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.open_manually"))).clicked()
                 && let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file()
             {
-                self.tab_state.settings.current_replay_path = file;
+                self.tab_state.persisted.write().settings.game.current_replay_path = file.clone();
 
                 if let Some(deps) = self.tab_state.replay_dependencies() {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        deps.parse_replay_from_path(
-                            self.tab_state.settings.current_replay_path.clone(),
-                            ReplaySource::ManualOpen
-                        )
+                        deps.parse_replay_from_path(file, ReplaySource::ManualOpen)
                     );
                 }
             }
 
-            ui.checkbox(&mut self.tab_state.auto_load_latest_replay, t!("ui.replay.autoload_latest"));
+            {
+                let mut val = self.tab_state.persisted.read().auto_load_latest_replay;
+                if ui.checkbox(&mut val, t!("ui.replay.autoload_latest")).changed() {
+                    self.tab_state.persisted.write().auto_load_latest_replay = val;
+                }
+            }
 
-            ComboBox::from_id_salt("replay_grouping")
-                .selected_text(t!(
-                    "ui.replay.group.prefix",
-                    label = self.tab_state.settings.replay_settings.grouping.label()
-                ))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.tab_state.settings.replay_settings.grouping,
-                        ReplayGrouping::Date,
-                        t!("ui.replay.group.date"),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab_state.settings.replay_settings.grouping,
-                        ReplayGrouping::Ship,
-                        t!("ui.replay.group.ship"),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab_state.settings.replay_settings.grouping,
-                        ReplayGrouping::None,
-                        t!("ui.replay.group.none"),
-                    );
-                });
+            {
+                let mut grouping = self.tab_state.persisted.read().settings.replay.grouping;
+                ComboBox::from_id_salt("replay_grouping")
+                    .selected_text(t!("ui.replay.group.prefix", label = grouping.label()))
+                    .show_ui(ui, |ui| {
+                        let changed = ui
+                            .selectable_value(&mut grouping, ReplayGrouping::Date, t!("ui.replay.group.date"))
+                            .changed()
+                            | ui.selectable_value(&mut grouping, ReplayGrouping::Ship, t!("ui.replay.group.ship"))
+                                .changed()
+                            | ui.selectable_value(&mut grouping, ReplayGrouping::None, t!("ui.replay.group.none"))
+                                .changed();
+                        if changed {
+                            self.tab_state.persisted.write().settings.replay.grouping = grouping;
+                        }
+                    });
+            }
 
             ComboBox::from_id_salt("column_filters")
                 .selected_text(t!("ui.replay.column_filters"))
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    ui.checkbox(
-                        &mut self.tab_state.settings.replay_settings.show_raw_xp,
-                        t!("ui.replay.filter.raw_xp"),
-                    );
-                    ui.checkbox(
-                        &mut self.tab_state.settings.replay_settings.show_entity_id,
-                        t!("ui.replay.filter.entity_id"),
-                    );
-                    ui.checkbox(
-                        &mut self.tab_state.settings.replay_settings.show_observed_damage,
-                        t!("ui.replay.filter.observed_damage"),
-                    );
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_fires, t!("ui.replay.filter.fires"));
-                    ui.checkbox(
-                        &mut self.tab_state.settings.replay_settings.show_floods,
-                        t!("ui.replay.filter.floods"),
-                    );
-                    ui.checkbox(
-                        &mut self.tab_state.settings.replay_settings.show_citadels,
-                        t!("ui.replay.filter.citadels"),
-                    );
-                    ui.checkbox(&mut self.tab_state.settings.replay_settings.show_crits, t!("ui.replay.filter.crits"));
+                    let mut rs = self.tab_state.persisted.read().settings.replay.clone();
+                    let mut changed = false;
+                    changed |= ui.checkbox(&mut rs.show_raw_xp, t!("ui.replay.filter.raw_xp")).changed();
+                    changed |= ui.checkbox(&mut rs.show_entity_id, t!("ui.replay.filter.entity_id")).changed();
+                    changed |=
+                        ui.checkbox(&mut rs.show_observed_damage, t!("ui.replay.filter.observed_damage")).changed();
+                    changed |= ui.checkbox(&mut rs.show_fires, t!("ui.replay.filter.fires")).changed();
+                    changed |= ui.checkbox(&mut rs.show_floods, t!("ui.replay.filter.floods")).changed();
+                    changed |= ui.checkbox(&mut rs.show_citadels, t!("ui.replay.filter.citadels")).changed();
+                    changed |= ui.checkbox(&mut rs.show_crits, t!("ui.replay.filter.crits")).changed();
+                    if changed {
+                        self.tab_state.persisted.write().settings.replay = rs;
+                    }
                 });
 
             ui.separator();
@@ -3545,6 +3540,9 @@ impl ToolkitTabViewer<'_> {
                         std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                         std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                         std::sync::Arc::clone(self.tab_state.world_of_warships_data.as_ref().unwrap()),
+                        self.tab_state.db_pool.clone(),
+                        self.tab_state.tokio_runtime.clone(),
+                        self.tab_state.window_settings.clone(),
                     );
                     if let Some(handle) = session_handle {
                         let is_authority = {
@@ -3823,8 +3821,9 @@ impl ToolkitTabViewer<'_> {
                         );
                     }
                     ui.label(t!("ui.collab.display_name"));
+                    let mut display_name = self.tab_state.persisted.read().settings.collab.display_name.clone();
                     let name_response = ui.add(
-                        egui::TextEdit::singleline(&mut self.tab_state.settings.collab_display_name)
+                        egui::TextEdit::singleline(&mut display_name)
                             .hint_text(t!("ui.collab.display_name_hint"))
                             .desired_width(160.0)
                             .text_color(if self.tab_state.show_display_name_error {
@@ -3833,6 +3832,9 @@ impl ToolkitTabViewer<'_> {
                                 ui.visuals().text_color()
                             }),
                     );
+                    if name_response.changed() {
+                        self.tab_state.persisted.write().settings.collab.display_name = display_name;
+                    }
                     if self.tab_state.show_display_name_error {
                         ui.painter().rect_stroke(
                             name_response.rect,
@@ -3852,12 +3854,12 @@ impl ToolkitTabViewer<'_> {
 
                     ui.label(RichText::new(t!("ui.collab.host_session").as_ref()).strong());
                     if ui.button(t!("ui.collab.start_session")).clicked() {
-                        if self.tab_state.settings.collab_display_name.trim().is_empty() {
+                        if self.tab_state.persisted.read().settings.collab.display_name.trim().is_empty() {
                             self.tab_state.show_display_name_error = true;
                             self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
                         } else {
                             self.tab_state.pending_host = true;
-                            if !self.tab_state.settings.suppress_p2p_ip_warning {
+                            if !self.tab_state.persisted.read().settings.collab.suppress_p2p_ip_warning {
                                 self.tab_state.show_ip_warning = true;
                             }
                         }
@@ -3879,7 +3881,7 @@ impl ToolkitTabViewer<'_> {
                         let trimmed = text.trim().to_string();
                         if trimmed.is_empty() {
                             self.tab_state.toasts.lock().error(t!("ui.collab.clipboard_empty"));
-                        } else if self.tab_state.settings.collab_display_name.trim().is_empty() {
+                        } else if self.tab_state.persisted.read().settings.collab.display_name.trim().is_empty() {
                             self.tab_state.show_display_name_error = true;
                             self.tab_state.toasts.lock().error(t!("ui.collab.enter_display_name"));
                         } else if let Err(e) = crate::collab::protocol::decode_token(&trimmed) {
@@ -3887,7 +3889,7 @@ impl ToolkitTabViewer<'_> {
                         } else {
                             self.tab_state.join_session_token = trimmed;
                             self.tab_state.pending_join = true;
-                            if !self.tab_state.settings.suppress_p2p_ip_warning {
+                            if !self.tab_state.persisted.read().settings.collab.suppress_p2p_ip_warning {
                                 self.tab_state.show_ip_warning = true;
                             }
                         }
@@ -3974,16 +3976,17 @@ impl ToolkitTabViewer<'_> {
                         } else {
                             // No hidden viewer — create a fresh one.
                             drop(renderers);
-                            let saved_options = &self.tab_state.settings.renderer_options;
+                            let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                             let suppress = std::sync::Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
                             let viewer = crate::replay::renderer::launch_client_renderer(
                                 replay.replay_name.clone(),
                                 replay.map_image_png.clone(),
                                 replay.game_version.clone(),
-                                saved_options,
+                                &saved_options,
                                 suppress,
                                 self.tab_state.world_of_warships_data.as_ref(),
                                 &self.tab_state.renderer_asset_cache,
+                                self.tab_state.window_settings.clone(),
                             );
                             if let Some(ref client_handle) = self.tab_state.client_session {
                                 let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -4034,6 +4037,9 @@ impl ToolkitTabViewer<'_> {
                                 std::sync::Arc::clone(&self.tab_state.cap_layout_db),
                                 std::sync::Arc::clone(&self.tab_state.renderer_asset_cache),
                                 std::sync::Arc::clone(wows_data),
+                                self.tab_state.db_pool.clone(),
+                                self.tab_state.tokio_runtime.clone(),
+                                self.tab_state.window_settings.clone(),
                             );
                             board.is_session_board = true;
                             if let Some(handle) = session_handle {
@@ -4301,8 +4307,9 @@ impl ToolkitTabViewer<'_> {
                 game_duration,
                 wows_data,
                 asset_cache,
-                &self.tab_state.settings.renderer_options,
+                &self.tab_state.persisted.read().settings.renderer,
                 Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
+                self.tab_state.window_settings.clone(),
             );
             self.tab_state.replay_renderers.lock().push(viewer);
         }

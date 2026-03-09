@@ -450,6 +450,8 @@ fn parse_replay_data_in_background(
                             let cap_provider = Arc::clone(&metadata_provider);
                             let cap_gc = Arc::clone(&gc);
                             let cap_db = Arc::clone(&data.cap_layout_db);
+                            let cap_pool = data.db_pool.clone();
+                            let cap_rt = data.tokio_runtime.clone();
                             crate::util::thread::spawn_logged("cap-layout-extract", move || {
                                 if let Some(layout) = crate::data::cap_layout::extract_cap_layout_from_replay(
                                     &cap_path,
@@ -457,9 +459,14 @@ fn parse_replay_data_in_background(
                                     Some(cap_gc.as_ref()),
                                 ) {
                                     let mut db = cap_db.lock();
-                                    if db.insert(layout) {
+                                    if db.insert(layout.clone()) {
                                         debug!("added cap layout for ({}, {})", key.map_id, key.scenario_config_id);
-                                        if let Some(cache_path) = crate::data::cap_layout::cache_path() {
+                                        // Save to SQLite if available.
+                                        if let (Some(pool), Some(rt)) = (&cap_pool, &cap_rt) {
+                                            let _ = rt.block_on(
+                                                crate::data::cap_layout::CapLayoutDb::save_layout_to_db(pool, &layout),
+                                            );
+                                        } else if let Some(cache_path) = crate::data::cap_layout::cache_path() {
                                             let _ = db.save(&cache_path);
                                         }
                                     }
@@ -673,6 +680,8 @@ pub struct BackgroundParserThread {
     pub is_debug: bool,
     pub parser_lock: Arc<Mutex<()>>,
     pub cap_layout_db: Arc<Mutex<crate::data::cap_layout::CapLayoutDb>>,
+    pub db_pool: Option<sqlx::SqlitePool>,
+    pub tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {

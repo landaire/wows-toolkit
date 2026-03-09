@@ -543,6 +543,8 @@ pub struct ReplayRendererViewer {
     gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
     /// User preference: prefer CPU (software) encoder for video export.
     prefer_cpu_encoder: Arc<AtomicBool>,
+    /// Shared window settings tracker for persisting viewport geometry.
+    window_settings: crate::tab_state::SharedWindowSettings,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -572,6 +574,7 @@ pub fn launch_replay_renderer(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     saved_options: &SavedRenderOptions,
     suppress_gpu_warning: Arc<AtomicBool>,
+    window_settings: crate::tab_state::SharedWindowSettings,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (command_tx, command_rx) = mpsc::channel();
@@ -650,6 +653,7 @@ pub fn launch_replay_renderer(
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
+        window_settings,
     };
 
     let open = Arc::clone(&viewer.open);
@@ -684,6 +688,7 @@ pub fn launch_client_renderer(
     suppress_gpu_warning: Arc<AtomicBool>,
     wows_data: Option<&SharedWoWsData>,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+    window_settings: crate::tab_state::SharedWindowSettings,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (_command_tx, _command_rx) = mpsc::channel();
@@ -792,6 +797,7 @@ pub fn launch_client_renderer(
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
+        window_settings,
     }
 }
 
@@ -820,6 +826,11 @@ impl ReplayRendererViewer {
         &self.shared_state
     }
 
+    /// The [`egui::ViewportId`] used by this viewer's deferred viewport.
+    pub fn viewport_id(&self) -> egui::ViewportId {
+        egui::ViewportId::from_hash_of(&*self.title)
+    }
+
     pub fn draw(&self, ctx: &egui::Context) {
         // Store the parent context so the background thread can request repaints.
         // Deferred viewports repaint as part of their parent's paint cycle.
@@ -846,15 +857,22 @@ impl ReplayRendererViewer {
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
+        let window_settings = self.window_settings.clone();
         let parent_ctx = ctx.clone();
         let viewport_id = egui::ViewportId::from_hash_of(&*self.title);
 
+        // Apply persisted window size if available.
+        let builder = egui::ViewportBuilder::default().with_title(&*self.title).with_min_inner_size([400.0, 450.0]);
+        let builder = window_settings
+            .lock()
+            .settings
+            .get(&crate::tab_state::WindowKind::ReplayRenderer)
+            .map(|s| s.apply_to_builder(builder.clone(), [800.0, 900.0]))
+            .unwrap_or_else(|| builder.with_inner_size([800.0, 900.0]));
+
         ctx.show_viewport_deferred(
             viewport_id,
-            egui::ViewportBuilder::default()
-                .with_title(&*self.title)
-                .with_inner_size([800.0, 900.0])
-                .with_min_inner_size([400.0, 450.0]),
+            builder,
             move |ctx, _class| {
                 if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
                     return;
@@ -2752,6 +2770,7 @@ impl ReplayRendererViewer {
 
                     toasts.lock().show(ctx);
                 });
+
 
                 if ctx.input(|i| i.viewport().close_requested()) {
                     window_open.store(false, Ordering::Relaxed);

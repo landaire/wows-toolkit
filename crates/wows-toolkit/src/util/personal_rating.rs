@@ -230,7 +230,7 @@ impl PersonalRatingData {
 /// Get the path for storing expected values
 pub fn get_expected_values_path() -> PathBuf {
     let mut path = PathBuf::from(EXPECTED_VALUES_FILENAME);
-    if let Some(storage_dir) = eframe::storage_dir(crate::APP_NAME) {
+    if let Some(storage_dir) = crate::storage_dir() {
         path = storage_dir.join(path);
     }
     path

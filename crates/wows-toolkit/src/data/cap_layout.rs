@@ -296,7 +296,7 @@ fn layouts_have_same_caps(a: &CapLayout, b: &CapLayout) -> bool {
 /// Return the on-disk path for the cap layout cache, or `None` if no storage
 /// directory is available.
 pub fn cache_path() -> Option<std::path::PathBuf> {
-    eframe::storage_dir(crate::APP_NAME).map(|d| d.join("cap_layouts.bin"))
+    crate::storage_dir().map(|d| d.join("cap_layouts.bin"))
 }
 
 impl CapLayoutDb {
@@ -331,6 +331,59 @@ impl CapLayoutDb {
         }
 
         None
+    }
+
+    /// Load the cap layout database from SQLite.
+    pub async fn load_from_db(pool: &sqlx::SqlitePool) -> Self {
+        let mut db = Self::default();
+        match crate::db::queries::get_all_cap_layouts(pool).await {
+            Ok(rows) => {
+                for (map_id, scenario_config_id, blob) in rows {
+                    match rkyv::from_bytes::<CapLayout, rkyv::rancor::Error>(&blob) {
+                        Ok(layout) => {
+                            db.layouts.insert(
+                                CapLayoutKey { map_id: map_id as u32, scenario_config_id: scenario_config_id as u32 },
+                                layout,
+                            );
+                        }
+                        Err(e) => {
+                            warn!("failed to deserialize cap layout ({map_id}, {scenario_config_id}): {e}");
+                        }
+                    }
+                }
+                tracing::info!("loaded {} cap layouts from SQLite", db.layouts.len());
+            }
+            Err(e) => {
+                warn!("failed to load cap layouts from SQLite: {e}");
+            }
+        }
+        db
+    }
+
+    /// Save the entire cap layout database to SQLite.
+    pub async fn save_to_db(&self, pool: &sqlx::SqlitePool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        for (key, layout) in &self.layouts {
+            let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|e| format!("{e}"))?;
+            crate::db::queries::upsert_cap_layout(pool, key.map_id as i64, key.scenario_config_id as i64, &blob)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Save a single cap layout to SQLite (for incremental inserts).
+    pub async fn save_layout_to_db(
+        pool: &sqlx::SqlitePool,
+        layout: &CapLayout,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|e| format!("{e}"))?;
+        crate::db::queries::upsert_cap_layout(
+            pool,
+            layout.key.map_id as i64,
+            layout.key.scenario_config_id as i64,
+            &blob,
+        )
+        .await?;
+        Ok(())
     }
 
     /// Save the cap layout database to disk.
