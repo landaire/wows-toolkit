@@ -9,7 +9,7 @@
 /// may extend slightly beyond for off-edge drawings).
 #[derive(Clone, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Annotation {
-    Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool },
+    Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool, config: Option<AnnotationShipConfig> },
     FreehandStroke { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
     Line { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
     Circle { center: [f32; 2], radius: f32, color: [u8; 4], width: f32, filled: bool },
@@ -17,6 +17,55 @@ pub enum Annotation {
     Triangle { center: [f32; 2], radius: f32, rotation: f32, color: [u8; 4], width: f32, filled: bool },
     Arrow { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
     Measurement { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
+}
+
+/// Optional ship assignment and configuration for Ship annotations.
+///
+/// Stores the ship identity (param_id + display name), selected hull, modifier
+/// coefficients, and which range circles are visible.  Coefficients are pre-computed
+/// products of all relevant captain skills / modernizations so the protocol layer
+/// stays independent of game-data structures.
+#[derive(Clone, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AnnotationShipConfig {
+    /// `GameParamId` as raw `u64`.  0 = unassigned.
+    pub param_id: u64,
+    /// Localized display name (e.g. "Moskva").
+    pub ship_name: String,
+    /// Selected hull upgrade name (e.g. "PRUH510_Moskva_1"). Empty = default hull.
+    pub hull_name: String,
+    /// Visibility distance coefficient (product of skills/mods). 1.0 = stock.
+    pub vis_coeff: f32,
+    /// Main battery max distance coefficient. 1.0 = stock.
+    pub gm_coeff: f32,
+    /// Secondary battery max distance coefficient. 1.0 = stock.
+    pub gs_coeff: f32,
+    /// Which range circles to display.
+    pub range_filter: AnnotationRangeFilter,
+}
+
+/// Range circle visibility flags for an annotation ship.
+#[derive(Clone, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AnnotationRangeFilter {
+    pub detection: bool,
+    pub main_battery: bool,
+    pub secondary_battery: bool,
+    pub torpedo: bool,
+    pub radar: bool,
+    pub hydro: bool,
+}
+
+impl Default for AnnotationShipConfig {
+    fn default() -> Self {
+        Self {
+            param_id: 0,
+            ship_name: String::new(),
+            hull_name: String::new(),
+            vis_coeff: 1.0,
+            gm_coeff: 1.0,
+            gs_coeff: 1.0,
+            range_filter: AnnotationRangeFilter::default(),
+        }
+    }
 }
 
 /// Active drawing/placement tool state.

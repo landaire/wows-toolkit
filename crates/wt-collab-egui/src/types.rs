@@ -57,7 +57,7 @@ impl From<&wt_collab_protocol::protocol::WireCapPoint> for CapPointView {
 /// A single annotation on the map, using egui types for rendering.
 #[derive(Clone)]
 pub enum Annotation {
-    Ship { pos: Vec2, yaw: f32, species: String, friendly: bool },
+    Ship { pos: Vec2, yaw: f32, species: String, friendly: bool, config: Option<AnnotationShipConfig> },
     FreehandStroke { points: Vec<Vec2>, color: Color32, width: f32 },
     Line { start: Vec2, end: Vec2, color: Color32, width: f32 },
     Circle { center: Vec2, radius: f32, color: Color32, width: f32, filled: bool },
@@ -65,6 +65,52 @@ pub enum Annotation {
     Triangle { center: Vec2, radius: f32, rotation: f32, color: Color32, width: f32, filled: bool },
     Arrow { points: Vec<Vec2>, color: Color32, width: f32 },
     Measurement { start: Vec2, end: Vec2, color: Color32, width: f32 },
+}
+
+// ─── Annotation Ship Config ─────────────────────────────────────────────────
+
+/// Ship assignment and configuration for Ship annotations (local egui mirror).
+#[derive(Clone, Debug)]
+pub struct AnnotationShipConfig {
+    /// `GameParamId` as raw `u64`.  0 = unassigned.
+    pub param_id: u64,
+    /// Localized display name (e.g. "Moskva").
+    pub ship_name: String,
+    /// Selected hull upgrade name. Empty = default hull.
+    pub hull_name: String,
+    /// Visibility distance coefficient (1.0 = stock).
+    pub vis_coeff: f32,
+    /// Main battery range coefficient (1.0 = stock).
+    pub gm_coeff: f32,
+    /// Secondary battery range coefficient (1.0 = stock).
+    pub gs_coeff: f32,
+    /// Which range circles to display.
+    pub range_filter: AnnotationRangeFilter,
+}
+
+impl Default for AnnotationShipConfig {
+    fn default() -> Self {
+        Self {
+            param_id: 0,
+            ship_name: String::new(),
+            hull_name: String::new(),
+            vis_coeff: 1.0,
+            gm_coeff: 1.0,
+            gs_coeff: 1.0,
+            range_filter: AnnotationRangeFilter::default(),
+        }
+    }
+}
+
+/// Range circle visibility flags.
+#[derive(Clone, Debug, Default)]
+pub struct AnnotationRangeFilter {
+    pub detection: bool,
+    pub main_battery: bool,
+    pub secondary_battery: bool,
+    pub torpedo: bool,
+    pub radar: bool,
+    pub hydro: bool,
 }
 
 // ─── Paint Tool ──────────────────────────────────────────────────────────────
@@ -196,11 +242,55 @@ impl AnnotationState {
 
 // ─── Wire ↔ Local Conversion ─────────────────────────────────────────────────
 
+fn wire_ship_config_to_local(c: wire::AnnotationShipConfig) -> AnnotationShipConfig {
+    AnnotationShipConfig {
+        param_id: c.param_id,
+        ship_name: c.ship_name,
+        hull_name: c.hull_name,
+        vis_coeff: c.vis_coeff,
+        gm_coeff: c.gm_coeff,
+        gs_coeff: c.gs_coeff,
+        range_filter: AnnotationRangeFilter {
+            detection: c.range_filter.detection,
+            main_battery: c.range_filter.main_battery,
+            secondary_battery: c.range_filter.secondary_battery,
+            torpedo: c.range_filter.torpedo,
+            radar: c.range_filter.radar,
+            hydro: c.range_filter.hydro,
+        },
+    }
+}
+
+fn local_ship_config_to_wire(c: &AnnotationShipConfig) -> wire::AnnotationShipConfig {
+    wire::AnnotationShipConfig {
+        param_id: c.param_id,
+        ship_name: c.ship_name.clone(),
+        hull_name: c.hull_name.clone(),
+        vis_coeff: c.vis_coeff,
+        gm_coeff: c.gm_coeff,
+        gs_coeff: c.gs_coeff,
+        range_filter: wire::AnnotationRangeFilter {
+            detection: c.range_filter.detection,
+            main_battery: c.range_filter.main_battery,
+            secondary_battery: c.range_filter.secondary_battery,
+            torpedo: c.range_filter.torpedo,
+            radar: c.range_filter.radar,
+            hydro: c.range_filter.hydro,
+        },
+    }
+}
+
 /// Convert a wire annotation (primitive arrays) to a local annotation (egui types).
 pub fn wire_to_local(ca: wire::Annotation) -> Annotation {
     match ca {
-        wire::Annotation::Ship { pos, yaw, species, friendly } => {
-            Annotation::Ship { pos: Vec2::new(pos[0], pos[1]), yaw, species, friendly }
+        wire::Annotation::Ship { pos, yaw, species, friendly, config } => {
+            Annotation::Ship {
+                pos: Vec2::new(pos[0], pos[1]),
+                yaw,
+                species,
+                friendly,
+                config: config.map(wire_ship_config_to_local),
+            }
         }
         wire::Annotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
             points: points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect(),
@@ -253,8 +343,14 @@ pub fn wire_to_local(ca: wire::Annotation) -> Annotation {
 /// Convert a local annotation (egui types) to wire annotation (primitive arrays).
 pub fn local_to_wire(a: &Annotation) -> wire::Annotation {
     match a {
-        Annotation::Ship { pos, yaw, species, friendly } => {
-            wire::Annotation::Ship { pos: [pos.x, pos.y], yaw: *yaw, species: species.clone(), friendly: *friendly }
+        Annotation::Ship { pos, yaw, species, friendly, config } => {
+            wire::Annotation::Ship {
+                pos: [pos.x, pos.y],
+                yaw: *yaw,
+                species: species.clone(),
+                friendly: *friendly,
+                config: config.as_ref().map(local_ship_config_to_wire),
+            }
         }
         Annotation::FreehandStroke { points, color, width } => wire::Annotation::FreehandStroke {
             points: points.iter().map(|p| [p.x, p.y]).collect(),

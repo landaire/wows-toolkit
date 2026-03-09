@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::map_data::MapInfo;
 use wowsunpack::game_params::types::BigWorldDistance;
+use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_types::WorldPos;
 
@@ -76,10 +77,48 @@ const RESIZE_HANDLE_TOLERANCE: f32 = 8.0;
 /// Default radius for newly added cap points (in BigWorld units).
 /// Typical cap circles are ~5km = ~167 BW units; 150 is a sensible default.
 const DEFAULT_CAP_RADIUS: f32 = 150.0;
+/// Serializable ship configuration for presets (mirrors [`super::AnnotationShipConfig`]).
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct PresetShipConfig {
+    pub param_id: u64,
+    pub ship_name: String,
+    #[serde(default)]
+    pub hull_name: String,
+    #[serde(default = "default_one")]
+    pub vis_coeff: f32,
+    #[serde(default = "default_one")]
+    pub gm_coeff: f32,
+    #[serde(default = "default_one")]
+    pub gs_coeff: f32,
+    #[serde(default)]
+    pub range_filter: PresetRangeFilter,
+}
+
+/// Serializable range filter for presets.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+struct PresetRangeFilter {
+    #[serde(default)]
+    pub detection: bool,
+    #[serde(default)]
+    pub main_battery: bool,
+    #[serde(default)]
+    pub secondary_battery: bool,
+    #[serde(default)]
+    pub torpedo: bool,
+    #[serde(default)]
+    pub radar: bool,
+    #[serde(default)]
+    pub hydro: bool,
+}
+
+fn default_one() -> f32 {
+    1.0
+}
+
 /// A serializable annotation (mirrors [`Annotation`] but with plain types).
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum PresetAnnotation {
-    Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool },
+    Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool, #[serde(default)] config: Option<PresetShipConfig> },
     FreehandStroke { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
     Line { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
     Circle { center: [f32; 2], radius: f32, color: [u8; 4], width: f32, filled: bool },
@@ -92,8 +131,29 @@ enum PresetAnnotation {
 impl PresetAnnotation {
     fn from_annotation(ann: &Annotation) -> Self {
         match ann {
-            Annotation::Ship { pos, yaw, species, friendly } => {
-                PresetAnnotation::Ship { pos: [pos.x, pos.y], yaw: *yaw, species: species.clone(), friendly: *friendly }
+            Annotation::Ship { pos, yaw, species, friendly, config } => {
+                PresetAnnotation::Ship {
+                    pos: [pos.x, pos.y],
+                    yaw: *yaw,
+                    species: species.clone(),
+                    friendly: *friendly,
+                    config: config.as_ref().map(|c| PresetShipConfig {
+                        param_id: c.param_id,
+                        ship_name: c.ship_name.clone(),
+                        hull_name: c.hull_name.clone(),
+                        vis_coeff: c.vis_coeff,
+                        gm_coeff: c.gm_coeff,
+                        gs_coeff: c.gs_coeff,
+                        range_filter: PresetRangeFilter {
+                            detection: c.range_filter.detection,
+                            main_battery: c.range_filter.main_battery,
+                            secondary_battery: c.range_filter.secondary_battery,
+                            torpedo: c.range_filter.torpedo,
+                            radar: c.range_filter.radar,
+                            hydro: c.range_filter.hydro,
+                        },
+                    }),
+                }
             }
             Annotation::FreehandStroke { points, color, width } => PresetAnnotation::FreehandStroke {
                 points: points.iter().map(|p| [p.x, p.y]).collect(),
@@ -147,11 +207,27 @@ impl PresetAnnotation {
 
     fn to_annotation(&self) -> Annotation {
         match self {
-            PresetAnnotation::Ship { pos, yaw, species, friendly } => Annotation::Ship {
+            PresetAnnotation::Ship { pos, yaw, species, friendly, config } => Annotation::Ship {
                 pos: Vec2::new(pos[0], pos[1]),
                 yaw: *yaw,
                 species: species.clone(),
                 friendly: *friendly,
+                config: config.as_ref().map(|c| super::AnnotationShipConfig {
+                    param_id: c.param_id,
+                    ship_name: c.ship_name.clone(),
+                    hull_name: c.hull_name.clone(),
+                    vis_coeff: c.vis_coeff,
+                    gm_coeff: c.gm_coeff,
+                    gs_coeff: c.gs_coeff,
+                    range_filter: super::AnnotationRangeFilter {
+                        detection: c.range_filter.detection,
+                        main_battery: c.range_filter.main_battery,
+                        secondary_battery: c.range_filter.secondary_battery,
+                        torpedo: c.range_filter.torpedo,
+                        radar: c.range_filter.radar,
+                        hydro: c.range_filter.hydro,
+                    },
+                }),
             },
             PresetAnnotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
                 points: points.iter().map(|p| Vec2::new(p[0], p[1])).collect(),
@@ -387,6 +463,12 @@ pub struct TacticsBoardState {
     applied_cap_sync_version: u64,
     /// Version of tactics map last applied from the collab session.
     applied_tactics_map_version: u64,
+
+    // ── Ship annotation config state ──
+    /// Lazily built ship catalog for annotation ship search.
+    ship_catalog: Option<crate::armor_viewer::ship_selector::ShipCatalog>,
+    /// Current search text for ship assignment.
+    ship_search_text: String,
 }
 
 impl TacticsBoardState {
@@ -422,6 +504,8 @@ impl Default for TacticsBoardState {
             applied_annotation_sync_version: 0,
             applied_cap_sync_version: 0,
             applied_tactics_map_version: 0,
+            ship_catalog: None,
+            ship_search_text: String::new(),
         }
     }
 }
@@ -1301,8 +1385,24 @@ impl TacticsBoardViewer {
             let ann_state = annotation_state_arc.lock();
             let icons_ref = state.ship_icons.as_ref();
             let map_space = state.map_info.as_ref().map(|m| m.space_size as f32);
+            let mut placed_labels: Vec<Rect> = Vec::new();
             for ann in &ann_state.annotations {
                 render_annotation(ann, &transform, icons_ref, &map_painter, map_space);
+                // Range circles for ship annotations with config
+                if let Annotation::Ship { pos, config: Some(cfg), .. } = ann {
+                    if let Some(map_info) = &state.map_info {
+                        render_annotation_range_circles(
+                            ui.ctx(),
+                            cfg,
+                            *pos,
+                            &transform,
+                            map_info,
+                            &map_painter,
+                            wows_data,
+                            &mut placed_labels,
+                        );
+                    }
+                }
             }
             for &sel in &ann_state.selected_indices {
                 if sel < ann_state.annotations.len() {
@@ -1447,13 +1547,18 @@ impl TacticsBoardViewer {
             collab_local_tx,
             collab_command_tx,
             Some(board_id),
+            wows_data,
         );
 
-        // ── Annotation selection edit popup ──
+        // ── Annotation selection edit popup (skip for ships — handled by context menu) ──
         {
             let ann = annotation_state_arc.lock();
             let sel_info = ann.single_selected().and_then(|idx| {
                 if idx < ann.annotations.len() {
+                    // Skip popup for Ship annotations — config lives in right-click menu
+                    if matches!(ann.annotations[idx], Annotation::Ship { .. }) {
+                        return None;
+                    }
                     let bounds = annotation_screen_bounds(&ann.annotations[idx], &transform);
                     Some((idx, bounds))
                 } else {
@@ -1782,6 +1887,7 @@ impl TacticsBoardViewer {
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
         board_id: Option<u64>,
+        wows_data: &SharedWoWsData,
     ) {
         let show_menu = annotation_state_arc.lock().show_context_menu;
         if !show_menu {
@@ -1815,6 +1921,269 @@ impl TacticsBoardViewer {
                         }
                         if result.did_undo {
                             send_annotation_full_sync(collab_command_tx, &ann, board_id);
+                        }
+                    }
+
+                    // ── Ship annotation config (when a single Ship is selected) ──
+                    {
+                        let ann = annotation_state_arc.lock();
+                        let single_ship_idx = if ann.selected_indices.len() == 1 {
+                            let idx = *ann.selected_indices.iter().next().unwrap();
+                            if matches!(ann.annotations.get(idx), Some(Annotation::Ship { .. })) {
+                                Some(idx)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        drop(ann);
+
+                        if let Some(sel_idx) = single_ship_idx {
+                            ui.separator();
+                            ui.label(egui::RichText::new("Ship Config").small().strong());
+
+                            // Team toggle + delete
+                            {
+                                let mut ann = annotation_state_arc.lock();
+                                let is_friendly = matches!(ann.annotations.get(sel_idx), Some(Annotation::Ship { friendly: true, .. }));
+                                let (label, color) = if is_friendly {
+                                    ("Friendly", super::FRIENDLY_COLOR)
+                                } else {
+                                    ("Enemy", super::ENEMY_COLOR)
+                                };
+
+                                let mut toggle_team = false;
+                                let mut do_delete = false;
+                                ui.horizontal(|ui| {
+                                    let btn = egui::Button::new(egui::RichText::new(label).color(color).small())
+                                        .min_size(egui::vec2(60.0, 0.0));
+                                    if ui.add(btn).clicked() {
+                                        toggle_team = true;
+                                    }
+                                    if ui
+                                        .button(
+                                            egui::RichText::new(crate::icons::TRASH)
+                                                .color(Color32::from_rgb(255, 100, 100)),
+                                        )
+                                        .on_hover_text("Delete")
+                                        .clicked()
+                                    {
+                                        do_delete = true;
+                                    }
+                                });
+
+                                if toggle_team {
+                                    if let Some(Annotation::Ship { friendly, .. }) = ann.annotations.get_mut(sel_idx) {
+                                        *friendly = !*friendly;
+                                    }
+                                    send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                }
+                                if do_delete {
+                                    ann.save_undo();
+                                    let id = ann.annotation_ids[sel_idx];
+                                    ann.annotations.remove(sel_idx);
+                                    ann.annotation_ids.remove(sel_idx);
+                                    ann.annotation_owners.remove(sel_idx);
+                                    ann.clear_selection();
+                                    send_annotation_remove(collab_local_tx, id, board_id);
+                                    ann.show_context_menu = false;
+                                }
+                            }
+
+                            // Lazy-build ship catalog
+                            if state.ship_catalog.is_none() {
+                                let wdata = wows_data.read();
+                                if let Some(ref metadata) = wdata.game_metadata {
+                                    state.ship_catalog = Some(crate::armor_viewer::ship_selector::ShipCatalog::build(metadata));
+                                }
+                            }
+
+                            // Ship search
+                            if let Some(ref catalog) = state.ship_catalog {
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(&mut state.ship_search_text)
+                                        .hint_text("Search ship...")
+                                        .desired_width(160.0),
+                                );
+                                if response.changed() || response.gained_focus() {
+                                    // Search is live as user types
+                                }
+
+                                if !state.ship_search_text.is_empty() {
+                                    let query = unidecode::unidecode(&state.ship_search_text).to_lowercase();
+                                    let mut results: Vec<&crate::armor_viewer::ship_selector::ShipEntry> = Vec::new();
+                                    for nation in &catalog.nations {
+                                        for class in &nation.classes {
+                                            for ship in &class.ships {
+                                                if ship.search_name.contains(&query) {
+                                                    results.push(ship);
+                                                    if results.len() >= 10 {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if results.len() >= 10 { break; }
+                                        }
+                                        if results.len() >= 10 { break; }
+                                    }
+
+                                    for entry in &results {
+                                        let tier = crate::armor_viewer::ship_selector::tier_roman(entry.tier);
+                                        let label = format!("{} {}", tier, entry.display_name);
+                                        if ui.button(egui::RichText::new(&label).small()).clicked() {
+                                            // Assign ship to annotation
+                                            let wdata = wows_data.read();
+                                            if let Some(ref metadata) = wdata.game_metadata {
+                                                if let Some(param) = metadata.game_param_by_index(&entry.param_index) {
+                                                    let param_id = param.id().raw();
+                                                    let ship_name = entry.display_name.clone();
+                                                    let species_str = param.species()
+                                                        .and_then(|s| s.known())
+                                                        .map(|s| format!("{s:?}"))
+                                                        .unwrap_or_default();
+
+                                                    let mut ann = annotation_state_arc.lock();
+                                                    ann.save_undo();
+                                                    if let Some(Annotation::Ship { species, config, .. }) = ann.annotations.get_mut(sel_idx) {
+                                                        *species = species_str;
+                                                        *config = Some(super::AnnotationShipConfig {
+                                                            param_id,
+                                                            ship_name,
+                                                            hull_name: String::new(),
+                                                            vis_coeff: 1.0,
+                                                            gm_coeff: 1.0,
+                                                            gs_coeff: 1.0,
+                                                            range_filter: super::AnnotationRangeFilter::default(),
+                                                        });
+                                                    }
+                                                    send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                                    drop(ann);
+                                                    state.ship_search_text.clear();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Show current ship config if assigned
+                            let ann = annotation_state_arc.lock();
+                            let has_config = matches!(
+                                ann.annotations.get(sel_idx),
+                                Some(Annotation::Ship { config: Some(_), .. })
+                            );
+                            drop(ann);
+
+                            if has_config {
+                                // Hull selector
+                                let hull_names: Vec<String> = {
+                                    let ann = annotation_state_arc.lock();
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get(sel_idx) {
+                                        let wdata = wows_data.read();
+                                        if let Some(ref metadata) = wdata.game_metadata {
+                                            if let Some(param) = metadata.game_param_by_id(cfg.param_id.into()) {
+                                                if let Some(vehicle) = param.vehicle() {
+                                                    if let Some(hulls) = vehicle.hull_upgrades() {
+                                                        hulls.keys().cloned().collect()
+                                                    } else { Vec::new() }
+                                                } else { Vec::new() }
+                                            } else { Vec::new() }
+                                        } else { Vec::new() }
+                                    } else { Vec::new() }
+                                };
+
+                                if hull_names.len() > 1 {
+                                    let mut ann = annotation_state_arc.lock();
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
+                                        let current_hull = if cfg.hull_name.is_empty() { "Default" } else { &cfg.hull_name };
+                                        let old_hull = cfg.hull_name.clone();
+                                        egui::ComboBox::from_id_salt("ann_hull_select")
+                                            .selected_text(current_hull)
+                                            .width(140.0)
+                                            .show_ui(ui, |ui| {
+                                                for hull in &hull_names {
+                                                    ui.selectable_value(&mut cfg.hull_name, hull.clone(), hull);
+                                                }
+                                            });
+                                        if cfg.hull_name != old_hull {
+                                            send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                        }
+                                    }
+                                }
+
+                                // Modifier checkboxes
+                                {
+                                    let mut ann = annotation_state_arc.lock();
+                                    let mut changed = false;
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
+                                        ui.separator();
+                                        ui.label(egui::RichText::new("Modifiers").small().strong());
+
+                                        let mut ce = cfg.vis_coeff < 1.0;
+                                        if ui.checkbox(&mut ce, egui::RichText::new("Concealment Expert").small()).changed() {
+                                            cfg.vis_coeff = if ce { 0.9 } else { 1.0 };
+                                            changed = true;
+                                        }
+
+                                        let mut gr = cfg.gm_coeff > 1.0;
+                                        if ui.checkbox(&mut gr, egui::RichText::new("Gun Range Mod").small()).changed() {
+                                            cfg.gm_coeff = if gr { 1.16 } else { 1.0 };
+                                            changed = true;
+                                        }
+
+                                        let mut sr = cfg.gs_coeff > 1.0;
+                                        if ui.checkbox(&mut sr, egui::RichText::new("Secondary Range Mod").small()).changed() {
+                                            cfg.gs_coeff = if sr { 1.05 } else { 1.0 };
+                                            changed = true;
+                                        }
+                                    }
+                                    if changed {
+                                        send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                    }
+                                }
+
+                                // Range circle toggles
+                                {
+                                    let mut ann = annotation_state_arc.lock();
+                                    let mut changed = false;
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
+                                        ui.separator();
+                                        ui.label(egui::RichText::new("Range Circles").small().strong());
+
+                                        ui.horizontal(|ui| {
+                                            if ui.button(egui::RichText::new("All").small()).clicked() {
+                                                cfg.range_filter.detection = true;
+                                                cfg.range_filter.main_battery = true;
+                                                cfg.range_filter.secondary_battery = true;
+                                                cfg.range_filter.torpedo = true;
+                                                cfg.range_filter.radar = true;
+                                                cfg.range_filter.hydro = true;
+                                                changed = true;
+                                            }
+                                            if ui.button(egui::RichText::new("None").small()).clicked() {
+                                                cfg.range_filter.detection = false;
+                                                cfg.range_filter.main_battery = false;
+                                                cfg.range_filter.secondary_battery = false;
+                                                cfg.range_filter.torpedo = false;
+                                                cfg.range_filter.radar = false;
+                                                cfg.range_filter.hydro = false;
+                                                changed = true;
+                                            }
+                                        });
+
+                                        changed |= ui.checkbox(&mut cfg.range_filter.detection, egui::RichText::new("Detection").small()).changed();
+                                        changed |= ui.checkbox(&mut cfg.range_filter.main_battery, egui::RichText::new("Main Battery").small()).changed();
+                                        changed |= ui.checkbox(&mut cfg.range_filter.secondary_battery, egui::RichText::new("Secondary Battery").small()).changed();
+                                        changed |= ui.checkbox(&mut cfg.range_filter.torpedo, egui::RichText::new("Torpedo").small()).changed();
+                                        changed |= ui.checkbox(&mut cfg.range_filter.radar, egui::RichText::new("Radar").small()).changed();
+                                        changed |= ui.checkbox(&mut cfg.range_filter.hydro, egui::RichText::new("Hydro").small()).changed();
+                                    }
+                                    if changed {
+                                        send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2119,6 +2488,108 @@ fn pretty_map_name(map_name: &str) -> String {
     let bare = map_name.strip_prefix("spaces/").unwrap_or(map_name);
     let stripped = bare.find('_').map(|i| &bare[i + 1..]).unwrap_or(bare);
     stripped.replace('_', " ")
+}
+
+/// Render range circles for a ship annotation with config.
+#[allow(clippy::too_many_arguments)]
+fn render_annotation_range_circles(
+    ctx: &egui::Context,
+    cfg: &super::AnnotationShipConfig,
+    pos: Vec2,
+    transform: &MapTransform,
+    map_info: &MapInfo,
+    painter: &egui::Painter,
+    wows_data: &SharedWoWsData,
+    placed_labels: &mut Vec<Rect>,
+) {
+    use wt_collab_egui::rendering::RangeCircleKind;
+    use wt_collab_egui::rendering::draw_range_circle;
+    use wt_collab_egui::rendering::minimap_vec2_to_screen;
+    use wt_collab_egui::rendering::range_circle_style;
+
+    if cfg.param_id == 0 {
+        return;
+    }
+
+    // Check if any range is enabled
+    let rf = &cfg.range_filter;
+    if !(rf.detection || rf.main_battery || rf.secondary_battery || rf.torpedo || rf.radar || rf.hydro) {
+        return;
+    }
+
+    // Resolve ranges from game data
+    let wdata = wows_data.read();
+    let metadata = match wdata.game_metadata.as_ref() {
+        Some(m) => m,
+        None => return,
+    };
+    let param = match metadata.game_param_by_id(cfg.param_id.into()) {
+        Some(p) => p,
+        None => return,
+    };
+    let vehicle = match param.vehicle() {
+        Some(v) => v,
+        None => return,
+    };
+    let version = wdata.full_version.unwrap_or(wowsunpack::data::Version { major: 99, minor: 0, patch: 0, build: 0 });
+    let hull_name = if cfg.hull_name.is_empty() { None } else { Some(cfg.hull_name.as_str()) };
+    let ranges = vehicle.resolve_ranges(Some(metadata.as_ref()), hull_name, version);
+    drop(wdata);
+
+    let screen_center = minimap_vec2_to_screen(pos, transform);
+
+    // Convert a distance in meters to screen pixels via minimap space.
+    // minimap_px = meters / (space_size_m) * MINIMAP_SIZE
+    // space_size_m = space_size (bigworld) * 30
+    let space_size_m = map_info.space_size as f32 * 30.0;
+    let meters_to_screen = |meters: f32| -> f32 {
+        let minimap_px = meters / space_size_m * wows_minimap_renderer::MINIMAP_SIZE as f32;
+        transform.scale_distance(minimap_px)
+    };
+
+    let mut shapes = Vec::new();
+
+    let draw = |shapes: &mut Vec<egui::Shape>, kind: RangeCircleKind, meters: f32, coeff: f32, label_km: f32, placed: &mut Vec<Rect>| {
+        let (color, alpha, dashed) = range_circle_style(kind);
+        let adjusted_m = meters * coeff;
+        let screen_r = meters_to_screen(adjusted_m);
+        if screen_r < 1.0 { return; }
+        let label = format!("{:.1} km", label_km * coeff);
+        draw_range_circle(ctx, shapes, screen_center, screen_r, color, alpha, dashed, Some(&label), Some(placed));
+    };
+
+    if rf.detection {
+        if let Some(km) = ranges.detection_km {
+            draw(&mut shapes, RangeCircleKind::Detection, km.value() * 1000.0, cfg.vis_coeff, km.value(), placed_labels);
+        }
+    }
+    if rf.main_battery {
+        if let Some(m) = ranges.main_battery_m {
+            draw(&mut shapes, RangeCircleKind::MainBattery, m.value(), cfg.gm_coeff, m.to_km().value(), placed_labels);
+        }
+    }
+    if rf.secondary_battery {
+        if let Some(m) = ranges.secondary_battery_m {
+            draw(&mut shapes, RangeCircleKind::SecondaryBattery, m.value(), cfg.gs_coeff, m.to_km().value(), placed_labels);
+        }
+    }
+    if rf.torpedo {
+        if let Some(m) = ranges.torpedo_range_m {
+            draw(&mut shapes, RangeCircleKind::TorpedoRange, m.value(), 1.0, m.to_km().value(), placed_labels);
+        }
+    }
+    if rf.radar {
+        if let Some(m) = ranges.radar_m {
+            draw(&mut shapes, RangeCircleKind::Radar, m.value(), 1.0, m.to_km().value(), placed_labels);
+        }
+    }
+    if rf.hydro {
+        if let Some(m) = ranges.hydro_m {
+            draw(&mut shapes, RangeCircleKind::Hydro, m.value(), 1.0, m.to_km().value(), placed_labels);
+        }
+    }
+
+    painter.extend(shapes);
 }
 
 /// Build a human-readable mode label from a cap layout.

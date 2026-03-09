@@ -47,6 +47,133 @@ pub fn game_font(size: f32) -> FontId {
     FontId::new(size, egui::FontFamily::Name("GameFont".into()))
 }
 
+// ─── Shared Range Circle Rendering ──────────────────────────────────────────
+
+/// Visual style for a range circle kind: `(rgb, alpha, dashed)`.
+pub fn range_circle_style(kind: RangeCircleKind) -> ([u8; 3], f32, bool) {
+    match kind {
+        RangeCircleKind::Detection => ([135, 206, 235], 0.6, true),
+        RangeCircleKind::MainBattery => ([180, 180, 180], 0.5, false),
+        RangeCircleKind::SecondaryBattery => ([255, 165, 0], 0.5, false),
+        RangeCircleKind::TorpedoRange => ([0, 200, 200], 0.5, false),
+        RangeCircleKind::Radar => ([255, 255, 100], 0.5, false),
+        RangeCircleKind::Hydro => ([100, 255, 100], 0.5, false),
+    }
+}
+
+/// Range circle kinds (mirrors [`wows_minimap_renderer::draw_command::ShipConfigCircleKind`]
+/// without requiring the minimap-renderer dependency in all consumers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeCircleKind {
+    Detection,
+    MainBattery,
+    SecondaryBattery,
+    TorpedoRange,
+    Radar,
+    Hydro,
+}
+
+/// Draw a range circle with optional label and collision-avoidance.
+///
+/// * `center` — screen-space center.
+/// * `screen_radius` — radius in screen pixels.
+/// * `color` — RGB color.
+/// * `alpha` — opacity (0.0–1.0).
+/// * `dashed` — if true, draw as a dashed circle.
+/// * `label` — optional label text placed at the circle edge.
+/// * `placed_labels` — optional mutable list for label collision avoidance.
+pub fn draw_range_circle(
+    ctx: &egui::Context,
+    shapes: &mut Vec<Shape>,
+    center: Pos2,
+    screen_radius: f32,
+    color: [u8; 3],
+    alpha: f32,
+    dashed: bool,
+    label: Option<&str>,
+    placed_labels: Option<&mut Vec<Rect>>,
+) {
+    let circle_color = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], (alpha * 255.0) as u8);
+    let stroke = Stroke::new(1.5, circle_color);
+
+    if dashed {
+        let segments = 48;
+        let gap_ratio = 0.4;
+        for i in 0..segments {
+            let t0 = i as f32 / segments as f32 * std::f32::consts::TAU;
+            let t1 = (i as f32 + 1.0 - gap_ratio) / segments as f32 * std::f32::consts::TAU;
+            let steps = 4;
+            let points: Vec<Pos2> = (0..=steps)
+                .map(|s| {
+                    let t = t0 + (t1 - t0) * s as f32 / steps as f32;
+                    Pos2::new(center.x + screen_radius * t.cos(), center.y + screen_radius * t.sin())
+                })
+                .collect();
+            shapes.push(Shape::line(points, stroke));
+        }
+    } else {
+        shapes.push(Shape::circle_stroke(center, screen_radius, stroke));
+    }
+
+    // Label with collision avoidance
+    if let Some(text) = label {
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), game_font(10.0), circle_color));
+        let text_w = galley.size().x;
+        let text_h = galley.size().y;
+        let label_gap = 4.0;
+
+        let candidate_angles: [f32; 8] = [
+            -std::f32::consts::FRAC_PI_2,
+            -std::f32::consts::FRAC_PI_4,
+            0.0,
+            std::f32::consts::FRAC_PI_4,
+            std::f32::consts::FRAC_PI_2,
+            3.0 * std::f32::consts::FRAC_PI_4,
+            std::f32::consts::PI,
+            -3.0 * std::f32::consts::FRAC_PI_4,
+        ];
+
+        let compute_label_rect = |angle: f32| -> Rect {
+            let anchor_x = center.x + (screen_radius + label_gap) * angle.cos();
+            let anchor_y = center.y + (screen_radius + label_gap) * angle.sin();
+            let cos = angle.cos();
+            let sin = angle.sin();
+            let x = if cos < -0.3 {
+                anchor_x - text_w
+            } else if cos > 0.3 {
+                anchor_x
+            } else {
+                anchor_x - text_w / 2.0
+            };
+            let y = if sin < -0.3 {
+                anchor_y - text_h
+            } else if sin > 0.3 {
+                anchor_y
+            } else {
+                anchor_y - text_h / 2.0
+            };
+            Rect::from_min_size(Pos2::new(x, y), egui::vec2(text_w, text_h))
+        };
+
+        let mut best_rect = compute_label_rect(candidate_angles[0]);
+        if let Some(ref labels) = placed_labels {
+            for &angle in &candidate_angles {
+                let rect = compute_label_rect(angle);
+                let overlaps = labels.iter().any(|prev| prev.intersects(rect));
+                if !overlaps {
+                    best_rect = rect;
+                    break;
+                }
+            }
+        }
+
+        if let Some(labels) = placed_labels {
+            labels.push(best_rect);
+        }
+        shapes.push(Shape::galley(best_rect.min, galley, Color32::TRANSPARENT));
+    }
+}
+
 /// Helper to convert a minimap `Vec2` position to screen `Pos2` via [`MapTransform`].
 pub fn minimap_vec2_to_screen(pos: Vec2, transform: &MapTransform) -> Pos2 {
     transform.minimap_to_screen(&MinimapPos { x: pos.x as i32, y: pos.y as i32 })
@@ -343,7 +470,7 @@ pub fn render_annotation(
     map_space_size: Option<f32>,
 ) {
     match ann {
-        Annotation::Ship { pos, yaw, species, friendly } => {
+        Annotation::Ship { pos, yaw, species, friendly, config } => {
             let screen_pos = minimap_vec2_to_screen(*pos, transform);
             let icon_size = transform.scale_distance(ICON_SIZE_F32);
             let tint = if *friendly { FRIENDLY_COLOR } else { ENEMY_COLOR };
@@ -351,6 +478,20 @@ pub fn render_annotation(
                 painter.add(make_rotated_icon_mesh(tex.id(), screen_pos, icon_size, *yaw, tint));
             } else {
                 painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
+            }
+            // Ship name label above the icon
+            if let Some(cfg) = config {
+                if !cfg.ship_name.is_empty() {
+                    let label_pos = Pos2::new(screen_pos.x, screen_pos.y - icon_size / 2.0 - 4.0);
+                    let font = game_font(transform.scale_distance(10.0));
+                    let text = cfg.ship_name.as_str();
+                    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
+                    let text_offset = egui::vec2(galley.size().x / 2.0, galley.size().y);
+                    // Shadow
+                    painter.galley(label_pos - text_offset + egui::vec2(1.0, 1.0), galley.clone(), Color32::from_black_alpha(180));
+                    // Foreground
+                    painter.galley(label_pos - text_offset, galley, Color32::WHITE);
+                }
             }
         }
         Annotation::FreehandStroke { points, color, width } => {

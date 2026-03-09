@@ -1043,85 +1043,17 @@ pub fn draw_command_to_shapes(
         DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
             let center = transform.minimap_to_screen(pos);
             let screen_radius = transform.scale_distance(*radius_px);
-            let circle_color = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], (alpha * 255.0) as u8);
-            let stroke = Stroke::new(1.5, circle_color);
-
-            if *dashed {
-                let segments = 48;
-                let gap_ratio = 0.4;
-                for i in 0..segments {
-                    let t0 = i as f32 / segments as f32 * std::f32::consts::TAU;
-                    let t1 = (i as f32 + 1.0 - gap_ratio) / segments as f32 * std::f32::consts::TAU;
-                    let steps = 4;
-                    let points: Vec<Pos2> = (0..=steps)
-                        .map(|s| {
-                            let t = t0 + (t1 - t0) * s as f32 / steps as f32;
-                            Pos2::new(center.x + screen_radius * t.cos(), center.y + screen_radius * t.sin())
-                        })
-                        .collect();
-                    shapes.push(Shape::line(points, stroke));
-                }
-            } else {
-                shapes.push(Shape::circle_stroke(center, screen_radius, stroke));
-            }
-
-            // Label collision avoidance
-            if let Some(text) = label {
-                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), game_font(10.0), circle_color));
-                let text_w = galley.size().x;
-                let text_h = galley.size().y;
-                let label_gap = 4.0;
-
-                let candidate_angles: [f32; 8] = [
-                    -std::f32::consts::FRAC_PI_2,
-                    -std::f32::consts::FRAC_PI_4,
-                    0.0,
-                    std::f32::consts::FRAC_PI_4,
-                    std::f32::consts::FRAC_PI_2,
-                    3.0 * std::f32::consts::FRAC_PI_4,
-                    std::f32::consts::PI,
-                    -3.0 * std::f32::consts::FRAC_PI_4,
-                ];
-
-                let compute_label_rect = |angle: f32| -> Rect {
-                    let anchor_x = center.x + (screen_radius + label_gap) * angle.cos();
-                    let anchor_y = center.y + (screen_radius + label_gap) * angle.sin();
-                    let cos = angle.cos();
-                    let sin = angle.sin();
-                    let x = if cos < -0.3 {
-                        anchor_x - text_w
-                    } else if cos > 0.3 {
-                        anchor_x
-                    } else {
-                        anchor_x - text_w / 2.0
-                    };
-                    let y = if sin < -0.3 {
-                        anchor_y - text_h
-                    } else if sin > 0.3 {
-                        anchor_y
-                    } else {
-                        anchor_y - text_h / 2.0
-                    };
-                    Rect::from_min_size(Pos2::new(x, y), egui::vec2(text_w, text_h))
-                };
-
-                let mut best_rect = compute_label_rect(candidate_angles[0]);
-                if let Some(ref labels) = placed_labels {
-                    for &angle in &candidate_angles {
-                        let rect = compute_label_rect(angle);
-                        let overlaps = labels.iter().any(|prev| prev.intersects(rect));
-                        if !overlaps {
-                            best_rect = rect;
-                            break;
-                        }
-                    }
-                }
-
-                if let Some(labels) = placed_labels {
-                    labels.push(best_rect);
-                }
-                shapes.push(Shape::galley(best_rect.min, galley, Color32::TRANSPARENT));
-            }
+            crate::rendering::draw_range_circle(
+                ctx,
+                &mut shapes,
+                center,
+                screen_radius,
+                *color,
+                *alpha,
+                *dashed,
+                label.as_deref(),
+                placed_labels,
+            );
         }
 
         DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {

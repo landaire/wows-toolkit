@@ -15,6 +15,8 @@ use crate::collab::peer::LocalEvent;
 pub use wt_collab_egui::transforms::MapTransform;
 pub use wt_collab_egui::transforms::ViewportZoomPan;
 pub use wt_collab_egui::types::Annotation;
+pub use wt_collab_egui::types::AnnotationRangeFilter;
+pub use wt_collab_egui::types::AnnotationShipConfig;
 pub use wt_collab_egui::types::AnnotationState;
 pub use wt_collab_egui::types::ENEMY_COLOR;
 pub use wt_collab_egui::types::FRIENDLY_COLOR;
