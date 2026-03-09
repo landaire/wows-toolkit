@@ -146,9 +146,8 @@ impl WebApp {
         // Extract session token from URL hash
         let session_token = extract_session_token();
 
-        // Load persisted display name (fall back to "Web User")
-        let display_name =
-            local_storage_get("wt_display_name").filter(|s| !s.is_empty()).unwrap_or_else(|| "Web User".to_string());
+        // Load persisted display name (empty until the user sets one).
+        let display_name = local_storage_get("wt_display_name").unwrap_or_default();
 
         Self {
             connection_status: ConnectionStatus::NotConnected,
@@ -229,6 +228,9 @@ impl WebApp {
                     // Clear old session state (handles reconnect case).
                     self.session.connected_users.clear();
                     self.session.cursors.clear();
+                    self.session.tactics_boards.clear();
+                    self.session.replay_views.clear();
+                    self.closed_tabs.clear();
 
                     // Add self cursor.
                     self.session.cursors.push(UserCursor {
@@ -521,8 +523,10 @@ impl WebApp {
                     ui.text_edit_singleline(&mut self.display_name);
                     ui.add_space(10.0);
 
+                    let name_valid = !self.display_name.trim().is_empty();
+
                     if self.session_token.is_some() {
-                        if ui.button("Connect").clicked() {
+                        if ui.add_enabled(name_valid, egui::Button::new("Connect")).clicked() {
                             self.connect(ui.ctx());
                         }
                     } else {
@@ -530,7 +534,7 @@ impl WebApp {
                         ui.text_edit_singleline(&mut self.manual_token);
                         ui.add_space(6.0);
                         let token_valid = !self.manual_token.trim().is_empty();
-                        if ui.add_enabled(token_valid, egui::Button::new("Connect")).clicked() {
+                        if ui.add_enabled(name_valid && token_valid, egui::Button::new("Connect")).clicked() {
                             self.session_token = Some(self.manual_token.trim().to_string());
                             self.connect(ui.ctx());
                         }
@@ -645,15 +649,16 @@ impl WebApp {
         let layout = compute_canvas_layout(available, logical_canvas, self.viewport.zoom, response.rect.min, None);
         let window_scale = layout.window_scale;
 
-        // Zoom/pan input handling
+        // Zoom/pan input handling — pass annotation state so left-drag panning
+        // is suppressed when a drawing tool is active.
         handle_viewport_zoom_pan(
             ctx,
             &response,
             &mut self.viewport,
             &layout,
             logical_canvas,
-            &ZoomPanConfig { allow_left_drag_pan: true, hud_height, handle_tool_yaw: false, map_width: None },
-            None,
+            &ZoomPanConfig { allow_left_drag_pan: true, hud_height, handle_tool_yaw: true, map_width: None },
+            Some(&mut self.annotation_state),
             false,
         );
 

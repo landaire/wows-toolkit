@@ -931,6 +931,29 @@ async fn host_accept_peer(
             return false;
         }
 
+        // Send ReplayOpened for each open replay so the peer creates views.
+        // (SessionInfo.open_replays carries metadata for the desktop client,
+        // but the web client needs discrete ReplayOpened messages.)
+        let replay_msgs: Vec<_> = {
+            let s = ui_state.lock();
+            s.open_replays
+                .iter()
+                .map(|r| PeerMessage::ReplayOpened {
+                    replay_id: r.replay_id,
+                    replay_name: r.replay_name.clone(),
+                    map_image_png: r.map_image_png.clone(),
+                    game_version: r.game_version.clone(),
+                    map_name: r.map_name.clone(),
+                    display_name: r.display_name.clone(),
+                })
+                .collect()
+        };
+        for msg in replay_msgs {
+            if write_peer_message(&mut send, &msg).await.is_err() {
+                return false;
+            }
+        }
+
         // Send all open tactics boards (map + cap points + annotations per board).
         let board_msgs: Vec<_> = {
             let s = ui_state.lock();
