@@ -118,43 +118,86 @@ fn default_one() -> f32 {
 /// A serializable annotation (mirrors [`Annotation`] but with plain types).
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum PresetAnnotation {
-    Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool, #[serde(default)] config: Option<PresetShipConfig> },
-    FreehandStroke { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
-    Line { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
-    Circle { center: [f32; 2], radius: f32, color: [u8; 4], width: f32, filled: bool },
-    Rectangle { center: [f32; 2], half_size: [f32; 2], rotation: f32, color: [u8; 4], width: f32, filled: bool },
-    Triangle { center: [f32; 2], radius: f32, rotation: f32, color: [u8; 4], width: f32, filled: bool },
-    Arrow { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
-    Measurement { start: [f32; 2], end: [f32; 2], color: [u8; 4], width: f32 },
+    Ship {
+        pos: [f32; 2],
+        yaw: f32,
+        species: String,
+        friendly: bool,
+        #[serde(default)]
+        config: Option<PresetShipConfig>,
+    },
+    FreehandStroke {
+        points: Vec<[f32; 2]>,
+        color: [u8; 4],
+        width: f32,
+    },
+    Line {
+        start: [f32; 2],
+        end: [f32; 2],
+        color: [u8; 4],
+        width: f32,
+    },
+    Circle {
+        center: [f32; 2],
+        radius: f32,
+        color: [u8; 4],
+        width: f32,
+        filled: bool,
+    },
+    Rectangle {
+        center: [f32; 2],
+        half_size: [f32; 2],
+        rotation: f32,
+        color: [u8; 4],
+        width: f32,
+        filled: bool,
+    },
+    Triangle {
+        center: [f32; 2],
+        radius: f32,
+        rotation: f32,
+        color: [u8; 4],
+        width: f32,
+        filled: bool,
+    },
+    Arrow {
+        points: Vec<[f32; 2]>,
+        color: [u8; 4],
+        width: f32,
+    },
+    Measurement {
+        start: [f32; 2],
+        end: [f32; 2],
+        color: [u8; 4],
+        width: f32,
+    },
 }
 
 impl PresetAnnotation {
     fn from_annotation(ann: &Annotation) -> Self {
         match ann {
-            Annotation::Ship { pos, yaw, species, friendly, config } => {
-                PresetAnnotation::Ship {
-                    pos: [pos.x, pos.y],
-                    yaw: *yaw,
-                    species: species.clone(),
-                    friendly: *friendly,
-                    config: config.as_ref().map(|c| PresetShipConfig {
-                        param_id: c.param_id,
-                        ship_name: c.ship_name.clone(),
-                        hull_name: c.hull_name.clone(),
-                        vis_coeff: c.vis_coeff,
-                        gm_coeff: c.gm_coeff,
-                        gs_coeff: c.gs_coeff,
-                        range_filter: PresetRangeFilter {
-                            detection: c.range_filter.detection,
-                            main_battery: c.range_filter.main_battery,
-                            secondary_battery: c.range_filter.secondary_battery,
-                            torpedo: c.range_filter.torpedo,
-                            radar: c.range_filter.radar,
-                            hydro: c.range_filter.hydro,
-                        },
-                    }),
-                }
-            }
+            Annotation::Ship { pos, yaw, species, friendly, config } => PresetAnnotation::Ship {
+                pos: [pos.x, pos.y],
+                yaw: *yaw,
+                species: species.clone(),
+                friendly: *friendly,
+                config: config.as_ref().map(|c| PresetShipConfig {
+                    param_id: c.param_id,
+                    ship_name: c.ship_name.clone(),
+                    hull_name: c.hull_name.clone(),
+                    vis_coeff: c.vis_coeff,
+                    gm_coeff: c.gm_coeff,
+                    gs_coeff: c.gs_coeff,
+                    range_filter: PresetRangeFilter {
+                        detection: c.range_filter.detection,
+                        main_battery: c.range_filter.main_battery,
+                        secondary_battery: c.range_filter.secondary_battery,
+                        torpedo: c.range_filter.torpedo,
+                        radar: c.range_filter.radar,
+                        hydro: c.range_filter.hydro,
+                    },
+                }),
+            },
             Annotation::FreehandStroke { points, color, width } => PresetAnnotation::FreehandStroke {
                 points: points.iter().map(|p| [p.x, p.y]).collect(),
                 color: color.to_array(),
@@ -1946,7 +1989,10 @@ impl TacticsBoardViewer {
                             // Team toggle + delete
                             {
                                 let mut ann = annotation_state_arc.lock();
-                                let is_friendly = matches!(ann.annotations.get(sel_idx), Some(Annotation::Ship { friendly: true, .. }));
+                                let is_friendly = matches!(
+                                    ann.annotations.get(sel_idx),
+                                    Some(Annotation::Ship { friendly: true, .. })
+                                );
                                 let (label, color) = if is_friendly {
                                     ("Friendly", super::FRIENDLY_COLOR)
                                 } else {
@@ -1995,7 +2041,8 @@ impl TacticsBoardViewer {
                             if state.ship_catalog.is_none() {
                                 let wdata = wows_data.read();
                                 if let Some(ref metadata) = wdata.game_metadata {
-                                    state.ship_catalog = Some(crate::armor_viewer::ship_selector::ShipCatalog::build(metadata));
+                                    state.ship_catalog =
+                                        Some(crate::armor_viewer::ship_selector::ShipCatalog::build(metadata));
                                 }
                             }
 
@@ -2023,9 +2070,13 @@ impl TacticsBoardViewer {
                                                     }
                                                 }
                                             }
-                                            if results.len() >= 10 { break; }
+                                            if results.len() >= 10 {
+                                                break;
+                                            }
                                         }
-                                        if results.len() >= 10 { break; }
+                                        if results.len() >= 10 {
+                                            break;
+                                        }
                                     }
 
                                     for entry in &results {
@@ -2038,14 +2089,17 @@ impl TacticsBoardViewer {
                                                 if let Some(param) = metadata.game_param_by_index(&entry.param_index) {
                                                     let param_id = param.id().raw();
                                                     let ship_name = entry.display_name.clone();
-                                                    let species_str = param.species()
+                                                    let species_str = param
+                                                        .species()
                                                         .and_then(|s| s.known())
                                                         .map(|s| format!("{s:?}"))
                                                         .unwrap_or_default();
 
                                                     let mut ann = annotation_state_arc.lock();
                                                     ann.save_undo();
-                                                    if let Some(Annotation::Ship { species, config, .. }) = ann.annotations.get_mut(sel_idx) {
+                                                    if let Some(Annotation::Ship { species, config, .. }) =
+                                                        ann.annotations.get_mut(sel_idx)
+                                                    {
                                                         *species = species_str;
                                                         *config = Some(super::AnnotationShipConfig {
                                                             param_id,
@@ -2069,34 +2123,47 @@ impl TacticsBoardViewer {
 
                             // Show current ship config if assigned
                             let ann = annotation_state_arc.lock();
-                            let has_config = matches!(
-                                ann.annotations.get(sel_idx),
-                                Some(Annotation::Ship { config: Some(_), .. })
-                            );
+                            let has_config =
+                                matches!(ann.annotations.get(sel_idx), Some(Annotation::Ship { config: Some(_), .. }));
                             drop(ann);
 
                             if has_config {
                                 // Hull selector
                                 let hull_names: Vec<String> = {
                                     let ann = annotation_state_arc.lock();
-                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get(sel_idx) {
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) =
+                                        ann.annotations.get(sel_idx)
+                                    {
                                         let wdata = wows_data.read();
                                         if let Some(ref metadata) = wdata.game_metadata {
                                             if let Some(param) = metadata.game_param_by_id(cfg.param_id.into()) {
                                                 if let Some(vehicle) = param.vehicle() {
                                                     if let Some(hulls) = vehicle.hull_upgrades() {
                                                         hulls.keys().cloned().collect()
-                                                    } else { Vec::new() }
-                                                } else { Vec::new() }
-                                            } else { Vec::new() }
-                                        } else { Vec::new() }
-                                    } else { Vec::new() }
+                                                    } else {
+                                                        Vec::new()
+                                                    }
+                                                } else {
+                                                    Vec::new()
+                                                }
+                                            } else {
+                                                Vec::new()
+                                            }
+                                        } else {
+                                            Vec::new()
+                                        }
+                                    } else {
+                                        Vec::new()
+                                    }
                                 };
 
                                 if hull_names.len() > 1 {
                                     let mut ann = annotation_state_arc.lock();
-                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
-                                        let current_hull = if cfg.hull_name.is_empty() { "Default" } else { &cfg.hull_name };
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) =
+                                        ann.annotations.get_mut(sel_idx)
+                                    {
+                                        let current_hull =
+                                            if cfg.hull_name.is_empty() { "Default" } else { &cfg.hull_name };
                                         let old_hull = cfg.hull_name.clone();
                                         egui::ComboBox::from_id_salt("ann_hull_select")
                                             .selected_text(current_hull)
@@ -2116,24 +2183,33 @@ impl TacticsBoardViewer {
                                 {
                                     let mut ann = annotation_state_arc.lock();
                                     let mut changed = false;
-                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) =
+                                        ann.annotations.get_mut(sel_idx)
+                                    {
                                         ui.separator();
                                         ui.label(egui::RichText::new("Modifiers").small().strong());
 
                                         let mut ce = cfg.vis_coeff < 1.0;
-                                        if ui.checkbox(&mut ce, egui::RichText::new("Concealment Expert").small()).changed() {
+                                        if ui
+                                            .checkbox(&mut ce, egui::RichText::new("Concealment Expert").small())
+                                            .changed()
+                                        {
                                             cfg.vis_coeff = if ce { 0.9 } else { 1.0 };
                                             changed = true;
                                         }
 
                                         let mut gr = cfg.gm_coeff > 1.0;
-                                        if ui.checkbox(&mut gr, egui::RichText::new("Gun Range Mod").small()).changed() {
+                                        if ui.checkbox(&mut gr, egui::RichText::new("Gun Range Mod").small()).changed()
+                                        {
                                             cfg.gm_coeff = if gr { 1.16 } else { 1.0 };
                                             changed = true;
                                         }
 
                                         let mut sr = cfg.gs_coeff > 1.0;
-                                        if ui.checkbox(&mut sr, egui::RichText::new("Secondary Range Mod").small()).changed() {
+                                        if ui
+                                            .checkbox(&mut sr, egui::RichText::new("Secondary Range Mod").small())
+                                            .changed()
+                                        {
                                             cfg.gs_coeff = if sr { 1.05 } else { 1.0 };
                                             changed = true;
                                         }
@@ -2147,7 +2223,9 @@ impl TacticsBoardViewer {
                                 {
                                     let mut ann = annotation_state_arc.lock();
                                     let mut changed = false;
-                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) = ann.annotations.get_mut(sel_idx) {
+                                    if let Some(Annotation::Ship { config: Some(cfg), .. }) =
+                                        ann.annotations.get_mut(sel_idx)
+                                    {
                                         ui.separator();
                                         ui.label(egui::RichText::new("Range Circles").small().strong());
 
@@ -2172,12 +2250,36 @@ impl TacticsBoardViewer {
                                             }
                                         });
 
-                                        changed |= ui.checkbox(&mut cfg.range_filter.detection, egui::RichText::new("Detection").small()).changed();
-                                        changed |= ui.checkbox(&mut cfg.range_filter.main_battery, egui::RichText::new("Main Battery").small()).changed();
-                                        changed |= ui.checkbox(&mut cfg.range_filter.secondary_battery, egui::RichText::new("Secondary Battery").small()).changed();
-                                        changed |= ui.checkbox(&mut cfg.range_filter.torpedo, egui::RichText::new("Torpedo").small()).changed();
-                                        changed |= ui.checkbox(&mut cfg.range_filter.radar, egui::RichText::new("Radar").small()).changed();
-                                        changed |= ui.checkbox(&mut cfg.range_filter.hydro, egui::RichText::new("Hydro").small()).changed();
+                                        changed |= ui
+                                            .checkbox(
+                                                &mut cfg.range_filter.detection,
+                                                egui::RichText::new("Detection").small(),
+                                            )
+                                            .changed();
+                                        changed |= ui
+                                            .checkbox(
+                                                &mut cfg.range_filter.main_battery,
+                                                egui::RichText::new("Main Battery").small(),
+                                            )
+                                            .changed();
+                                        changed |= ui
+                                            .checkbox(
+                                                &mut cfg.range_filter.secondary_battery,
+                                                egui::RichText::new("Secondary Battery").small(),
+                                            )
+                                            .changed();
+                                        changed |= ui
+                                            .checkbox(
+                                                &mut cfg.range_filter.torpedo,
+                                                egui::RichText::new("Torpedo").small(),
+                                            )
+                                            .changed();
+                                        changed |= ui
+                                            .checkbox(&mut cfg.range_filter.radar, egui::RichText::new("Radar").small())
+                                            .changed();
+                                        changed |= ui
+                                            .checkbox(&mut cfg.range_filter.hydro, egui::RichText::new("Hydro").small())
+                                            .changed();
                                     }
                                     if changed {
                                         send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
@@ -2549,18 +2651,32 @@ fn render_annotation_range_circles(
 
     let mut shapes = Vec::new();
 
-    let draw = |shapes: &mut Vec<egui::Shape>, kind: RangeCircleKind, meters: f32, coeff: f32, label_km: f32, placed: &mut Vec<Rect>| {
+    let draw = |shapes: &mut Vec<egui::Shape>,
+                kind: RangeCircleKind,
+                meters: f32,
+                coeff: f32,
+                label_km: f32,
+                placed: &mut Vec<Rect>| {
         let (color, alpha, dashed) = range_circle_style(kind);
         let adjusted_m = meters * coeff;
         let screen_r = meters_to_screen(adjusted_m);
-        if screen_r < 1.0 { return; }
+        if screen_r < 1.0 {
+            return;
+        }
         let label = format!("{:.1} km", label_km * coeff);
         draw_range_circle(ctx, shapes, screen_center, screen_r, color, alpha, dashed, Some(&label), Some(placed));
     };
 
     if rf.detection {
         if let Some(km) = ranges.detection_km {
-            draw(&mut shapes, RangeCircleKind::Detection, km.value() * 1000.0, cfg.vis_coeff, km.value(), placed_labels);
+            draw(
+                &mut shapes,
+                RangeCircleKind::Detection,
+                km.value() * 1000.0,
+                cfg.vis_coeff,
+                km.value(),
+                placed_labels,
+            );
         }
     }
     if rf.main_battery {
@@ -2570,7 +2686,14 @@ fn render_annotation_range_circles(
     }
     if rf.secondary_battery {
         if let Some(m) = ranges.secondary_battery_m {
-            draw(&mut shapes, RangeCircleKind::SecondaryBattery, m.value(), cfg.gs_coeff, m.to_km().value(), placed_labels);
+            draw(
+                &mut shapes,
+                RangeCircleKind::SecondaryBattery,
+                m.value(),
+                cfg.gs_coeff,
+                m.to_km().value(),
+                placed_labels,
+            );
         }
     }
     if rf.torpedo {

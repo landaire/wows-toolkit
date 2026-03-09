@@ -63,8 +63,13 @@ pub fn handle_tool_interaction(
             if response.clicked()
                 && let Some(pos) = cursor_minimap
             {
-                new_annotation =
-                    Some(Annotation::Ship { pos, yaw: *yaw, species: species.clone(), friendly: *friendly, config: None });
+                new_annotation = Some(Annotation::Ship {
+                    pos,
+                    yaw: *yaw,
+                    species: species.clone(),
+                    friendly: *friendly,
+                    config: None,
+                });
             }
         }
         PaintTool::Freehand { current_stroke } => {

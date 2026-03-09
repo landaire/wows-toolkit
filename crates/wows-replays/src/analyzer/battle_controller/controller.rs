@@ -2819,11 +2819,8 @@ where
             } => {
                 debug!("NewPlayerSpawnedInBattle: {} players, {} bots", players.len(), bots.len());
                 // Determine the self player's team_id so we can derive correct relations.
-                let self_team_id = self
-                    .player_entities
-                    .values()
-                    .find(|p| p.relation().is_self())
-                    .map(|p| p.initial_state.team_id());
+                let self_team_id =
+                    self.player_entities.values().find(|p| p.relation().is_self()).map(|p| p.initial_state.team_id());
                 for player in players.iter().chain(bots.iter()) {
                     let entity_id = player.entity_id();
                     // Skip players already tracked (avoid duplicates).
@@ -2839,9 +2836,7 @@ where
                             }
                         })
                         .unwrap_or(Relation::new(2)); // default to enemy if unknown
-                    if let Some(battle_player) =
-                        Player::from_spawned_player(player, self.game_resources, relation)
-                    {
+                    if let Some(battle_player) = Player::from_spawned_player(player, self.game_resources, relation) {
                         let battle_player = Rc::new(battle_player);
                         self.player_entities.insert(entity_id, battle_player);
                     }

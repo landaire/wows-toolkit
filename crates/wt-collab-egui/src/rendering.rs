@@ -488,7 +488,11 @@ pub fn render_annotation(
                     let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
                     let text_offset = egui::vec2(galley.size().x / 2.0, galley.size().y);
                     // Shadow
-                    painter.galley(label_pos - text_offset + egui::vec2(1.0, 1.0), galley.clone(), Color32::from_black_alpha(180));
+                    painter.galley(
+                        label_pos - text_offset + egui::vec2(1.0, 1.0),
+                        galley.clone(),
+                        Color32::from_black_alpha(180),
+                    );
                     // Foreground
                     painter.galley(label_pos - text_offset, galley, Color32::WHITE);
                 }

@@ -283,15 +283,13 @@ fn local_ship_config_to_wire(c: &AnnotationShipConfig) -> wire::AnnotationShipCo
 /// Convert a wire annotation (primitive arrays) to a local annotation (egui types).
 pub fn wire_to_local(ca: wire::Annotation) -> Annotation {
     match ca {
-        wire::Annotation::Ship { pos, yaw, species, friendly, config } => {
-            Annotation::Ship {
-                pos: Vec2::new(pos[0], pos[1]),
-                yaw,
-                species,
-                friendly,
-                config: config.map(wire_ship_config_to_local),
-            }
-        }
+        wire::Annotation::Ship { pos, yaw, species, friendly, config } => Annotation::Ship {
+            pos: Vec2::new(pos[0], pos[1]),
+            yaw,
+            species,
+            friendly,
+            config: config.map(wire_ship_config_to_local),
+        },
         wire::Annotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
             points: points.into_iter().map(|p| Vec2::new(p[0], p[1])).collect(),
             color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
@@ -343,15 +341,13 @@ pub fn wire_to_local(ca: wire::Annotation) -> Annotation {
 /// Convert a local annotation (egui types) to wire annotation (primitive arrays).
 pub fn local_to_wire(a: &Annotation) -> wire::Annotation {
     match a {
-        Annotation::Ship { pos, yaw, species, friendly, config } => {
-            wire::Annotation::Ship {
-                pos: [pos.x, pos.y],
-                yaw: *yaw,
-                species: species.clone(),
-                friendly: *friendly,
-                config: config.as_ref().map(local_ship_config_to_wire),
-            }
-        }
+        Annotation::Ship { pos, yaw, species, friendly, config } => wire::Annotation::Ship {
+            pos: [pos.x, pos.y],
+            yaw: *yaw,
+            species: species.clone(),
+            friendly: *friendly,
+            config: config.as_ref().map(local_ship_config_to_wire),
+        },
         Annotation::FreehandStroke { points, color, width } => wire::Annotation::FreehandStroke {
             points: points.iter().map(|p| [p.x, p.y]).collect(),
             color: color.to_array(),
