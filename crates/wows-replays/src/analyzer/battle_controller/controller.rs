@@ -296,10 +296,13 @@ impl Player {
     /// Create a Player from a mid-battle spawn (e.g. Operations reinforcement wave).
     /// Uses the ship_params_id from the PlayerStateData directly since these players
     /// are not in the replay's JSON metadata.
-    fn from_spawned_player<G: ResourceLoader>(player: &PlayerStateData, resources: &G) -> Option<Player> {
+    fn from_spawned_player<G: ResourceLoader>(
+        player: &PlayerStateData,
+        resources: &G,
+        relation: Relation,
+    ) -> Option<Player> {
         let ship_params_id = player.ship_params_id()?;
         let vehicle = resources.game_param_by_id(ship_params_id)?;
-        let relation = Relation::new(player.team_id() as u32);
         Some(Player {
             initial_state: player.clone(),
             end_state: crate::RwCell::new(player.clone()),
@@ -2815,17 +2818,30 @@ where
                 bot_states: bots,
             } => {
                 debug!("NewPlayerSpawnedInBattle: {} players, {} bots", players.len(), bots.len());
+                // Determine the self player's team_id so we can derive correct relations.
+                let self_team_id = self
+                    .player_entities
+                    .values()
+                    .find(|p| p.relation().is_self())
+                    .map(|p| p.initial_state.team_id());
                 for player in players.iter().chain(bots.iter()) {
-                    if let Some(battle_player) = Player::from_spawned_player(player, self.game_resources) {
-                        let entity_id = player.entity_id();
-                        // Add to metadata_players so future OnArenaStateReceived/OnGameRoomStateChanged
-                        // can find this player.
-                        self.metadata_players.push(Rc::new(MetadataPlayer {
-                            id: player.meta_ship_id(),
-                            name: player.username().to_string(),
-                            relation: battle_player.relation(),
-                            vehicle: Rc::clone(&battle_player.vehicle),
-                        }));
+                    let entity_id = player.entity_id();
+                    // Skip players already tracked (avoid duplicates).
+                    if self.player_entities.contains_key(&entity_id) {
+                        continue;
+                    }
+                    let relation = self_team_id
+                        .map(|self_team| {
+                            if player.team_id() == self_team {
+                                Relation::new(1) // ally
+                            } else {
+                                Relation::new(2) // enemy
+                            }
+                        })
+                        .unwrap_or(Relation::new(2)); // default to enemy if unknown
+                    if let Some(battle_player) =
+                        Player::from_spawned_player(player, self.game_resources, relation)
+                    {
                         let battle_player = Rc::new(battle_player);
                         self.player_entities.insert(entity_id, battle_player);
                     }
