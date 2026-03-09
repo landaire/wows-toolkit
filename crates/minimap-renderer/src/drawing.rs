@@ -1938,15 +1938,69 @@ impl RenderTarget for ImageTarget {
                 hp_fraction,
                 hp_current,
                 hp_max,
+                player_name,
+                clan_tag,
+                clan_color,
+                ship_name,
                 silhouette,
             } => {
                 let padding = 8;
                 let inner_x = *x + padding;
                 let inner_w = *width - padding * 2;
 
+                // Draw clan tag + player name, and ship name above the silhouette
+                let name_scale = self.fonts.scale(12.0);
+                let small_scale = self.fonts.scale(10.0);
+                let mut label_y = *y + 2;
+
+                if player_name.is_some() || clan_tag.as_ref().is_some_and(|t| !t.is_empty()) {
+                    let clan_prefix = clan_tag.as_ref().filter(|t| !t.is_empty()).map(|t| format!("[{t}] "));
+                    let name_part = player_name.as_deref().unwrap_or("");
+
+                    // Measure total width for centering
+                    let clan_w =
+                        clan_prefix.as_ref().map(|cp| text_size(name_scale, &self.fonts.primary, cp).0).unwrap_or(0);
+                    let name_w =
+                        if !name_part.is_empty() { text_size(name_scale, &self.fonts.primary, name_part).0 } else { 0 };
+                    let total_w = clan_w + name_w;
+                    let mut cx = inner_x + (inner_w - total_w as i32) / 2;
+
+                    if let Some(ref cp) = clan_prefix {
+                        let cc = clan_color.unwrap_or([255, 255, 255]);
+                        draw_text_shadow(&mut self.canvas, cc, cx, label_y, name_scale, &self.fonts.primary, cp);
+                        cx += clan_w as i32;
+                    }
+                    if !name_part.is_empty() {
+                        draw_text_shadow(
+                            &mut self.canvas,
+                            [255, 255, 255],
+                            cx,
+                            label_y,
+                            name_scale,
+                            &self.fonts.primary,
+                            name_part,
+                        );
+                    }
+                    label_y += 14;
+                }
+                if let Some(name) = ship_name {
+                    let (tw, _) = text_size(small_scale, &self.fonts.primary, name);
+                    let tx = inner_x + (inner_w - tw as i32) / 2;
+                    draw_text_shadow(
+                        &mut self.canvas,
+                        [180, 180, 180],
+                        tx,
+                        label_y,
+                        small_scale,
+                        &self.fonts.primary,
+                        name,
+                    );
+                    label_y += 14;
+                }
+
                 // Draw silhouette (gray base + yellow HP overlay)
-                let sil_y = *y + 22;
-                let sil_h = (*height - 40).max(20);
+                let sil_y = label_y + 2;
+                let sil_h = (*y + *height - 18 - sil_y).max(20);
                 if let Some(sil_img) = silhouette {
                     // Scale silhouette to fit the available area
                     let aspect = sil_img.width() as f32 / sil_img.height() as f32;

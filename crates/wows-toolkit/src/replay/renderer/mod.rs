@@ -1045,6 +1045,15 @@ impl ReplayRendererViewer {
                     if tex_guard.is_none() && has_assets {
                         let state = shared_state.lock();
                         if let Some(assets) = &state.assets {
+                            // Send silhouette to collab peers if available at initial upload time.
+                            if let Some((w, h, data)) = state.self_silhouette_raw.as_ref()
+                                && let Some(ref tx) = state.collab_local_tx {
+                                    let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
+                                        data: data.clone(),
+                                        width: *w,
+                                        height: *h,
+                                    });
+                                }
                             *tex_guard = Some(upload_textures(ctx, assets, state.self_silhouette_raw.as_ref()));
                         }
                     }
@@ -1055,6 +1064,14 @@ impl ReplayRendererViewer {
                             if let Some((w, h, data)) = state.self_silhouette_raw.as_ref() {
                                 let image = egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], data);
                                 textures.silhouette_texture = Some(ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR));
+                                // Send to collab peers so web clients can render the stats panel silhouette.
+                                if let Some(ref tx) = state.collab_local_tx {
+                                    let _ = tx.send(crate::collab::peer::LocalEvent::SelfSilhouette {
+                                        data: data.clone(),
+                                        width: *w,
+                                        height: *h,
+                                    });
+                                }
                             }
                         }
                 }

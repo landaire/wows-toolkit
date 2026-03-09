@@ -1843,15 +1843,31 @@ impl<'a> MinimapRenderer<'a> {
                 })
                 .unwrap_or((1.0, 0.0, 0.0, None));
 
+            let (self_player_name, self_ship_name, self_clan_tag, self_clan_color) = self
+                .self_entity_id
+                .map(|eid| {
+                    (
+                        self.player_names.get(&eid).cloned(),
+                        self.ship_display_names.get(&eid).cloned(),
+                        self.player_clan_tags.get(&eid).cloned(),
+                        self.player_clan_colors.get(&eid).copied().flatten(),
+                    )
+                })
+                .unwrap_or_default();
+
             commands.push(DrawCommand::StatsSilhouette {
                 x: panel_x,
                 y: HUD_HEIGHT as i32,
                 width: panel_w,
-                height: 80,
+                height: 110,
                 ship_param_id,
                 hp_fraction,
                 hp_current,
                 hp_max,
+                player_name: self_player_name,
+                clan_tag: self_clan_tag,
+                clan_color: self_clan_color,
+                ship_name: self_ship_name,
                 #[cfg(feature = "rendering")]
                 silhouette: self.self_silhouette.clone(),
             });

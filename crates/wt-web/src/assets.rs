@@ -15,6 +15,7 @@ pub struct AssetStore {
     pub death_cause_icons: HashMap<String, TextureHandle>,
     pub powerup_icons: HashMap<String, TextureHandle>,
     pub game_fonts: Option<GameFontsData>,
+    pub silhouette_texture: Option<TextureHandle>,
 }
 
 /// Parsed game font data (raw TTF bytes).
@@ -74,6 +75,7 @@ impl AssetStore {
             death_cause_icons: upload(death_cause_icons, "death"),
             powerup_icons: upload(powerup_icons, "powerup"),
             game_fonts: fonts_data,
+            silhouette_texture: None,
         }
     }
 

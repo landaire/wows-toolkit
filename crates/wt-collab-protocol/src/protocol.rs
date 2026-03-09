@@ -352,6 +352,14 @@ pub enum PeerMessage {
         game_fonts: Option<GameFontsWire>,
     },
 
+    /// Ship silhouette for the stats panel HP overlay (sent once per replay, host → clients).
+    SelfSilhouette {
+        /// Raw RGBA pixel data (white silhouette with alpha).
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+
     // ── Connection keepalive ──────────────────────────────────────────
     /// Heartbeat keepalive. Sent every 10s; NOT relayed between peers.
     Heartbeat,

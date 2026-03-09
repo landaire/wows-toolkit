@@ -331,6 +331,17 @@ pub fn validate_peer_message(msg: &PeerMessage) -> Result<(), ValidationError> {
         }
 
         PeerMessage::Heartbeat => {}
+
+        PeerMessage::SelfSilhouette { data, width, height } => {
+            // Basic sanity check: data length must match width * height * 4 (RGBA).
+            let expected = (*width as usize) * (*height as usize) * 4;
+            if data.len() != expected {
+                return Err(ValidationError(format!(
+                    "SelfSilhouette data length mismatch: {} != {expected} ({width}x{height}x4)",
+                    data.len()
+                )));
+            }
+        }
     }
     Ok(())
 }

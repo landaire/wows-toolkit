@@ -1383,13 +1383,95 @@ pub fn draw_command_to_shapes(
         }
 
         DrawCommand::StatsSilhouette {
-            x, y, width, height, ship_param_id: _, hp_fraction, hp_current, hp_max, ..
+            x,
+            y,
+            width,
+            height,
+            ship_param_id: _,
+            hp_fraction,
+            hp_current,
+            hp_max,
+            player_name,
+            clan_tag,
+            clan_color,
+            ship_name,
+            ..
         } => {
             let padding = 8.0 * ws;
             let origin = transform.hud_pos(*x as f32, *y as f32);
             let inner_x = origin.x + padding;
             let inner_w = *width as f32 * ws - padding * 2.0;
-            let sil_area_h = *height as f32 * ws - 20.0 * ws; // leave room for HP text below
+
+            // Draw clan tag + player name, and ship name above the silhouette
+            let label_font = game_font(12.0 * ws);
+            let label_small_font = game_font(10.0 * ws);
+            let shadow_color = Color32::from_rgba_unmultiplied(0, 0, 0, 180);
+            let shadow_off = (1.0 * ws).min(2.0);
+            let mut label_y = origin.y + 2.0 * ws;
+            let line_h = 14.0 * ws;
+
+            if player_name.is_some() || clan_tag.is_some() {
+                // Build "[CLAN] PlayerName" with clan part colored
+                let clan_prefix = clan_tag.as_ref().filter(|t| !t.is_empty()).map(|t| format!("[{t}] "));
+                let name_part = player_name.as_deref().unwrap_or("");
+
+                let mut total_w = 0.0;
+                let clan_galley = clan_prefix.as_ref().map(|cp| {
+                    let clan_c = clan_color.map(|cc| Color32::from_rgb(cc[0], cc[1], cc[2])).unwrap_or(Color32::WHITE);
+                    let g = ctx.fonts_mut(|f| f.layout_no_wrap(cp.clone(), label_font.clone(), clan_c));
+                    total_w += g.size().x;
+                    g
+                });
+                let name_galley = if !name_part.is_empty() {
+                    let g =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(name_part.to_owned(), label_font.clone(), Color32::WHITE));
+                    total_w += g.size().x;
+                    Some(g)
+                } else {
+                    None
+                };
+
+                let mut cx = inner_x + (inner_w - total_w) / 2.0;
+                if let Some(cg) = clan_galley {
+                    let w = cg.size().x;
+                    let shadow_g = ctx.fonts_mut(|f| {
+                        f.layout_no_wrap(clan_prefix.as_ref().unwrap().clone(), label_font.clone(), shadow_color)
+                    });
+                    shapes.push(Shape::galley(
+                        Pos2::new(cx + shadow_off, label_y + shadow_off),
+                        shadow_g,
+                        shadow_color,
+                    ));
+                    shapes.push(Shape::galley(Pos2::new(cx, label_y), cg, Color32::TRANSPARENT));
+                    cx += w;
+                }
+                if let Some(ng) = name_galley {
+                    let shadow_g =
+                        ctx.fonts_mut(|f| f.layout_no_wrap(name_part.to_owned(), label_font.clone(), shadow_color));
+                    shapes.push(Shape::galley(
+                        Pos2::new(cx + shadow_off, label_y + shadow_off),
+                        shadow_g,
+                        shadow_color,
+                    ));
+                    shapes.push(Shape::galley(Pos2::new(cx, label_y), ng, Color32::WHITE));
+                }
+                label_y += line_h;
+            }
+            if let Some(name) = ship_name {
+                let color = Color32::from_rgb(180, 180, 180);
+                let galley = ctx.fonts_mut(|f| f.layout_no_wrap(name.clone(), label_small_font.clone(), color));
+                let tx = inner_x + (inner_w - galley.size().x) / 2.0;
+                let shadow = ctx.fonts_mut(|f| f.layout_no_wrap(name.clone(), label_small_font.clone(), shadow_color));
+                shapes.push(Shape::galley(Pos2::new(tx + shadow_off, label_y + shadow_off), shadow, shadow_color));
+                shapes.push(Shape::galley(Pos2::new(tx, label_y), galley, color));
+                label_y += line_h;
+            }
+
+            // Remaining area for silhouette + HP text
+            let sil_top = label_y + 2.0 * ws;
+            let total_h = *height as f32 * ws;
+            let hp_text_h = 20.0 * ws;
+            let sil_area_h = (origin.y + total_h - hp_text_h - sil_top).max(0.0);
 
             // Draw silhouette with HP overlay if texture is available
             if let Some(sil_tex) = textures.silhouette_texture {
@@ -1399,7 +1481,7 @@ pub fn draw_command_to_shapes(
                 let fit_w = inner_w.min(sil_area_h * aspect);
                 let fit_h = fit_w / aspect;
                 let sil_x = inner_x + (inner_w - fit_w) / 2.0;
-                let sil_y = origin.y + (sil_area_h - fit_h) / 2.0;
+                let sil_y = sil_top + (sil_area_h - fit_h) / 2.0;
                 let sil_rect = Rect::from_min_size(Pos2::new(sil_x, sil_y), Vec2::new(fit_w, fit_h));
 
                 // Gray silhouette (base — represents missing HP)
@@ -1426,7 +1508,7 @@ pub fn draw_command_to_shapes(
                 }
             } else {
                 // Fallback: simple HP bar when no silhouette texture
-                let bar_y = origin.y + 10.0 * ws;
+                let bar_y = sil_top + 10.0 * ws;
                 let bar_h = sil_area_h - 10.0 * ws;
                 if bar_h > 0.0 {
                     shapes.push(Shape::rect_filled(
@@ -1452,7 +1534,7 @@ pub fn draw_command_to_shapes(
             let hp_font = game_font(16.0 * ws);
             let hp_galley = ctx.fonts_mut(|f| f.layout_no_wrap(hp_text, hp_font, Color32::from_rgb(220, 220, 220)));
             let hp_x = inner_x + (inner_w - hp_galley.size().x) / 2.0;
-            let hp_y = origin.y + sil_area_h;
+            let hp_y = sil_top + sil_area_h;
             shapes.push(Shape::galley(Pos2::new(hp_x, hp_y), hp_galley, Color32::TRANSPARENT));
         }
 

@@ -422,6 +422,11 @@ impl WebApp {
                     board.cap_points = cap_points;
                 }
             }
+            PeerMessage::SelfSilhouette { data, width, height } => {
+                let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
+                self.assets.silhouette_texture =
+                    Some(ctx.load_texture("stats_silhouette", image, egui::TextureOptions::LINEAR));
+            }
             _ => {
                 // Ignore unhandled messages (Heartbeat, MeshHello, PeerAnnounce, etc.)
             }
@@ -698,7 +703,7 @@ impl WebApp {
                 consumable_icons: Some(&self.assets.consumable_icons),
                 death_cause_icons: Some(&self.assets.death_cause_icons),
                 powerup_icons: Some(&self.assets.powerup_icons),
-                silhouette_texture: None,
+                silhouette_texture: self.assets.silhouette_texture.as_ref(),
             };
             let label_opts = DrawCommandLabelOptions::default();
             let text_resolver = DefaultTextResolver;

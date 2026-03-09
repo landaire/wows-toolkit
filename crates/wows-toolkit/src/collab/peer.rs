@@ -129,6 +129,12 @@ pub enum LocalEvent {
     TacticsMapClosed {
         board_id: u64,
     },
+    /// Ship silhouette for the stats panel (host → clients, sent once per replay).
+    SelfSilhouette {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
 }
 
 /// Handle returned from `start_peer_session` for UI interaction.
@@ -706,6 +712,9 @@ async fn host_main(
                                 s.tactics_boards_version += 1;
                             }
                             broadcast_to_mesh(&mesh, &PeerMessage::TacticsMapClosed { board_id });
+                        }
+                        LocalEvent::SelfSilhouette { data, width, height } => {
+                            broadcast_to_mesh(&mesh, &PeerMessage::SelfSilhouette { data, width, height });
                         }
                     }
                 }
@@ -1661,6 +1670,9 @@ async fn join_main(
                             }
                             let _ = write_peer_message(&mut send, &PeerMessage::TacticsMapClosed { board_id }).await;
                         }
+                        LocalEvent::SelfSilhouette { data, width, height } => {
+                            let _ = write_peer_message(&mut send, &PeerMessage::SelfSilhouette { data, width, height }).await;
+                        }
                     }
                 }
 
@@ -2084,6 +2096,16 @@ fn handle_incoming_message(
                 &PeerMessage::Frame { replay_id, clock, frame_index, total_frames, game_duration, commands },
                 mesh,
             );
+        }
+
+        PeerMessage::SelfSilhouette { data, width, height } => {
+            if sender_id != frame_source_id {
+                debug!("Dropping SelfSilhouette from {sender_id} (frame source is {frame_source_id})");
+                return;
+            }
+            // Desktop client doesn't need this (it has local silhouette data).
+            // Relay to other peers so web clients can receive it.
+            relay_if_host(sender_id, &PeerMessage::SelfSilhouette { data, width, height }, mesh);
         }
 
         // ── Replay lifecycle (host -> all peers) ────────────────────────

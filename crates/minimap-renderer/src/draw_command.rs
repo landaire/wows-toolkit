@@ -548,6 +548,14 @@ pub enum DrawCommand {
         hp_fraction: f32,
         hp_current: f32,
         hp_max: f32,
+        /// Player name to display above the silhouette.
+        player_name: Option<String>,
+        /// Clan tag (e.g. "CLAN"), empty string or None if none.
+        clan_tag: Option<String>,
+        /// Clan color as RGB, or None to use default white.
+        clan_color: Option<[u8; 3]>,
+        /// Ship name to display below the player name.
+        ship_name: Option<String>,
         #[cfg(feature = "rendering")]
         #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
         silhouette: Option<RgbaImage>,
