@@ -107,5 +107,5 @@ The CI pipeline (`.github/workflows/rust.yml`) runs on every push and PR:
 Release builds (`.github/workflows/build.yml`) run on GitHub release creation and produce:
 
 - **Windows**: Signed `.exe` + `.pdb` in a zip
-- **Linux**: AppImage
+- **Linux**: Flatpak bundle
 - **macOS**: Universal binary (aarch64 + x86_64) in a `.dmg`

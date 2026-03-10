@@ -62,9 +62,9 @@ jobs:
             wows_toolkit_${{ github.event.release.tag_name }}_windows.zip
             target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb
 
-  # ── Linux (AppImage) ──────────────────────────────────────────────────
+  # ── Linux (Flatpak) ───────────────────────────────────────────────────
   linux:
-    name: Linux AppImage
+    name: Linux Flatpak
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +93,8 @@ jobs:
             libfontconfig-dev \
             libssl-dev \
             libvulkan-dev \
-            pkg-config
+            pkg-config \
+            flatpak
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -104,32 +105,54 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit
 
-      - name: Download linuxdeploy
+      - name: Set up Flatpak
         run: |
-          curl -fSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y org.freedesktop.Platform//24.08
 
-      - name: Build AppImage
+      - name: Build Flatpak bundle
         run: |
-          # Create AppDir structure
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          APP_ID="io.github.landaire.WoWsToolkit"
 
-          cp target/x86_64-unknown-linux-gnu/release/wows_toolkit AppDir/usr/bin/
-          cp -r crates/wt-translations/translations AppDir/usr/bin/translations
-          cp assets/wows-toolkit.desktop AppDir/usr/share/applications/
-          cp assets/icon-256.png AppDir/usr/share/icons/hicolor/256x256/apps/wows_toolkit.png
+          # Initialise build directory against the runtime
+          flatpak build-init build-dir "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform 24.08
 
-          # linuxdeploy needs FUSE or extract-and-run
-          export APPIMAGE_EXTRACT_AND_RUN=1
-          export OUTPUT="WoWs_Toolkit-x86_64.AppImage"
-          ./linuxdeploy --appdir AppDir --output appimage
+          # Install binary and data
+          mkdir -p build-dir/files/bin
+          cp target/x86_64-unknown-linux-gnu/release/wows_toolkit build-dir/files/bin/
+          cp -r crates/wt-translations/translations build-dir/files/bin/translations
+
+          # Desktop entry (renamed to match app ID)
+          mkdir -p build-dir/files/share/applications
+          cp assets/wows-toolkit.desktop "build-dir/files/share/applications/${APP_ID}.desktop"
+
+          # Icon
+          mkdir -p build-dir/files/share/icons/hicolor/256x256/apps
+          cp assets/icon-256.png "build-dir/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+
+          # AppStream metainfo
+          mkdir -p build-dir/files/share/metainfo
+          cp "assets/${APP_ID}.metainfo.xml" build-dir/files/share/metainfo/
+
+          # Finish build with sandbox permissions
+          flatpak build-finish build-dir \
+            --share=ipc \
+            --share=network \
+            --socket=x11 \
+            --socket=wayland \
+            --socket=fallback-x11 \
+            --device=dri \
+            --filesystem=host:ro \
+            --command=wows_toolkit
+
+          # Export to a local repo and create a single-file bundle
+          flatpak build-export repo build-dir
+          flatpak build-bundle repo "WoWs_Toolkit-x86_64.flatpak" "$APP_ID"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: WoWs_Toolkit-x86_64.AppImage
+          files: WoWs_Toolkit-x86_64.flatpak
 
   # ── macOS (universal .app in .dmg) ────────────────────────────────────
   macos:

@@ -700,7 +700,7 @@
                     const ua = navigator.userAgent.toLowerCase();
                     let suffix = "_windows.zip";
                     if (ua.includes("mac")) suffix = "_macos.dmg";
-                    else if (ua.includes("linux")) suffix = ".AppImage";
+                    else if (ua.includes("linux")) suffix = ".flatpak";
 
                     const asset = data.assets?.find((a) =>
                         a.name.endsWith(suffix),

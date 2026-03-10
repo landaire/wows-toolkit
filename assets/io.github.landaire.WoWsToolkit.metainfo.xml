@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.landaire.WoWsToolkit</id>
+  <name>WoWs Toolkit</name>
+  <summary>World of Warships replay analysis and game file browser</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      WoWs Toolkit is a desktop application for analyzing World of Warships
+      replay files, browsing game data, and rendering minimap animations.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.landaire.WoWsToolkit.desktop</launchable>
+  <categories>
+    <category>Game</category>
+    <category>Utility</category>
+  </categories>
+  <url type="homepage">https://github.com/landaire/wows-toolkit</url>
+  <url type="bugtracker">https://github.com/landaire/wows-toolkit/issues</url>
+  <provides>
+    <binary>wows_toolkit</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>
