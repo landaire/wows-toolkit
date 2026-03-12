@@ -1898,6 +1898,7 @@ where
                 ArgValue::Int16(v) => *v as i8,
                 ArgValue::Uint16(v) => *v as i8,
                 ArgValue::Int32(v) => *v as i8,
+                ArgValue::Blob(b) if !b.is_empty() => b[0] as i8,
                 other => panic!("onConsumableUsed: unexpected consumable arg type: {:?}", other),
             };
             let duration: f32 = match &args[1] {
