@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.59] - 2026-03-12
+
+### ⚙️ Miscellaneous Tasks
+
+- Distribute flatpak instead of appimage
+
+### App
+
+- Refactor to use SQLite database for app storage
+
+### Renderer
+
+- Add player/ship name
+- Add support for setting ship annotations as a particular ship
+- Fix duplicate players + players being added to wrong team in games with ships that spawn in/respawn (like operations)
+
+### Replays
+
+- Add spotting/potential damage breakdowns in inspector/renderer
+- Fix broken consumable packets
+
+### Web
+
+- Fix annotations not working and default name
+
 ## [0.1.58] - 2026-03-08
 
 ### 🚀 Features
