@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.58"
+version = "0.1.59"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -24,10 +24,10 @@ name = "wows-toolkit"
 
 [workspace.dependencies]
 # Internal crates (versions synced by scripts/bump-versions.sh)
-wowsunpack = { version = "0.26.0", path = "crates/wowsunpack", default-features = false }
-wows_replays = { version = "0.27.0", path = "crates/wows-replays", default-features = false }
-wows_minimap_renderer = { version = "0.20.0", path = "crates/minimap-renderer", default-features = false }
-wows-data-mgr = { version = "0.2.0", path = "crates/wows-data-mgr" }
+wowsunpack = { version = "0.27.0", path = "crates/wowsunpack", default-features = false }
+wows_replays = { version = "0.28.0", path = "crates/wows-replays", default-features = false }
+wows_minimap_renderer = { version = "0.21.0", path = "crates/minimap-renderer", default-features = false }
+wows-data-mgr = { version = "0.3.0", path = "crates/wows-data-mgr" }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { path = "crates/wt-translations" }
