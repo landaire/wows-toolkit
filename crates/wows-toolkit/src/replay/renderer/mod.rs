@@ -680,6 +680,7 @@ pub fn launch_replay_renderer(
 /// The client doesn't have its own replay data — it receives rendered frames
 /// from the host. The map image is decoded from the PNG sent in SessionInfo.
 /// Ship icons, fonts, and other assets are loaded from the local game data.
+#[allow(clippy::too_many_arguments)]
 pub fn launch_client_renderer(
     replay_name: String,
     map_image_png: Vec<u8>,

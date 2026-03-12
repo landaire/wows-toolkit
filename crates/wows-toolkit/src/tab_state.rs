@@ -336,6 +336,7 @@ pub struct TabState {
     // ─── Transient / runtime-only state ──────────────────────────────────
     pub world_of_warships_data: Option<SharedWoWsData>,
     pub items_to_extract: Mutex<Vec<VfsPath>>,
+    #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
     /// Derived from `settings.game.wows_dir` — not persisted.
     pub replays_dir: Option<PathBuf>,
@@ -369,7 +370,9 @@ pub struct TabState {
     pub markdown_cache: egui_commonmark::CommonMarkCache,
     pub game_constants: Arc<RwLock<serde_json::Value>>,
     pub mod_action_sender: Sender<ModInfo>,
-    /// Used temporarily to store the mod action receiver until the mod manager thread is started
+    /// Used temporarily to store the mod action receiver until the mod manager thread is started.
+    /// Consumed via `.take()` in `app.rs` — clippy false positive for "never read".
+    #[allow(dead_code)]
     pub mod_action_receiver: Option<Receiver<ModInfo>>,
     pub background_task_receiver: Receiver<BackgroundTask>,
     pub background_task_sender: Sender<BackgroundTask>,

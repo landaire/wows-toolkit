@@ -612,6 +612,7 @@ pub struct TacticsBoardViewer {
 
 impl TacticsBoardViewer {
     /// Create a new tactics board viewer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         board_id: u64,
         owner_user_id: u64,
@@ -1432,19 +1433,19 @@ impl TacticsBoardViewer {
             for ann in &ann_state.annotations {
                 render_annotation(ann, &transform, icons_ref, &map_painter, map_space);
                 // Range circles for ship annotations with config
-                if let Annotation::Ship { pos, config: Some(cfg), .. } = ann {
-                    if let Some(map_info) = &state.map_info {
-                        render_annotation_range_circles(
-                            ui.ctx(),
-                            cfg,
-                            *pos,
-                            &transform,
-                            map_info,
-                            &map_painter,
-                            wows_data,
-                            &mut placed_labels,
-                        );
-                    }
+                if let Annotation::Ship { pos, config: Some(cfg), .. } = ann
+                    && let Some(map_info) = &state.map_info
+                {
+                    render_annotation_range_circles(
+                        ui.ctx(),
+                        cfg,
+                        *pos,
+                        &transform,
+                        map_info,
+                        &map_painter,
+                        wows_data,
+                        &mut placed_labels,
+                    );
                 }
             }
             for &sel in &ann_state.selected_indices {
@@ -2085,36 +2086,36 @@ impl TacticsBoardViewer {
                                         if ui.button(egui::RichText::new(&label).small()).clicked() {
                                             // Assign ship to annotation
                                             let wdata = wows_data.read();
-                                            if let Some(ref metadata) = wdata.game_metadata {
-                                                if let Some(param) = metadata.game_param_by_index(&entry.param_index) {
-                                                    let param_id = param.id().raw();
-                                                    let ship_name = entry.display_name.clone();
-                                                    let species_str = param
-                                                        .species()
-                                                        .and_then(|s| s.known())
-                                                        .map(|s| format!("{s:?}"))
-                                                        .unwrap_or_default();
+                                            if let Some(ref metadata) = wdata.game_metadata
+                                                && let Some(param) = metadata.game_param_by_index(&entry.param_index)
+                                            {
+                                                let param_id = param.id().raw();
+                                                let ship_name = entry.display_name.clone();
+                                                let species_str = param
+                                                    .species()
+                                                    .and_then(|s| s.known())
+                                                    .map(|s| format!("{s:?}"))
+                                                    .unwrap_or_default();
 
-                                                    let mut ann = annotation_state_arc.lock();
-                                                    ann.save_undo();
-                                                    if let Some(Annotation::Ship { species, config, .. }) =
-                                                        ann.annotations.get_mut(sel_idx)
-                                                    {
-                                                        *species = species_str;
-                                                        *config = Some(super::AnnotationShipConfig {
-                                                            param_id,
-                                                            ship_name,
-                                                            hull_name: String::new(),
-                                                            vis_coeff: 1.0,
-                                                            gm_coeff: 1.0,
-                                                            gs_coeff: 1.0,
-                                                            range_filter: super::AnnotationRangeFilter::default(),
-                                                        });
-                                                    }
-                                                    send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
-                                                    drop(ann);
-                                                    state.ship_search_text.clear();
+                                                let mut ann = annotation_state_arc.lock();
+                                                ann.save_undo();
+                                                if let Some(Annotation::Ship { species, config, .. }) =
+                                                    ann.annotations.get_mut(sel_idx)
+                                                {
+                                                    *species = species_str;
+                                                    *config = Some(super::AnnotationShipConfig {
+                                                        param_id,
+                                                        ship_name,
+                                                        hull_name: String::new(),
+                                                        vis_coeff: 1.0,
+                                                        gm_coeff: 1.0,
+                                                        gs_coeff: 1.0,
+                                                        range_filter: super::AnnotationRangeFilter::default(),
+                                                    });
                                                 }
+                                                send_annotation_update(collab_local_tx, &ann, sel_idx, board_id);
+                                                drop(ann);
+                                                state.ship_search_text.clear();
                                             }
                                         }
                                     }
@@ -2667,49 +2668,35 @@ fn render_annotation_range_circles(
         draw_range_circle(ctx, shapes, screen_center, screen_r, color, alpha, dashed, Some(&label), Some(placed));
     };
 
-    if rf.detection {
-        if let Some(km) = ranges.detection_km {
-            draw(
-                &mut shapes,
-                RangeCircleKind::Detection,
-                km.value() * 1000.0,
-                cfg.vis_coeff,
-                km.value(),
-                placed_labels,
-            );
-        }
+    if rf.detection
+        && let Some(km) = ranges.detection_km
+    {
+        draw(&mut shapes, RangeCircleKind::Detection, km.value() * 1000.0, cfg.vis_coeff, km.value(), placed_labels);
     }
-    if rf.main_battery {
-        if let Some(m) = ranges.main_battery_m {
-            draw(&mut shapes, RangeCircleKind::MainBattery, m.value(), cfg.gm_coeff, m.to_km().value(), placed_labels);
-        }
+    if rf.main_battery
+        && let Some(m) = ranges.main_battery_m
+    {
+        draw(&mut shapes, RangeCircleKind::MainBattery, m.value(), cfg.gm_coeff, m.to_km().value(), placed_labels);
     }
-    if rf.secondary_battery {
-        if let Some(m) = ranges.secondary_battery_m {
-            draw(
-                &mut shapes,
-                RangeCircleKind::SecondaryBattery,
-                m.value(),
-                cfg.gs_coeff,
-                m.to_km().value(),
-                placed_labels,
-            );
-        }
+    if rf.secondary_battery
+        && let Some(m) = ranges.secondary_battery_m
+    {
+        draw(&mut shapes, RangeCircleKind::SecondaryBattery, m.value(), cfg.gs_coeff, m.to_km().value(), placed_labels);
     }
-    if rf.torpedo {
-        if let Some(m) = ranges.torpedo_range_m {
-            draw(&mut shapes, RangeCircleKind::TorpedoRange, m.value(), 1.0, m.to_km().value(), placed_labels);
-        }
+    if rf.torpedo
+        && let Some(m) = ranges.torpedo_range_m
+    {
+        draw(&mut shapes, RangeCircleKind::TorpedoRange, m.value(), 1.0, m.to_km().value(), placed_labels);
     }
-    if rf.radar {
-        if let Some(m) = ranges.radar_m {
-            draw(&mut shapes, RangeCircleKind::Radar, m.value(), 1.0, m.to_km().value(), placed_labels);
-        }
+    if rf.radar
+        && let Some(m) = ranges.radar_m
+    {
+        draw(&mut shapes, RangeCircleKind::Radar, m.value(), 1.0, m.to_km().value(), placed_labels);
     }
-    if rf.hydro {
-        if let Some(m) = ranges.hydro_m {
-            draw(&mut shapes, RangeCircleKind::Hydro, m.value(), 1.0, m.to_km().value(), placed_labels);
-        }
+    if rf.hydro
+        && let Some(m) = ranges.hydro_m
+    {
+        draw(&mut shapes, RangeCircleKind::Hydro, m.value(), 1.0, m.to_km().value(), placed_labels);
     }
 
     painter.extend(shapes);

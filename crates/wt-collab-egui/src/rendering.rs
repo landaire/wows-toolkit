@@ -82,6 +82,7 @@ pub enum RangeCircleKind {
 /// * `dashed` — if true, draw as a dashed circle.
 /// * `label` — optional label text placed at the circle edge.
 /// * `placed_labels` — optional mutable list for label collision avoidance.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_range_circle(
     ctx: &egui::Context,
     shapes: &mut Vec<Shape>,
@@ -480,22 +481,22 @@ pub fn render_annotation(
                 painter.add(Shape::circle_filled(screen_pos, icon_size / 2.0, tint));
             }
             // Ship name label above the icon
-            if let Some(cfg) = config {
-                if !cfg.ship_name.is_empty() {
-                    let label_pos = Pos2::new(screen_pos.x, screen_pos.y - icon_size / 2.0 - 4.0);
-                    let font = game_font(transform.scale_distance(10.0));
-                    let text = cfg.ship_name.as_str();
-                    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
-                    let text_offset = egui::vec2(galley.size().x / 2.0, galley.size().y);
-                    // Shadow
-                    painter.galley(
-                        label_pos - text_offset + egui::vec2(1.0, 1.0),
-                        galley.clone(),
-                        Color32::from_black_alpha(180),
-                    );
-                    // Foreground
-                    painter.galley(label_pos - text_offset, galley, Color32::WHITE);
-                }
+            if let Some(cfg) = config
+                && !cfg.ship_name.is_empty()
+            {
+                let label_pos = Pos2::new(screen_pos.x, screen_pos.y - icon_size / 2.0 - 4.0);
+                let font = game_font(transform.scale_distance(10.0));
+                let text = cfg.ship_name.as_str();
+                let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
+                let text_offset = egui::vec2(galley.size().x / 2.0, galley.size().y);
+                // Shadow
+                painter.galley(
+                    label_pos - text_offset + egui::vec2(1.0, 1.0),
+                    galley.clone(),
+                    Color32::from_black_alpha(180),
+                );
+                // Foreground
+                painter.galley(label_pos - text_offset, galley, Color32::WHITE);
             }
         }
         Annotation::FreehandStroke { points, color, width } => {

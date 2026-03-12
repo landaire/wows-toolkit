@@ -6,6 +6,7 @@
 use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
+use tracing::trace;
 
 use crate::tab_state::TabState;
 
@@ -161,7 +162,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     };
     queries::set_setting_raw(pool, "player_tracker.filter_time_period", &filter_period).await?;
 
-    info!("  saved settings");
+    trace!("  saved settings");
     Ok(())
 }
 
@@ -200,7 +201,7 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
         queries::insert_session_stat(pool, row).await?;
     }
 
-    info!("  saved {} session stats", rows.len());
+    trace!("  saved {} session stats", rows.len());
     Ok(())
 }
 
@@ -220,7 +221,7 @@ async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<()
         }
     }
 
-    info!("  saved player tracker");
+    trace!("  saved player tracker");
     Ok(())
 }
 
@@ -233,7 +234,7 @@ async fn save_sent_replays(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), s
         queries::insert_sent_replay(pool, path).await?;
     }
 
-    info!("  saved {} sent replays", paths.len());
+    trace!("  saved {} sent replays", paths.len());
     Ok(())
 }
 
@@ -252,7 +253,7 @@ async fn save_chart_configs(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
         queries::upsert_chart_config(pool, *chart_id, json).await?;
     }
 
-    info!("  saved {} chart configs", configs.len());
+    trace!("  saved {} chart configs", configs.len());
     Ok(())
 }
 
@@ -275,7 +276,7 @@ async fn save_armor_viewer_defaults(pool: &SqlitePool, ctx: &SaveContext) -> Res
     };
     queries::save_armor_viewer_defaults(pool, &row).await?;
 
-    info!("  saved armor viewer defaults");
+    trace!("  saved armor viewer defaults");
     Ok(())
 }
 
@@ -291,7 +292,7 @@ async fn save_render_options(pool: &SqlitePool, ctx: &SaveContext) -> Result<(),
         None => error!("Failed to serialize render options"),
     }
 
-    info!("  saved render options");
+    trace!("  saved render options");
     Ok(())
 }
 
@@ -307,7 +308,7 @@ async fn save_dock_layout(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sq
         None => error!("Failed to serialize dock layout"),
     }
 
-    info!("  saved dock layout");
+    trace!("  saved dock layout");
     Ok(())
 }
 
@@ -323,6 +324,6 @@ async fn save_mod_manager(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sq
         None => error!("Failed to serialize mod manager info"),
     }
 
-    info!("  saved mod manager info");
+    trace!("  saved mod manager info");
     Ok(())
 }

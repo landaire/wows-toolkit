@@ -191,6 +191,7 @@ impl LegacyWowsToolkitApp {
     /// Convert the deserialized legacy state into the new structures.
     ///
     /// Returns `(persisted, player_tracker, sent_replays, replay_sort)`.
+    #[allow(clippy::type_complexity)]
     pub fn into_new_state(
         self,
     ) -> (PersistedState, Arc<RwLock<PlayerTracker>>, Arc<RwLock<HashSet<String>>>, Arc<Mutex<SortOrder>>) {
