@@ -874,8 +874,9 @@ impl ReplayRendererViewer {
         ctx.show_viewport_deferred(
             viewport_id,
             builder,
-            move |ctx, _class| {
-                if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
+            move |viewport_ui, _class| {
+                let ctx = viewport_ui.ctx().clone();
+                if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(&ctx) {
                     return;
                 }
 
@@ -1055,7 +1056,7 @@ impl ReplayRendererViewer {
                                         height: *h,
                                     });
                                 }
-                            *tex_guard = Some(upload_textures(ctx, assets, state.self_silhouette_raw.as_ref()));
+                            *tex_guard = Some(upload_textures(&ctx, assets, state.self_silhouette_raw.as_ref()));
                         }
                     }
                     // Lazy silhouette upload: raw data may arrive after initial texture upload
@@ -1079,7 +1080,7 @@ impl ReplayRendererViewer {
 
                 // ── Annotation toolbar ──
                 if !status_is_loading {
-                    egui::TopBottomPanel::top("replay_annotation_toolbar").show(ctx, |ui| {
+                    egui::Panel::top("replay_annotation_toolbar").show_inside(viewport_ui, |ui| {
                         let locked = shared_state
                             .lock()
                             .collab_session_state
@@ -1107,7 +1108,7 @@ impl ReplayRendererViewer {
 
                 let show_stats_panel = !status_is_loading && shared_state.lock().options.show_stats_panel;
 
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
                     if status_is_loading {
                         ui.centered_and_justified(|ui| {
                             ui.spinner();
@@ -1140,7 +1141,7 @@ impl ReplayRendererViewer {
                     let zoom_changed = {
                         let mut zp = zoom_pan_arc.lock();
                         handle_viewport_zoom_pan(
-                            ctx,
+                            &ctx,
                             &response,
                             &mut zp,
                             &layout,
@@ -1295,7 +1296,7 @@ impl ReplayRendererViewer {
                                     }
                                 }
                                 let is_hud = cmd.is_hud();
-                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, ctx, &options, &mut placed_labels, &LocalizedTextResolver);
+                                let cmd_shapes = draw_command_to_shapes(cmd, &transform, textures, &ctx, &options, &mut placed_labels, &LocalizedTextResolver);
                                 let target_painter = if is_hud { &painter } else { &map_painter };
                                 for shape in cmd_shapes {
                                     target_painter.add(shape);
@@ -1321,7 +1322,7 @@ impl ReplayRendererViewer {
                                         continue;
                                     }
                                     let cmd_shapes = wt_collab_egui::draw_commands::draw_command_to_shapes(
-                                        cmd, &stats_transform, &shared_tex, ctx, &label_opts,
+                                        cmd, &stats_transform, &shared_tex, &ctx, &label_opts,
                                         Some(&mut stats_placed), &LocalizedTextResolver,
                                     );
                                     for shape in cmd_shapes {
@@ -1580,10 +1581,10 @@ impl ReplayRendererViewer {
                         }
 
                         // Tool shortcuts (Ctrl+1..7, Ctrl+M)
-                        handle_tool_shortcuts(ctx, &mut ann);
+                        handle_tool_shortcuts(&ctx, &mut ann);
 
                         // Show shortcut overlay while Ctrl is held
-                        draw_shortcut_overlay(ctx, egui::Id::new("replay_shortcut_overlay"));
+                        draw_shortcut_overlay(&ctx, egui::Id::new("replay_shortcut_overlay"));
 
                         // Escape key: cancel tool or deselect
                         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1767,7 +1768,7 @@ impl ReplayRendererViewer {
                                 .order(egui::Order::Foreground)
                                 .fixed_pos(menu_pos)
                                 .interactable(true)
-                                .show(ctx, |ui| {
+                                .show(&ctx, |ui| {
                                     let frame = egui::Frame::NONE
                                         .fill(Color32::from_gray(30))
                                         .corner_radius(CornerRadius::same(6))
@@ -1969,7 +1970,7 @@ impl ReplayRendererViewer {
 
                             // Close menu on click outside (but not if a sub-popup like color picker is open)
                             let menu_rect = menu_resp.response.rect;
-                            let any_popup = ctx.is_popup_open();
+                            let any_popup = ctx.any_popup_open();
                             let clicked_outside = !any_popup
                                 && ctx.input(|i| {
                                     i.pointer.any_click()
@@ -1998,7 +1999,7 @@ impl ReplayRendererViewer {
                             let collab_tx = shared_state.lock().collab_local_tx.clone();
                             let map_space = shared_state.lock().map_space_size;
                             draw_annotation_edit_popup(
-                                ctx,
+                                &ctx,
                                 ui.id().with("annotation_edit_popup"),
                                 &annotation_arc,
                                 sel_idx,
@@ -2029,7 +2030,7 @@ impl ReplayRendererViewer {
                             .order(egui::Order::Foreground)
                             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 8.0))
                             .interactable(false)
-                            .show(ctx, |ui| {
+                            .show(&ctx, |ui| {
                                 egui::Frame::new()
                                     .fill(Color32::from_rgba_unmultiplied(30, 30, 30, 200))
                                     .corner_radius(CornerRadius::same(4))
@@ -2061,7 +2062,7 @@ impl ReplayRendererViewer {
                     }
 
                     // Check if any popup is open (keeps overlay visible, e.g. settings or speed)
-                    let any_popup_open = egui::Popup::is_any_open(ctx);
+                    let any_popup_open = egui::Popup::is_any_open(&ctx);
 
                     // Compute overlay opacity
                     let elapsed = now - overlay_state_arc.lock().last_activity;
@@ -2090,7 +2091,7 @@ impl ReplayRendererViewer {
                             .order(egui::Order::Foreground)
                             .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
                             .interactable(true)
-                            .show(ctx, |ui| {
+                            .show(&ctx, |ui| {
                                 // Apply faded text color
                                 ui.visuals_mut().override_text_color =
                                     Some(Color32::from_rgba_unmultiplied(255, 255, 255, text_alpha));
@@ -2749,7 +2750,7 @@ impl ReplayRendererViewer {
                             .collapsible(false)
                             .resizable(false)
                             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                            .show(ctx, |ui| {
+                            .show(&ctx, |ui| {
                                 ui.label(
                                     "Could not find a supported GPU video encoder. \
                                      Video export will fall back to CPU encoding, \
@@ -2786,7 +2787,7 @@ impl ReplayRendererViewer {
                         }
                     }
 
-                    toasts.lock().show(ctx);
+                    toasts.lock().show(&ctx);
                 });
 
 

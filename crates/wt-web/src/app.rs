@@ -1158,7 +1158,7 @@ impl TabViewer for WebTabViewer<'_> {
 }
 
 impl eframe::App for WebApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Register default GameFont family on first frame (can't do in new() — fonts not ready)
         if !self.fonts_registered {
             self.fonts_registered = true;
@@ -1191,14 +1191,18 @@ impl eframe::App for WebApp {
                 self.send_message(PeerMessage::RequestAssets);
             }
         }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
 
         // Info bar at bottom
-        egui::TopBottomPanel::bottom("info_bar").show(ctx, |ui| {
+        egui::Panel::bottom("info_bar").show_inside(ui, |ui| {
             self.render_info_bar(ui);
         });
 
         // Dock area for tabbed views
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             // Temporarily take the dock state out of self so we can pass
             // &mut self to the TabViewer without double-borrow.
             let mut dock_state = std::mem::replace(&mut self.dock_state, DockState::new(vec![WebTab::Lobby]));
@@ -1208,7 +1212,7 @@ impl eframe::App for WebApp {
                 .allowed_splits(egui_dock::AllowedSplits::None)
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
-                .show_inside(ui, &mut WebTabViewer { app: self, ctx });
+                .show_inside(ui, &mut WebTabViewer { app: self, ctx: &ctx });
 
             self.dock_state = dock_state;
 

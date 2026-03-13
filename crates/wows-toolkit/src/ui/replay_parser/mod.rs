@@ -4115,9 +4115,9 @@ impl ToolkitTabViewer<'_> {
                     });
                 }
 
-                egui::SidePanel::left("replay_listing_panel")
-                    .default_width(default_width)
-                    .width_range(100.0..=f32::INFINITY)
+                egui::Panel::left("replay_listing_panel")
+                    .default_size(default_width)
+                    .size_range(100.0..=f32::INFINITY)
                     .show_inside(ui, |ui| {
                         egui::ScrollArea::both().id_salt("replay_listing_scroll_area").show(ui, |ui| {
                             self.build_file_listing(ui);

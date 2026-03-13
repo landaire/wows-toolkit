@@ -186,7 +186,7 @@ impl ArcballCamera {
 
         // Scroll: zoom
         if response.hovered() {
-            let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+            let scroll = response.ctx.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
                 self.zoom(scroll);
             }

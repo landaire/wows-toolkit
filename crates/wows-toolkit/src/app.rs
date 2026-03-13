@@ -1598,7 +1598,7 @@ impl WowsToolkitApp {
                     screen_rect.center(),
                     Align2::CENTER_CENTER,
                     text,
-                    TextStyle::Heading.resolve(&ctx.style()),
+                    TextStyle::Heading.resolve(&ctx.global_style()),
                     Color32::WHITE,
                 );
             }
@@ -1797,49 +1797,7 @@ impl WowsToolkitApp {
             });
         }
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                let is_web = cfg!(target_arch = "wasm32");
-                if !is_web {
-                    ui.menu_button(t!("ui.menu.file"), |ui| {
-                        if ui.button(t!("ui.menu.check_updates")).clicked() {
-                            self.checked_for_updates = false;
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.button(t!("ui.menu.about")).clicked() {
-                            self.show_about_window = true;
-                            ui.close_kind(UiKind::Menu);
-                        }
-                        if ui.button(t!("ui.menu.quit")).clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    });
-                    ui.add_space(16.0);
-                }
-
-                if ui.button(wt_translations::icon_t(icons::BUG, &t!("ui.buttons.create_issue"))).clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
-                }
-
-                if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
-                }
-            });
-        });
-
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            self.build_bottom_panel(ui);
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            DockArea::new(&mut self.dock_state)
-                .style(Style::from_egui(ui.style().as_ref()))
-                .allowed_splits(egui_dock::AllowedSplits::None)
-                .show_leaf_collapse_buttons(false)
-                .show_leaf_close_all_buttons(false)
-                .show_close_buttons(false)
-                .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
-        });
+        // Panels are drawn in ui() via draw_panels()
 
         self.show_confirmation_dialog(ctx);
         self.show_ip_warning_dialog(ctx);
@@ -2556,8 +2514,55 @@ impl WowsToolkitApp {
 }
 
 impl eframe::App for WowsToolkitApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.update_impl(ctx, frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                let is_web = cfg!(target_arch = "wasm32");
+                if !is_web {
+                    ui.menu_button(t!("ui.menu.file"), |ui| {
+                        if ui.button(t!("ui.menu.check_updates")).clicked() {
+                            self.checked_for_updates = false;
+                            ui.close_kind(UiKind::Menu);
+                        }
+                        if ui.button(t!("ui.menu.about")).clicked() {
+                            self.show_about_window = true;
+                            ui.close_kind(UiKind::Menu);
+                        }
+                        if ui.button(t!("ui.menu.quit")).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    ui.add_space(16.0);
+                }
+
+                if ui.button(wt_translations::icon_t(icons::BUG, &t!("ui.buttons.create_issue"))).clicked() {
+                    ui.ctx().open_url(OpenUrl::new_tab("https://github.com/landaire/wows-toolkit/issues/new/choose"));
+                }
+
+                if ui.button(wt_translations::icon_t(icons::DISCORD_LOGO, &t!("ui.buttons.discord"))).clicked() {
+                    ui.ctx().open_url(OpenUrl::new_tab("https://discord.gg/SpmXzfSdux"));
+                }
+            });
+        });
+
+        egui::Panel::bottom("status_panel").show_inside(ui, |ui| {
+            self.build_bottom_panel(ui);
+        });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            DockArea::new(&mut self.dock_state)
+                .style(Style::from_egui(ui.style().as_ref()))
+                .allowed_splits(egui_dock::AllowedSplits::None)
+                .show_leaf_collapse_buttons(false)
+                .show_leaf_close_all_buttons(false)
+                .show_close_buttons(false)
+                .show_inside(ui, &mut ToolkitTabViewer { tab_state: &mut self.tab_state });
+        });
     }
 
     fn on_exit(&mut self) {

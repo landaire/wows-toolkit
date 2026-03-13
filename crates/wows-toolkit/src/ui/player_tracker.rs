@@ -281,7 +281,7 @@ impl ToolkitTabViewer<'_> {
             ui.add_space(10.0);
 
             ui.separator();
-            egui::SidePanel::left("current_match_side_panel").default_width(450.0).show_inside(ui, |ui| {
+            egui::Panel::left("current_match_side_panel").default_size(450.0).show_inside(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.heading(t!("ui.player_tracker.current_match"));
                     egui::ScrollArea::both().id_salt("current_match_scroll_area").show(ui, |ui| {

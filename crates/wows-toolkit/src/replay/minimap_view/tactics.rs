@@ -694,8 +694,9 @@ impl TacticsBoardViewer {
             .map(|s| s.apply_to_builder(builder.clone(), [800.0, 850.0]))
             .unwrap_or_else(|| builder.with_inner_size([800.0, 850.0]));
 
-        ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
-            if !open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
+        ctx.show_viewport_deferred(viewport_id, builder, move |viewport_ui, _class| {
+            let ctx = viewport_ui.ctx().clone();
+            if !open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(&ctx) {
                 return;
             }
 
@@ -818,7 +819,7 @@ impl TacticsBoardViewer {
                 .unwrap_or(true); // No session -> standalone, show everything.
 
             if is_authority {
-                egui::TopBottomPanel::bottom("tactics_bottom_panel").show(ctx, |ui| {
+                egui::Panel::bottom("tactics_bottom_panel").show_inside(viewport_ui, |ui| {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         Self::draw_map_mode_selector(
@@ -859,7 +860,7 @@ impl TacticsBoardViewer {
             } // is_authority
 
             // ── Annotation toolbar ──
-            egui::TopBottomPanel::top("tactics_annotation_toolbar").show(ctx, |ui| {
+            egui::Panel::top("tactics_annotation_toolbar").show_inside(viewport_ui, |ui| {
                 let locked =
                     collab_session_state.as_ref().map(|ss| ss.lock().permissions.annotations_locked).unwrap_or(false);
                 let mut ann = annotation_state_arc.lock();
@@ -875,7 +876,7 @@ impl TacticsBoardViewer {
             });
 
             // ── Central panel: map viewport ──
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
                 Self::draw_map_viewport(
                     ui,
                     &mut state,

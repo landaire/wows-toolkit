@@ -362,8 +362,8 @@ impl UnpackerPaneViewer<'_> {
         recompute_filter(browser);
 
         // Per-pane folder tree in a left side panel
-        egui::SidePanel::left(format!("browser_folder_tree_{}", source_id))
-            .default_width(260.0)
+        egui::Panel::left(format!("browser_folder_tree_{}", source_id))
+            .default_size(260.0)
             .resizable(true)
             .show_inside(ui, |ui| {
                 // Filter input
@@ -378,7 +378,7 @@ impl UnpackerPaneViewer<'_> {
                 ui.separator();
 
                 // Content search input (at bottom of sidebar)
-                egui::TopBottomPanel::bottom(format!("browser_content_search_{}", source_id)).show_inside(ui, |ui| {
+                egui::Panel::bottom(format!("browser_content_search_{}", source_id)).show_inside(ui, |ui| {
                     ui.add_space(2.0);
                     ui.label(RichText::new(t!("ui.unpacker.search_in_files").as_ref()).strong());
                     ui.horizontal(|ui| {
@@ -1802,7 +1802,7 @@ impl ToolkitTabViewer<'_> {
 
         // ── Top panel: version selector (only when multiple builds) ──────
         if self.tab_state.available_builds.len() > 1 {
-            egui::TopBottomPanel::top("browser_version_bar").show_inside(ui, |ui| {
+            egui::Panel::top("browser_version_bar").show_inside(ui, |ui| {
                 if let Some(map) = &self.tab_state.wows_data_map {
                     let mut builds = self.tab_state.available_builds.clone();
                     builds.sort();
@@ -1886,7 +1886,7 @@ impl ToolkitTabViewer<'_> {
         }
 
         // ── Bottom panel: extract controls ───────────────────────────────
-        egui::TopBottomPanel::bottom("browser_extract_bar").exact_height(36.0).show_inside(ui, |ui| {
+        egui::Panel::bottom("browser_extract_bar").exact_size(36.0).show_inside(ui, |ui| {
             let queue_count = self.tab_state.items_to_extract.lock().len();
 
             ui.horizontal_centered(|ui| {

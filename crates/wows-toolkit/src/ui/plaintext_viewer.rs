@@ -29,9 +29,10 @@ impl PlaintextFileViewer {
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of(&*self.title),
             ViewportBuilder::default().with_title(&*self.title),
-            move |ctx, _ui| {
+            move |viewport_ui, _class| {
+                let ctx = viewport_ui.ctx().clone();
                 let mut file_info = info.lock();
-                egui::CentralPanel::default().show(ctx, |ui| match &mut *file_info {
+                egui::CentralPanel::default().show_inside(viewport_ui, |ui| match &mut *file_info {
                     FileType::PlainTextFile { ext, contents } => {
                         let mut layouter = |ui: &egui::Ui, text_buffer: &dyn TextBuffer, wrap_width: f32| {
                             let style = ui.style().as_ref();

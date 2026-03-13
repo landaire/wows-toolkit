@@ -1191,8 +1191,9 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
         .map(|s| s.apply_to_builder(builder.clone(), [900.0, 700.0]))
         .unwrap_or_else(|| builder.with_inner_size([900.0, 700.0]));
 
-    ctx.show_viewport_deferred(viewport_id, builder, move |ctx, _class| {
-        if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(ctx) {
+    ctx.show_viewport_deferred(viewport_id, builder, move |viewport_ui, _class| {
+        let ctx = viewport_ui.ctx().clone();
+        if !window_open.load(Ordering::Relaxed) || crate::app::mitigate_wgpu_mem_leak(&ctx) {
             return;
         }
 
@@ -1210,7 +1211,7 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
             // viewports, so we can't depend on the parent's tick alone).
             viewer.tick();
 
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
                 viewer.draw_content(ui);
             });
 
@@ -1234,7 +1235,7 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
 impl RealtimeArmorViewer {
     /// Draw the main content: 3D viewport + side panel.
     fn draw_content(&mut self, ui: &mut egui::Ui) {
-        egui::SidePanel::right("rtav_side_panel").default_width(250.0).min_width(200.0).show_inside(ui, |ui| {
+        egui::Panel::right("rtav_side_panel").default_size(250.0).min_size(200.0).show_inside(ui, |ui| {
             self.draw_side_panel(ui);
         });
 
