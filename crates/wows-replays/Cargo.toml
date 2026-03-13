@@ -1,6 +1,6 @@
 [package]
 name = "wows_replays"
-version = "0.28.0"
+version = "0.29.0"
 authors = ["landaire"]
 description = "A parser for World of Warships replay files"
 repository = "https://github.com/landaire/wows-toolkit"
