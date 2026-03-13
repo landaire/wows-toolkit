@@ -46,6 +46,7 @@ pub async fn save_tab_state_to_db(pool: &SqlitePool, ts: &TabState) -> Result<()
         replay_sort: ts.replay_sort.clone(),
         window_settings: ts.window_settings.clone(),
         active_viewports: ts.active_viewports.clone(),
+        save_notify: ts.save_notify.clone(),
     };
     save_state_to_db(pool, &ctx).await
 }

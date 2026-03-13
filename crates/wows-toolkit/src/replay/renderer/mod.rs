@@ -545,6 +545,8 @@ pub struct ReplayRendererViewer {
     prefer_cpu_encoder: Arc<AtomicBool>,
     /// Shared window settings tracker for persisting viewport geometry.
     window_settings: crate::tab_state::SharedWindowSettings,
+    /// Notify handle to trigger an immediate settings save.
+    save_notify: Arc<tokio::sync::Notify>,
 }
 
 /// Data retained for video export. Cloned once at launch time.
@@ -575,6 +577,7 @@ pub fn launch_replay_renderer(
     saved_options: &SavedRenderOptions,
     suppress_gpu_warning: Arc<AtomicBool>,
     window_settings: crate::tab_state::SharedWindowSettings,
+    save_notify: Arc<tokio::sync::Notify>,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (command_tx, command_rx) = mpsc::channel();
@@ -654,6 +657,7 @@ pub fn launch_replay_renderer(
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
         window_settings,
+        save_notify,
     };
 
     let open = Arc::clone(&viewer.open);
@@ -690,6 +694,7 @@ pub fn launch_client_renderer(
     wows_data: Option<&SharedWoWsData>,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     window_settings: crate::tab_state::SharedWindowSettings,
+    save_notify: Arc<tokio::sync::Notify>,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (_command_tx, _command_rx) = mpsc::channel();
@@ -799,6 +804,7 @@ pub fn launch_client_renderer(
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
         window_settings,
+        save_notify,
     }
 }
 
@@ -859,6 +865,7 @@ impl ReplayRendererViewer {
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
         let window_settings = self.window_settings.clone();
+        let save_notify = self.save_notify.clone();
         let parent_ctx = ctx.clone();
         let viewport_id = egui::ViewportId::from_hash_of(&*self.title);
 
@@ -2792,6 +2799,15 @@ impl ReplayRendererViewer {
 
 
                 if ctx.input(|i| i.viewport().close_requested()) {
+                    // Capture window geometry before closing.
+                    {
+                        let info = ctx.input(|i| i.viewport().clone());
+                        window_settings.lock().settings.insert(
+                            crate::tab_state::WindowKind::ReplayRenderer,
+                            crate::tab_state::WindowSettings::from_viewport_info(&info),
+                        );
+                        save_notify.notify_one();
+                    }
                     window_open.store(false, Ordering::Relaxed);
                     let _ = command_tx.send(PlaybackCommand::Stop);
                     // Unregister viewport sink.

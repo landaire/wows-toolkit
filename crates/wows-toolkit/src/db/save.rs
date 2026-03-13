@@ -1,5 +1,5 @@
-//! Background save task — persists app state to SQLite on a timer,
-//! decoupled from UI painting.
+//! Background save task — persists app state to SQLite when notified
+//! and periodically for window geometry, decoupled from UI painting.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -27,12 +27,14 @@ pub struct SaveContext {
     pub replay_sort: Arc<Mutex<SortOrder>>,
     pub window_settings: SharedWindowSettings,
     pub active_viewports: Arc<Mutex<Vec<(WindowKind, egui::ViewportId)>>>,
+    pub save_notify: Arc<tokio::sync::Notify>,
 }
 
 /// Spawn the background save task on the tokio runtime.
 ///
-/// The task runs a 30-second interval timer. On each tick it captures window
-/// geometry from `egui::Context`, reads all shared state, and writes to SQLite.
+/// The task saves immediately when notified via `save_notify`, with a short
+/// debounce to coalesce rapid changes. It also runs a periodic timer for
+/// window geometry capture.
 ///
 /// Sends a final save on `shutdown_rx` before exiting.
 pub fn spawn_save_task(
@@ -43,13 +45,25 @@ pub fn spawn_save_task(
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     runtime.spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-        // The first tick fires immediately — skip it so we don't save right after load.
-        interval.tick().await;
+        // Periodic timer for capturing window geometry (which changes
+        // continuously during resize/move and has no discrete event).
+        let mut geometry_interval = tokio::time::interval(Duration::from_secs(30));
+        // Skip the first immediate tick.
+        geometry_interval.tick().await;
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
+                _ = ctx.save_notify.notified() => {
+                    // Debounce: wait a moment to coalesce rapid changes,
+                    // then drain any further notifications that arrived.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+
+                    capture_window_settings(&egui_ctx, &ctx);
+                    if let Err(e) = do_save(&pool, &ctx).await {
+                        error!("Save (notified) failed: {e}");
+                    }
+                }
+                _ = geometry_interval.tick() => {
                     capture_window_settings(&egui_ctx, &ctx);
                     if let Err(e) = do_save(&pool, &ctx).await {
                         error!("Background save failed: {e}");

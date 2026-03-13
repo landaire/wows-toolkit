@@ -3088,6 +3088,7 @@ impl ToolkitTabViewer<'_> {
                         &self.tab_state.persisted.read().settings.renderer,
                         Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
                         self.tab_state.window_settings.clone(),
+                        self.tab_state.save_notify.clone(),
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -3543,6 +3544,7 @@ impl ToolkitTabViewer<'_> {
                         self.tab_state.db_pool.clone(),
                         self.tab_state.tokio_runtime.clone(),
                         self.tab_state.window_settings.clone(),
+                        self.tab_state.save_notify.clone(),
                     );
                     if let Some(handle) = session_handle {
                         let is_authority = {
@@ -3987,6 +3989,7 @@ impl ToolkitTabViewer<'_> {
                                 self.tab_state.world_of_warships_data.as_ref(),
                                 &self.tab_state.renderer_asset_cache,
                                 self.tab_state.window_settings.clone(),
+                                self.tab_state.save_notify.clone(),
                             );
                             if let Some(ref client_handle) = self.tab_state.client_session {
                                 let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -4040,6 +4043,7 @@ impl ToolkitTabViewer<'_> {
                                 self.tab_state.db_pool.clone(),
                                 self.tab_state.tokio_runtime.clone(),
                                 self.tab_state.window_settings.clone(),
+                                self.tab_state.save_notify.clone(),
                             );
                             board.is_session_board = true;
                             if let Some(handle) = session_handle {
@@ -4310,6 +4314,7 @@ impl ToolkitTabViewer<'_> {
                 &self.tab_state.persisted.read().settings.renderer,
                 Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
                 self.tab_state.window_settings.clone(),
+                self.tab_state.save_notify.clone(),
             );
             self.tab_state.replay_renderers.lock().push(viewer);
         }

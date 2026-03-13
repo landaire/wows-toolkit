@@ -600,6 +600,8 @@ pub struct TacticsBoardViewer {
     db_pool: Option<sqlx::SqlitePool>,
     tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
     window_settings: crate::tab_state::SharedWindowSettings,
+    /// Notify handle to trigger an immediate settings save.
+    save_notify: Arc<tokio::sync::Notify>,
 
     // Collab
     /// Channel to send local UI events (cursors, annotations, pings) to the collab peer task.
@@ -622,6 +624,7 @@ impl TacticsBoardViewer {
         db_pool: Option<sqlx::SqlitePool>,
         tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
         window_settings: crate::tab_state::SharedWindowSettings,
+        save_notify: Arc<tokio::sync::Notify>,
     ) -> Self {
         Self {
             board_id,
@@ -637,6 +640,7 @@ impl TacticsBoardViewer {
             db_pool,
             tokio_runtime,
             window_settings,
+            save_notify,
             collab_local_tx: None,
             collab_session_state: None,
             collab_command_tx: None,
@@ -671,6 +675,7 @@ impl TacticsBoardViewer {
         let db_pool = self.db_pool.clone();
         let tokio_runtime = self.tokio_runtime.clone();
         let window_settings = self.window_settings.clone();
+        let save_notify = self.save_notify.clone();
         let collab_local_tx = self.collab_local_tx.clone();
         let collab_session_state = self.collab_session_state.clone();
         let collab_command_tx = self.collab_command_tx.clone();
@@ -892,6 +897,15 @@ impl TacticsBoardViewer {
             });
 
             if ctx.input(|i| i.viewport().close_requested()) {
+                // Capture window geometry before closing.
+                {
+                    let info = ctx.input(|i| i.viewport().clone());
+                    window_settings.lock().settings.insert(
+                        crate::tab_state::WindowKind::TacticsBoard,
+                        crate::tab_state::WindowSettings::from_viewport_info(&info),
+                    );
+                    save_notify.notify_one();
+                }
                 open.store(false, Ordering::Relaxed);
                 // Unregister viewport sink.
                 if let Some(ref session_state) = collab_session_state {

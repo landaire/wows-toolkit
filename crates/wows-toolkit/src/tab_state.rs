@@ -143,7 +143,47 @@ impl Default for PersistedState {
     }
 }
 
-pub type SharedPersistedState = Arc<parking_lot::RwLock<PersistedState>>;
+/// A wrapper around `RwLock<PersistedState>` that tracks a generation counter.
+/// Every call to `write()` increments the generation, allowing the save task
+/// to detect changes without touching individual mutation sites.
+pub struct TrackedPersistedState {
+    inner: parking_lot::RwLock<PersistedState>,
+    generation: std::sync::atomic::AtomicU64,
+}
+
+impl TrackedPersistedState {
+    pub fn new(state: PersistedState) -> Self {
+        Self {
+            inner: parking_lot::RwLock::new(state),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, PersistedState> {
+        self.inner.read()
+    }
+
+    /// Acquire a write guard. Automatically increments the generation counter,
+    /// so any write is treated as a potential change.
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, PersistedState> {
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.write()
+    }
+
+    /// Current generation counter. Compared by the app each frame to detect
+    /// whether a save is needed.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Default for TrackedPersistedState {
+    fn default() -> Self {
+        Self::new(PersistedState::default())
+    }
+}
+
+pub type SharedPersistedState = Arc<TrackedPersistedState>;
 
 /// Sub-tab selection for the Stats tab
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -449,6 +489,9 @@ pub struct TabState {
     /// Active viewport IDs for secondary windows, updated each frame.
     /// The background save task reads this to capture window geometry.
     pub active_viewports: Arc<parking_lot::Mutex<Vec<(WindowKind, egui::ViewportId)>>>,
+
+    /// Notify handle to wake the background save task when settings change.
+    pub save_notify: Arc<tokio::sync::Notify>,
 }
 
 impl Default for TabState {
@@ -458,7 +501,7 @@ impl Default for TabState {
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
-            persisted: Arc::new(parking_lot::RwLock::new(PersistedState::default())),
+            persisted: Arc::new(TrackedPersistedState::default()),
             player_tracker: Default::default(),
             sent_replays: Default::default(),
             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
@@ -526,11 +569,18 @@ impl Default for TabState {
             db_pool: None,
             window_settings: Default::default(),
             active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            save_notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
 }
 
 impl TabState {
+    /// Notify the background save task that state has changed and should be
+    /// persisted. The save task debounces rapid calls (1 second).
+    pub fn request_save(&self) {
+        self.save_notify.notify_one();
+    }
+
     /// Returns the replay shown in the currently focused (or first) replay dock tab, if any.
     pub fn focused_replay(&self) -> Option<Arc<RwLock<Replay>>> {
         // Try focused leaf first

@@ -201,6 +201,11 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     db_pool: Option<sqlx::SqlitePool>,
 
+    /// Last observed `PersistedState::generation`, used to detect changes
+    /// and notify the background save task.
+    #[serde(skip)]
+    last_persisted_generation: u64,
+
     /// Shutdown signal for the background save task. Dropping or sending
     /// triggers a final save before the task exits.
     #[serde(skip)]
@@ -233,6 +238,7 @@ impl Default for WowsToolkitApp {
             #[cfg(feature = "logging")]
             _log_guard: None,
             realtime_armor_viewers: Vec::new(),
+            last_persisted_generation: 0,
             db_pool: None,
             shutdown_tx: None,
         }
@@ -532,6 +538,7 @@ impl WowsToolkitApp {
                 replay_sort: state.tab_state.replay_sort.clone(),
                 window_settings: state.tab_state.window_settings.clone(),
                 active_viewports: state.tab_state.active_viewports.clone(),
+                save_notify: state.tab_state.save_notify.clone(),
             };
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
             crate::db::save::spawn_save_task(&state.runtime, pool.clone(), save_ctx, cc.egui_ctx.clone(), shutdown_rx);
@@ -1358,6 +1365,7 @@ impl WowsToolkitApp {
                     self.tab_state.db_pool.clone(),
                     self.tab_state.tokio_runtime.clone(),
                     self.tab_state.window_settings.clone(),
+                    self.tab_state.save_notify.clone(),
                 );
                 board.is_session_board = true;
                 board.collab_local_tx = Some(handle.local_tx.clone());
@@ -1395,6 +1403,7 @@ impl WowsToolkitApp {
                     self.tab_state.db_pool.clone(),
                     self.tab_state.tokio_runtime.clone(),
                     self.tab_state.window_settings.clone(),
+                    self.tab_state.save_notify.clone(),
                 );
                 board.is_session_board = true;
                 board.collab_local_tx = Some(handle.local_tx.clone());
@@ -1514,6 +1523,7 @@ impl WowsToolkitApp {
                             render_state,
                             Some(request.command_tx.clone()),
                             self.tab_state.window_settings.clone(),
+                            self.tab_state.save_notify.clone(),
                         );
                         drop(bridge);
                         self.realtime_armor_viewers.push(Arc::new(parking_lot::Mutex::new(viewer)));
@@ -1837,6 +1847,15 @@ impl WowsToolkitApp {
         self.ui_file_drag_and_drop(ctx);
 
         self.tab_state.toasts.lock().show(ctx);
+
+        // If persisted state was written to this frame, wake the background save task.
+        {
+            let current_gen = self.tab_state.persisted.generation();
+            if current_gen != self.last_persisted_generation {
+                self.last_persisted_generation = current_gen;
+                self.tab_state.request_save();
+            }
+        }
 
         // When any replay renderer is playing locally, repaint continuously so
         // deferred viewports stay in sync. Client sessions are event-driven:
@@ -2388,6 +2407,7 @@ impl WowsToolkitApp {
                             self.tab_state.world_of_warships_data.as_ref(),
                             &self.tab_state.renderer_asset_cache,
                             self.tab_state.window_settings.clone(),
+                            self.tab_state.save_notify.clone(),
                         );
                         if let Some(ref client_handle) = self.tab_state.client_session {
                             let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -2460,6 +2480,7 @@ impl WowsToolkitApp {
                         self.tab_state.world_of_warships_data.as_ref(),
                         &self.tab_state.renderer_asset_cache,
                         self.tab_state.window_settings.clone(),
+                        self.tab_state.save_notify.clone(),
                     );
                     // Wire the client viewer to the session.
                     if let Some(ref client_handle) = self.tab_state.client_session {

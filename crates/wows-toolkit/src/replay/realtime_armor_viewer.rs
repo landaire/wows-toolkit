@@ -133,6 +133,8 @@ pub struct RealtimeArmorViewer {
 
     /// Shared window settings tracker for persisting viewport geometry.
     window_settings: crate::tab_state::SharedWindowSettings,
+    /// Notify handle to trigger an immediate settings save.
+    save_notify: Arc<tokio::sync::Notify>,
 }
 
 /// Identifies a salvo firing event. Shells with `salvo: None` get unique unmatched keys.
@@ -220,6 +222,7 @@ impl RealtimeArmorViewer {
         render_state: eframe::egui_wgpu::RenderState,
         command_tx: Option<std::sync::mpsc::Sender<crate::replay::renderer::PlaybackCommand>>,
         window_settings: crate::tab_state::SharedWindowSettings,
+        save_notify: Arc<tokio::sync::Notify>,
     ) -> Self {
         let title =
             Arc::new(format!("Armor Viewer — {} ({})", target_player.username, target_player.ship_display_name));
@@ -274,6 +277,7 @@ impl RealtimeArmorViewer {
             auto_scroll: true,
             last_auto_scroll_clock: GameClock(0.0),
             window_settings,
+            save_notify,
         }
     }
 
@@ -1169,12 +1173,12 @@ impl RealtimeArmorViewer {
 /// Draw a realtime armor viewer as a deferred secondary viewport.
 /// Takes `Arc<Mutex<RealtimeArmorViewer>>` so the closure can be `'static`.
 pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx: &egui::Context) {
-    let (title, open, window_settings) = {
+    let (title, open, window_settings, save_notify) = {
         let v = viewer.lock();
         if !v.open.load(Ordering::Relaxed) {
             return;
         }
-        (v.title.clone(), v.open.clone(), v.window_settings.clone())
+        (v.title.clone(), v.open.clone(), v.window_settings.clone(), v.save_notify.clone())
     };
 
     let viewport_id = egui::ViewportId::from_hash_of(&*title);
@@ -1199,6 +1203,15 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
 
         // Handle window close
         if ctx.input(|i| i.viewport().close_requested()) {
+            // Capture window geometry before closing.
+            {
+                let info = ctx.input(|i| i.viewport().clone());
+                window_settings.lock().settings.insert(
+                    crate::tab_state::WindowKind::ArmorViewer,
+                    crate::tab_state::WindowSettings::from_viewport_info(&info),
+                );
+                save_notify.notify_one();
+            }
             window_open.store(false, Ordering::Relaxed);
             return;
         }
