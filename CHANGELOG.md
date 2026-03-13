@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.60] - 2026-03-13
+
+### 🐛 Bug Fixes
+
+- Settings were not properly persisted on change
+
+### App
+
+- Update to main egui branch to fix crash plaguing people
+
+### Replays
+
+- Fix incorrect consumable packet decoding, showing wrong consumable icon
+
 ## [0.1.59] - 2026-03-12
 
 ### ⚙️ Miscellaneous Tasks
