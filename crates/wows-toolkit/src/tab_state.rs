@@ -153,10 +153,7 @@ pub struct TrackedPersistedState {
 
 impl TrackedPersistedState {
     pub fn new(state: PersistedState) -> Self {
-        Self {
-            inner: parking_lot::RwLock::new(state),
-            generation: std::sync::atomic::AtomicU64::new(0),
-        }
+        Self { inner: parking_lot::RwLock::new(state), generation: std::sync::atomic::AtomicU64::new(0) }
     }
 
     pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, PersistedState> {

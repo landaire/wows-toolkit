@@ -214,6 +214,7 @@ impl RealtimeArmorViewer {
     ///
     /// `target_player` must be the player info for the ship being viewed.
     /// `ship_assets` and `gpu_pipeline` are shared from the armor viewer state.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         target_player: &ReplayPlayerInfo,
         bridge: Arc<Mutex<RealtimeArmorBridge>>,
