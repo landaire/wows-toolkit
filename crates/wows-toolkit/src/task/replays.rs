@@ -18,7 +18,6 @@ use rootcause::Report;
 use rootcause::prelude::ResultExt;
 use serde::Deserialize;
 use serde::Serialize;
-use std::borrow::Cow;
 use tracing::debug;
 use tracing::error;
 use tracing::instrument;
@@ -156,24 +155,7 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
 #[instrument(skip(vfs, replay_constants))]
 pub fn build_game_constants(vfs: &VfsPath, replay_constants: &serde_json::Value, build: u32) -> GameConstants {
     let mut game_constants = GameConstants::from_vfs(vfs);
-    if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
-        let types = game_constants.common_mut().consumable_types_mut();
-        for (key, value) in consumable_ids {
-            let id = value.as_i64().expect("CONSUMABLE_IDS value is not a number") as i32;
-            types.insert(id, Cow::Owned(key.clone()));
-        }
-    }
-    if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
-        let stages = game_constants.common_mut().battle_stages_mut();
-        let version = Version { major: 0, minor: 0, patch: 0, build };
-        for (key, value) in battle_stages {
-            if let Some(id) = value.as_i64()
-                && let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known()
-            {
-                stages.insert(id as i32, stage);
-            }
-        }
-    }
+    game_constants.merge_replay_constants(replay_constants, build);
     game_constants
 }
 

@@ -19,6 +19,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter::FromIterator;
+use tracing::error;
 use winnow::Parser;
 use winnow::binary::le_f32;
 use winnow::binary::le_u8;
@@ -41,22 +42,35 @@ pub struct DecoderBuilder {
     silent: bool,
     no_meta: bool,
     path: Option<String>,
+    game_constants: Option<&'static crate::game_constants::GameConstants>,
 }
 
 impl DecoderBuilder {
     pub fn new(silent: bool, no_meta: bool, output: Option<&str>) -> Self {
-        Self { silent, no_meta, path: output.map(|s| s.to_string()) }
+        Self { silent, no_meta, path: output.map(|s| s.to_string()), game_constants: None }
+    }
+
+    /// Override the game constants used for decoding (consumable IDs, battle stages, etc.).
+    pub fn game_constants(mut self, gc: &'static crate::game_constants::GameConstants) -> Self {
+        self.game_constants = Some(gc);
+        self
     }
 
     pub fn build(self, meta: &crate::ReplayMeta) -> Box<dyn Analyzer> {
         let version = Version::from_client_exe(&meta.clientVersionFromExe);
+        let gc = self.game_constants.unwrap_or(&*crate::game_constants::DEFAULT_GAME_CONSTANTS);
         let mut decoder = Decoder {
             silent: self.silent,
             output: self
                 .path
                 .as_ref()
                 .map(|path| Box::new(std::fs::File::create(path).unwrap()) as Box<dyn std::io::Write>),
-            packet_decoder: PacketDecoder::builder().version(version).build(),
+            packet_decoder: PacketDecoder::builder()
+                .version(version)
+                .battle_constants(gc.battle())
+                .common_constants(gc.common())
+                .ships_constants(gc.ships())
+                .build(),
         };
         if !self.no_meta {
             decoder.write(&serde_json::to_string(&meta).unwrap());
@@ -69,6 +83,7 @@ impl DecoderBuilder {
 use wowsunpack::game_types::CameraMode;
 use wowsunpack::game_types::CollisionType;
 use wowsunpack::game_types::Consumable;
+use wowsunpack::game_types::ConsumableUsageParams;
 use wowsunpack::game_types::DeathCause;
 use wowsunpack::game_types::FinishType;
 use wowsunpack::game_types::Ribbon;
@@ -1021,6 +1036,9 @@ pub enum DecodedPacketPayload<'replay, 'argtype, 'rawpacket> {
         consumable: Recognized<Consumable>,
         /// How long the consumable will be active for
         duration: f32,
+        /// Usage parameters (15.2+): how the consumable was targeted.
+        /// `None` for pre-15.2 replays.
+        usage_params: Option<ConsumableUsageParams>,
     },
     /// Indicates a change to the "cruise state," which is the fixed settings for various controls
     /// such as steering (using the Q & E keys), throttle, and dive planes.
@@ -1891,24 +1909,73 @@ where
             };
             DecodedPacketPayload::BattleEnd { winning_team, finish_type }
         } else if *method == "consumableUsed" || *method == "onConsumableUsed" {
-            // onConsumableUsed may use different integer width than consumableUsed
-            let consumable: i8 = match &args[0] {
-                ArgValue::Int8(v) => *v,
-                ArgValue::Uint8(v) => *v as i8,
-                ArgValue::Int16(v) => *v as i8,
-                ArgValue::Uint16(v) => *v as i8,
-                ArgValue::Int32(v) => *v as i8,
-                ArgValue::Blob(b) if !b.is_empty() => b[0] as i8,
-                other => panic!("onConsumableUsed: unexpected consumable arg type: {:?}", other),
+            // In 15.2+ the first arg changed from CONSUMABLE_ID (a plain integer) to
+            // CONSUMABLE_USAGE_PARAMS (a packed struct serialized as a Blob).
+            // b[0] = ConsumableUsageType: 0=None, 1=Default (<BB>), 2=Position (<BBff>), 3=Entity (<BBbQ>).
+            // b[1] = consumable type ID in all variants (except None).
+            let is_new_format = version.is_at_least(&Version { major: 15, minor: 2, patch: 0, build: 0 });
+            let (raw_consumable, usage_params): (i32, Option<ConsumableUsageParams>) = if is_new_format {
+                match &args[0] {
+                    ArgValue::Blob(b) => {
+                        // The blob is serialized by UsageConverter via struct.pack with the
+                        // format determined by ConsumableUsageType. Length checks guard against
+                        // truncated replay data (the game always writes the full struct).
+                        match b.first().copied() {
+                            Some(0) => {
+                                // NONE — no consumable ID or extra data
+                                (0, Some(ConsumableUsageParams::None))
+                            }
+                            Some(1) if b.len() >= 2 => {
+                                // DEFAULT: struct.pack('<BB', usage_type, consumable_id) = 2 bytes
+                                (b[1] as i32, Some(ConsumableUsageParams::Default))
+                            }
+                            Some(2) if b.len() >= 10 => {
+                                // POSITION: struct.pack('<BBff', usage_type, consumable_id, x, z) = 10 bytes
+                                let x = f32::from_le_bytes([b[2], b[3], b[4], b[5]]);
+                                let z = f32::from_le_bytes([b[6], b[7], b[8], b[9]]);
+                                (b[1] as i32, Some(ConsumableUsageParams::Position(WorldPos2D { x, z })))
+                            }
+                            Some(3) if b.len() >= 11 => {
+                                // ENTITY: struct.pack('<BBbQ', usage_type, consumable_id, target_type, target_id) = 11 bytes
+                                let target_type = b[2] as i8;
+                                let target_id = u64::from_le_bytes([b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10]]);
+                                (b[1] as i32, Some(ConsumableUsageParams::Entity { target_type, target_id }))
+                            }
+                            other => {
+                                error!("onConsumableUsed (15.2+): unexpected blob: {:?}", other);
+                                return DecodedPacketPayload::EntityMethod(packet);
+                            }
+                        }
+                    }
+                    other => {
+                        error!("onConsumableUsed (15.2+): expected Blob arg, got: {:?}", other);
+                        return DecodedPacketPayload::EntityMethod(packet);
+                    }
+                }
+            } else {
+                let id = match &args[0] {
+                    ArgValue::Int8(v) => *v as i32,
+                    ArgValue::Uint8(v) => *v as i32,
+                    ArgValue::Int16(v) => *v as i32,
+                    ArgValue::Uint16(v) => *v as i32,
+                    ArgValue::Int32(v) => *v,
+                    other => {
+                        error!("onConsumableUsed (pre-15.2): unexpected arg type: {:?}", other);
+                        return DecodedPacketPayload::EntityMethod(packet);
+                    }
+                };
+                (id, None)
             };
             let duration: f32 = match &args[1] {
                 ArgValue::Float32(v) => *v,
                 ArgValue::Float64(v) => *v as f32,
-                other => panic!("onConsumableUsed: unexpected duration arg type: {:?}", other),
+                other => {
+                    error!("onConsumableUsed: unexpected duration arg type: {:?}", other);
+                    return DecodedPacketPayload::EntityMethod(packet);
+                }
             };
-            let raw_consumable = consumable;
             // Try runtime-loaded consumable types from game data first
-            let consumable = if let Some(c) = Consumable::from_id(raw_consumable as i32, common_constants, *version) {
+            let consumable = if let Some(c) = Consumable::from_id(raw_consumable, common_constants, *version) {
                 c
             } else if audit {
                 return DecodedPacketPayload::Audit(format!(
@@ -1919,7 +1986,7 @@ where
                 Recognized::Unknown(format!("{}", raw_consumable))
             };
 
-            DecodedPacketPayload::Consumable { entity: *entity_id, consumable, duration }
+            DecodedPacketPayload::Consumable { entity: *entity_id, consumable, duration, usage_params }
         } else if *method == "receiveArtilleryShots" {
             let salvos_array = match &args[0] {
                 ArgValue::Array(a) => a,

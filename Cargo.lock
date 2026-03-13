@@ -10940,6 +10940,7 @@ dependencies = [
  "rootcause",
  "roxmltree 0.21.1",
  "serde",
+ "serde_json",
  "tiny-skia 0.12.0",
  "toml 1.0.6+spec-1.1.0",
  "tracing",

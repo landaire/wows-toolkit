@@ -6,6 +6,7 @@ pub use wowsunpack::game_types::BuoyancyState;
 pub use wowsunpack::game_types::CameraMode;
 pub use wowsunpack::game_types::CollisionType;
 pub use wowsunpack::game_types::Consumable;
+pub use wowsunpack::game_types::ConsumableUsageParams;
 pub use wowsunpack::game_types::DamageStatCategory;
 pub use wowsunpack::game_types::DamageStatWeapon;
 pub use wowsunpack::game_types::DeathCause;

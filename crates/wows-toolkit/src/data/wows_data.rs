@@ -326,7 +326,15 @@ impl ReplayDependencies {
     ) -> Option<BackgroundTask> {
         let path = replay_path.as_ref();
 
-        let replay_file: ReplayFile = ReplayFile::from_file(path).unwrap();
+        let replay_file: ReplayFile = match ReplayFile::from_file(path) {
+            Ok(f) => f,
+            Err(e) => {
+                error!("Failed to parse replay file: {e}");
+                let (tx, rx) = mpsc::channel();
+                let _ = tx.send(Err(e.into_dynamic()));
+                return Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay });
+            }
+        };
         let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
         let Some(wows_data_for_build) = self.wows_data_map.resolve(&replay_version) else {

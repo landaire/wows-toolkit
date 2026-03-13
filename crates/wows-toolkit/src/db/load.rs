@@ -42,7 +42,7 @@ pub async fn load_tab_state_from_db(pool: &SqlitePool, tab_state: &mut TabState)
 }
 
 /// Load scalar settings from the k/v table.
-    #[allow(clippy::await_holding_lock)]
+#[allow(clippy::await_holding_lock)]
 async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx::Error> {
     let mut p = ts.persisted.write();
     let s = &mut p.settings;

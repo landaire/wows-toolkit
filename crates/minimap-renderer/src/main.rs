@@ -117,6 +117,11 @@ struct Args {
     #[arg(long)]
     no_progress: bool,
 
+    /// Path to a constants JSON file (from wows-constants repo) to override
+    /// consumable IDs, battle stages, etc.
+    #[arg(short = 'c', long = "constants")]
+    constants: Option<PathBuf>,
+
     /// The replay file to process
     #[arg(required_unless_present_any = ["generate_config", "check_encoder"])]
     replay: Option<PathBuf>,
@@ -175,7 +180,15 @@ fn main() -> Result<(), Report> {
     let flag_icons = load_flag_icons(vfs);
 
     // Load game constants from game data (falls back to hardcoded defaults per-field)
-    let game_constants = GameConstants::from_vfs(vfs);
+    let mut game_constants = GameConstants::from_vfs(vfs);
+    if let Some(ref constants_path) = args.constants {
+        let data = std::fs::read_to_string(constants_path)
+            .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
+        let json: serde_json::Value =
+            serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
+        game_constants.merge_replay_constants(&json, replay_version.build);
+        info!("Merged replay constants from {}", constants_path.display());
+    }
 
     if let Some(mode_name) = game_constants.game_mode_name(replay_file.meta.gameMode as i32) {
         info!(mode = %mode_name, id = replay_file.meta.gameMode, "Game mode");

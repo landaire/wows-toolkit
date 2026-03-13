@@ -1,5 +1,7 @@
 use std::sync::LazyLock;
 
+#[cfg(feature = "parsing")]
+use std::borrow::Cow;
 pub use wowsunpack::game_constants::BattleConstants;
 pub use wowsunpack::game_constants::ChannelConstants;
 pub use wowsunpack::game_constants::CommonConstants;
@@ -92,5 +94,32 @@ impl GameConstants {
 
     pub fn channel_mut(&mut self) -> &mut ChannelConstants {
         &mut self.channel
+    }
+
+    /// Merge replay constants JSON (from wows-constants repo) into this instance.
+    ///
+    /// Overrides `CONSUMABLE_IDS` and `BATTLE_STAGES` mappings from the JSON data.
+    /// The `build` number is used for version-aware battle stage parsing.
+    #[cfg(feature = "parsing")]
+    pub fn merge_replay_constants(&mut self, replay_constants: &serde_json::Value, build: u32) {
+        if let Some(consumable_ids) = replay_constants.pointer("/CONSUMABLE_IDS").and_then(|ids| ids.as_object()) {
+            let types = self.common.consumable_types_mut();
+            for (key, value) in consumable_ids {
+                if let Some(id) = value.as_i64() {
+                    types.insert(id as i32, Cow::Owned(key.clone()));
+                }
+            }
+        }
+        if let Some(battle_stages) = replay_constants.pointer("/BATTLE_STAGES").and_then(|s| s.as_object()) {
+            let stages = self.common.battle_stages_mut();
+            let version = wowsunpack::data::Version { major: 0, minor: 0, patch: 0, build };
+            for (key, value) in battle_stages {
+                if let Some(id) = value.as_i64()
+                    && let Some(stage) = wowsunpack::game_types::BattleStage::from_name(key, version).into_known()
+                {
+                    stages.insert(id as i32, stage);
+                }
+            }
+        }
     }
 }

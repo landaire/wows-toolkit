@@ -368,8 +368,8 @@ impl WorldPos {
 
 /// 2D world-space position (X/Z plane) for entities that lack altitude data,
 /// such as minimap plane squadron positions.
-#[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct WorldPos2D {
     pub x: f32,
@@ -836,6 +836,23 @@ impl DeathCause {
             _ => Option::None,
         }
     }
+}
+
+/// How a consumable was activated (`ConsumableUsageType` from the game scripts).
+///
+/// Determines the shape of the `CONSUMABLE_USAGE_PARAMS` blob in 15.2+ replays.
+/// Serialized by `UsageConverter` in `CommonConsumables/UsageConverter.pyc`.
+#[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ConsumableUsageParams {
+    /// `NONE` (type 0) — no parameters.
+    None,
+    /// `DEFAULT` (type 1) — standard activation, no extra data. Format: `<BB>`.
+    Default,
+    /// `POSITION` (type 2) — activated at a map position (e.g. tactical consumables). Format: `<BBff>`.
+    Position(WorldPos2D),
+    /// `ENTITY` (type 3) — targeted at a specific entity. Format: `<BBbQ>`.
+    Entity { target_type: i8, target_id: u64 },
 }
 
 /// Consumable ability type, mapped from `consumableType` in GameParams.

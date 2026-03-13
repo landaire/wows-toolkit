@@ -39,7 +39,7 @@ rendering = [
     "wowsunpack/vfs",
     "wowsunpack/parsing",
 ]
-bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "rendering", "rkyv"]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wowsunpack/rkyv"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
 vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
@@ -60,6 +60,7 @@ bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
 convert_case = { workspace = true, optional = true }
 gettext = { workspace = true, optional = true }
 roxmltree = { workspace = true, optional = true }

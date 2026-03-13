@@ -16,6 +16,7 @@ use wowsunpack::rpc::entitydefs::parse_scripts;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 
 /// Parses & processes World of Warships replay files
@@ -29,6 +30,11 @@ struct Args {
     /// Path to extracted game files
     #[arg(short = 'e', long = "extracted")]
     extracted_dir: Option<PathBuf>,
+
+    /// Path to a constants JSON file (from wows-constants repo) to override
+    /// consumable IDs, battle stages, etc.
+    #[arg(short = 'c', long = "constants")]
+    constants: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -217,10 +223,17 @@ fn build_investigative_printer(
     filter_method: Option<&str>,
     timestamp: Option<&str>,
     entity_id: Option<&str>,
+    game_constants: &'static GameConstants,
 ) -> Box<dyn Analyzer> {
     let version = Version::from_client_exe(&meta.clientVersionFromExe);
     let decoder = InvestigativePrinter {
-        packet_decoder: wows_replays::analyzer::decoder::PacketDecoder::builder().version(version).audit(true).build(),
+        packet_decoder: wows_replays::analyzer::decoder::PacketDecoder::builder()
+            .version(version)
+            .audit(true)
+            .battle_constants(game_constants.battle())
+            .common_constants(game_constants.common())
+            .ships_constants(game_constants.ships())
+            .build(),
         filter_packet: filter_packet.map(|s| parse_int::parse::<u32>(s).unwrap()),
         filter_method: filter_method.map(|s| s.to_string()),
         timestamp: timestamp.map(|s| {
@@ -452,6 +465,7 @@ fn survey_file(
     skip_decode: bool,
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
+    game_constants: &'static GameConstants,
     replay: std::path::PathBuf,
 ) -> SurveyResult {
     let filename = replay.file_name().unwrap().to_str().unwrap();
@@ -463,7 +477,9 @@ fn survey_file(
     let survey_stats = std::rc::Rc::new(std::cell::RefCell::new(wows_replays::analyzer::survey::SurveyStats::new()));
     let stats_clone = survey_stats.clone();
     match parse_replay(&replay, game_dir, extracted_dir, |meta| {
-        wows_replays::analyzer::survey::SurveyBuilder::new(stats_clone, skip_decode).build(meta)
+        wows_replays::analyzer::survey::SurveyBuilder::new(stats_clone, skip_decode)
+            .game_constants(game_constants)
+            .build(meta)
     }) {
         Ok(_) => {
             let stats = survey_stats.borrow();
@@ -495,20 +511,43 @@ fn survey_file(
     }
 }
 
+/// Load a constants JSON file and merge it into a `GameConstants`, returning a
+/// `&'static` reference (leaked, since the CLI is short-lived).
+fn load_game_constants(constants_path: Option<&Path>, build: u32) -> &'static GameConstants {
+    let mut gc = GameConstants::defaults();
+    if let Some(path) = constants_path {
+        let data = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
+        let json: serde_json::Value =
+            serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
+        gc.merge_replay_constants(&json, build);
+    }
+    Box::leak(Box::new(gc))
+}
+
 fn main() {
     let args = Args::parse();
 
     let game_dir = args.game_dir.as_deref().and_then(|p| p.to_str());
     let extracted = args.extracted_dir.as_deref().and_then(|p| p.to_str());
+    let constants_path = args.constants.as_deref();
 
     match args.command {
         Commands::Dump { output, no_meta, replay } => {
+            let replay_file = ReplayFile::from_file(&replay).unwrap();
+            let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+            let gc = load_game_constants(constants_path, version.build);
             parse_replay(&replay, game_dir, extracted, |meta| {
-                wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref()).build(meta)
+                wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
+                    .game_constants(gc)
+                    .build(meta)
             })
             .unwrap();
         }
         Commands::Investigate { meta, timestamp, filter_packet, filter_method, entity_id, replay } => {
+            let replay_file = ReplayFile::from_file(&replay).unwrap();
+            let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+            let gc = load_game_constants(constants_path, version.build);
             let no_meta = !meta;
             parse_replay(&replay, game_dir, extracted, |meta| {
                 build_investigative_printer(
@@ -518,6 +557,7 @@ fn main() {
                     filter_method.as_deref(),
                     timestamp.as_deref(),
                     entity_id.as_deref(),
+                    gc,
                 )
             })
             .unwrap();
@@ -548,6 +588,9 @@ fn main() {
             .unwrap();
         }
         Commands::Survey { skip_decode, replays } => {
+            // For survey, we use build 0 since we don't know the build ahead of time.
+            // The constants override is still useful for consumable ID mapping.
+            let gc = load_game_constants(constants_path, 0);
             let mut survey_result = SurveyResults::empty();
             for replay_path in &replays {
                 for entry in walkdir::WalkDir::new(replay_path) {
@@ -556,7 +599,7 @@ fn main() {
                         continue;
                     }
                     let replay = entry.path().to_path_buf();
-                    let result = survey_file(skip_decode, game_dir, extracted, replay);
+                    let result = survey_file(skip_decode, game_dir, extracted, gc, replay);
                     survey_result.add(result);
                 }
             }

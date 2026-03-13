@@ -17,6 +17,7 @@ use crate::types::NormalizedPos;
 use crate::types::PlaneId;
 use crate::types::WorldPos;
 use crate::types::WorldPos2D;
+use wowsunpack::game_types::ConsumableUsageParams;
 
 /// Last known world-space position of a ship entity.
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +125,8 @@ pub struct ActiveConsumable {
     pub consumable: Recognized<Consumable>,
     pub activated_at: GameClock,
     pub duration: f32,
+    /// How the consumable was activated (15.2+). `None` for pre-15.2 replays.
+    pub usage_params: Option<ConsumableUsageParams>,
 }
 
 /// A building/structure entity in the game.

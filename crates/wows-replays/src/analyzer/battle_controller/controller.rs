@@ -2981,11 +2981,17 @@ where
                     self.finish_type = finish_type;
                 }
             }
-            crate::analyzer::decoder::DecodedPacketPayload::Consumable { entity, consumable, duration } => {
+            crate::analyzer::decoder::DecodedPacketPayload::Consumable {
+                entity,
+                consumable,
+                duration,
+                usage_params,
+            } => {
                 self.active_consumables.entry(entity).or_default().push(ActiveConsumable {
                     consumable,
                     activated_at: packet.clock,
                     duration,
+                    usage_params,
                 });
             }
             crate::analyzer::decoder::DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
