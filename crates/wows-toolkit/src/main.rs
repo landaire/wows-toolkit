@@ -74,15 +74,21 @@ fn main() -> eframe::Result<()> {
 
     let icon_data: &[u8] = &include_bytes!("../../../assets/wows_toolkit.png")[..];
 
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 400.0])
-            .with_min_inner_size([400.0, 300.0])
-            .with_icon(eframe::icon_data::from_png_bytes(icon_data).expect("failed to load application icon"))
-            .with_title(format!("{} v{}", wows_toolkit::APP_NAME, env!("CARGO_PKG_VERSION")))
-            .with_drag_and_drop(true),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_min_inner_size([400.0, 300.0])
+        .with_icon(eframe::icon_data::from_png_bytes(icon_data).expect("failed to load application icon"))
+        .with_title(format!("{} v{}", wows_toolkit::APP_NAME, env!("CARGO_PKG_VERSION")))
+        .with_drag_and_drop(true);
+
+    // Restore window position/size from the database before creating the window.
+    // Position can only be set on the ViewportBuilder, not via viewport commands.
+    if let Some(settings) = wows_toolkit::load_main_window_settings() {
+        viewport = settings.apply_to_builder(viewport, [600.0, 400.0]);
+    } else {
+        viewport = viewport.with_inner_size([600.0, 400.0]);
+    }
+
+    let native_options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,

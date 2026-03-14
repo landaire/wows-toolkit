@@ -89,7 +89,10 @@ impl WindowSettings {
     /// `default_size` when no stored size is available.
     pub fn apply_to_builder(&self, builder: egui::ViewportBuilder, default_size: [f32; 2]) -> egui::ViewportBuilder {
         let size = self.inner_size_points.unwrap_or(default_size);
-        let builder = builder.with_inner_size(size);
+        let mut builder = builder.with_inner_size(size);
+        if let Some([x, y]) = self.outer_position_pixels {
+            builder = builder.with_position(egui::pos2(x, y));
+        }
         if self.fullscreen {
             builder.with_fullscreen(true)
         } else if self.maximized {

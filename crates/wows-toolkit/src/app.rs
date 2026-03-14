@@ -476,19 +476,9 @@ impl WowsToolkitApp {
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
         state.tab_state.db_pool = state.db_pool.clone();
 
-        // Restore main window geometry from persisted settings.
-        if let Some(settings) =
-            state.tab_state.window_settings.lock().settings.get(&crate::tab_state::WindowKind::Main).copied()
-        {
-            if let Some([w, h]) = settings.inner_size_points {
-                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
-            }
-            if settings.fullscreen {
-                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-            } else if settings.maximized {
-                cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-            }
-        }
+        // Main window geometry is now restored via the ViewportBuilder in main.rs,
+        // which is the only way to set window position. Size, fullscreen, and
+        // maximized state are also applied there.
 
         // Load persisted cap layout cache.
         {
