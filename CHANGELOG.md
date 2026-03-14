@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.61] - 2026-03-14
+
+### 🐛 Bug Fixes
+
+- Main app window position was not being restored on startup
+- Completely remove logic involving bundled constants data, except for using it as a fallback
+
 ## [0.1.60] - 2026-03-14
 
 ### 🐛 Bug Fixes
