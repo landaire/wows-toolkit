@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.60] - 2026-03-13
+## [0.1.60] - 2026-03-14
 
 ### 🐛 Bug Fixes
 
 - Settings were not properly persisted on change
+- Constants fallback sometimes was unreliable, which might break constants data updates
 
 ### App
 
