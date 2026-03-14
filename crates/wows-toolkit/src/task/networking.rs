@@ -276,15 +276,16 @@ impl NetworkingThread {
             return;
         }
 
-        // Walk down to the nearest previous build
+        // Walk down to the nearest previous build.
+        // Only cache under the actual source build — never under the target build,
+        // so that future startups re-attempt the fetch when the real data appears.
         for &available_build in available_builds.iter().rev() {
             if available_build >= target_build {
                 continue;
             }
             // Check disk for this fallback
-            if let Some(data) = load_versioned_constants_from_disk(available_build) {
+            if load_versioned_constants_from_disk(available_build).is_some() {
                 debug!(available_build, "using cached fallback from disk");
-                save_versioned_constants(target_build, &data);
                 let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
                 return;
             }
@@ -292,7 +293,6 @@ impl NetworkingThread {
             if let Some(data) = self.fetch_constants_for_build(available_build) {
                 debug!(available_build, "fetched fallback from GitHub");
                 save_versioned_constants(available_build, &data);
-                save_versioned_constants(target_build, &data);
                 let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
                 return;
             }

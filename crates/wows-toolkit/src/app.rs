@@ -210,6 +210,11 @@ pub struct WowsToolkitApp {
     /// triggers a final save before the task exits.
     #[serde(skip)]
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+
+    /// Constants data fetched from the network before game data was loaded.
+    /// Flushed to disk once we know the build number (in `DataLoaded`).
+    #[serde(skip)]
+    pending_constants_data: Option<Vec<u8>>,
 }
 
 impl Default for WowsToolkitApp {
@@ -241,6 +246,7 @@ impl Default for WowsToolkitApp {
             last_persisted_generation: 0,
             db_pool: None,
             shutdown_tx: None,
+            pending_constants_data: None,
         }
     }
 }
@@ -554,7 +560,6 @@ impl WowsToolkitApp {
 
     #[tracing::instrument(skip_all)]
     fn begin_startup_tasks(&mut self, token_rx: tokio::sync::mpsc::Receiver<crate::twitch::TwitchUpdate>) {
-        use std::path::PathBuf;
         use std::sync::Arc;
 
         // Start the networking thread
@@ -576,19 +581,6 @@ impl WowsToolkitApp {
 
         #[cfg(feature = "mod_manager")]
         update_background_task!(self.tab_state.background_tasks, Some(crate::mod_manager::load_mods_db()));
-
-        let mut constants_path = PathBuf::from("constants.json");
-        if let Some(storage_dir) = crate::storage_dir() {
-            constants_path = storage_dir.join(constants_path)
-        }
-
-        if constants_path.exists() {
-            if let Ok(constants_data) = std::fs::read(&constants_path) {
-                update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(constants_data)));
-            } else {
-                tracing::error!("failed to read constants file");
-            }
-        }
 
         // Load PR expected values from disk if available
         let pr_path = crate::util::personal_rating::get_expected_values_path();
@@ -811,15 +803,19 @@ impl WowsToolkitApp {
                     self.tab_state.toasts.lock().error(t!("ui.messages.update_check_failed"));
                 }
                 NetworkResult::ConstantsFetched { data, commit } => {
-                    let mut constants_path = PathBuf::from("constants.json");
-                    if let Some(storage_dir) = crate::storage_dir() {
-                        constants_path = storage_dir.join(constants_path);
+                    // Save under the current build number so the versioned system finds it.
+                    // If game data hasn't loaded yet, stash for later (DataLoaded will flush it).
+                    if let Some(wows_data) = &self.tab_state.world_of_warships_data {
+                        let build = wows_data.read().build_number;
+                        if let Some(storage_dir) = crate::storage_dir() {
+                            let path = storage_dir.join(format!("constants_{build}.json"));
+                            let _ = std::fs::write(path, data.as_slice());
+                        }
+                    } else {
+                        self.pending_constants_data = Some(data.clone());
                     }
-
-                    if std::fs::write(&constants_path, data.as_slice()).is_ok() {
-                        self.tab_state.persisted.write().settings.game.constants_file_commit = commit;
-                        update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(data)));
-                    }
+                    self.tab_state.persisted.write().settings.game.constants_file_commit = commit;
+                    update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(data)));
                 }
                 NetworkResult::ConstantsUpToDate => {}
                 NetworkResult::ConstantsFetchFailed(msg) => {
@@ -935,6 +931,15 @@ impl WowsToolkitApp {
                     // If the initial build used fallback constants, request the correct version
                     if !wows_data_ref.read().replay_constants_exact_match {
                         self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build: build_number });
+                    }
+
+                    // Flush any constants data that arrived from the network before
+                    // we knew the build number.
+                    if let Some(data) = self.pending_constants_data.take()
+                        && let Some(storage_dir) = crate::storage_dir()
+                    {
+                        let path = storage_dir.join(format!("constants_{build_number}.json"));
+                        let _ = std::fs::write(path, &data);
                     }
 
                     self.tab_state.available_builds = available_builds;
@@ -2018,6 +2023,22 @@ impl WowsToolkitApp {
             Some(true) => {
                 self.constants_version_mismatch = true;
                 self.tab_state.toasts.lock().warning(t!("ui.messages.constants_version_mismatch")).duration(None);
+
+                // The on-disk constants file is stale — delete it so the versioned
+                // system doesn't treat it as an exact match, then request a fresh fetch.
+                if let Some(wows_data) = &self.tab_state.world_of_warships_data {
+                    let build = wows_data.read().build_number;
+                    if let Some(storage_dir) = crate::storage_dir() {
+                        let path = storage_dir.join(format!("constants_{build}.json"));
+                        let _ = std::fs::remove_file(path);
+                    }
+                    // Mark as inexact so the fetch/rebuild path works
+                    wows_data.write().replay_constants_exact_match = false;
+                    self.tab_state.send_network_job(NetworkJob::FetchVersionedConstants { build });
+                }
+                // Also clear the saved commit so FetchLatestConstants re-downloads
+                self.tab_state.persisted.write().settings.game.constants_file_commit = None;
+                self.tab_state.send_network_job(NetworkJob::FetchLatestConstants { current_commit: None });
             }
             Some(false) => {
                 self.constants_version_mismatch = false;
