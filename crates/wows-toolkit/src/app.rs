@@ -681,7 +681,6 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::LoadingReplay => {}
                             BackgroundTaskKind::Updating { rx: _rx, last_progress: _last_progress } => {}
                             BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {}
-                            BackgroundTaskKind::LoadingConstants => {}
                             #[cfg(feature = "mod_manager")]
                             BackgroundTaskKind::ModTask(_task_info) => {}
                             BackgroundTaskKind::LoadingPersonalRatingData => {}
@@ -776,6 +775,8 @@ impl WowsToolkitApp {
 
     /// Poll the networking thread for results and handle them.
     fn poll_network_results(&mut self) {
+        let mut check_version_mismatch = false;
+
         let Some(rx) = &self.network_result_rx else {
             return;
         };
@@ -801,11 +802,19 @@ impl WowsToolkitApp {
                             let path = storage_dir.join(format!("constants_{build}.json"));
                             let _ = std::fs::write(path, data.as_slice());
                         }
+                        // Rebuild loaded data with the new constants from disk.
+                        if wows_data.write().rebuild_with_new_constants()
+                            && let Some(replay_files) = &self.tab_state.replay_files
+                        {
+                            for replay in replay_files.values() {
+                                replay.write().ui_report = None;
+                            }
+                        }
                     } else {
-                        self.pending_constants_data = Some(data.clone());
+                        self.pending_constants_data = Some(data);
                     }
                     self.tab_state.persisted.write().settings.game.constants_file_commit = commit;
-                    update_background_task!(self.tab_state.background_tasks, Some(task::load_constants(data)));
+                    check_version_mismatch = true;
                 }
                 NetworkResult::ConstantsUpToDate => {}
                 NetworkResult::ConstantsFetchFailed(msg) => {
@@ -848,6 +857,10 @@ impl WowsToolkitApp {
                     warn!("Versioned constants fetch failed for build {}: {}", build, msg);
                 }
             }
+        }
+
+        if check_version_mismatch {
+            self.check_constants_version_mismatch();
         }
     }
 
@@ -1017,10 +1030,6 @@ impl WowsToolkitApp {
                     // Switch to "All Time" so historical data is visible
                     self.tab_state.player_tracker.write().filter_time_period =
                         crate::ui::player_tracker::TimePeriod::AllTime;
-                }
-                BackgroundTaskCompletion::ConstantsLoaded(constants) => {
-                    *self.tab_state.game_constants.write() = constants;
-                    self.check_constants_version_mismatch();
                 }
                 BackgroundTaskCompletion::PersonalRatingDataLoaded(pr_data) => {
                     self.tab_state.personal_rating_data.write().load(pr_data);
@@ -1989,14 +1998,17 @@ impl WowsToolkitApp {
     }
 
     fn check_constants_version_mismatch(&mut self) {
-        // Determine mismatch status under locks, then drop them before acting
+        // Determine mismatch status under locks, then drop them before acting.
+        // Read the version from the loaded WorldOfWarshipsData's replay constants
+        // rather than a separate copy.
         let mismatch_status = {
-            let constants = self.tab_state.game_constants.read();
             let Some(wows_data) = &self.tab_state.world_of_warships_data else { return };
             let wows_data = wows_data.read();
             let Some(full_version) = &wows_data.full_version else { return };
 
-            let constants_version = constants.get("VERSION").and_then(|v| v.get("VERSION")).and_then(|v| v.as_str());
+            let replay_constants = wows_data.replay_constants.read();
+            let constants_version =
+                replay_constants.get("VERSION").and_then(|v| v.get("VERSION")).and_then(|v| v.as_str());
             let Some(constants_version) = constants_version else { return };
             let game_version = format!("{}.{}", full_version.major, full_version.minor);
 

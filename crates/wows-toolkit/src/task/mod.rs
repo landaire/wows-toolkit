@@ -41,7 +41,6 @@ pub enum ReplaySource {
 // Re-export everything so `use crate::task::*` still works
 pub use networking::NetworkJob;
 pub use networking::NetworkResult;
-pub use networking::load_constants;
 pub use networking::load_personal_rating_data;
 pub use networking::load_versioned_constants_from_disk_with_fallback;
 #[cfg(target_os = "windows")]
@@ -112,7 +111,6 @@ pub enum BackgroundTaskKind {
         last_progress: Option<DownloadProgress>,
     },
     PopulatePlayerInspectorFromReplays,
-    LoadingConstants,
     LoadingPersonalRatingData,
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
@@ -185,10 +183,6 @@ impl BackgroundTask {
                     BackgroundTaskKind::PopulatePlayerInspectorFromReplays => {
                         ui.spinner();
                         ui.label("Populating player inspector from historical replays...");
-                    }
-                    BackgroundTaskKind::LoadingConstants => {
-                        ui.spinner();
-                        ui.label("Loading data constants...");
                     }
                     #[cfg(feature = "mod_manager")]
                     BackgroundTaskKind::ModTask(mod_task) => match mod_task.as_mut() {
@@ -273,7 +267,6 @@ pub enum BackgroundTaskCompletion {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     UpdateDownloaded(PathBuf),
     PopulatePlayerInspectorFromReplays,
-    ConstantsLoaded(serde_json::Value),
     PersonalRatingDataLoaded(crate::util::personal_rating::ExpectedValuesData),
     #[cfg(feature = "mod_manager")]
     ModManager(Box<crate::mod_manager::ModTaskCompletion>),
@@ -303,7 +296,6 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             }
             Self::UpdateDownloaded(arg0) => f.debug_tuple("UpdateDownloaded").field(arg0).finish(),
             Self::PopulatePlayerInspectorFromReplays => f.write_str("PopulatePlayerInspectorFromReplays"),
-            Self::ConstantsLoaded(_) => f.write_str("ConstantsLoaded(_)"),
             Self::PersonalRatingDataLoaded(_) => f.write_str("PersonalRatingDataLoaded(_)"),
             #[cfg(feature = "mod_manager")]
             Self::ModManager(mod_manager_completion) => {

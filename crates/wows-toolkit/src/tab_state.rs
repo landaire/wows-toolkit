@@ -408,7 +408,6 @@ pub struct TabState {
     pub twitch_update_sender: Option<tokio::sync::mpsc::Sender<crate::twitch::TwitchUpdate>>,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
-    pub game_constants: Arc<RwLock<serde_json::Value>>,
     pub mod_action_sender: Sender<ModInfo>,
     /// Used temporarily to store the mod action receiver until the mod manager thread is started.
     /// Consumed via `.take()` in `app.rs` — clippy false positive for "never read".
@@ -496,8 +495,6 @@ pub struct TabState {
 
 impl Default for TabState {
     fn default() -> Self {
-        let default_constants = serde_json::from_str(include_str!("../../../embedded_resources/constants.json"))
-            .expect("failed to parse constants JSON");
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
         let (background_task_sender, background_task_receiver) = mpsc::channel();
         Self {
@@ -527,7 +524,6 @@ impl Default for TabState {
             twitch_update_sender: Default::default(),
             twitch_state: Default::default(),
             markdown_cache: Default::default(),
-            game_constants: Arc::new(parking_lot::RwLock::new(default_constants)),
             mod_action_sender,
             mod_action_receiver: Some(mod_action_receiver),
             background_task_receiver,
@@ -965,7 +961,9 @@ impl TabState {
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = mpsc::channel();
         let locale = self.persisted.read().settings.app.locale.clone().unwrap();
-        let fallback_constants = self.game_constants.read().clone();
+        let fallback_constants: serde_json::Value =
+            serde_json::from_str(include_str!("../../../embedded_resources/constants.json"))
+                .expect("failed to parse embedded constants JSON");
         let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
             let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));
         });
