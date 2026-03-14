@@ -68,10 +68,10 @@
             fontconfig
             wayland
             vulkan-loader
-            xorg.libXcursor
-            xorg.libXrandr
-            xorg.libXi
-            xorg.libX11
+            libxcursor
+            libxrandr
+            libxi
+            libx11
           ];
 
           guiBuildInputs =
@@ -79,10 +79,10 @@
             ++ lib.optionals stdenv.hostPlatform.isLinux [
               libxkbcommon
               wayland
-              xorg.libXcursor
-              xorg.libXrandr
-              xorg.libXi
-              xorg.libX11
+              libxcursor
+              libxrandr
+              libxi
+              libx11
               fontconfig
             ];
 
@@ -169,10 +169,10 @@
               wayland
 
               # x11 libraries
-              xorg.libXcursor
-              xorg.libXrandr
-              xorg.libXi
-              xorg.libX11
+              libxcursor
+              libxrandr
+              libxi
+              libx11
             ];
 
           # ring's cc crate needs clang + llvm-ar for wasm32-unknown-unknown

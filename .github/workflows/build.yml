@@ -108,7 +108,7 @@ jobs:
       - name: Set up Flatpak
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y org.freedesktop.Platform//24.08
+          flatpak install --user -y org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 
       - name: Build Flatpak bundle
         run: |
