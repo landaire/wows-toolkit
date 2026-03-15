@@ -30,7 +30,7 @@ wows_minimap_renderer = { version = "0.23.0", path = "crates/minimap-renderer", 
 wows-data-mgr = { version = "0.5.0", path = "crates/wows-data-mgr" }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
-wt-translations = { path = "crates/wt-translations" }
+wt-translations = { version = "0.1.0", path = "crates/wt-translations" }
 # Shared UI dependencies
 egui = "0.33.3"
 egui-phosphor = "0.11"

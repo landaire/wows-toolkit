@@ -1,9 +1,10 @@
 [package]
 name = "wt-translations"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-publish = false
+license.workspace = true
+repository = "https://github.com/landaire/wows-toolkit"
 description = "Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit"
 
 [dependencies]
