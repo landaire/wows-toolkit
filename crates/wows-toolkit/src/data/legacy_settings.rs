@@ -212,6 +212,7 @@ impl LegacyWowsToolkitApp {
                 build_consent_window_shown: s.build_consent_window_shown,
                 language_selection_shown: s.language_selection_shown,
                 suppress_gpu_encoder_warning: s.suppress_gpu_encoder_warning,
+                zoom_factor: None,
             },
             game: GameSettings {
                 wows_dir: s.wows_dir,

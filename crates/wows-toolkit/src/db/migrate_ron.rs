@@ -87,6 +87,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         collab_name,
         collab_ip_warn,
         collab_auto_open,
+        zoom_factor,
         replay_settings_json,
         output_dir,
         auto_load,
@@ -116,6 +117,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.collab.display_name.clone(),
             s.collab.suppress_p2p_ip_warning,
             s.collab.disable_auto_open_session_windows,
+            s.app.zoom_factor,
             serde_json::to_string(&s.replay).unwrap_or_default(),
             p.output_dir.clone(),
             p.auto_load_latest_replay,
@@ -145,6 +147,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "collab_display_name", &collab_name).await?;
     queries::set_setting(pool, "suppress_p2p_ip_warning", &collab_ip_warn).await?;
     queries::set_setting(pool, "disable_auto_open_session_windows", &collab_auto_open).await?;
+    queries::set_setting(pool, "zoom_factor", &zoom_factor).await?;
     queries::set_setting_raw(pool, "replay_settings", &replay_settings_json).await?;
     queries::set_setting(pool, "output_dir", &output_dir).await?;
     queries::set_setting(pool, "auto_load_latest_replay", &auto_load).await?;

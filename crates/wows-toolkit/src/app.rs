@@ -422,12 +422,12 @@ impl WowsToolkitApp {
                 update_background_task!(this.tab_state.background_tasks, Some(task));
             }
 
-            // By default set the zoom factor. We don't persist this value because it's
-            // persisted with the application window instead.
-            cc.egui_ctx.set_zoom_factor(DEFAULT_ZOOM_FACTOR);
-
             state = this;
         }
+
+        // Restore zoom factor from persisted settings, falling back to default.
+        let zoom = state.tab_state.persisted.read().settings.app.zoom_factor.unwrap_or(DEFAULT_ZOOM_FACTOR);
+        cc.egui_ctx.set_zoom_factor(zoom);
 
         // Apply locale to rust-i18n
         if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {

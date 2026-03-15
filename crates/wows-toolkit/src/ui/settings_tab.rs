@@ -57,9 +57,11 @@ impl ToolkitTabViewer<'_> {
                     let mut zoom = ui.ctx().zoom_factor();
                     if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text(t!("ui.settings.app.zoom_factor"))).changed() {
                         ui.ctx().set_zoom_factor(zoom);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = Some(zoom);
                     }
                     if ui.button(t!("ui.buttons.reset")).clicked() {
                         ui.ctx().set_zoom_factor(DEFAULT_ZOOM_FACTOR);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = Some(DEFAULT_ZOOM_FACTOR);
                     }
                 });
                 ui.horizontal(|ui| {

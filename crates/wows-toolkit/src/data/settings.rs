@@ -252,6 +252,8 @@ pub struct AppPreferences {
     pub build_consent_window_shown: bool,
     pub language_selection_shown: bool,
     pub suppress_gpu_encoder_warning: bool,
+    /// UI zoom factor. `None` means use the default (1.15).
+    pub zoom_factor: Option<f32>,
 }
 
 /// Game installation and data paths.
