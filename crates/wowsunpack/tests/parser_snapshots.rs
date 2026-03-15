@@ -2,7 +2,6 @@
 //!
 //! Requires game data to be available. Run with:
 //!   cargo test -p wowsunpack --features test-game-data
-#![cfg(feature = "test-game-data")]
 
 use std::collections::BTreeMap;
 use std::io::Read;

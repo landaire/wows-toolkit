@@ -2,7 +2,6 @@
 //!
 //! Requires game data to be available. Run with:
 //!   cargo test -p wowsunpack --features test-game-data
-#![cfg(feature = "test-game-data")]
 
 use sha2::Digest;
 use sha2::Sha256;
