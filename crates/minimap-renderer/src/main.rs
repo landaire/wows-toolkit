@@ -390,6 +390,17 @@ fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> R
     Ok((vfs, specs, game_params, controller_game_params))
 }
 
+#[derive(serde::Deserialize)]
+struct ExtractedMetadata {
+    version: String,
+    build: u32,
+}
+
+fn read_metadata(path: &std::path::Path) -> Option<ExtractedMetadata> {
+    let contents = std::fs::read_to_string(path.join("metadata.toml")).ok()?;
+    toml::from_str(&contents).ok()
+}
+
 /// Resolve the extracted data directory. If the user passed a parent directory
 /// containing version subdirectories (e.g. `15.1.0_11965230/`), auto-detect the
 /// right one. If they passed the version dir itself, use it directly.
@@ -399,31 +410,25 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     }
 
     // If the path itself contains metadata.toml, it's already the version dir
-    if path.join("metadata.toml").exists() {
+    if let Some(meta) = read_metadata(path) {
+        if meta.build != replay_version.build {
+            bail!(
+                "Extracted data is build {} ({}) but replay is build {}. \
+                 Entity definitions will not match. Use extracted data for the correct build.",
+                meta.build, meta.version, replay_version.build
+            );
+        }
         return Ok(path.to_path_buf());
     }
 
     // Otherwise, scan for version subdirectories
-    let mut candidates: Vec<(PathBuf, String, u32)> = Vec::new();
+    let mut candidates: Vec<(PathBuf, ExtractedMetadata)> = Vec::new();
     let entries = std::fs::read_dir(path).attach_with(|| format!("Failed to read directory: {}", path.display()))?;
 
     for entry in entries.flatten() {
         let sub = entry.path();
-        let meta_path = sub.join("metadata.toml");
-        if meta_path.exists()
-            && let Ok(contents) = std::fs::read_to_string(&meta_path)
-        {
-            // Parse version and build from metadata.toml
-            let mut version = String::new();
-            let mut build = 0u32;
-            for line in contents.lines() {
-                if let Some(v) = line.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
-                    version = v.to_string();
-                } else if let Some(b) = line.strip_prefix("build = ") {
-                    build = b.trim().parse().unwrap_or(0);
-                }
-            }
-            candidates.push((sub, version, build));
+        if let Some(meta) = read_metadata(&sub) {
+            candidates.push((sub, meta));
         }
     }
 
@@ -437,20 +442,22 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
     }
 
     // Try to match by build number first
-    if let Some(matched) = candidates.iter().find(|(_, _, b)| *b == replay_version.build) {
+    if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_version.build) {
         info!("Matched extracted data for build {}: {}", replay_version.build, matched.0.display());
         return Ok(matched.0.clone());
     }
 
-    // If only one candidate, use it with a warning
+    // No match — fail with available versions
     if candidates.len() == 1 {
-        let (ref dir, ref ver, build) = candidates[0];
-        warn!("No exact build match for replay (build {}). Using {ver} (build {build}).", replay_version.build);
-        return Ok(dir.clone());
+        let (_, ref meta) = candidates[0];
+        bail!(
+            "No exact build match for replay (build {}). Only available: {} (build {}). \
+             Download or extract the correct build.",
+            replay_version.build, meta.version, meta.build
+        );
     }
 
-    // Multiple candidates, none matching
-    let available: Vec<String> = candidates.iter().map(|(_, v, b)| format!("{v} (build {b})")).collect();
+    let available: Vec<String> = candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();
     bail!(
         "No extracted data matches replay build {}. Available versions in {}: {}",
         replay_version.build,
