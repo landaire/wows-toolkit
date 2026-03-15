@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.62] - 2026-03-15
+
+### 🐛 Bug Fixes
+
+- UI scaling was not being persisted
+
+### Minimap-renderer-cli
+
+- Use strict version matching and warn on mismatch for extracted data
+
+### Replays
+
+- Filter out removed captain skills
+
+### Replayshark
+
+- Make extracted dir behavior match minimap-renderer-cli
+
 ## [0.1.61] - 2026-03-14
 
 ### 🐛 Bug Fixes
