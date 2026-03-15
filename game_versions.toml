@@ -2,7 +2,7 @@
 #
 # Maps build numbers to game versions and Steam depot manifest IDs.
 # Build numbers are the directory names under bin/ in a WoWs installation.
-# Manifest IDs can be found on SteamDB: https://steamdb.info/app/552993/depots/
+# Manifest IDs can be found on SteamDB: https://steamdb.info/depot/552993/
 #
 # To download a specific version:
 #   cargo run -p wows-data-mgr -- download --version 15.1
@@ -14,3 +14,8 @@
 version = "15.1.0"
 depot_id = 552993
 manifest_id = "7417710726139444358"
+
+[versions.12116141]
+version = "15.2.0"
+depot_id = 552993
+manifest_id = "4224240752247274225"
