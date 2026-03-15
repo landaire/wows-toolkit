@@ -1,9 +1,8 @@
 //! Snapshot tests for binary format parsers.
 //!
-//! These tests load known game files from the VFS, parse them, and snapshot
-//! the output with insta. Each parser gets its own snapshot subdirectory.
-//!
-//! Requires game data to be available — ignored otherwise.
+//! Requires game data to be available. Run with:
+//!   cargo test -p wowsunpack --features test-game-data
+#![cfg(feature = "test-game-data")]
 
 use std::collections::BTreeMap;
 use std::io::Read;

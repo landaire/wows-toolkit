@@ -1,8 +1,8 @@
 //! Integration tests for game data loading via VFS.
 //!
-//! These tests require game data to be available (either downloaded via
-//! `wows-data-mgr` or registered with `--latest`).
-//! They are automatically ignored when no game data is present.
+//! Requires game data to be available. Run with:
+//!   cargo test -p wowsunpack --features test-game-data
+#![cfg(feature = "test-game-data")]
 
 use sha2::Digest;
 use sha2::Sha256;

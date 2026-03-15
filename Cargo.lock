@@ -11188,7 +11188,6 @@ dependencies = [
  "variantly",
  "vfs",
  "winnow",
- "wows-data-mgr",
 ]
 
 [[package]]
