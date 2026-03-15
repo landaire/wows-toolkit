@@ -10990,7 +10990,7 @@ dependencies = [
 
 [[package]]
 name = "wows-data-mgr"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "indicatif",
@@ -11006,7 +11006,7 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -11043,7 +11043,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "bon",
  "flate2",
@@ -11067,7 +11067,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -11147,7 +11147,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.28.0"
+version = "0.29.0"
 dependencies = [
  "async-std",
  "async-trait",
@@ -11218,7 +11218,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-egui"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -11231,7 +11231,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-protocol"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "data-encoding",
  "egui",
@@ -11245,14 +11245,14 @@ dependencies = [
 
 [[package]]
 name = "wt-translations"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "wowsunpack",
 ]
 
 [[package]]
 name = "wt-web"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "eframe",
  "egui",
