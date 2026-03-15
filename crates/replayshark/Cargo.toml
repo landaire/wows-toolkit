@@ -16,3 +16,4 @@ serde_json = { workspace = true }
 parse_int = "0.9.0"
 wowsunpack = { workspace = true, features = ["json", "vfs"] }
 anyhow = { workspace = true }
+toml = { workspace = true }

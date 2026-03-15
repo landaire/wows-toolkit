@@ -258,6 +258,94 @@ fn build_investigative_printer(
     Box::new(decoder)
 }
 
+struct ExtractedMetadata {
+    version: String,
+    build: u32,
+}
+
+fn read_metadata(path: &Path) -> Option<ExtractedMetadata> {
+    let contents = std::fs::read_to_string(path.join("metadata.toml")).ok()?;
+    let table: toml::Table = contents.parse().ok()?;
+    Some(ExtractedMetadata {
+        version: table.get("version")?.as_str()?.to_string(),
+        build: table.get("build")?.as_integer()? as u32,
+    })
+}
+
+/// Resolve the extracted data directory. If the user passed a parent directory
+/// containing version subdirectories (e.g. `15.1.0_11965230/`), auto-detect the
+/// right one. If they passed the version dir itself, use it directly.
+/// Falls back to the legacy `<extracted>/<version>` layout.
+fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Result<PathBuf> {
+    if !path.exists() {
+        return Err(anyhow!("Extracted data directory does not exist: {}", path.display()));
+    }
+
+    // If the path itself contains metadata.toml, it's already the version dir
+    if let Some(meta) = read_metadata(path) {
+        if meta.build != replay_version.build {
+            return Err(anyhow!(
+                "Extracted data is build {} ({}) but replay is build {}. \
+                 Entity definitions will not match. Use extracted data for the correct build.",
+                meta.build,
+                meta.version,
+                replay_version.build
+            ));
+        }
+        return Ok(path.to_path_buf());
+    }
+
+    // Scan for version subdirectories with metadata.toml
+    let mut candidates: Vec<(PathBuf, ExtractedMetadata)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let sub = entry.path();
+            if let Some(meta) = read_metadata(&sub) {
+                candidates.push((sub, meta));
+            }
+        }
+    }
+
+    if !candidates.is_empty() {
+        // Try to match by build number
+        if let Some(matched) = candidates.iter().find(|(_, m)| m.build == replay_version.build) {
+            return Ok(matched.0.clone());
+        }
+
+        if candidates.len() == 1 {
+            let (_, ref meta) = candidates[0];
+            return Err(anyhow!(
+                "No exact build match for replay (build {}). Only available: {} (build {}). \
+                 Download or extract the correct build.",
+                replay_version.build,
+                meta.version,
+                meta.build
+            ));
+        }
+
+        let available: Vec<String> =
+            candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();
+        return Err(anyhow!(
+            "No extracted data matches replay build {}. Available versions in {}: {}",
+            replay_version.build,
+            path.display(),
+            available.join(", ")
+        ));
+    }
+
+    // Legacy fallback: <extracted>/<major.minor.patch>/
+    let legacy = path.join(replay_version.to_path());
+    if legacy.exists() {
+        return Ok(legacy);
+    }
+
+    Err(anyhow!(
+        "No extracted game data found in {}. Expected a version directory \
+         (containing metadata.toml) or legacy layout (<extracted>/<version>/).",
+        path.display()
+    ))
+}
+
 fn load_game_data(
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
@@ -270,18 +358,13 @@ fn load_game_data(
             resources.specs
         }
         (None, Some(extracted)) => {
-            let extracted_dir = Path::new(extracted).join(replay_version.to_path());
-            if !extracted_dir.exists() {
-                return Err(anyhow!(
-                    "Missing scripts for game version {}. Expected to be at {:?}",
-                    replay_version.to_path(),
-                    &extracted_dir
-                ));
-            }
+            let extracted_dir = resolve_extracted_dir(Path::new(extracted), replay_version)?;
+            let vfs_dir = extracted_dir.join("vfs");
+            let scripts_dir = if vfs_dir.exists() { vfs_dir } else { extracted_dir };
             let loader = DataFileWithCallback::new(|path| {
                 let path = Path::new(path);
 
-                let file_data = std::fs::read(extracted_dir.join(path))
+                let file_data = std::fs::read(scripts_dir.join(path))
                     .with_context(|| format!("failed to read game file from extracted dir: {:?}", path))
                     .unwrap();
 

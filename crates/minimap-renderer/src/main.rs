@@ -390,7 +390,6 @@ fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> R
     Ok((vfs, specs, game_params, controller_game_params))
 }
 
-#[derive(serde::Deserialize)]
 struct ExtractedMetadata {
     version: String,
     build: u32,
@@ -398,7 +397,11 @@ struct ExtractedMetadata {
 
 fn read_metadata(path: &std::path::Path) -> Option<ExtractedMetadata> {
     let contents = std::fs::read_to_string(path.join("metadata.toml")).ok()?;
-    toml::from_str(&contents).ok()
+    let table: toml::Table = contents.parse().ok()?;
+    Some(ExtractedMetadata {
+        version: table.get("version")?.as_str()?.to_string(),
+        build: table.get("build")?.as_integer()? as u32,
+    })
 }
 
 /// Resolve the extracted data directory. If the user passed a parent directory
@@ -415,7 +418,9 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
             bail!(
                 "Extracted data is build {} ({}) but replay is build {}. \
                  Entity definitions will not match. Use extracted data for the correct build.",
-                meta.build, meta.version, replay_version.build
+                meta.build,
+                meta.version,
+                replay_version.build
             );
         }
         return Ok(path.to_path_buf());
@@ -453,7 +458,9 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
         bail!(
             "No exact build match for replay (build {}). Only available: {} (build {}). \
              Download or extract the correct build.",
-            replay_version.build, meta.version, meta.build
+            replay_version.build,
+            meta.version,
+            meta.build
         );
     }
 
