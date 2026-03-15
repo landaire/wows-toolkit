@@ -2335,7 +2335,17 @@ impl VehicleEntity {
 
         let skills = skills_for_species
             .iter()
-            .map(|skill_type| captain.skill_by_type(*skill_type as u32).expect("could not get skill type"))
+            .filter_map(|skill_type| {
+                let skill = captain.skill_by_type(*skill_type as u32);
+                if skill.is_none() {
+                    tracing::warn!(
+                        skill_type,
+                        captain_id = %self.commander_id(),
+                        "captain definition is missing learned skill type"
+                    );
+                }
+                skill
+            })
             .collect();
 
         Some(skills)
