@@ -7,13 +7,13 @@ on:
   # Rebuild tactics WASM when a release is published.
   release:
     types: [published]
-  # Manual trigger — optionally rebuild tactics.
+  # Manual trigger — optionally skip tactics rebuild.
   workflow_dispatch:
     inputs:
       build_tactics:
         description: "Rebuild tactics WASM app"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_TACTICS: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.build_tactics == 'true') }}
+  BUILD_TACTICS: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.build_tactics) }}
 
 jobs:
   deploy:
@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- Tactics WASM build (release or manual opt-in) ---
+      # --- Tactics WASM build ---
       - name: Install Nix
         if: env.BUILD_TACTICS == 'true'
         uses: cachix/install-nix-action@v30
