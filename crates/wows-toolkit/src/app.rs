@@ -211,6 +211,10 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 
+    /// Join handle for the background save task, used to await completion on exit.
+    #[serde(skip)]
+    save_task_handle: Option<tokio::task::JoinHandle<()>>,
+
     /// Constants data fetched from the network before game data was loaded.
     /// Flushed to disk once we know the build number (in `DataLoaded`).
     #[serde(skip)]
@@ -246,6 +250,7 @@ impl Default for WowsToolkitApp {
             last_persisted_generation: 0,
             db_pool: None,
             shutdown_tx: None,
+            save_task_handle: None,
             pending_constants_data: None,
         }
     }
@@ -537,8 +542,15 @@ impl WowsToolkitApp {
                 save_notify: state.tab_state.save_notify.clone(),
             };
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-            crate::db::save::spawn_save_task(&state.runtime, pool.clone(), save_ctx, cc.egui_ctx.clone(), shutdown_rx);
+            let handle = crate::db::save::spawn_save_task(
+                &state.runtime,
+                pool.clone(),
+                save_ctx,
+                cc.egui_ctx.clone(),
+                shutdown_rx,
+            );
             state.shutdown_tx = Some(shutdown_tx);
+            state.save_task_handle = Some(handle);
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -2610,12 +2622,17 @@ impl eframe::App for WowsToolkitApp {
     }
 
     fn on_exit(&mut self) {
-        // Signal the background save task to do a final save, then wait for it.
+        // Signal the background save task to do a final save, then await completion.
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
-            // Give the save task a moment to complete the final save.
+        }
+        if let Some(handle) = self.save_task_handle.take() {
             self.runtime.block_on(async {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+                    Ok(Ok(())) => info!("Final save completed"),
+                    Ok(Err(e)) => error!("Save task panicked: {e}"),
+                    Err(_) => error!("Final save timed out after 5 seconds"),
+                }
             });
         }
     }

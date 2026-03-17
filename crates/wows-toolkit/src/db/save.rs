@@ -43,7 +43,7 @@ pub fn spawn_save_task(
     ctx: SaveContext,
     egui_ctx: egui::Context,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-) {
+) -> tokio::task::JoinHandle<()> {
     runtime.spawn(async move {
         // Periodic timer for capturing window geometry (which changes
         // continuously during resize/move and has no discrete event).
@@ -80,7 +80,7 @@ pub fn spawn_save_task(
             }
         }
         info!("Save task exited");
-    });
+    })
 }
 
 /// Capture viewport geometry for all known windows.

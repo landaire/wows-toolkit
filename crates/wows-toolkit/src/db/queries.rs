@@ -11,8 +11,20 @@ use sqlx::SqlitePool;
 /// Get a JSON-encoded setting by key.
 pub async fn get_setting<T: DeserializeOwned>(pool: &SqlitePool, key: &str) -> Option<T> {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = ?1").bind(key).fetch_optional(pool).await.ok()?;
-    row.and_then(|(json,)| serde_json::from_str(&json).ok())
+        match sqlx::query_as("SELECT value FROM settings WHERE key = ?1").bind(key).fetch_optional(pool).await {
+            Ok(row) => row,
+            Err(e) => {
+                tracing::warn!("Failed to read setting '{key}' from DB: {e}");
+                return None;
+            }
+        };
+    row.and_then(|(json,)| match serde_json::from_str(&json) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!("Failed to deserialize setting '{key}': {e}");
+            None
+        }
+    })
 }
 
 /// Set a JSON-encoded setting by key (upsert).
@@ -58,50 +70,16 @@ pub struct SessionStatRow {
     pub achievements: String,
 }
 
-/// Insert a single session stat row.
-pub async fn insert_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result<i64, sqlx::Error> {
-    let result = sqlx::query(
-        "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
-         damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-    )
-    .bind(&row.sort_key)
-    .bind(&row.ship_name)
-    .bind(row.ship_id)
-    .bind(row.player_id)
-    .bind(&row.game_time)
-    .bind(&row.match_group)
-    .bind(row.damage)
-    .bind(row.spotting_damage)
-    .bind(row.frags)
-    .bind(row.raw_xp)
-    .bind(row.base_xp)
-    .bind(row.is_win)
-    .bind(row.is_loss)
-    .bind(row.is_draw)
-    .bind(row.is_div)
-    .bind(&row.achievements)
-    .execute(pool)
-    .await?;
-    Ok(result.last_insert_rowid())
-}
-
 /// Load all session stats ordered by sort_key.
 pub async fn get_all_session_stats(pool: &SqlitePool) -> Result<Vec<SessionStatRow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM session_stats ORDER BY sort_key ASC").fetch_all(pool).await
-}
-
-/// Delete all session stats (used during migration to re-import).
-pub async fn clear_session_stats(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM session_stats").execute(pool).await?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // sent_replays
 // ---------------------------------------------------------------------------
 
-/// Insert a sent replay path.
+/// Insert a sent replay path (no-op if already exists).
 pub async fn insert_sent_replay(pool: &SqlitePool, path: &str) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT OR IGNORE INTO sent_replays (replay_path) VALUES (?1)").bind(path).execute(pool).await?;
     Ok(())
@@ -113,9 +91,20 @@ pub async fn get_all_sent_replays(pool: &SqlitePool) -> Result<Vec<String>, sqlx
     Ok(rows.into_iter().map(|(p,)| p).collect())
 }
 
-/// Clear all sent replays.
-pub async fn clear_sent_replays(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM sent_replays").execute(pool).await?;
+/// Delete sent replays not in the given set.
+pub async fn delete_stale_sent_replays(pool: &SqlitePool, current: &[String]) -> Result<(), sqlx::Error> {
+    // Build a comma-separated list of placeholders.
+    if current.is_empty() {
+        sqlx::query("DELETE FROM sent_replays").execute(pool).await?;
+        return Ok(());
+    }
+    // SQLite doesn't support array binds, so use a temp approach:
+    // delete where NOT IN (select from json_each).
+    let json_array = serde_json::to_string(current).unwrap_or_else(|_| "[]".to_string());
+    sqlx::query("DELETE FROM sent_replays WHERE replay_path NOT IN (SELECT value FROM json_each(?1))")
+        .bind(&json_array)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -141,9 +130,17 @@ pub async fn get_all_chart_configs(pool: &SqlitePool) -> Result<Vec<(i64, String
     sqlx::query_as("SELECT chart_id, config FROM chart_configs").fetch_all(pool).await
 }
 
-/// Delete all chart configs (for migration).
-pub async fn clear_chart_configs(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM chart_configs").execute(pool).await?;
+/// Delete chart configs not in the given set of IDs.
+pub async fn delete_stale_chart_configs(pool: &SqlitePool, current_ids: &[i64]) -> Result<(), sqlx::Error> {
+    if current_ids.is_empty() {
+        sqlx::query("DELETE FROM chart_configs").execute(pool).await?;
+        return Ok(());
+    }
+    let json_array = serde_json::to_string(current_ids).unwrap_or_else(|_| "[]".to_string());
+    sqlx::query("DELETE FROM chart_configs WHERE chart_id NOT IN (SELECT value FROM json_each(?1))")
+        .bind(&json_array)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

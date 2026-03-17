@@ -827,6 +827,11 @@ impl TabState {
     }
 
     pub(crate) fn update_wows_dir(&mut self, wows_dir: &Path, replay_dir: &Path) {
+        // Persist the directory immediately — before anything that might early-return.
+        self.persisted.write().settings.game.wows_dir = wows_dir.to_str().unwrap().to_string();
+        self.replays_dir = Some(replay_dir.to_owned());
+        self.revalidate_wows_dir();
+
         // Drop old watcher and background parser thread (if any).
         // Dropping background_parser_tx closes the channel, causing the old
         // parser thread to exit when its recv() returns Err.
@@ -932,10 +937,6 @@ impl TabState {
 
         self.file_watcher = Some(watcher);
         self.file_receiver = Some(rx);
-
-        self.persisted.write().settings.game.wows_dir = wows_dir.to_str().unwrap().to_string();
-        self.replays_dir = Some(replay_dir.to_owned());
-        self.revalidate_wows_dir();
     }
 
     /// Re-check whether `settings.wows_dir` points to a valid WoWs installation.

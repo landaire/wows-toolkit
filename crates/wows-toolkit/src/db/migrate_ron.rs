@@ -200,10 +200,35 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
             .collect()
     };
 
-    queries::clear_session_stats(pool).await?;
+    // Use a transaction so a crash mid-save doesn't wipe the table.
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM session_stats").execute(&mut *tx).await?;
     for row in &rows {
-        queries::insert_session_stat(pool, row).await?;
+        sqlx::query(
+            "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
+             damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        )
+        .bind(&row.sort_key)
+        .bind(&row.ship_name)
+        .bind(row.ship_id)
+        .bind(row.player_id)
+        .bind(&row.game_time)
+        .bind(&row.match_group)
+        .bind(row.damage)
+        .bind(row.spotting_damage)
+        .bind(row.frags)
+        .bind(row.raw_xp)
+        .bind(row.base_xp)
+        .bind(row.is_win)
+        .bind(row.is_loss)
+        .bind(row.is_draw)
+        .bind(row.is_div)
+        .bind(&row.achievements)
+        .execute(&mut *tx)
+        .await?;
     }
+    tx.commit().await?;
 
     trace!("  saved {} session stats", rows.len());
     Ok(())
@@ -233,10 +258,11 @@ async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<()
 async fn save_sent_replays(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
     let paths: Vec<String> = ctx.sent_replays.read().iter().cloned().collect();
 
-    queries::clear_sent_replays(pool).await?;
+    // Upsert current paths, then remove any that were deleted.
     for path in &paths {
         queries::insert_sent_replay(pool, path).await?;
     }
+    queries::delete_stale_sent_replays(pool, &paths).await?;
 
     trace!("  saved {} sent replays", paths.len());
     Ok(())
@@ -252,10 +278,12 @@ async fn save_chart_configs(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
             .collect()
     };
 
-    queries::clear_chart_configs(pool).await?;
+    // Upsert current configs, then remove any that were deleted.
+    let current_ids: Vec<i64> = configs.iter().map(|(id, _)| *id).collect();
     for (chart_id, json) in &configs {
         queries::upsert_chart_config(pool, *chart_id, json).await?;
     }
+    queries::delete_stale_chart_configs(pool, &current_ids).await?;
 
     trace!("  saved {} chart configs", configs.len());
     Ok(())
