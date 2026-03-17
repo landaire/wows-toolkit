@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.63] - 2026-03-17
+
+### 🐛 Bug Fixes
+
+- Some settings weren't being properly persisted (#30)
+
+### ⚙️ Miscellaneous Tasks
+
+- Get wt-translations ready for publish
+- Add 15.2 to `game_versions.toml`
+
 ## [0.1.62] - 2026-03-15
 
 ### 🐛 Bug Fixes
