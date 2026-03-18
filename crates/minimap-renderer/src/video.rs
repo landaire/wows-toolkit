@@ -64,6 +64,7 @@ pub fn check_encoder() -> crate::encoder::EncoderStatus {
 pub struct VideoEncoder {
     output_path: String,
     dump_mode: Option<DumpMode>,
+    dump_all_mode: bool,
     game_duration: f32,
     last_rendered_frame: i64,
     backend: Option<EncoderBackend>,
@@ -94,6 +95,7 @@ impl VideoEncoder {
     pub fn new(
         output_path: &str,
         dump_mode: Option<DumpMode>,
+        dump_all_mode: bool,
         match_time_limit: f32,
         canvas_width: u32,
         canvas_height: u32,
@@ -102,6 +104,7 @@ impl VideoEncoder {
         Self {
             output_path: output_path.to_string(),
             dump_mode,
+            dump_all_mode,
             game_duration: match_time_limit,
             last_rendered_frame: -1,
             backend: None,
@@ -217,7 +220,28 @@ impl VideoEncoder {
 
             let commands = renderer.draw_frame(controller);
 
-            if let Some(ref dump_mode) = self.dump_mode {
+            if self.dump_all_mode {
+                target.begin_frame();
+                for cmd in &commands {
+                    target.draw(cmd);
+                }
+                target.end_frame();
+
+                let png_path =
+                    format!("{}{}{}.png", self.output_path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+                if let Err(e) = target.frame().save(&png_path) {
+                    error!(error = %e, "Failed to save frame");
+                    return;
+                }
+
+                if let Some(ref cb) = self.progress_callback {
+                    cb(RenderProgress {
+                        stage: RenderStage::Encoding,
+                        current: (self.last_rendered_frame + 1) as u64,
+                        total: self.expected_frames,
+                    });
+                }
+            } else if let Some(ref dump_mode) = self.dump_mode {
                 let dump_frame = match dump_mode {
                     DumpMode::Frame(n) => *n as i64,
                     DumpMode::Midpoint => total_frames / 2,
@@ -287,6 +311,23 @@ impl VideoEncoder {
         }
 
         self.advance_clock(end_clock, controller, renderer, target);
+
+        if self.dump_all_mode {
+            // Dump the final frame (includes result overlay if winner is known)
+            let commands = renderer.draw_frame(controller);
+            target.begin_frame();
+            for cmd in &commands {
+                target.draw(cmd);
+            }
+            target.end_frame();
+
+            let png_path = format!("{}{}{}.png", self.output_path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+            if let Err(e) = target.frame().save(&png_path) {
+                error!(error = %e, "Failed to save frame");
+            }
+
+            return Ok(());
+        }
 
         if let Some(ref dump_mode) = self.dump_mode {
             if matches!(dump_mode, DumpMode::Last) {
