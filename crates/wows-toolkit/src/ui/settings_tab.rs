@@ -8,14 +8,13 @@ use egui::Slider;
 use rust_i18n::t;
 
 use crate::app::ToolkitTabViewer;
+use crate::data::settings::AppPreferences;
 use crate::icons;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplayExportFormat;
 use crate::twitch::Token;
 use crate::update_background_task;
-
-const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
 
 /// Render a styled section header with an icon, title, and dimmed description.
 fn section_header(ui: &mut egui::Ui, icon: &str, title: &str, description: &str) {
@@ -57,11 +56,12 @@ impl ToolkitTabViewer<'_> {
                     let mut zoom = ui.ctx().zoom_factor();
                     if ui.add(Slider::new(&mut zoom, 0.5..=2.0).text(t!("ui.settings.app.zoom_factor"))).changed() {
                         ui.ctx().set_zoom_factor(zoom);
-                        self.tab_state.persisted.write().settings.app.zoom_factor = Some(zoom);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = zoom;
                     }
                     if ui.button(t!("ui.buttons.reset")).clicked() {
-                        ui.ctx().set_zoom_factor(DEFAULT_ZOOM_FACTOR);
-                        self.tab_state.persisted.write().settings.app.zoom_factor = Some(DEFAULT_ZOOM_FACTOR);
+                        let default_zoom = AppPreferences::default().zoom_factor;
+                        ui.ctx().set_zoom_factor(default_zoom);
+                        self.tab_state.persisted.write().settings.app.zoom_factor = default_zoom;
                     }
                 });
                 ui.horizontal(|ui| {

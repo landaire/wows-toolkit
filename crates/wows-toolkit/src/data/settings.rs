@@ -243,7 +243,6 @@ pub struct AppSettings {
 }
 
 /// General application preferences.
-#[derive(Default)]
 pub struct AppPreferences {
     pub check_for_updates: bool,
     pub debug_mode: bool,
@@ -252,8 +251,23 @@ pub struct AppPreferences {
     pub build_consent_window_shown: bool,
     pub language_selection_shown: bool,
     pub suppress_gpu_encoder_warning: bool,
-    /// UI zoom factor. `None` means use the default (1.15).
-    pub zoom_factor: Option<f32>,
+    /// UI zoom factor (default 1.15).
+    pub zoom_factor: f32,
+}
+
+impl Default for AppPreferences {
+    fn default() -> Self {
+        Self {
+            check_for_updates: true,
+            debug_mode: false,
+            enable_logging: true,
+            locale: Some("en".to_string()),
+            build_consent_window_shown: false,
+            language_selection_shown: false,
+            suppress_gpu_encoder_warning: false,
+            zoom_factor: 1.15,
+        }
+    }
 }
 
 /// Game installation and data paths.

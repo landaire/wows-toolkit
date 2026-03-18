@@ -409,8 +409,6 @@ impl WowsToolkitApp {
             }
         }
 
-        const DEFAULT_ZOOM_FACTOR: f32 = 1.15;
-
         if !had_saved_state {
             let mut this: Self = Default::default();
             let detected = sys_locale::get_locale()
@@ -430,9 +428,8 @@ impl WowsToolkitApp {
             state = this;
         }
 
-        // Restore zoom factor from persisted settings, falling back to default.
-        let zoom = state.tab_state.persisted.read().settings.app.zoom_factor.unwrap_or(DEFAULT_ZOOM_FACTOR);
-        cc.egui_ctx.set_zoom_factor(zoom);
+        // Restore zoom factor from persisted settings.
+        cc.egui_ctx.set_zoom_factor(state.tab_state.persisted.read().settings.app.zoom_factor);
 
         // Apply locale to rust-i18n
         if let Some(locale) = &state.tab_state.persisted.read().settings.app.locale {

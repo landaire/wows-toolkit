@@ -102,7 +102,7 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<bool>(pool, "enable_logging").await {
         s.app.enable_logging = v;
     }
-    if let Some(v) = queries::get_setting::<Option<f32>>(pool, "zoom_factor").await {
+    if let Some(v) = queries::get_setting::<f32>(pool, "zoom_factor").await {
         s.app.zoom_factor = v;
     }
     if let Some(v) = queries::get_setting::<String>(pool, "collab_display_name").await {
