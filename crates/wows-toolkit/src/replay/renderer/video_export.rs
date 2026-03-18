@@ -300,7 +300,7 @@ pub(super) fn render_video_blocking(
     );
     target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
     let (cw, ch) = target.canvas_size();
-    let mut encoder = VideoEncoder::new(output_path, None, game_duration, cw, ch);
+    let mut encoder = VideoEncoder::new(output_path, None, false, game_duration, cw, ch);
     encoder.set_prefer_cpu(prefer_cpu);
     if let Some(duration) = actual_game_duration {
         encoder.set_battle_duration(GameClock(duration));

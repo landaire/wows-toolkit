@@ -53,9 +53,13 @@ struct Args {
     #[arg(short, long, required_unless_present_any = ["generate_config", "check_encoder"])]
     output: Option<PathBuf>,
 
-    /// Dump a single frame as PNG instead of rendering video (specify frame number or 'mid' for midpoint)
-    #[arg(long)]
+    /// Dump a single frame as PNG instead of rendering video (specify frame number, 'mid' for midpoint or 'last' for last frame)
+    #[arg(long, conflicts_with = "dump_frames")]
     dump_frame: Option<String>,
+
+    /// Dump all frames as PNGs instead of rendering video (output flag must specify directory where files will be placed)
+    #[arg(long, conflicts_with = "dump_frame")]
+    dump_frames: bool,
 
     /// Hide player names above ship icons
     #[arg(long)]
@@ -258,7 +262,7 @@ fn main() -> Result<(), Report> {
     }
 
     let (cw, ch) = target.canvas_size();
-    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, game_duration, cw, ch);
+    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, args.dump_frames, game_duration, cw, ch);
     if args.cpu {
         encoder.set_prefer_cpu(true);
     }
