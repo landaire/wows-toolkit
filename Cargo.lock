@@ -11067,7 +11067,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.63"
+version = "0.1.64"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -11218,7 +11218,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-egui"
-version = "0.1.63"
+version = "0.1.64"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -11231,7 +11231,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-protocol"
-version = "0.1.63"
+version = "0.1.64"
 dependencies = [
  "data-encoding",
  "egui",
@@ -11252,7 +11252,7 @@ dependencies = [
 
 [[package]]
 name = "wt-web"
-version = "0.1.63"
+version = "0.1.64"
 dependencies = [
  "eframe",
  "egui",
