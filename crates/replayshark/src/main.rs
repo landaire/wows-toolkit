@@ -118,6 +118,28 @@ enum Commands {
         #[command(subcommand)]
         command: QueryCommands,
     },
+    /// Benchmark replay parsing (for profiling)
+    Bench {
+        /// What to measure: meta-json / meta-json-ref (JSON deserialize only,
+        /// owned vs zero-copy, preloaded), meta-ref (zero-copy meta per file),
+        /// meta-file (owned meta per file), file
+        /// (ReplayFile::from_file: read + decrypt + inflate), full
+        /// (file + packet parse; requires game data)
+        #[arg(long, default_value = "file")]
+        mode: String,
+
+        /// Number of passes over the replay set
+        #[arg(long, default_value_t = 1)]
+        iterations: usize,
+
+        /// Max number of replay files to use
+        #[arg(long)]
+        limit: Option<usize>,
+
+        /// The replay files/directories to use
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
+    },
     /// Tools designed for reverse-engineering packets
     Investigate {
         /// Output the metadata as first line
@@ -763,6 +785,178 @@ fn survey_file(
     }
 }
 
+fn collect_replay_paths(replays: &[PathBuf], limit: Option<usize>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for replay_path in replays {
+        for entry in walkdir::WalkDir::new(replay_path).sort_by_file_name() {
+            let entry = entry.expect("Error unwrapping entry");
+            if !entry.path().is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|e| e.to_str()) != Some("wowsreplay") {
+                continue;
+            }
+            paths.push(entry.path().to_path_buf());
+            if let Some(limit) = limit
+                && paths.len() >= limit
+            {
+                return paths;
+            }
+        }
+    }
+    paths
+}
+
+fn run_bench(
+    mode: &str,
+    iterations: usize,
+    limit: Option<usize>,
+    replays: &[PathBuf],
+    game_dir: Option<&str>,
+    extracted_dir: Option<&str>,
+) {
+    let paths = collect_replay_paths(replays, limit);
+    println!("bench mode={} files={} iterations={}", mode, paths.len(), iterations);
+
+    let mut parsed = 0usize;
+    let mut failed = 0usize;
+    let mut bytes = 0usize;
+    // Checksum accumulator so parse results are observable and not optimized out.
+    let mut sink = 0usize;
+
+    let start = std::time::Instant::now();
+    match mode {
+        "meta-json" | "meta-json-ref" => {
+            let blobs: Vec<Vec<u8>> = paths.iter().filter_map(|p| ReplayFile::read_meta_blob(p).ok()).collect();
+            let preload_elapsed = start.elapsed();
+            println!("preloaded {} metadata blobs in {:?}", blobs.len(), preload_elapsed);
+            let zero_copy = mode == "meta-json-ref";
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                for blob in &blobs {
+                    let vehicles = if zero_copy {
+                        wows_replays::ReplayMetaRef::from_slice(blob).ok().map(|m| m.vehicles.len())
+                    } else {
+                        serde_json::from_slice::<wows_replays::ReplayMeta>(blob).ok().map(|m| m.vehicles.len())
+                    };
+                    match vehicles {
+                        Some(n) => {
+                            parsed += 1;
+                            bytes += blob.len();
+                            sink = sink.wrapping_add(n);
+                        }
+                        None => failed += 1,
+                    }
+                }
+            }
+            report_bench(parsed, failed, bytes, sink, start.elapsed());
+            return;
+        }
+        "meta-file" => {
+            for _ in 0..iterations {
+                for path in &paths {
+                    match ReplayFile::meta_from_file(path) {
+                        Ok(meta) => {
+                            parsed += 1;
+                            bytes += meta.playerName.len();
+                            sink = sink.wrapping_add(meta.vehicles.len());
+                        }
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+        }
+        "meta-ref" => {
+            for _ in 0..iterations {
+                for path in &paths {
+                    match ReplayFile::read_meta_blob(path) {
+                        Ok(blob) => match wows_replays::ReplayMetaRef::from_slice(&blob) {
+                            Ok(meta) => {
+                                parsed += 1;
+                                bytes += blob.len();
+                                sink = sink.wrapping_add(meta.vehicles.len());
+                            }
+                            Err(_) => failed += 1,
+                        },
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+        }
+        "file" => {
+            for _ in 0..iterations {
+                for path in &paths {
+                    match ReplayFile::from_file(path) {
+                        Ok(replay) => {
+                            parsed += 1;
+                            bytes += replay.packet_data.len();
+                            sink = sink.wrapping_add(replay.meta.vehicles.len());
+                        }
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+        }
+        "full" => {
+            let mut spec_cache: HashMap<Option<std::num::NonZero<u32>>, Option<Vec<EntitySpec>>> = HashMap::new();
+            for _ in 0..iterations {
+                for path in &paths {
+                    let Ok(replay) = ReplayFile::from_file(path) else {
+                        failed += 1;
+                        continue;
+                    };
+                    let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+                    let specs = spec_cache
+                        .entry(version.build)
+                        .or_insert_with(|| load_game_data(game_dir, extracted_dir, &version).ok());
+                    let Some(specs) = specs else {
+                        failed += 1;
+                        continue;
+                    };
+                    let specs_ref = &*specs;
+                    // The parser still has panic paths on malformed input;
+                    // treat those as failures, not aborts.
+                    let mut local_sink = 0usize;
+                    let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut parser = wows_replays::packet2::Parser::new(specs_ref);
+                        let mut remaining = &replay.packet_data[..];
+                        while !remaining.is_empty() {
+                            match parser.parse_packet(&mut remaining) {
+                                Ok(packet) => local_sink = local_sink.wrapping_add(packet.packet_size as usize),
+                                Err(_) => return false,
+                            }
+                        }
+                        true
+                    }))
+                    .unwrap_or(false);
+                    sink = sink.wrapping_add(local_sink);
+                    if ok {
+                        parsed += 1;
+                        bytes += replay.packet_data.len();
+                    } else {
+                        failed += 1;
+                    }
+                }
+            }
+        }
+        other => {
+            eprintln!("unknown bench mode: {}", other);
+            std::process::exit(1);
+        }
+    }
+    report_bench(parsed, failed, bytes, sink, start.elapsed());
+}
+
+fn report_bench(parsed: usize, failed: usize, bytes: usize, sink: usize, elapsed: std::time::Duration) {
+    let secs = elapsed.as_secs_f64();
+    let per_parse_us = if parsed > 0 { secs * 1e6 / parsed as f64 } else { 0.0 };
+    let mib_s = if secs > 0.0 { bytes as f64 / (1024.0 * 1024.0) / secs } else { 0.0 };
+    println!(
+        "parsed={} failed={} bytes={} elapsed={:?} per_parse={:.1}us throughput={:.1}MiB/s sink={}",
+        parsed, failed, bytes, elapsed, per_parse_us, mib_s, sink
+    );
+}
+
 /// Load a constants JSON file and merge it into a `GameConstants`, returning a
 /// `&'static` reference (leaked, since the CLI is short-lived).
 fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'static GameConstants {
@@ -1136,6 +1330,9 @@ fn main() {
                 }
             }
             survey_result.print();
+        }
+        Commands::Bench { mode, iterations, limit, replays } => {
+            run_bench(&mode, iterations, limit, &replays, game_dir, extracted);
         }
         Commands::Search { replays: replay_paths } => {
             let mut replays = vec![];
