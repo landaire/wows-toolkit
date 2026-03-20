@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.64] - 2026-03-20
+
+### 🚀 Features
+
+- *(minimap-renderer)* Added option to dump all frames
+- Allow test ships to be seen in armor viewer
+
+### 🐛 Bug Fixes
+
+- App defaults for updates/log files were incorrect
+- I think I FINALLY fixed settings not saving for some people
+- File > Check for Updates now does not respect the main app setting for checking for updates on startup
+
 ## [0.1.63] - 2026-03-17
 
 ### 🐛 Bug Fixes
@@ -35,15 +48,15 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
+- Constants fallback sometimes was unreliable, which might break constants data updates
 - Main app window position was not being restored on startup
 - Completely remove logic involving bundled constants data, except for using it as a fallback
 
-## [0.1.60] - 2026-03-14
+## [0.1.60] - 2026-03-13
 
 ### 🐛 Bug Fixes
 
 - Settings were not properly persisted on change
-- Constants fallback sometimes was unreliable, which might break constants data updates
 
 ### App
 
@@ -819,7 +832,6 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
-- *(replays)* Add base xp
 - *(replays)* Add checkbox to auto-load most recent replay
 - *(replays)* Colorize base XP and damage
 - Add new player tracker tab
@@ -827,18 +839,30 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
-- *(replays)* Fixed total damage numbers reflecting incorrect teams
 - *(replays)* Fix operation replays failing to load
 
 ### ⚙️ Miscellaneous Tasks
 
-- Update changelog
 - Update gui
 
 ### Replays
 
 - Adjust some table column sizes
 - Enable auto loading of latest replay by default
+
+## [0.1.22] - 2024-11-13
+
+### 🚀 Features
+
+- *(replays)* Add base xp
+
+### 🐛 Bug Fixes
+
+- *(replays)* Fixed total damage numbers reflecting incorrect teams
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog
 
 ## [0.1.21] - 2024-11-12
 
