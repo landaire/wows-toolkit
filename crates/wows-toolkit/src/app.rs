@@ -410,22 +410,19 @@ impl WowsToolkitApp {
         }
 
         if !had_saved_state {
-            let mut this: Self = Default::default();
             let detected = sys_locale::get_locale()
                 .and_then(|sys| wt_translations::system_locale_to_wows(&sys).map(String::from))
                 .unwrap_or_else(|| "en".into());
-            this.tab_state.persisted.write().settings.app.locale = Some(detected);
+            state.tab_state.persisted.write().settings.app.locale = Some(detected);
 
             let default_wows_dir = "C:\\Games\\World_of_Warships";
             let default_wows_path = Path::new(default_wows_dir);
             if default_wows_path.exists() {
-                this.tab_state.persisted.write().settings.game.wows_dir = default_wows_dir.to_string();
+                state.tab_state.persisted.write().settings.game.wows_dir = default_wows_dir.to_string();
 
-                let task = this.tab_state.load_game_data(default_wows_path.to_path_buf());
-                update_background_task!(this.tab_state.background_tasks, Some(task));
+                let task = state.tab_state.load_game_data(default_wows_path.to_path_buf());
+                update_background_task!(state.tab_state.background_tasks, Some(task));
             }
-
-            state = this;
         }
 
         // Restore zoom factor from persisted settings.

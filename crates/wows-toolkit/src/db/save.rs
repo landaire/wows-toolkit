@@ -101,5 +101,9 @@ fn capture_window_settings(egui_ctx: &egui::Context, ctx: &SaveContext) {
 
 /// Perform the actual save — writes all state to SQLite.
 async fn do_save(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
-    super::migrate_ron::save_state_to_db(pool, ctx).await
+    super::migrate_ron::save_state_to_db(pool, ctx).await?;
+    // Ensure the migration flag is set so the next launch knows to load from
+    // SQLite. This is a no-op after the first successful save (idempotent upsert).
+    super::set_migrated(pool).await?;
+    Ok(())
 }
