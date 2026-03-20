@@ -47,6 +47,12 @@ pub enum ParseError {
     )]
     ExposedMethodMappingDrift { method: String, method_id: u32, entity_type: u16, expected: usize, got: usize },
 
+    #[error("metadata length {meta_len} exceeds file size {file_len}")]
+    InvalidMetaLength { meta_len: u64, file_len: u64 },
+
+    #[error("battle results length {expected} does not match remaining packet data {remaining}")]
+    BattleResultsLengthMismatch { expected: u32, remaining: usize },
+
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 }

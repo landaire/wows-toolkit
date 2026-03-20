@@ -5,6 +5,8 @@
 
 pub mod analyzer;
 #[cfg(feature = "parsing")]
+mod blowfish;
+#[cfg(feature = "parsing")]
 mod error;
 #[cfg(feature = "parsing")]
 pub mod game_constants;

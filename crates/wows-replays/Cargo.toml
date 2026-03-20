@@ -14,9 +14,7 @@ flate2 = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true }
-blowfish = { version = "0.9", optional = true }
-cipher = { version = "0.4", optional = true }
-byteorder = { version = "1", optional = true }
+roxmltree = { workspace = true, optional = true }
 pickled = { workspace = true, optional = true }
 kinded = "0.5"
 tracing = { workspace = true }
@@ -30,6 +28,7 @@ serde = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+rust-crypto = "0.2.36"
 insta = { workspace = true }
 sha2 = { workspace = true }
 wows-data-mgr = { workspace = true }
@@ -40,9 +39,6 @@ default = ["arc", "parsing"]
 # Compiles for wasm32. Does not pull in the filesystem-backed VFS.
 parsing = [
     "dep:winnow",
-    "dep:blowfish",
-    "dep:cipher",
-    "dep:byteorder",
     "dep:pickled",
     "dep:modular-bitfield",
     "dep:bon",

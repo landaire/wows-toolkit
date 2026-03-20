@@ -871,7 +871,7 @@ impl<'argtype> Parser<'argtype> {
         // build's layout (packet-id mapping differs by version). Fail gracefully
         // rather than asserting so a single mis-mapped packet can't crash a batch.
         if len as usize != i.len() {
-            return Err(failure(ParseError::InvalidPacketData));
+            return Err(failure(ParseError::BattleResultsLengthMismatch { expected: len, remaining: i.len() }));
         }
         let battle_results: &'replay [u8] = take(len as usize).parse_next(i)?;
 

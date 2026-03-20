@@ -2,14 +2,10 @@ use crate::error::*;
 use crate::types::AccountId;
 use crate::types::GameParamId;
 use crate::types::PlayerId;
-use blowfish::Blowfish;
-use byteorder::BE;
-use cipher::BlockDecrypt;
-use cipher::KeyInit;
-use cipher::generic_array::GenericArray;
 use rootcause::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 use winnow::Parser;
@@ -69,6 +65,114 @@ pub struct ReplayMeta {
     pub battleDuration: Option<u32>,
 }
 
+/// Borrowed mirror of [`VehicleInfoMeta`] for zero-copy scanning.
+#[allow(non_snake_case)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct VehicleInfoMetaRef<'a> {
+    pub shipId: GameParamId,
+    pub relation: u32,
+    pub id: PlayerId,
+    #[serde(borrow)]
+    pub name: Cow<'a, str>,
+}
+
+/// Borrowed mirror of [`ReplayMeta`]. `Cow<str>` fields borrow from the raw
+/// JSON buffer (owned only when the JSON contains escapes), which makes it
+/// the cheap choice for bulk directory scans. Strings nested in collections
+/// or `Option` (`weatherParams`, `matchGroup`, `gameType`, `gameLogic`,
+/// `logic`) are always owned; serde's zero-copy support only reaches bare
+/// `Cow` fields.
+#[allow(non_snake_case)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplayMetaRef<'a> {
+    #[serde(default)]
+    pub matchGroup: Option<Cow<'a, str>>,
+    pub gameMode: u32,
+    #[serde(default)]
+    pub gameType: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub clientVersionFromExe: Cow<'a, str>,
+    #[serde(default)]
+    pub scenarioUiCategoryId: Option<u32>,
+    #[serde(borrow)]
+    pub mapDisplayName: Cow<'a, str>,
+    pub mapId: u32,
+    #[serde(borrow)]
+    pub clientVersionFromXml: Cow<'a, str>,
+    #[serde(default)]
+    pub weatherParams: Option<HashMap<String, Vec<String>>>,
+    pub duration: u32,
+    pub gameLogic: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub name: Cow<'a, str>,
+    #[serde(borrow)]
+    pub scenario: Cow<'a, str>,
+    pub playerID: AccountId,
+    #[serde(borrow)]
+    pub vehicles: Vec<VehicleInfoMetaRef<'a>>,
+    pub playersPerTeam: u32,
+    #[serde(borrow)]
+    pub dateTime: Cow<'a, str>,
+    #[serde(borrow)]
+    pub mapName: Cow<'a, str>,
+    #[serde(borrow)]
+    pub playerName: Cow<'a, str>,
+    pub scenarioConfigId: u32,
+    pub teamsCount: u32,
+    pub logic: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub playerVehicle: Cow<'a, str>,
+    #[serde(default)]
+    pub battleDuration: Option<u32>,
+}
+
+impl<'a> ReplayMetaRef<'a> {
+    /// Parses metadata from the raw JSON blob returned by
+    /// [`ReplayFile::read_meta_blob`], borrowing string fields from it.
+    pub fn from_slice(blob: &'a [u8]) -> Result<Self, ParseError> {
+        let raw = std::str::from_utf8(blob)?;
+        Ok(serde_json::from_str(raw)?)
+    }
+
+    pub fn into_owned(self) -> ReplayMeta {
+        ReplayMeta {
+            matchGroup: self.matchGroup.map(Cow::into_owned),
+            gameMode: self.gameMode,
+            gameType: self.gameType.map(Cow::into_owned),
+            clientVersionFromExe: self.clientVersionFromExe.into_owned(),
+            scenarioUiCategoryId: self.scenarioUiCategoryId,
+            mapDisplayName: self.mapDisplayName.into_owned(),
+            mapId: self.mapId,
+            clientVersionFromXml: self.clientVersionFromXml.into_owned(),
+            weatherParams: self.weatherParams,
+            duration: self.duration,
+            gameLogic: self.gameLogic.map(Cow::into_owned),
+            name: self.name.into_owned(),
+            scenario: self.scenario.into_owned(),
+            playerID: self.playerID,
+            vehicles: self
+                .vehicles
+                .into_iter()
+                .map(|v| VehicleInfoMeta {
+                    shipId: v.shipId,
+                    relation: v.relation,
+                    id: v.id,
+                    name: v.name.into_owned(),
+                })
+                .collect(),
+            playersPerTeam: self.playersPerTeam,
+            dateTime: self.dateTime.into_owned(),
+            mapName: self.mapName.into_owned(),
+            playerName: self.playerName.into_owned(),
+            scenarioConfigId: self.scenarioConfigId,
+            teamsCount: self.teamsCount,
+            logic: self.logic.map(Cow::into_owned),
+            playerVehicle: self.playerVehicle.into_owned(),
+            battleDuration: self.battleDuration,
+        }
+    }
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 struct Replay<'a> {
@@ -124,35 +228,77 @@ fn replay_format<'a>(i: &mut &'a [u8]) -> PResult<Replay<'a>> {
     Ok(Replay { meta, raw_meta, extra_data: blocks, decompressed_size, compressed_size })
 }
 
-/// Blowfish-CBC decrypt of a replay's trailing packet stream. A ragged
-/// trailing block is dropped: the loop walks whole 8-byte blocks only, which
-/// is what makes a file the game is still writing readable.
-fn decrypt_packet_stream(encrypted: &[u8]) -> Vec<u8> {
-    let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
-    let cipher = <Blowfish<BE>>::new_from_slice(&key).expect("16-byte key is valid for Blowfish");
+const BLOWFISH_BLOCK: usize = 8;
+const DECRYPT_LANES: usize = 8;
 
-    // CBC decrypt: each plaintext block is xored with the previous ciphertext
-    // block (the WoWs replay format uses an all-zero IV).
-    let mut decrypted = vec![0u8; encrypted.len()];
-    let mut previous = [0u8; 8];
-    for chunk_idx in 0..(encrypted.len() / 8) {
-        let off = chunk_idx * 8;
-        let mut block = GenericArray::clone_from_slice(&encrypted[off..off + 8]);
-        cipher.decrypt_block(&mut block);
-        for j in 0..8 {
-            decrypted[off + j] = block[j] ^ previous[j];
-        }
-        previous.copy_from_slice(&decrypted[off..off + 8]);
-    }
-    decrypted.truncate((encrypted.len() / 8) * 8);
-    decrypted
+pub(crate) fn replay_blowfish() -> &'static crate::blowfish::Blowfish {
+    static BLOWFISH: std::sync::OnceLock<crate::blowfish::Blowfish> = std::sync::OnceLock::new();
+    BLOWFISH.get_or_init(|| {
+        let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
+        crate::blowfish::Blowfish::new(&key)
+    })
 }
 
-/// Inflate as much of `deflated` as is intact. Any inflate error ends the
-/// prefix: a stream cut mid-symbol is reported as corrupt rather than as a
-/// clean EOF, so a partial write cannot be told apart from real damage. The
-/// caller retries either way.
-fn inflate_prefix(deflated: &[u8]) -> Vec<u8> {
+/// Streaming Blowfish decryptor for the replay packet stream (ECB plus a
+/// previous-plaintext XOR chain, an all-zero IV). Blocks are decrypted
+/// straight into the caller's buffer, so no full-size plaintext buffer ever
+/// exists. A ragged trailing sub-block is dropped: the loop walks whole
+/// 8-byte blocks only, which is what makes a file the game is still writing
+/// readable.
+struct BlowfishXorReader<'a> {
+    encrypted: &'a [u8],
+    previous: u64,
+    blowfish: &'static crate::blowfish::Blowfish,
+}
+
+impl<'a> BlowfishXorReader<'a> {
+    fn new(encrypted: &'a [u8]) -> Self {
+        Self { encrypted, previous: 0, blowfish: replay_blowfish() }
+    }
+}
+
+impl Read for BlowfishXorReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // A sub-block destination buffer would falsely signal EOF below;
+        // flate2's internal buffer is always much larger than one block.
+        debug_assert!(buf.len() >= BLOWFISH_BLOCK || self.encrypted.len() < BLOWFISH_BLOCK);
+        let block_count = (self.encrypted.len() / BLOWFISH_BLOCK).min(buf.len() / BLOWFISH_BLOCK);
+        if block_count == 0 {
+            return Ok(0);
+        }
+
+        let n = block_count * BLOWFISH_BLOCK;
+        let lane_bytes = DECRYPT_LANES * BLOWFISH_BLOCK;
+        let full = n - n % lane_bytes;
+        for (src, dst) in self.encrypted[..full].chunks_exact(lane_bytes).zip(buf[..full].chunks_exact_mut(lane_bytes))
+        {
+            self.blowfish.decrypt_lanes::<DECRYPT_LANES>(src, dst);
+        }
+        for (src, dst) in
+            self.encrypted[full..n].chunks_exact(BLOWFISH_BLOCK).zip(buf[full..n].chunks_exact_mut(BLOWFISH_BLOCK))
+        {
+            self.blowfish.decrypt_block(src.try_into().unwrap(), dst.try_into().unwrap());
+        }
+
+        // XOR chain over the decrypted blocks; cheap relative to the cipher.
+        let mut previous = self.previous;
+        for dst in buf[..n].chunks_exact_mut(BLOWFISH_BLOCK) {
+            let plain = u64::from_ne_bytes(dst.try_into().unwrap()) ^ previous;
+            dst.copy_from_slice(&plain.to_ne_bytes());
+            previous = plain;
+        }
+        self.previous = previous;
+
+        self.encrypted = &self.encrypted[n..];
+        Ok(n)
+    }
+}
+
+/// Inflate as much of the compressed stream as is intact. Any inflate error
+/// ends the prefix: a stream cut mid-symbol is reported as corrupt rather
+/// than as a clean EOF, so a partial write cannot be told apart from real
+/// damage. The caller retries either way.
+fn inflate_prefix(deflated: impl Read) -> Vec<u8> {
     let mut decoder = flate2::read::ZlibDecoder::new(deflated);
     let mut out = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
@@ -190,10 +336,13 @@ impl ReplayFile {
     pub fn from_bytes(bytes: &[u8]) -> rootcause::Result<ReplayFile, ParseError> {
         let mut input = bytes;
         let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
-        let decrypted = decrypt_packet_stream(input);
 
-        let mut deflater = flate2::read::ZlibDecoder::new(decrypted.as_slice());
-        let mut packet_data = vec![];
+        // Decrypt lazily inside the inflate loop; see BlowfishXorReader.
+        let mut deflater = flate2::read::ZlibDecoder::new(BlowfishXorReader::new(input));
+        // decompressed_size comes from the file; clamp the reservation so a
+        // corrupt header cannot force a huge allocation up front.
+        const MAX_PREALLOC: usize = 512 * 1024 * 1024;
+        let mut packet_data = Vec::with_capacity((result.decompressed_size as usize).min(MAX_PREALLOC));
         deflater.read_to_end(&mut packet_data).map_err(|e| report!(ParseError::from(e)))?;
 
         Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
@@ -222,8 +371,7 @@ impl ReplayFile {
     pub fn from_partial_bytes(bytes: &[u8]) -> rootcause::Result<ReplayFile, ParseError> {
         let mut input = bytes;
         let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
-        let decrypted = decrypt_packet_stream(input);
-        let packet_data = inflate_prefix(&decrypted);
+        let packet_data = inflate_prefix(BlowfishXorReader::new(input));
 
         Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
     }
@@ -257,31 +405,41 @@ impl ReplayFile {
         Ok(meta)
     }
 
-    /// Read [`ReplayFile::meta_from_bytes`] from a file on disk.
+    /// Reads only the wrapper header and raw JSON metadata blob off disk, not
+    /// the (potentially many megabytes of) packet stream that follows. Parse
+    /// the result with [`ReplayMetaRef::from_slice`] (zero-copy) or
+    /// [`ReplayFile::meta_from_file`] (owned).
+    pub fn read_meta_blob(replay: &std::path::Path) -> rootcause::Result<Vec<u8>, ParseError> {
+        let path_context = || format!("path: {}", replay.display());
+
+        let mut f = std::fs::File::open(replay).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        let file_len = f.metadata().map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?.len();
+
+        // Layout: magic (u32) | block_count (u32) | meta_len (u32) | meta bytes.
+        let mut header = [0u8; 12];
+        f.read_exact(&mut header).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        let meta_len = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as u64;
+        if meta_len > file_len.saturating_sub(12) {
+            return Err(report!(ParseError::InvalidMetaLength { meta_len, file_len })).attach_with(path_context);
+        }
+
+        let mut meta = vec![0u8; meta_len as usize];
+        f.read_exact(&mut meta).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        Ok(meta)
+    }
+
+    /// Read owned metadata from a file on disk via [`ReplayFile::read_meta_blob`].
     ///
     /// Only the file header and metadata block are read off disk, not the
     /// (potentially many megabytes of) packet stream that follows.
     pub fn meta_from_file(replay: &std::path::Path) -> rootcause::Result<ReplayMeta, ParseError> {
         let path_context = || format!("path: {}", replay.display());
 
-        let mut f = std::fs::File::options()
-            .read(true)
-            .open(replay)
-            .map_err(|e| report!(ParseError::from(e)))
-            .attach_with(path_context)?;
-
-        // Layout: magic (u32) | block_count (u32) | meta_len (u32) | meta bytes.
-        let mut header = [0u8; 12];
-        f.read_exact(&mut header).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
-        let meta_len = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-
-        let mut buffer = Vec::with_capacity(12 + meta_len);
-        buffer.extend_from_slice(&header);
-        let mut meta_bytes = vec![0u8; meta_len];
-        f.read_exact(&mut meta_bytes).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
-        buffer.extend_from_slice(&meta_bytes);
-
-        Self::meta_from_bytes(&buffer).attach_with(path_context)
+        let blob = Self::read_meta_blob(replay)?;
+        let raw = std::str::from_utf8(&blob).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        let meta: ReplayMeta =
+            serde_json::from_str(raw).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        Ok(meta)
     }
 }
 
@@ -305,7 +463,7 @@ mod tests {
         let full = encoder.finish().expect("finish stream");
         let truncated = &full[..full.len() - 8];
 
-        let complete = inflate_prefix(&full);
+        let complete = inflate_prefix(full.as_slice());
         let partial = inflate_prefix(truncated);
 
         assert_eq!(complete, payload);
