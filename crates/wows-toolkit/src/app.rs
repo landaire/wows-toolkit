@@ -146,6 +146,8 @@ pub struct WowsToolkitApp {
     #[serde(skip)]
     checked_for_updates: bool,
     #[serde(skip)]
+    manual_update_requested: bool,
+    #[serde(skip)]
     update_window_open: bool,
     #[serde(skip)]
     panic_window_open: bool,
@@ -225,6 +227,7 @@ impl Default for WowsToolkitApp {
     fn default() -> Self {
         Self {
             checked_for_updates: false,
+            manual_update_requested: false,
             update_window_open: false,
             panic_info: None,
             panic_window_open: false,
@@ -1707,7 +1710,10 @@ impl WowsToolkitApp {
 
         self.tab_state.process_session_stats_reset();
 
-        if !self.checked_for_updates && self.tab_state.persisted.read().settings.app.check_for_updates {
+        if self.manual_update_requested
+            || (!self.checked_for_updates && self.tab_state.persisted.read().settings.app.check_for_updates)
+        {
+            self.manual_update_requested = false;
             self.request_update_checks();
         }
 
@@ -2576,7 +2582,7 @@ impl eframe::App for WowsToolkitApp {
                 if !is_web {
                     ui.menu_button(t!("ui.menu.file"), |ui| {
                         if ui.button(t!("ui.menu.check_updates")).clicked() {
-                            self.checked_for_updates = false;
+                            self.manual_update_requested = true;
                             ui.close_kind(UiKind::Menu);
                         }
                         if ui.button(t!("ui.menu.about")).clicked() {
