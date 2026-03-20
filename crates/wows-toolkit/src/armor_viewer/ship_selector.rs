@@ -101,11 +101,11 @@ impl ShipCatalog {
                 None => continue,
             };
 
-            // Skip test/NDA ships, rentals, and disabled/unavailable ships.
-            let group = vehicle.group();
-            if group.starts_with("demo") || group == "clan" || group == "disabled" || group == "unavailable" {
+            // Skip clan rental ships (duplicates of real ships).
+            if vehicle.group() == "clan" {
                 continue;
             }
+
             let tier = vehicle.level();
             let nation = param.nation().to_string();
 
