@@ -1,0 +1,88 @@
+on:
+  release:
+    types: [created]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc -p wowsunpack
+          cargo build --release --target x86_64-pc-windows-msvc -p wows-data-mgr
+          cargo build --release --target x86_64-pc-windows-msvc -p replayshark
+          cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer --features cpu
+
+      - name: Collect artifacts
+        run: |
+          New-Item -ItemType Directory -Path ${{ github.workspace }}\artifacts
+          Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\*.exe `
+          -Destination ${{ github.workspace }}\artifacts\
+          Move-Item -Path ${{ github.workspace }}\game_versions.toml -Destination ${{ github.workspace }}\artifacts\
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows_artifacts
+          path: ${{ github.workspace }}\artifacts\*
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ./target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu -p wowsunpack
+          cargo build --release --target x86_64-unknown-linux-gnu -p wows-data-mgr
+          cargo build --release --target x86_64-unknown-linux-gnu -p replayshark
+          cargo build --release --target x86_64-unknown-linux-gnu -p wows_minimap_renderer --features cpu
+          mv -f ./target/x86_64-unknown-linux-gnu/release/minimap_renderer \
+          ./target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu
+          cargo build --release --target x86_64-unknown-linux-gnu -p wows_minimap_renderer
+
+      - name: Collect artifacts
+        run: |
+          mkdir ${{ github.workspace }}/artifacts
+          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wowsunpack ${{ github.workspace }}/artifacts/
+          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/replayshark ${{ github.workspace }}/artifacts/
+          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wows-data-mgr ${{ github.workspace }}/artifacts/
+          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu ${{ github.workspace }}/artifacts/
+          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer ${{ github.workspace }}/artifacts/
+          mv ${{ github.workspace }}/game_versions.toml ${{ github.workspace }}/artifacts/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux_artifacts
+          path: ${{ github.workspace }}/artifacts/*
