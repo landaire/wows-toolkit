@@ -1,7 +1,8 @@
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write, stdout};
 
 use bytes::Bytes;
+use image::codecs::png::PngEncoder;
 use rootcause::prelude::*;
 use tracing::error;
 use tracing::info;
@@ -62,7 +63,7 @@ pub fn check_encoder() -> crate::encoder::EncoderStatus {
 /// Linux/Windows), falls back to CPU (openh264) if the `cpu` feature is enabled
 /// and GPU is unavailable.
 pub struct VideoEncoder {
-    output_path: String,
+    output_path: Option<String>,
     dump_mode: Option<DumpMode>,
     dump_all_mode: bool,
     game_duration: f32,
@@ -93,7 +94,7 @@ impl VideoEncoder {
     /// Call `set_battle_duration()` with the true end time for accurate
     /// progress reporting.
     pub fn new(
-        output_path: &str,
+        output_path: Option<&str>,
         dump_mode: Option<DumpMode>,
         dump_all_mode: bool,
         match_time_limit: f32,
@@ -102,7 +103,10 @@ impl VideoEncoder {
     ) -> Self {
         let total_frames = (OUTPUT_DURATION * FPS) as usize;
         Self {
-            output_path: output_path.to_string(),
+            output_path: match output_path {
+                None => None,
+                Some(path) => Option::from(path.to_string()),
+            },
             dump_mode,
             dump_all_mode,
             game_duration: match_time_limit,
@@ -210,6 +214,8 @@ impl VideoEncoder {
         let frame_duration = self.game_duration / total_frames as f32;
         let target_frame = (new_clock.seconds() / frame_duration) as i64;
 
+        let mut writer = BufWriter::new(stdout().lock());
+
         while self.last_rendered_frame < target_frame {
             self.last_rendered_frame += 1;
 
@@ -227,11 +233,21 @@ impl VideoEncoder {
                 }
                 target.end_frame();
 
-                let png_path =
-                    format!("{}{}{}.png", self.output_path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
-                if let Err(e) = target.frame().save(&png_path) {
-                    error!(error = %e, "Failed to save frame");
-                    return;
+                match &self.output_path {
+                    None => {
+                        let encoder = PngEncoder::new(&mut writer);
+                        if let Err(e) = target.frame().write_with_encoder(encoder) {
+                            error!(error = %e, "Failed to write frame to stdout");
+                            return;
+                        }
+                    }
+                    Some(path) => {
+                        let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+                        if let Err(e) = target.frame().save(&png_path) {
+                            error!(error = %e, "Failed to save frame");
+                            return;
+                        }
+                    }
                 }
 
                 if let Some(ref cb) = self.progress_callback {
@@ -254,14 +270,24 @@ impl VideoEncoder {
                     }
                     target.end_frame();
 
-                    let png_path = self.output_path.replace(".mp4", ".png");
-                    let png_path =
-                        if png_path == self.output_path { format!("{}.png", self.output_path) } else { png_path };
-                    if let Err(e) = target.frame().save(&png_path) {
-                        error!(error = %e, "Failed to save frame");
-                    } else {
-                        let (w, h) = target.canvas_size();
-                        info!(frame = dump_frame, path = %png_path, width = w, height = h, "Frame saved");
+                    match &self.output_path {
+                        None => {
+                            let encoder = PngEncoder::new(&mut writer);
+                            if let Err(e) = target.frame().write_with_encoder(encoder) {
+                                error!(error = %e, "Failed to write frame to stdout");
+                                return;
+                            }
+                        }
+                        Some(path) => {
+                            let png_path = path.replace(".mp4", ".png");
+                            let png_path = if png_path == *path { format!("{}.png", path) } else { png_path };
+                            if let Err(e) = target.frame().save(&png_path) {
+                                error!(error = %e, "Failed to save frame");
+                            } else {
+                                let (w, h) = target.canvas_size();
+                                info!(frame = dump_frame, path = %png_path, width = w, height = h, "Frame saved");
+                            }
+                        }
                     }
                 }
             } else {
@@ -293,6 +319,8 @@ impl VideoEncoder {
                 }
             }
         }
+
+        writer.flush().expect("flushing output to stdout failed");
     }
 
     /// Finalize: flush any remaining frames and write the video file.
@@ -312,6 +340,8 @@ impl VideoEncoder {
 
         self.advance_clock(end_clock, controller, renderer, target);
 
+        let mut writer = BufWriter::new(stdout().lock());
+
         if self.dump_all_mode {
             // Dump the final frame (includes result overlay if winner is known)
             let commands = renderer.draw_frame(controller);
@@ -321,9 +351,19 @@ impl VideoEncoder {
             }
             target.end_frame();
 
-            let png_path = format!("{}{}{}.png", self.output_path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
-            if let Err(e) = target.frame().save(&png_path) {
-                error!(error = %e, "Failed to save frame");
+            match &self.output_path {
+                None => {
+                    let encoder = PngEncoder::new(&mut writer);
+                    if let Err(e) = target.frame().write_with_encoder(encoder) {
+                        error!(error = %e, "Failed to write frame to stdout");
+                    }
+                }
+                Some(path) => {
+                    let png_path = format!("{}{}{}.png", path, std::path::MAIN_SEPARATOR, self.last_rendered_frame);
+                    if let Err(e) = target.frame().save(&png_path) {
+                        error!(error = %e, "Failed to save frame");
+                    }
+                }
             }
 
             return Ok(());
@@ -339,18 +379,29 @@ impl VideoEncoder {
                 }
                 target.end_frame();
 
-                let png_path = self.output_path.replace(".mp4", ".png");
-                let png_path =
-                    if png_path == self.output_path { format!("{}.png", self.output_path) } else { png_path };
-                if let Err(e) = target.frame().save(&png_path) {
-                    error!(error = %e, "Failed to save frame");
-                } else {
-                    let (w, h) = target.canvas_size();
-                    info!(path = %png_path, width = w, height = h, "Result frame saved");
+                match &self.output_path {
+                    None => {
+                        let encoder = PngEncoder::new(&mut writer);
+                        if let Err(e) = target.frame().write_with_encoder(encoder) {
+                            error!(error = %e, "Failed to write frame to stdout");
+                        }
+                    }
+                    Some(path) => {
+                        let png_path = path.replace(".mp4", ".png");
+                        let png_path = if png_path == *path { format!("{}.png", path) } else { png_path };
+                        if let Err(e) = target.frame().save(&png_path) {
+                            error!(error = %e, "Failed to save frame");
+                        } else {
+                            let (w, h) = target.canvas_size();
+                            info!(path = %png_path, width = w, height = h, "Result frame saved");
+                        }
+                    }
                 }
             }
             return Ok(());
         }
+
+        writer.flush().expect("flushing output to stdout failed");
 
         // Mux the already-encoded H.264 frames into MP4
         self.mux_to_mp4()
@@ -390,7 +441,7 @@ impl VideoEncoder {
             timescale: 1000,
         };
 
-        let file = File::create(&self.output_path).context_transform(VideoError::Io)?;
+        let file = File::create(&self.output_path.as_ref().unwrap()).context_transform(VideoError::Io)?;
         let writer = BufWriter::new(file);
         let mut mp4_writer = mp4::Mp4Writer::write_start(writer, &mp4_config)
             .map_err(|e| report!(VideoError::MuxFailed(format!("{e:?}"))))?;
@@ -452,7 +503,7 @@ impl VideoEncoder {
         }
 
         mp4_writer.write_end().map_err(|e| report!(VideoError::MuxFailed(format!("{e:?}"))))?;
-        info!(path = %self.output_path, "Video saved");
+        info!(path = %self.output_path.as_ref().unwrap(), "Video saved");
         Ok(())
     }
 }

@@ -49,15 +49,15 @@ struct Args {
     #[arg(long, conflicts_with = "game_dir", required_unless_present_any = ["generate_config", "check_encoder", "game_dir"])]
     extracted_dir: Option<PathBuf>,
 
-    /// Output MP4 file path
-    #[arg(short, long, required_unless_present_any = ["generate_config", "check_encoder"])]
+    /// Output MP4 file path, for dumping may not be specified to dump to stdout instead
+    #[arg(short, long, required_unless_present_any = ["generate_config", "check_encoder", "dump_frame", "dump_frames"])]
     output: Option<PathBuf>,
 
     /// Dump a single frame as PNG instead of rendering video (specify frame number, 'mid' for midpoint or 'last' for last frame)
     #[arg(long, conflicts_with = "dump_frames")]
     dump_frame: Option<String>,
 
-    /// Dump all frames as PNGs instead of rendering video (output flag must specify directory where files will be placed)
+    /// Dump all frames as PNGs instead of rendering video
     #[arg(long, conflicts_with = "dump_frame")]
     dump_frames: bool,
 
@@ -149,7 +149,16 @@ fn main() -> Result<(), Report> {
         return Ok(());
     }
 
-    let output = args.output.as_ref().expect("output is required");
+    let output = match &args.output {
+        None => {
+            // Checking here so that video rendering can safely unwrap() later
+            if !args.dump_frames && args.dump_frame.is_none() {
+                panic!("output is required");
+            }
+            None
+        }
+        Some(path) => path.to_str(),
+    };
     let replay_path = args.replay.as_ref().expect("replay is required");
 
     let dump_mode = match args.dump_frame.as_deref() {
@@ -262,7 +271,7 @@ fn main() -> Result<(), Report> {
     }
 
     let (cw, ch) = target.canvas_size();
-    let mut encoder = VideoEncoder::new(output.to_str().unwrap(), dump_mode, args.dump_frames, game_duration, cw, ch);
+    let mut encoder = VideoEncoder::new(output, dump_mode, args.dump_frames, game_duration, cw, ch);
     if args.cpu {
         encoder.set_prefer_cpu(true);
     }
