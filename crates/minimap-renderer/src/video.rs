@@ -441,7 +441,7 @@ impl VideoEncoder {
             timescale: 1000,
         };
 
-        let file = File::create(&self.output_path.as_ref().unwrap()).context_transform(VideoError::Io)?;
+        let file = File::create(self.output_path.as_ref().unwrap()).context_transform(VideoError::Io)?;
         let writer = BufWriter::new(file);
         let mut mp4_writer = mp4::Mp4Writer::write_start(writer, &mp4_config)
             .map_err(|e| report!(VideoError::MuxFailed(format!("{e:?}"))))?;
