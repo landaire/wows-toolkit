@@ -153,7 +153,7 @@ fn main() -> Result<(), Report> {
         None => {
             // Checking here so that video rendering can safely unwrap() later
             if !args.dump_frames && args.dump_frame.is_none() {
-                panic!("output is required");
+                bail!("output is required");
             }
             None
         }
