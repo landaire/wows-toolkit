@@ -1,5 +1,7 @@
 use std::fs::File;
-use std::io::{BufWriter, Write, stdout};
+use std::io::BufWriter;
+use std::io::Write;
+use std::io::stdout;
 
 use bytes::Bytes;
 use image::codecs::png::PngEncoder;
@@ -103,10 +105,7 @@ impl VideoEncoder {
     ) -> Self {
         let total_frames = (OUTPUT_DURATION * FPS) as usize;
         Self {
-            output_path: match output_path {
-                None => None,
-                Some(path) => Option::from(path.to_string()),
-            },
+            output_path: output_path.map(String::from),
             dump_mode,
             dump_all_mode,
             game_duration: match_time_limit,
