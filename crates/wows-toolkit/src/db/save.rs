@@ -88,14 +88,16 @@ fn capture_window_settings(egui_ctx: &egui::Context, ctx: &SaveContext) {
     let viewports = ctx.active_viewports.lock().clone();
     let mut tracker = ctx.window_settings.lock();
 
+    let zoom = egui_ctx.zoom_factor();
+
     // Main viewport.
     let main_info = egui_ctx.input(|i| i.viewport().clone());
-    tracker.settings.insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info));
+    tracker.settings.insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info, zoom));
 
     // Secondary viewports.
     for &(kind, viewport_id) in &viewports {
         let info = egui_ctx.input_for(viewport_id, |i| i.viewport().clone());
-        tracker.settings.insert(kind, WindowSettings::from_viewport_info(&info));
+        tracker.settings.insert(kind, WindowSettings::from_viewport_info(&info, zoom));
     }
 }
 

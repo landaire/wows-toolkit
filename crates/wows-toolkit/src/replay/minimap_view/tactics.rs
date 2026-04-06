@@ -902,7 +902,7 @@ impl TacticsBoardViewer {
                     let info = ctx.input(|i| i.viewport().clone());
                     window_settings.lock().settings.insert(
                         crate::tab_state::WindowKind::TacticsBoard,
-                        crate::tab_state::WindowSettings::from_viewport_info(&info),
+                        crate::tab_state::WindowSettings::from_viewport_info(&info, ctx.zoom_factor()),
                     );
                     save_notify.notify_one();
                 }

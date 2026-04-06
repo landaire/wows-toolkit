@@ -1209,7 +1209,7 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
                 let info = ctx.input(|i| i.viewport().clone());
                 window_settings.lock().settings.insert(
                     crate::tab_state::WindowKind::ArmorViewer,
-                    crate::tab_state::WindowSettings::from_viewport_info(&info),
+                    crate::tab_state::WindowSettings::from_viewport_info(&info, ctx.zoom_factor()),
                 );
                 save_notify.notify_one();
             }

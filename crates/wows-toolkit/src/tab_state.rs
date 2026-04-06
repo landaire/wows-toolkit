@@ -76,9 +76,13 @@ pub struct WindowSettings {
 
 impl WindowSettings {
     /// Capture current viewport state from [`egui::ViewportInfo`].
-    pub fn from_viewport_info(info: &egui::ViewportInfo) -> Self {
+    ///
+    /// `zoom_factor` must be the current `ctx.zoom_factor()` — the stored size
+    /// is scaled back to zoom=1.0 logical points so that `with_inner_size`
+    /// doesn't double-apply the zoom on the next launch.
+    pub fn from_viewport_info(info: &egui::ViewportInfo, zoom_factor: f32) -> Self {
         Self {
-            inner_size_points: info.inner_rect.map(|r| [r.width(), r.height()]),
+            inner_size_points: info.inner_rect.map(|r| [r.width() * zoom_factor, r.height() * zoom_factor]),
             outer_position_pixels: info.outer_rect.map(|r| [r.left(), r.top()]),
             fullscreen: info.fullscreen.unwrap_or(false),
             maximized: info.maximized.unwrap_or(false),
