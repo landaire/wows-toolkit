@@ -24,6 +24,7 @@ const REQUIRED_VFS_DIRS: &[&str] = &[
     "gui/powerups/drops",
     "gui/fonts",
     "gui/data/constants",
+    "gui/ships_silhouettes",
     "scripts/entity_defs",
 ];
 
