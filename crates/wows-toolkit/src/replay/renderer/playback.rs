@@ -823,18 +823,7 @@ pub(super) fn playback_thread(
         // (armament/trail toggling requires backend to re-emit draw commands)
         if !playing {
             let new_opts = shared_state.lock().options.clone();
-            if live_renderer.options.show_armament != new_opts.show_armament
-                || live_renderer.options.show_trails != new_opts.show_trails
-                || live_renderer.options.show_dead_trails != new_opts.show_dead_trails
-                || live_renderer.options.show_speed_trails != new_opts.show_speed_trails
-                || live_renderer.options.show_player_names != new_opts.show_player_names
-                || live_renderer.options.show_ship_names != new_opts.show_ship_names
-                || live_renderer.options.show_ship_config != new_opts.show_ship_config
-                || live_renderer.options.show_chat != new_opts.show_chat
-                || live_renderer.options.show_advantage != new_opts.show_advantage
-                || live_renderer.options.show_score_timer != new_opts.show_score_timer
-                || live_renderer.options.show_stats_panel != new_opts.show_stats_panel
-            {
+            if live_renderer.options != new_opts {
                 live_renderer.options = new_opts;
                 let commands = live_renderer.draw_frame(&live_controller);
                 let clock =

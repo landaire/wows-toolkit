@@ -4,7 +4,7 @@ use serde::Serialize;
 use crate::draw_command::ShipConfigVisibility;
 
 /// Configurable rendering options.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RenderOptions {
     pub show_hp_bars: bool,
     pub show_tracers: bool,

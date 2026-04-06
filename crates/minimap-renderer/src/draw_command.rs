@@ -151,6 +151,12 @@ pub enum ShipConfigVisibility {
     Filtered(Arc<dyn Fn(EntityId) -> Option<ShipConfigFilter> + Send + Sync>),
 }
 
+impl PartialEq for ShipConfigVisibility {
+    fn eq(&self, other: &Self) -> bool {
+        matches!((self, other), (Self::SelfOnly, Self::SelfOnly) | (Self::Filtered(_), Self::Filtered(_)))
+    }
+}
+
 impl ShipConfigVisibility {
     /// Returns the filter for a ship, or None if circles should be hidden.
     pub fn filter_for(&self, is_self: bool, entity_id: EntityId) -> Option<ShipConfigFilter> {

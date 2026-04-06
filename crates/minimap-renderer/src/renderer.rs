@@ -1943,89 +1943,95 @@ impl<'a> MinimapRenderer<'a> {
             let ribbon_count = ribbons.len();
             commands.push(DrawCommand::StatsRibbons { x: panel_x, y: ribbon_y, width: panel_w, ribbons });
 
-            // Activity feed: merge kills + chat sorted by game clock
+            // Activity feed: merge kills + chat sorted by game clock,
+            // respecting the user's individual toggle preferences.
             let mut activity_entries: Vec<ActivityFeedEntry> = Vec::new();
-            for kill in controller.kills() {
-                if !self.player_names.contains_key(&kill.victim) {
-                    continue;
+            if self.options.show_kill_feed {
+                for kill in controller.kills() {
+                    if !self.player_names.contains_key(&kill.victim) {
+                        continue;
+                    }
+                    let killer_name =
+                        self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
+                    let victim_name =
+                        self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
+                    let killer_relation = self.player_relations.get(&kill.killer).copied().unwrap_or(Relation::new(2));
+                    let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
+                    activity_entries.push(ActivityFeedEntry {
+                        clock: kill.clock,
+                        kind: ActivityFeedKind::Kill(KillFeedEntry {
+                            killer_name,
+                            killer_species: self.player_species.get(&kill.killer).cloned(),
+                            killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
+                            killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
+                            killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
+                            victim_name,
+                            victim_species: self.player_species.get(&kill.victim).cloned(),
+                            victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
+                            victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
+                            victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
+                            cause: kill.cause.clone(),
+                        }),
+                    });
                 }
-                let killer_name =
-                    self.player_names.get(&kill.killer).cloned().unwrap_or_else(|| format!("#{}", kill.killer));
-                let victim_name =
-                    self.player_names.get(&kill.victim).cloned().unwrap_or_else(|| format!("#{}", kill.victim));
-                let killer_relation = self.player_relations.get(&kill.killer).copied().unwrap_or(Relation::new(2));
-                let victim_relation = self.player_relations.get(&kill.victim).copied().unwrap_or(Relation::new(2));
-                activity_entries.push(ActivityFeedEntry {
-                    clock: kill.clock,
-                    kind: ActivityFeedKind::Kill(KillFeedEntry {
-                        killer_name,
-                        killer_species: self.player_species.get(&kill.killer).cloned(),
-                        killer_ship_name: self.ship_display_names.get(&kill.killer).cloned(),
-                        killer_color: ship_color_rgb(killer_relation, self.division_mates.contains(&kill.killer)),
-                        killer_is_friendly: killer_relation.is_self() || killer_relation.is_ally(),
-                        victim_name,
-                        victim_species: self.player_species.get(&kill.victim).cloned(),
-                        victim_ship_name: self.ship_display_names.get(&kill.victim).cloned(),
-                        victim_color: ship_color_rgb(victim_relation, self.division_mates.contains(&kill.victim)),
-                        victim_is_friendly: victim_relation.is_self() || victim_relation.is_ally(),
-                        cause: kill.cause.clone(),
-                    }),
-                });
             }
             // Add chat messages
-            for msg in controller.game_chat() {
-                if msg.clock > clock {
-                    continue;
-                }
-                let sender_entity = msg.player.as_ref().map(|p| p.initial_state().entity_id());
-                let is_div_mate = sender_entity.map(|eid| self.division_mates.contains(&eid)).unwrap_or(false);
-                let team_color = msg.sender_relation.map(|r| ship_color_rgb(r, is_div_mate)).unwrap_or([255, 255, 255]);
-                let (clan_tag, clan_color, ship_species, ship_name) = if let Some(ref player) = msg.player {
-                    let state = player.initial_state();
-                    let tag = state.clan().to_string();
-                    let color_raw = state.clan_color();
-                    let color = if color_raw != 0 {
-                        Some([
-                            ((color_raw & 0xFF0000) >> 16) as u8,
-                            ((color_raw & 0xFF00) >> 8) as u8,
-                            (color_raw & 0xFF) as u8,
-                        ])
+            if self.options.show_chat {
+                for msg in controller.game_chat() {
+                    if msg.clock > clock {
+                        continue;
+                    }
+                    let sender_entity = msg.player.as_ref().map(|p| p.initial_state().entity_id());
+                    let is_div_mate = sender_entity.map(|eid| self.division_mates.contains(&eid)).unwrap_or(false);
+                    let team_color =
+                        msg.sender_relation.map(|r| ship_color_rgb(r, is_div_mate)).unwrap_or([255, 255, 255]);
+                    let (clan_tag, clan_color, ship_species, ship_name) = if let Some(ref player) = msg.player {
+                        let state = player.initial_state();
+                        let tag = state.clan().to_string();
+                        let color_raw = state.clan_color();
+                        let color = if color_raw != 0 {
+                            Some([
+                                ((color_raw & 0xFF0000) >> 16) as u8,
+                                ((color_raw & 0xFF00) >> 8) as u8,
+                                (color_raw & 0xFF) as u8,
+                            ])
+                        } else {
+                            None
+                        };
+                        let species = player.vehicle().species().and_then(species_key);
+                        let name = self.game_params.localized_name_from_param(player.vehicle());
+                        (tag, color, species, name)
                     } else {
-                        None
+                        (String::new(), None, None, None)
                     };
-                    let species = player.vehicle().species().and_then(species_key);
-                    let name = self.game_params.localized_name_from_param(player.vehicle());
-                    (tag, color, species, name)
-                } else {
-                    (String::new(), None, None, None)
-                };
-                let message_color = match msg.channel {
-                    ChatChannel::Division => [255, 215, 0],
-                    ChatChannel::Team => [140, 255, 140],
-                    ChatChannel::Global => [255, 255, 255],
-                    _ => [200, 200, 200],
-                };
-                let font_hint = self
-                    .fonts
-                    .as_ref()
-                    .and_then(|f| f.font_hint_for_text(&msg.message))
-                    .map(FontHint::Fallback)
-                    .unwrap_or(FontHint::Primary);
-                activity_entries.push(ActivityFeedEntry {
-                    clock: msg.clock,
-                    kind: ActivityFeedKind::Chat(ChatEntry {
-                        clan_tag,
-                        clan_color,
-                        player_name: msg.sender_name.clone(),
-                        team_color,
-                        ship_species,
-                        ship_name,
-                        message: msg.message.clone(),
-                        message_color,
-                        opacity: 1.0,
-                        font_hint,
-                    }),
-                });
+                    let message_color = match msg.channel {
+                        ChatChannel::Division => [255, 215, 0],
+                        ChatChannel::Team => [140, 255, 140],
+                        ChatChannel::Global => [255, 255, 255],
+                        _ => [200, 200, 200],
+                    };
+                    let font_hint = self
+                        .fonts
+                        .as_ref()
+                        .and_then(|f| f.font_hint_for_text(&msg.message))
+                        .map(FontHint::Fallback)
+                        .unwrap_or(FontHint::Primary);
+                    activity_entries.push(ActivityFeedEntry {
+                        clock: msg.clock,
+                        kind: ActivityFeedKind::Chat(ChatEntry {
+                            clan_tag,
+                            clan_color,
+                            player_name: msg.sender_name.clone(),
+                            team_color,
+                            ship_species,
+                            ship_name,
+                            message: msg.message.clone(),
+                            message_color,
+                            opacity: 1.0,
+                            font_hint,
+                        }),
+                    });
+                }
             }
             // Sort merged entries by game clock
             activity_entries.sort_by(|a, b| a.clock.cmp(&b.clock));
