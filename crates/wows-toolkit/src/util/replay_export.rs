@@ -39,7 +39,9 @@ impl Match {
             game_type: battle_report.game_type().to_string(),
             match_group: battle_report.match_group().to_string(),
             version: battle_report.version(),
-            duration: replay.replay_file.meta.duration,
+            max_duration: battle_report.max_duration(),
+            played_duration: battle_report.played_duration(),
+            extra_duration: battle_report.extra_duration(),
             timestamp: ui_report.match_timestamp(),
             battle_result: battle_report.battle_result().cloned(),
         };
@@ -87,7 +89,9 @@ pub struct Metadata {
     game_type: String,
     match_group: String,
     version: Version,
-    duration: u32,
+    max_duration: u32,
+    played_duration: Option<f32>,
+    extra_duration: Option<f32>,
     timestamp: Timestamp,
     battle_result: Option<BattleResult>,
 }

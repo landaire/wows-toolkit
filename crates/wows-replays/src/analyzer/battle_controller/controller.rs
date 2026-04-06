@@ -441,6 +441,12 @@ pub struct BattleReport {
     local_weather_zones: Vec<LocalWeatherZone>,
     battle_start_clock: Option<GameClock>,
     self_damage_stats: Vec<DamageStatEntry>,
+    /// Maximum match duration from replay metadata (time limit), in seconds.
+    max_duration: u32,
+    /// Actual played duration of the battle phase (battle start to battle end), in seconds.
+    played_duration: Option<f32>,
+    /// Time between battle end and last recorded packet, in seconds.
+    extra_duration: Option<f32>,
 }
 
 impl BattleReport {
@@ -518,6 +524,18 @@ impl BattleReport {
         &self.buildings
     }
 
+    pub fn max_duration(&self) -> u32 {
+        self.max_duration
+    }
+
+    pub fn played_duration(&self) -> Option<f32> {
+        self.played_duration
+    }
+
+    pub fn extra_duration(&self) -> Option<f32> {
+        self.extra_duration
+    }
+
     pub fn finish_type(&self) -> Option<&Recognized<FinishType>> {
         self.finish_type.as_ref()
     }
@@ -563,6 +581,8 @@ pub struct BattleController<'res, 'replay, G> {
     battle_results: Option<String>,
     match_finished: bool,
     battle_end_clock: Option<GameClock>,
+    /// Clock when `battleResult` property was set on BattleLogic (regulation time ended).
+    battle_result_clock: Option<GameClock>,
     winning_team: Option<i8>,
     finish_type: Option<Recognized<FinishType>>,
     arena_id: i64,
@@ -677,6 +697,7 @@ where
             battle_results: Default::default(),
             match_finished: false,
             battle_end_clock: None,
+            battle_result_clock: None,
             winning_team: None,
             finish_type: None,
             arena_id: 0,
@@ -977,6 +998,20 @@ where
         let buildings: Vec<BuildingEntity> =
             self.entities_by_id.values().filter_map(|e| e.building_ref().map(|b| RefCell::borrow(b).clone())).collect();
 
+        // The match result clock (battleResult property) marks regulation end.
+        // Fall back to BattleEnd packet clock if battleResult wasn't observed.
+        let match_end = self.battle_result_clock.or(self.battle_end_clock);
+
+        let played_duration = match (self.battle_start_clock, match_end) {
+            (Some(start), Some(end)) => Some(end.seconds() - start.seconds()),
+            _ => None,
+        };
+
+        let extra_duration = match (match_end, self.battle_end_clock) {
+            (Some(result), Some(end)) if end.seconds() > result.seconds() => Some(end.seconds() - result.seconds()),
+            _ => None,
+        };
+
         BattleReport {
             arena_id: self.arena_id,
             match_result: if self.match_finished {
@@ -1011,6 +1046,9 @@ where
             local_weather_zones: self.local_weather_zones,
             battle_start_clock: self.battle_start_clock,
             self_damage_stats: self.self_damage_stats.into_values().collect(),
+            max_duration: self.game_meta.duration,
+            played_duration,
+            extra_duration,
         }
     }
 
@@ -2595,7 +2633,9 @@ where
         let span = span!(Level::TRACE, "packet processing");
         let _enter = span.enter();
 
-        self.current_clock = packet.clock;
+        if packet.clock.seconds() > 0.0 || self.current_clock.seconds() == 0.0 {
+            self.current_clock = packet.clock;
+        }
         if self.track_shots {
             self.shot_hits.clear();
         }
@@ -2742,6 +2782,9 @@ where
                         && winner >= -1
                     {
                         self.winning_team = Some(winner as i8);
+                        if self.battle_result_clock.is_none() {
+                            self.battle_result_clock = Some(packet.clock);
+                        }
                     }
                     if let Some(reason) = dict.get("finishReason").and_then(|v| v.as_i64())
                         && reason > 0
