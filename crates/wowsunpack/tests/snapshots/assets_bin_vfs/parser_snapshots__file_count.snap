@@ -1,5 +1,0 @@
----
-source: crates/wowsunpack/tests/parser_snapshots.rs
-expression: abvfs.file_count()
----
-122545

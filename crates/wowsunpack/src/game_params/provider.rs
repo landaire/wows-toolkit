@@ -10,7 +10,27 @@ use itertools::Itertools;
 
 use pickled::HashableValue;
 use pickled::Value;
+use pickled::object::DictObject;
+use pickled::value::Shared;
 use tracing::debug;
+
+/// Extension trait that provides dict extraction for both `Value::Dict` and `Value::Object`.
+trait ValueDictExt {
+    fn dict_or_object_dict(&self) -> Option<Shared<BTreeMap<HashableValue, Value>>>;
+}
+
+impl ValueDictExt for Value {
+    fn dict_or_object_dict(&self) -> Option<Shared<BTreeMap<HashableValue, Value>>> {
+        match self {
+            Value::Dict(d) => Some(d.clone()),
+            Value::Object(o) => {
+                let dict_obj = o.as_any().downcast_ref::<DictObject>()?;
+                Some(Shared::new(dict_obj.state().clone()))
+            }
+            _ => None,
+        }
+    }
+}
 
 use crate::Rc;
 use crate::data::DataFileWithCallback;
@@ -155,7 +175,11 @@ macro_rules! game_param_to_type {
             })
     };
     ($params:ident, $key:expr, HashMap<(), ()>) => {
-        game_param_to_type!($params, $key, dict_ref, HashMap<(), ()>)
+        $params
+            .get(&HashableValue::String($key.to_string().into()))
+            .unwrap_or_else(|| panic!("could not get {}", $key))
+            .dict_or_object_dict()
+            .unwrap_or_else(|| panic!("{} is not a {}", $key, stringify!(HashMap<(), ()>)))
     };
     ($params:ident, $key:expr, &[()]) => {
         game_param_to_type!($params, $key, list_ref, &[()])
@@ -201,7 +225,7 @@ fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<Crew
                     .submarine(common_value)
                     .name(modifier_name.to_owned())
                     .build()
-            } else if let Some(modifier_data) = modifier_data.dict_ref() {
+            } else if let Some(modifier_data) = modifier_data.dict_or_object_dict() {
                 let modifier_data = modifier_data.inner();
 
                 // Skip dicts that aren't per-species modifier dicts
@@ -245,7 +269,7 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                 return None;
             }
 
-            let skill_data = skill_data.dict_ref().expect("skill data is not dictionary");
+            let skill_data = skill_data.dict_or_object_dict().expect("skill data is not dictionary");
             let skill_data = skill_data.inner();
 
             let logic_modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
@@ -401,31 +425,33 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
     };
 
     // Extract detection radius fields from "logic" sub-object
-    let logic = category_data
-        .get(&HashableValue::String("logic".to_owned().into()))
-        .and_then(|v| v.dict_ref())
-        .map(|d| d.inner());
+    let logic =
+        category_data.get(&HashableValue::String("logic".to_owned().into())).and_then(|v| v.dict_or_object_dict());
 
     let dist_ship = logic.as_ref().and_then(|l| {
-        l.get(&HashableValue::String("distShip".to_owned().into()))
+        l.inner()
+            .get(&HashableValue::String("distShip".to_owned().into()))
             .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
             .map(BigWorldDistance::from)
     });
 
     let dist_torpedo = logic.as_ref().and_then(|l| {
-        l.get(&HashableValue::String("distTorpedo".to_owned().into()))
+        l.inner()
+            .get(&HashableValue::String("distTorpedo".to_owned().into()))
             .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
             .map(BigWorldDistance::from)
     });
 
     let hydrophone_wave_radius = logic.as_ref().and_then(|l| {
-        l.get(&HashableValue::String("hydrophoneWaveRadius".to_owned().into()))
+        l.inner()
+            .get(&HashableValue::String("hydrophoneWaveRadius".to_owned().into()))
             .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
             .map(Meters::from)
     });
 
     let patrol_radius = logic.as_ref().and_then(|l| {
-        l.get(&HashableValue::String("radius".to_owned().into()))
+        l.inner()
+            .get(&HashableValue::String("radius".to_owned().into()))
             .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
             .map(BigWorldDistance::from)
     });
@@ -456,7 +482,8 @@ fn build_ability(ability_data: &BTreeMap<HashableValue, Value>) -> Ability {
                 return None;
             }
 
-            let value = value.dict_ref().unwrap().inner();
+            let value = value.dict_or_object_dict().unwrap();
+            let value = value.inner();
             if value.contains_key(&test_key) {
                 Some((key.string_ref().unwrap().inner().to_owned(), build_ability_category(&value)))
             } else {
@@ -564,7 +591,7 @@ fn parse_armor_dict(dict: &BTreeMap<HashableValue, Value>) -> ArmorMap {
 
 /// Extract mount points (HP_* entries with model paths) from a component dict.
 fn extract_mounts(ship_data: &BTreeMap<HashableValue, Value>, component_name: &str) -> Vec<MountPoint> {
-    let Some(comp_data) = ship_data.get(&pk(component_name)).and_then(|v| v.dict_ref()) else {
+    let Some(comp_data) = ship_data.get(&pk(component_name)).and_then(|v| v.dict_or_object_dict()) else {
         return Vec::new();
     };
 
@@ -576,18 +603,20 @@ fn extract_mounts(ship_data: &BTreeMap<HashableValue, Value>, component_name: &s
             if !key_str.starts_with(keys::HP_PREFIX) {
                 return None;
             }
-            let mount_dict = v.dict_ref()?;
+            let mount_dict = v.dict_or_object_dict()?;
             let mount_inner = mount_dict.inner();
             let model_path = read_string(&mount_inner, keys::MODEL)?;
 
             // Extract per-mount armor map (turret shell thickness).
-            let mount_armor: Option<ArmorMap> =
-                mount_inner.get(&pk(keys::ARMOR)).and_then(|v| v.dict_ref()).map(|d| parse_armor_dict(&d.inner()));
+            let mount_armor: Option<ArmorMap> = mount_inner
+                .get(&pk(keys::ARMOR))
+                .and_then(|v| v.dict_or_object_dict())
+                .map(|d| parse_armor_dict(&d.inner()));
 
             // Extract mount species from typeinfo.species.
             let species = mount_inner
                 .get(&pk("typeinfo"))
-                .and_then(|v| v.dict_ref())
+                .and_then(|v| v.dict_or_object_dict())
                 .and_then(|d| read_string(&d.inner(), "species"))
                 .and_then(|s| MountSpecies::from_gp_str(&s));
 
@@ -611,7 +640,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
                     return None;
                 }
 
-                let slot_data = slot_data.dict_ref().expect("slot data is not a dictionary");
+                let slot_data = slot_data.dict_or_object_dict().expect("slot data is not a dictionary");
                 let slot_data = slot_data.inner();
 
                 let slot = game_param_to_type!(slot_data, "slot", usize);
@@ -660,7 +689,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         let Some(upgrade_name) = upgrade_name_val.string_ref().map(|s| s.inner().clone()) else {
             continue;
         };
-        let Some(upgrade_dict) = upgrade_value.dict_ref() else {
+        let Some(upgrade_dict) = upgrade_value.dict_or_object_dict() else {
             continue;
         };
         let upgrade_dict = upgrade_dict.inner();
@@ -675,7 +704,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             continue;
         }
 
-        let Some(components) = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_ref()) else {
+        let Some(components) = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_or_object_dict()) else {
             continue;
         };
         let components = components.inner();
@@ -698,7 +727,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
 
         // Read hull detection data and hull model path.
         if let Some(hull_comp) = config.component_names.get(&keys::ComponentType::Hull)
-            && let Some(hull_data) = ship_data.get(&pk(hull_comp)).and_then(|v| v.dict_ref())
+            && let Some(hull_data) = ship_data.get(&pk(hull_comp)).and_then(|v| v.dict_or_object_dict())
         {
             let hull_data = hull_data.inner();
             config.detection_km = Km::from(read_float(&hull_data, keys::VISIBILITY_FACTOR).unwrap_or(0.0));
@@ -743,7 +772,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     let mut max_secondary_battery_m: Option<Meters> = None;
 
     for (_upgrade_name_val, upgrade_value) in upgrade_data.inner().iter() {
-        let Some(upgrade_dict) = upgrade_value.dict_ref() else {
+        let Some(upgrade_dict) = upgrade_value.dict_or_object_dict() else {
             continue;
         };
         let upgrade_dict = upgrade_dict.inner();
@@ -753,7 +782,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             continue;
         };
 
-        let components = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_ref());
+        let components = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_or_object_dict());
         let Some(components) = components else {
             continue;
         };
@@ -761,7 +790,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         // Collect main battery maxDist from _Hull and _Artillery upgrades
         if (uc_type == keys::UC_TYPE_HULL || uc_type == keys::UC_TYPE_ARTILLERY)
             && let Some(art_comp) = components.inner().get(&pk(keys::COMP_ARTILLERY)).and_then(read_first_string)
-            && let Some(art_data) = ship_data.get(&pk(&art_comp)).and_then(|v| v.dict_ref())
+            && let Some(art_data) = ship_data.get(&pk(&art_comp)).and_then(|v| v.dict_or_object_dict())
         {
             if let Some(m) = read_float(&art_data.inner(), keys::MAX_DIST).map(Meters::from) {
                 max_main_battery_m = Some(match max_main_battery_m {
@@ -771,7 +800,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             }
             // Collect main battery ammo from all mounts in the artillery component
             for (_mount_key, mount_val) in art_data.inner().iter() {
-                let Some(mount_dict) = mount_val.dict_ref() else {
+                let Some(mount_dict) = mount_val.dict_or_object_dict() else {
                     continue;
                 };
                 let mount_inner = mount_dict.inner();
@@ -794,7 +823,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         // Collect secondary battery maxDist from _Hull upgrades
         if uc_type == keys::UC_TYPE_HULL
             && let Some(atba_comp) = components.inner().get(&pk(keys::COMP_ATBA)).and_then(read_first_string)
-            && let Some(atba_data) = ship_data.get(&pk(&atba_comp)).and_then(|v| v.dict_ref())
+            && let Some(atba_data) = ship_data.get(&pk(&atba_comp)).and_then(|v| v.dict_or_object_dict())
             && let Some(m) = read_float(&atba_data.inner(), keys::MAX_DIST).map(Meters::from)
         {
             max_secondary_battery_m = Some(match max_secondary_battery_m {
@@ -807,7 +836,7 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
         if uc_type != keys::UC_TYPE_TORPEDOES {
             continue;
         }
-        let Some(components) = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_ref()) else {
+        let Some(components) = upgrade_dict.get(&pk(keys::COMPONENTS)).and_then(|v| v.dict_or_object_dict()) else {
             continue;
         };
         // Get the torpedo component name(s) from this upgrade
@@ -815,11 +844,11 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             continue;
         };
         // Look up that component in the ship data and extract ammo from launchers
-        let Some(torp_data) = ship_data.get(&pk(&torp_comp)).and_then(|v| v.dict_ref()) else {
+        let Some(torp_data) = ship_data.get(&pk(&torp_comp)).and_then(|v| v.dict_or_object_dict()) else {
             continue;
         };
         for (_key, val) in torp_data.inner().iter() {
-            let Some(launcher) = val.dict_ref() else {
+            let Some(launcher) = val.dict_or_object_dict() else {
                 continue;
             };
             let launcher_inner = launcher.inner();
@@ -869,12 +898,16 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
     };
 
     // Extract model path, armor map, and hit location groups from the first hull component.
-    let a_hull = ship_data.get(&pk(hull_comp_key)).and_then(|v| v.dict_ref());
+    let a_hull = ship_data.get(&pk(hull_comp_key)).and_then(|v| v.dict_or_object_dict());
 
     let model_path: Option<String> = a_hull.as_ref().and_then(|hull_dict| read_string(&hull_dict.inner(), keys::MODEL));
 
     let armor: Option<ArmorMap> = a_hull.as_ref().and_then(|hull_dict| {
-        hull_dict.inner().get(&pk(keys::ARMOR)).and_then(|v| v.dict_ref()).map(|d| parse_armor_dict(&d.inner()))
+        hull_dict
+            .inner()
+            .get(&pk(keys::ARMOR))
+            .and_then(|v| v.dict_or_object_dict())
+            .map(|d| parse_armor_dict(&d.inner()))
     });
 
     // Hit location zones are stored as top-level entries in the hull component (e.g. Bow, Cit, SS).
@@ -885,7 +918,8 @@ fn build_ship(ship_data: &BTreeMap<HashableValue, Value>) -> Vehicle {
             .iter()
             .filter_map(|(k, v)| {
                 let name = k.string_ref()?.inner().to_string();
-                let group_dict = v.dict_ref()?.inner();
+                let group_shared = v.dict_or_object_dict()?;
+                let group_dict = group_shared.inner();
                 // Only consider entries with hlType — that marks them as hit location zones.
                 let hl_type = read_string(&group_dict, keys::HL_TYPE)?;
                 let max_hp = read_float(&group_dict, keys::MAX_HP).unwrap_or(0.0);
@@ -964,21 +998,21 @@ impl GameMetadataProvider {
 
         let pickled_params: Value = game_params_to_pickle(game_params_data)?;
 
-        let params_dict = if let Some(params_dict) = pickled_params.dict_ref() {
+        let params_dict = if let Some(params_dict) = pickled_params.dict_or_object_dict() {
             let params_dict = params_dict.inner();
             params_dict
                 .get(&pk(""))
                 .expect("failed to get default game_params")
-                .dict_ref()
+                .dict_or_object_dict()
                 .expect("game params is not a dict")
                 .clone()
         } else if let Some(params_list) = pickled_params.list_ref() {
             let params = &params_list.inner()[0];
-            params.dict_ref().expect("First element of GameParams list is not a dictionary").clone()
+            params.dict_or_object_dict().expect("First element of GameParams list is not a dictionary").clone()
         } else if let Some(params_tuple) = pickled_params.tuple_ref() {
             let inner = params_tuple.inner();
             let params = &inner[0];
-            params.dict_ref().expect("First element of GameParams tuple is not a dictionary").clone()
+            params.dict_or_object_dict().expect("First element of GameParams tuple is not a dictionary").clone()
         } else {
             panic!("Root game params is not a dict, list, or tuple");
         };
@@ -991,13 +1025,14 @@ impl GameMetadataProvider {
                     return None;
                 }
 
-                let param_data = param.dict_ref().expect("Params root level dictionary values are not dictionaries");
+                let param_data =
+                    param.dict_or_object_dict().expect("Params root level dictionary values are not dictionaries");
                 let param_data = param_data.inner();
 
                 param_data
                     .get(&pk(keys::TYPEINFO))
                     .and_then(|type_info| {
-                        type_info.dict_ref().and_then(|type_info_main| {
+                        type_info.dict_or_object_dict().and_then(|type_info_main| {
                             let type_info = type_info_main.inner();
                             let (nation, species, ty) = (
                                 type_info.get(&pk(keys::TYPEINFO_NATION))?,
@@ -1071,7 +1106,7 @@ impl GameMetadataProvider {
                             ParamType::Modernization => {
                                 let modifiers = param_data
                                     .get(&pk("modifiers"))
-                                    .and_then(|v| v.dict_ref())
+                                    .and_then(|v| v.dict_or_object_dict())
                                     .map(|d| build_skill_modifiers(&d.inner()))
                                     .unwrap_or_default();
                                 Some(ParamData::Modernization(super::types::Modernization::new(modifiers)))
@@ -1125,7 +1160,7 @@ impl GameMetadataProvider {
                                         params_dict
                                             .inner()
                                             .get(&HashableValue::String(bomb_name.clone()))
-                                            .and_then(|proj| proj.dict_ref())
+                                            .and_then(|proj| proj.dict_or_object_dict())
                                             .and_then(|proj_dict| {
                                                 proj_dict
                                                     .inner()
@@ -1198,7 +1233,7 @@ impl GameMetadataProvider {
                             }
                             ParamType::Building => {
                                 let level = game_param_to_type!(param_data, "level", u32);
-                                let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_ref());
+                                let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_or_object_dict());
                                 let health = hull
                                     .as_ref()
                                     .and_then(|h| {
@@ -1241,12 +1276,9 @@ impl GameMetadataProvider {
                             }
                         }?;
 
+                        let id_value = param_data.get(&pk(keys::PARAM_ID)).expect("param has no id field");
                         let id = GameParamId::from(
-                            *param_data
-                                .get(&pk(keys::PARAM_ID))
-                                .expect("param has no id field")
-                                .i64_ref()
-                                .expect("param id is not an i64"),
+                            *id_value.i64_ref().unwrap_or_else(|| panic!("param id is not an i64, got: {id_value:?}")),
                         );
 
                         let index = param_data

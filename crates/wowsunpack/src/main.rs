@@ -898,13 +898,12 @@ fn run() -> Result<(), Report> {
             let base_path = game_params_path.join("base");
 
             let handle_params_from_listish = |params: &pickled::Value| -> Result<(), Report> {
-                let pickled::Value::Dict(params) = params else {
+                let Some(params) = value_to_dict(params.clone()) else {
                     bail!("Params are not a dictionary");
                 };
 
-                let params = params.inner();
                 for (key, value) in params.iter() {
-                    let key_str = key.to_string_key().expect("key is not stringable");
+                    let key_str: std::borrow::Cow<'_, str> = key.to_string_key().expect("key is not stringable");
 
                     dump_param(&key_str, value, base_path.to_owned());
                 }
@@ -920,7 +919,7 @@ fn run() -> Result<(), Report> {
                         .get(&HashableValue::String("".to_string().into()))
                         .expect("failed to find base GameParams");
 
-                    let base_data = base_data.dict_ref().expect("params are not a dictionary").inner();
+                    let base_data = value_to_dict(base_data.clone()).expect("params are not a dictionary");
 
                     for (key, value) in base_data.iter() {
                         let key = key.to_string_key().expect("key is not stringable");
@@ -932,14 +931,13 @@ fn run() -> Result<(), Report> {
                         .iter()
                         .filter(|(key, _value)| key.string_ref().map(|s| !s.inner().is_empty()).unwrap_or_default())
                     {
-                        let pickled::Value::Dict(params) = params else {
+                        let Some(params) = value_to_dict(params.clone()) else {
                             continue;
                         };
 
                         let region_key = region.to_string_key().expect("could not convert region to string");
                         let region_path = game_params_path.join(region_key.as_ref());
 
-                        let params = params.inner();
                         for (key, value) in params.iter() {
                             let key_str = key.to_string_key().expect("key is not stringable");
 
@@ -1095,6 +1093,17 @@ fn dump_param(file_stem: &str, value: &pickled::Value, mut out_path: PathBuf) ->
     value.serialize(&mut serializer).expect("failed to serialize data");
 
     None
+}
+
+fn value_to_dict(value: pickled::Value) -> Option<std::collections::BTreeMap<pickled::HashableValue, pickled::Value>> {
+    match value {
+        pickled::Value::Dict(d) => Some(d.into_raw_or_cloned()),
+        pickled::Value::Object(o) => {
+            let dict_obj = o.as_any().downcast_ref::<pickled::object::DictObject>()?;
+            Some(dict_obj.state().clone())
+        }
+        _ => None,
+    }
 }
 
 fn load_game_params(vfs: &VfsPath) -> Result<pickled::Value, Report> {

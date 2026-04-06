@@ -80,6 +80,7 @@ pub fn pickle_to_json(pickled: pickled::Value) -> serde_json::Value {
 
             serde_json::Value::Object(map)
         }
+        pickled::Value::Object(ref o) => pickle_to_json(o.__reduce__().state_or_none()),
     }
 }
 
