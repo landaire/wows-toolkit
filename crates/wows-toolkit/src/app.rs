@@ -713,6 +713,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::OpenFileViewer(plaintext_file_viewer) => {
                                 self.tab_state.file_viewer.lock().push(plaintext_file_viewer.clone());
                             }
+                            BackgroundTaskKind::BatchVideoExport { .. } => {}
                         }
 
                         self.handle_task_completion(ui.ctx(), result);

@@ -238,6 +238,25 @@ fn show_leaf_context_menu(
 /// Show context menu items for a group node (date or ship).
 fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], replays: &[Weak<RwLock<Replay>>]) {
     let count = replays.len();
+
+    // Batch render
+    let render_label =
+        if count == 1 { "Render to Video".to_string() } else { format!("Render {} Replays to Video", count) };
+    if ui.button(render_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("batch_render_replays"), replays.to_vec());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    let clipboard_label =
+        if count == 1 { "Render to Clipboard".to_string() } else { format!("Render {} Replays to Clipboard", count) };
+    if ui.button(clipboard_label).clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("batch_render_clipboard"), replays.to_vec());
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    ui.separator();
     let copy_label: String = if count == 1 {
         t!("ui.replay.context.copy_replay").into()
     } else {
@@ -336,6 +355,29 @@ impl GroupedTreeMaps {
 
         if !selected_replays.is_empty() {
             let count = selected_replays.len();
+
+            // Batch render
+            let render_label =
+                if count == 1 { "Render to Video".to_string() } else { format!("Render {} Replays to Video", count) };
+            if ui.button(render_label).clicked() {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::new("batch_render_replays"), selected_replays.clone());
+                });
+                ui.close_kind(UiKind::Menu);
+            }
+            let clipboard_label = if count == 1 {
+                "Render to Clipboard".to_string()
+            } else {
+                format!("Render {} Replays to Clipboard", count)
+            };
+            if ui.button(clipboard_label).clicked() {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::new("batch_render_clipboard"), selected_replays.clone());
+                });
+                ui.close_kind(UiKind::Menu);
+            }
+            ui.separator();
+
             let set_label = if count == 1 {
                 "Set as Session Stats (1 replay)".to_string()
             } else {
@@ -3300,6 +3342,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.handle_context_menu_render(ui);
+        self.handle_batch_render_request(ui);
         self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
     }
 
@@ -3439,6 +3482,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         self.handle_context_menu_render(ui);
+        self.handle_batch_render_request(ui);
 
         // Handle tree actions
         let mut replay_to_open: Option<Arc<RwLock<Replay>>> = None;
@@ -4401,6 +4445,109 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.save_notify.clone(),
             );
             self.tab_state.replay_renderers.lock().push(viewer);
+        }
+    }
+
+    fn collect_batch_replay_infos(
+        &self,
+        replay_weaks: &[Weak<RwLock<Replay>>],
+    ) -> Vec<crate::replay::renderer::BatchReplayInfo> {
+        let mut batch_infos = Vec::new();
+        for weak in replay_weaks {
+            let Some(arc) = weak.upgrade() else { continue };
+            let guard = arc.read();
+            let map_name = guard.replay_file.meta.mapName.clone();
+            let translated_map = guard.map_name(&guard.resource_loader);
+            let base = format!("{} - {}", guard.replay_file.meta.playerName, translated_map);
+            let replay_name = if let Some(stem) =
+                guard.source_path.as_ref().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            {
+                format!("{} - {}", base, stem)
+            } else {
+                base
+            };
+            let game_duration = guard.replay_file.meta.duration as f32;
+            let replay_version =
+                wowsunpack::data::Version::from_client_exe(&guard.replay_file.meta.clientVersionFromExe);
+            let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
+            let pkt_data = guard.replay_file.packet_data.clone();
+            drop(guard);
+
+            let Some(wows_data) = self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
+            else {
+                tracing::warn!("No data for build {} - skipping replay '{}'", replay_version.build, replay_name);
+                continue;
+            };
+
+            batch_infos.push(crate::replay::renderer::BatchReplayInfo {
+                raw_meta,
+                packet_data: pkt_data,
+                map_name,
+                replay_name,
+                game_duration,
+                wows_data,
+            });
+        }
+        batch_infos
+    }
+
+    fn handle_batch_render_request(&mut self, ui: &mut egui::Ui) {
+        // Batch render to folder
+        if let Some(replay_weaks) = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(egui::Id::new("batch_render_replays")))
+        {
+            let Some(output_dir) =
+                rfd::FileDialog::new().set_title("Select output folder for rendered videos").pick_folder()
+            else {
+                return;
+            };
+
+            let batch_infos = self.collect_batch_replay_infos(&replay_weaks);
+            if batch_infos.is_empty() {
+                self.tab_state.toasts.lock().warning("No renderable replays in selection");
+                return;
+            }
+
+            let options =
+                crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
+            let prefer_cpu = self.tab_state.persisted.read().settings.renderer.prefer_cpu_encoder;
+
+            let task = crate::replay::renderer::batch_render_to_folder(
+                output_dir,
+                batch_infos,
+                options,
+                self.tab_state.renderer_asset_cache.clone(),
+                self.tab_state.toasts.clone(),
+                prefer_cpu,
+            );
+            self.tab_state.background_tasks.push(task);
+            return;
+        }
+
+        // Batch render to clipboard
+        if let Some(replay_weaks) = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<Vec<Weak<RwLock<Replay>>>>(egui::Id::new("batch_render_clipboard")))
+        {
+            let batch_infos = self.collect_batch_replay_infos(&replay_weaks);
+            if batch_infos.is_empty() {
+                self.tab_state.toasts.lock().warning("No renderable replays in selection");
+                return;
+            }
+
+            let options =
+                crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
+            let prefer_cpu = self.tab_state.persisted.read().settings.renderer.prefer_cpu_encoder;
+
+            let task = crate::replay::renderer::batch_render_to_clipboard(
+                batch_infos,
+                options,
+                self.tab_state.renderer_asset_cache.clone(),
+                self.tab_state.toasts.clone(),
+                prefer_cpu,
+            );
+            self.tab_state.background_tasks.push(task);
         }
     }
 

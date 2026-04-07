@@ -820,6 +820,9 @@ pub(crate) use timeline::event_color;
 pub(crate) use timeline::format_timeline_event;
 
 mod video_export;
+pub use video_export::BatchReplayInfo;
+pub use video_export::batch_render_to_clipboard;
+pub use video_export::batch_render_to_folder;
 use video_export::execute_video_export;
 
 mod shapes;

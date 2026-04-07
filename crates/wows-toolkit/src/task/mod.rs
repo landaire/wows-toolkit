@@ -116,6 +116,23 @@ pub enum BackgroundTaskKind {
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(ToastMessage),
     OpenFileViewer(PlaintextFileViewer),
+    BatchVideoExport {
+        progress: Arc<parking_lot::Mutex<BatchVideoExportProgress>>,
+    },
+}
+
+/// Progress state for a batch video export, shared between the background thread and the UI.
+pub struct BatchVideoExportProgress {
+    /// Total estimated frames across all replays.
+    pub total_frames: u64,
+    /// Frames completed so far.
+    pub completed_frames: u64,
+    /// Index of the replay currently being rendered (0-based).
+    pub current_index: usize,
+    /// Total number of replays to render.
+    pub total_replays: usize,
+    /// Name of the replay currently being rendered.
+    pub current_name: String,
 }
 
 #[cfg(feature = "mod_manager")]
@@ -237,6 +254,17 @@ impl BackgroundTask {
                             }
                         }
                     },
+                    BackgroundTaskKind::BatchVideoExport { progress } => {
+                        let p = progress.lock();
+                        let pct =
+                            if p.total_frames > 0 { p.completed_frames as f32 / p.total_frames as f32 } else { 0.0 };
+                        ui.add(egui::ProgressBar::new(pct).text(format!(
+                            "Rendering {}/{}: {}",
+                            p.current_index + 1,
+                            p.total_replays,
+                            p.current_name,
+                        )));
+                    }
                     BackgroundTaskKind::LoadingPersonalRatingData
                     | BackgroundTaskKind::UpdateTimedMessage(_)
                     | BackgroundTaskKind::OpenFileViewer(_) => {

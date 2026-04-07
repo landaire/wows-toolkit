@@ -133,7 +133,7 @@ pub(super) fn render_video_to_clipboard(
         let temp_dir = match tempfile::tempdir() {
             Ok(d) => d,
             Err(e) => {
-                toasts.lock().error(format!("Failed to create temp dir: {}", e));
+                toasts.lock().error(format!("Failed to create temp dir: {e}"));
                 *video_export_progress.lock() = None;
                 video_exporting.store(false, Ordering::Relaxed);
                 return;
@@ -160,9 +160,9 @@ pub(super) fn render_video_to_clipboard(
             Ok(()) => {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                     let _ = clipboard.set().file_list(&[output_path]);
-                    // Leak the tempdir so the file persists until the OS cleans it up
-                    // or the process exits — clipboard consumers need the file to exist.
-                    std::mem::forget(temp_dir);
+                    // Persist the temp dir so the file remains for clipboard consumers.
+                    // The OS will clean it up on reboot.
+                    let _ = temp_dir.keep();
                     toasts.lock().success("Video copied to clipboard");
                 } else {
                     toasts.lock().error("Failed to open clipboard");
@@ -175,6 +175,190 @@ pub(super) fn render_video_to_clipboard(
         *video_export_progress.lock() = None;
         video_exporting.store(false, Ordering::Relaxed);
     });
+}
+
+/// Information about a single replay to be rendered in a batch.
+pub struct BatchReplayInfo {
+    pub raw_meta: Vec<u8>,
+    pub packet_data: Vec<u8>,
+    pub map_name: String,
+    pub replay_name: String,
+    pub game_duration: f32,
+    pub wows_data: SharedWoWsData,
+}
+
+/// Shared helper: render a list of replays sequentially, updating progress.
+/// Returns (succeeded_count, failed_count, output_paths).
+fn render_batch(
+    replays: &[BatchReplayInfo],
+    output_dir: &std::path::Path,
+    options: &RenderOptions,
+    asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+    progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
+    prefer_cpu: bool,
+) -> (usize, usize, Vec<std::path::PathBuf>) {
+    let mut succeeded_paths = Vec::new();
+    let mut failed = 0usize;
+    let mut completed_frames: u64 = 0;
+
+    for (i, replay) in replays.iter().enumerate() {
+        {
+            let mut p = progress.lock();
+            p.completed_frames = completed_frames;
+            p.current_index = i;
+            p.current_name = replay.replay_name.clone();
+        }
+
+        let output_path = output_dir.join(format!("{}.mp4", replay.replay_name));
+        let output_str = output_path.to_string_lossy().to_string();
+
+        let frames_before = completed_frames;
+        let per_replay_progress: Arc<Mutex<Option<RenderProgress>>> = Arc::new(Mutex::new(None));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+
+        let progress_thread = {
+            let progress = Arc::clone(progress);
+            let per_replay_progress = Arc::clone(&per_replay_progress);
+            let stop_flag = Arc::clone(&stop_flag);
+            std::thread::spawn(move || {
+                while !stop_flag.load(Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    if let Some(ref p) = *per_replay_progress.lock() {
+                        progress.lock().completed_frames = frames_before + p.current;
+                    }
+                }
+            })
+        };
+
+        let result = render_video_blocking(
+            &output_str,
+            &replay.raw_meta,
+            &replay.packet_data,
+            &replay.map_name,
+            replay.game_duration,
+            options.clone(),
+            &replay.wows_data,
+            asset_cache,
+            &per_replay_progress,
+            prefer_cpu,
+            None,
+        );
+
+        let estimated_frames = (replay.game_duration * 7.0) as u64;
+        completed_frames += estimated_frames;
+
+        stop_flag.store(true, Ordering::Relaxed);
+        let _ = progress_thread.join();
+
+        match result {
+            Ok(()) => succeeded_paths.push(output_path),
+            Err(e) => {
+                tracing::error!("Batch render failed for '{}': {}", replay.replay_name, e);
+                failed += 1;
+            }
+        }
+    }
+
+    (succeeded_paths.len(), failed, succeeded_paths)
+}
+
+/// Spawn a background thread that renders multiple replays to video files in a folder.
+/// Returns a `BackgroundTask` to plug into the global status bar.
+pub fn batch_render_to_folder(
+    output_dir: std::path::PathBuf,
+    replays: Vec<BatchReplayInfo>,
+    options: RenderOptions,
+    asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
+    toasts: crate::tab_state::SharedToasts,
+    prefer_cpu: bool,
+) -> crate::task::BackgroundTask {
+    let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
+    let total_replays = replays.len();
+    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress {
+        total_frames,
+        completed_frames: 0,
+        current_index: 0,
+        total_replays,
+        current_name: String::new(),
+    }));
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let progress_clone = Arc::clone(&progress);
+    crate::util::thread::spawn_logged("batch-video-export", move || {
+        let (succeeded, failed, _) =
+            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, prefer_cpu);
+
+        if failed == 0 {
+            toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
+        } else {
+            toasts.lock().warning(format!("Batch render: {} succeeded, {} failed", succeeded, failed));
+        }
+        let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
+    });
+
+    crate::task::BackgroundTask {
+        receiver: Some(rx),
+        kind: crate::task::BackgroundTaskKind::BatchVideoExport { progress },
+    }
+}
+
+/// Spawn a background thread that renders multiple replays to a temp directory,
+/// then copies all output files to the clipboard.
+/// Returns a `BackgroundTask` to plug into the global status bar.
+pub fn batch_render_to_clipboard(
+    replays: Vec<BatchReplayInfo>,
+    options: RenderOptions,
+    asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
+    toasts: crate::tab_state::SharedToasts,
+    prefer_cpu: bool,
+) -> crate::task::BackgroundTask {
+    let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
+    let total_replays = replays.len();
+    let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress {
+        total_frames,
+        completed_frames: 0,
+        current_index: 0,
+        total_replays,
+        current_name: String::new(),
+    }));
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let progress_clone = Arc::clone(&progress);
+    crate::util::thread::spawn_logged("batch-video-clipboard", move || {
+        let temp_dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                toasts.lock().error(format!("Failed to create temp dir: {e}"));
+                let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
+                return;
+            }
+        };
+
+        let (succeeded, failed, paths) =
+            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, prefer_cpu);
+
+        if !paths.is_empty()
+            && let Ok(mut clipboard) = arboard::Clipboard::new()
+        {
+            let refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
+            let _ = clipboard.set().file_list(&refs);
+            let _ = temp_dir.keep();
+        }
+
+        if failed == 0 {
+            toasts.lock().success(format!("{} videos copied to clipboard", succeeded));
+        } else {
+            toasts.lock().warning(format!("Batch render: {} copied to clipboard, {} failed", succeeded, failed));
+        }
+        let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
+    });
+
+    crate::task::BackgroundTask {
+        receiver: Some(rx),
+        kind: crate::task::BackgroundTaskKind::BatchVideoExport { progress },
+    }
 }
 
 /// Blocking implementation of the video export.
