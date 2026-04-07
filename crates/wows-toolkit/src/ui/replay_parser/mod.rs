@@ -217,6 +217,18 @@ fn show_leaf_context_menu(
         });
         ui.close_kind(UiKind::Menu);
     }
+    if ui.button("Render to Video").clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("batch_render_replays"), vec![replay_weak.clone()]);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
+    if ui.button("Render to Clipboard").clicked() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("batch_render_clipboard"), vec![replay_weak.clone()]);
+        });
+        ui.close_kind(UiKind::Menu);
+    }
     ui.separator();
     if ui.button(t!("ui.replay.context.set_session_stats_one")).clicked() {
         ui.ctx().data_mut(|data| {
