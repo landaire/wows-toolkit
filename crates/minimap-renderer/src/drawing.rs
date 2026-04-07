@@ -360,8 +360,6 @@ fn draw_ship_labels(
     name_color: Option<[u8; 3]>,
     fonts: &GameFonts,
 ) {
-    let font = &fonts.primary;
-    let scale = fonts.scale(10.0);
     let line_height = 12i32;
     let line_count = player_name.is_some() as i32 + ship_name.is_some() as i32;
     if line_count == 0 {
@@ -376,6 +374,7 @@ fn draw_ship_labels(
     let mut cur_y = base_y;
 
     if let Some(name) = player_name {
+        let (font, scale) = fonts.font_and_scale(name, 10.0);
         let color = if !color_on_ship { name_color.unwrap_or([255, 255, 255]) } else { [255, 255, 255] };
         let (w, _) = text_size(scale, font, name);
         let tx = x - w as i32 / 2;
@@ -383,6 +382,7 @@ fn draw_ship_labels(
         cur_y += line_height;
     }
     if let Some(name) = ship_name {
+        let (font, scale) = fonts.font_and_scale(name, 10.0);
         let color = name_color.unwrap_or([255, 255, 255]);
         let (w, _) = text_size(scale, font, name);
         let tx = x - w as i32 / 2;
@@ -740,9 +740,8 @@ fn draw_kill_feed(
     death_cause_icons: &HashMap<String, RgbaImage>,
     map_width: u32,
 ) {
-    let font = &fonts.primary;
-    let name_scale = fonts.scale(12.0);
-    let ship_scale = name_scale;
+    let default_font = &fonts.primary;
+    let default_name_scale = fonts.scale(12.0);
     let line_height = 20i32;
     let right_margin = 4i32;
     let icon_size = crate::assets::ICON_SIZE as i32;
@@ -750,7 +749,7 @@ fn draw_kill_feed(
     let gap = 2i32; // gap between elements
     let width = map_width as i32;
 
-    let (_, text_h) = text_size(name_scale, font, "Ag");
+    let (_, text_h) = text_size(default_name_scale, default_font, "Ag");
     let text_h = text_h as i32;
 
     for (i, entry) in entries.iter().take(5).enumerate() {
@@ -760,22 +759,23 @@ fn draw_kill_feed(
         // Get death cause icon key
         let cause_key = death_cause_icon_key(&entry.cause);
         let has_cause_icon = death_cause_icons.contains_key(cause_key);
-        let cause_w = if has_cause_icon {
-            cause_icon_size
-        } else {
-            // Fallback to text measurement — shouldn't happen with full icon set
-            0
-        } as u32;
+        let cause_w = if has_cause_icon { cause_icon_size } else { 0 } as u32;
+
+        // Pick appropriate fonts for each text segment
+        let (killer_name_font, killer_name_scale) = fonts.font_and_scale(&entry.killer_name, 12.0);
+        let (victim_name_font, victim_name_scale) = fonts.font_and_scale(&entry.victim_name, 12.0);
+        let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
+        let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
+        let (killer_ship_font, killer_ship_scale) = fonts.font_and_scale(killer_ship, 12.0);
+        let (victim_ship_font, victim_ship_scale) = fonts.font_and_scale(victim_ship, 12.0);
 
         // Measure all text segments
-        let (killer_name_w, _) = text_size(name_scale, font, &entry.killer_name);
-        let killer_ship = entry.killer_ship_name.as_deref().unwrap_or("");
+        let (killer_name_w, _) = text_size(killer_name_scale, killer_name_font, &entry.killer_name);
         let (killer_ship_w, _) =
-            if !killer_ship.is_empty() { text_size(ship_scale, font, killer_ship) } else { (0, 0) };
-        let (victim_name_w, _) = text_size(name_scale, font, &entry.victim_name);
-        let victim_ship = entry.victim_ship_name.as_deref().unwrap_or("");
+            if !killer_ship.is_empty() { text_size(killer_ship_scale, killer_ship_font, killer_ship) } else { (0, 0) };
+        let (victim_name_w, _) = text_size(victim_name_scale, victim_name_font, &entry.victim_name);
         let (victim_ship_w, _) =
-            if !victim_ship.is_empty() { text_size(ship_scale, font, victim_ship) } else { (0, 0) };
+            if !victim_ship.is_empty() { text_size(victim_ship_scale, victim_ship_font, victim_ship) } else { (0, 0) };
 
         // Determine if we have icons
         let has_killer_icon =
@@ -813,7 +813,7 @@ fn draw_kill_feed(
         let mut x = width - total_w - right_margin;
 
         // Killer name (team-colored)
-        draw_text_shadow(pm, entry.killer_color, x, y, name_scale, font, &entry.killer_name);
+        draw_text_shadow(pm, entry.killer_color, x, y, killer_name_scale, killer_name_font, &entry.killer_name);
         x += killer_name_w as i32;
 
         // Killer ship icon (friendly=left, enemy=right)
@@ -828,21 +828,20 @@ fn draw_kill_feed(
 
         // Killer ship name
         if killer_ship_w > 0 {
-            draw_text_shadow(pm, entry.killer_color, x, y, ship_scale, font, killer_ship);
+            draw_text_shadow(pm, entry.killer_color, x, y, killer_ship_scale, killer_ship_font, killer_ship);
             x += killer_ship_w as i32;
         }
 
         // Death cause icon (or fallback gap)
         x += gap * 2;
         if let Some(cause_icon) = death_cause_icons.get(cause_key) {
-            // draw_icon takes center coords; use same vertical center as ship icons
             let cause_center_y = icon_y + cause_icon_size / 2;
             draw_icon(pm, cause_icon, x + cause_icon_size / 2, cause_center_y);
         }
         x += cause_w as i32 + gap * 2;
 
         // Victim name (team-colored)
-        draw_text_shadow(pm, entry.victim_color, x, y, name_scale, font, &entry.victim_name);
+        draw_text_shadow(pm, entry.victim_color, x, y, victim_name_scale, victim_name_font, &entry.victim_name);
         x += victim_name_w as i32;
 
         // Victim ship icon (friendly=left, enemy=right)
@@ -857,7 +856,7 @@ fn draw_kill_feed(
 
         // Victim ship name
         if victim_ship_w > 0 {
-            draw_text_shadow(pm, entry.victim_color, x, y, ship_scale, font, victim_ship);
+            draw_text_shadow(pm, entry.victim_color, x, y, victim_ship_scale, victim_ship_font, victim_ship);
         }
     }
 }
@@ -1050,19 +1049,21 @@ fn draw_chat_overlay(
     let mut total_height = margin; // top padding
 
     for entry in entries {
-        // Line 1: "[CLAN] PlayerName" — truncated to fit
+        // Line 1: "[CLAN] PlayerName" -- pick font based on player name
         let clan_prefix = if !entry.clan_tag.is_empty() { format!("[{}] ", entry.clan_tag) } else { String::new() };
         let full_name_line = format!("{}{}", clan_prefix, entry.player_name);
-        let name_line = truncate_to_fit(&full_name_line, inner_width, header_scale, font);
+        let (name_font, name_font_scale) = fonts.font_and_scale(&entry.player_name, 11.0);
+        let name_line = truncate_to_fit(&full_name_line, inner_width, name_font_scale, name_font);
         let clan_color =
             if !entry.clan_tag.is_empty() { Some(entry.clan_color.unwrap_or(entry.team_color)) } else { None };
 
         // Line 2: ship icon + ship name (if available)
         let has_ship_line = entry.ship_name.is_some();
         let ship_line = entry.ship_name.as_ref().map(|name| {
+            let (sf, ss) = fonts.font_and_scale(name, 11.0);
             let icon_reserved = (icon_size + 2) as u32;
             let available = inner_width.saturating_sub(icon_reserved);
-            truncate_to_fit(name, available, header_scale, font)
+            truncate_to_fit(name, available, ss, sf)
         });
 
         // Message lines (word-wrapped), using the font selected by font_hint
@@ -1949,25 +1950,27 @@ impl RenderTarget for ImageTarget {
                 let inner_w = *width - padding * 2;
 
                 // Draw clan tag + player name, and ship name above the silhouette
-                let name_scale = self.fonts.scale(12.0);
-                let small_scale = self.fonts.scale(10.0);
+                let _name_scale = self.fonts.scale(12.0);
+                let _small_scale = self.fonts.scale(10.0);
                 let mut label_y = *y + 2;
 
                 if player_name.is_some() || clan_tag.as_ref().is_some_and(|t| !t.is_empty()) {
                     let clan_prefix = clan_tag.as_ref().filter(|t| !t.is_empty()).map(|t| format!("[{t}] "));
                     let name_part = player_name.as_deref().unwrap_or("");
 
+                    let (name_font, name_font_scale) = self.fonts.font_and_scale(name_part, 12.0);
+
                     // Measure total width for centering
                     let clan_w =
-                        clan_prefix.as_ref().map(|cp| text_size(name_scale, &self.fonts.primary, cp).0).unwrap_or(0);
+                        clan_prefix.as_ref().map(|cp| text_size(name_font_scale, name_font, cp).0).unwrap_or(0);
                     let name_w =
-                        if !name_part.is_empty() { text_size(name_scale, &self.fonts.primary, name_part).0 } else { 0 };
+                        if !name_part.is_empty() { text_size(name_font_scale, name_font, name_part).0 } else { 0 };
                     let total_w = clan_w + name_w;
                     let mut cx = inner_x + (inner_w - total_w as i32) / 2;
 
                     if let Some(ref cp) = clan_prefix {
                         let cc = clan_color.unwrap_or([255, 255, 255]);
-                        draw_text_shadow(&mut self.canvas, cc, cx, label_y, name_scale, &self.fonts.primary, cp);
+                        draw_text_shadow(&mut self.canvas, cc, cx, label_y, name_font_scale, name_font, cp);
                         cx += clan_w as i32;
                     }
                     if !name_part.is_empty() {
@@ -1976,25 +1979,18 @@ impl RenderTarget for ImageTarget {
                             [255, 255, 255],
                             cx,
                             label_y,
-                            name_scale,
-                            &self.fonts.primary,
+                            name_font_scale,
+                            name_font,
                             name_part,
                         );
                     }
                     label_y += 14;
                 }
                 if let Some(name) = ship_name {
-                    let (tw, _) = text_size(small_scale, &self.fonts.primary, name);
+                    let (ship_font, ship_font_scale) = self.fonts.font_and_scale(name, 10.0);
+                    let (tw, _) = text_size(ship_font_scale, ship_font, name);
                     let tx = inner_x + (inner_w - tw as i32) / 2;
-                    draw_text_shadow(
-                        &mut self.canvas,
-                        [180, 180, 180],
-                        tx,
-                        label_y,
-                        small_scale,
-                        &self.fonts.primary,
-                        name,
-                    );
+                    draw_text_shadow(&mut self.canvas, [180, 180, 180], tx, label_y, ship_font_scale, ship_font, name);
                     label_y += 14;
                 }
 
@@ -2295,16 +2291,9 @@ impl RenderTarget for ImageTarget {
                             cx += pw as i32;
 
                             // Killer name
-                            draw_text_shadow(
-                                &mut self.canvas,
-                                kill.killer_color,
-                                cx,
-                                ey,
-                                name_scale,
-                                font,
-                                &kill.killer_name,
-                            );
-                            let (kw, _) = text_size(name_scale, font, &kill.killer_name);
+                            let (kf, ks) = self.fonts.font_and_scale(&kill.killer_name, 14.0);
+                            draw_text_shadow(&mut self.canvas, kill.killer_color, cx, ey, ks, kf, &kill.killer_name);
+                            let (kw, _) = text_size(ks, kf, &kill.killer_name);
                             cx += kw as i32 + gap;
 
                             // Killer ship icon (friendly=left, enemy=right)
@@ -2332,16 +2321,9 @@ impl RenderTarget for ImageTarget {
                             }
 
                             // Victim name
-                            draw_text_shadow(
-                                &mut self.canvas,
-                                kill.victim_color,
-                                cx,
-                                ey,
-                                name_scale,
-                                font,
-                                &kill.victim_name,
-                            );
-                            let (vw, _) = text_size(name_scale, font, &kill.victim_name);
+                            let (vf, vs) = self.fonts.font_and_scale(&kill.victim_name, 14.0);
+                            draw_text_shadow(&mut self.canvas, kill.victim_color, cx, ey, vs, vf, &kill.victim_name);
+                            let (vw, _) = text_size(vs, vf, &kill.victim_name);
                             cx += vw as i32 + gap;
 
                             // Victim ship icon (friendly=left, enemy=right)
@@ -2364,12 +2346,21 @@ impl RenderTarget for ImageTarget {
                         ActivityFeedKind::Chat(chat) => {
                             let mut cx = inner_x;
 
-                            // Clan tag
+                            // Clan tag + Player name (use same font for both)
+                            let (chat_name_font, chat_name_scale) = self.fonts.font_and_scale(&chat.player_name, 14.0);
                             if !chat.clan_tag.is_empty() {
                                 let clan_color = chat.clan_color.unwrap_or(chat.team_color);
                                 let clan_text = format!("[{}] ", chat.clan_tag);
-                                draw_text_shadow(&mut self.canvas, clan_color, cx, ey, name_scale, font, &clan_text);
-                                let (cw, _) = text_size(name_scale, font, &clan_text);
+                                draw_text_shadow(
+                                    &mut self.canvas,
+                                    clan_color,
+                                    cx,
+                                    ey,
+                                    chat_name_scale,
+                                    chat_name_font,
+                                    &clan_text,
+                                );
+                                let (cw, _) = text_size(chat_name_scale, chat_name_font, &clan_text);
                                 cx += cw as i32;
                             }
 
@@ -2379,11 +2370,11 @@ impl RenderTarget for ImageTarget {
                                 chat.team_color,
                                 cx,
                                 ey,
-                                name_scale,
-                                font,
+                                chat_name_scale,
+                                chat_name_font,
                                 &chat.player_name,
                             );
-                            let (nw, text_h) = text_size(name_scale, font, &chat.player_name);
+                            let (nw, text_h) = text_size(chat_name_scale, chat_name_font, &chat.player_name);
                             cx += nw as i32 + gap;
 
                             // Ship icon

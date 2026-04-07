@@ -513,22 +513,6 @@ pub struct GameFonts {
 }
 
 impl GameFonts {
-    /// Pick the best font that can render all characters in `text`.
-    ///
-    /// Tries primary first, then each fallback in order. Returns primary
-    /// if no font fully covers the text.
-    pub fn font_for_text(&self, text: &str) -> &FontArc {
-        if Self::can_render(&self.primary, text) {
-            return &self.primary;
-        }
-        for fallback in &self.fallbacks {
-            if Self::can_render(fallback, text) {
-                return fallback;
-            }
-        }
-        &self.primary
-    }
-
     /// Returns the index into `fallbacks` if a fallback was selected, or None for primary.
     pub fn font_hint_for_text(&self, text: &str) -> Option<usize> {
         if Self::can_render(&self.primary, text) {
@@ -540,6 +524,17 @@ impl GameFonts {
             }
         }
         None
+    }
+
+    /// Pick the best font that can render all characters in `text`.
+    ///
+    /// Tries primary first, then each fallback in order. Returns primary
+    /// if no font fully covers the text.
+    pub fn font_for_text(&self, text: &str) -> &FontArc {
+        match self.font_hint_for_text(text) {
+            Some(i) => self.fallbacks.get(i).unwrap_or(&self.primary),
+            None => &self.primary,
+        }
     }
 
     /// Get a corrected `PxScale` for the primary font.
@@ -557,6 +552,23 @@ impl GameFonts {
             FontHint::Fallback(i) => self.fallback_scale_factors.get(i).copied().unwrap_or(self.primary_scale_factor),
         };
         PxScale::from(size * factor)
+    }
+
+    /// Pick the best font for the given text and return it with the correct scale.
+    pub fn font_and_scale(&self, text: &str, size: f32) -> (&FontArc, PxScale) {
+        let hint = self.font_hint_for_text(text);
+        let font = match hint {
+            Some(i) => self.fallbacks.get(i).unwrap_or(&self.primary),
+            None => &self.primary,
+        };
+        let scale = self.scale_for_hint(
+            size,
+            match hint {
+                Some(i) => crate::draw_command::FontHint::Fallback(i),
+                None => crate::draw_command::FontHint::Primary,
+            },
+        );
+        (font, scale)
     }
 
     /// Check if a font can render every character in a string.
