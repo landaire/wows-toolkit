@@ -2807,7 +2807,7 @@ impl ReplayRendererViewer {
                         let info = ctx.input(|i| i.viewport().clone());
                         window_settings.lock().settings.insert(
                             crate::tab_state::WindowKind::ReplayRenderer,
-                            crate::tab_state::WindowSettings::from_viewport_info(&info, ctx.zoom_factor()),
+                            crate::tab_state::WindowSettings::from_viewport_info(&info, None),
                         );
                         save_notify.notify_one();
                     }

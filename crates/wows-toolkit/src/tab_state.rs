@@ -77,12 +77,13 @@ pub struct WindowSettings {
 impl WindowSettings {
     /// Capture current viewport state from [`egui::ViewportInfo`].
     ///
-    /// `zoom_factor` must be the current `ctx.zoom_factor()` — the stored size
-    /// is scaled back to zoom=1.0 logical points so that `with_inner_size`
-    /// doesn't double-apply the zoom on the next launch.
-    pub fn from_viewport_info(info: &egui::ViewportInfo, zoom_factor: f32) -> Self {
+    /// Pass `Some(ctx.zoom_factor())` for the main window to compensate for
+    /// eframe applying the zoom again on restore. Secondary/deferred viewports
+    /// should pass `None` since they already report sizes at the correct scale.
+    pub fn from_viewport_info(info: &egui::ViewportInfo, zoom_compensation: Option<f32>) -> Self {
+        let zoom = zoom_compensation.unwrap_or(1.0);
         Self {
-            inner_size_points: info.inner_rect.map(|r| [r.width() * zoom_factor, r.height() * zoom_factor]),
+            inner_size_points: info.inner_rect.map(|r| [r.width() * zoom, r.height() * zoom]),
             outer_position_pixels: info.outer_rect.map(|r| [r.left(), r.top()]),
             fullscreen: info.fullscreen.unwrap_or(false),
             maximized: info.maximized.unwrap_or(false),

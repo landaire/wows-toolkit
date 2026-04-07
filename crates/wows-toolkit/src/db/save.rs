@@ -88,16 +88,16 @@ fn capture_window_settings(egui_ctx: &egui::Context, ctx: &SaveContext) {
     let viewports = ctx.active_viewports.lock().clone();
     let mut tracker = ctx.window_settings.lock();
 
-    let zoom = egui_ctx.zoom_factor();
-
-    // Main viewport.
+    // Main viewport needs zoom compensation: inner_rect reports zoomed logical
+    // points, but with_inner_size expects zoom=1.0 points. Without this, the
+    // window shrinks on every launch when zoom != 1.0.
     let main_info = egui_ctx.input(|i| i.viewport().clone());
-    tracker.settings.insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info, zoom));
+    tracker.settings.insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info, Some(egui_ctx.zoom_factor())));
 
-    // Secondary viewports.
+    // Secondary/deferred viewports don't need zoom compensation.
     for &(kind, viewport_id) in &viewports {
         let info = egui_ctx.input_for(viewport_id, |i| i.viewport().clone());
-        tracker.settings.insert(kind, WindowSettings::from_viewport_info(&info, zoom));
+        tracker.settings.insert(kind, WindowSettings::from_viewport_info(&info, None));
     }
 }
 
