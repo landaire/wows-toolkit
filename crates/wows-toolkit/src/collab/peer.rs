@@ -256,8 +256,13 @@ async fn host_main(
     ui_state: Arc<Mutex<SessionState>>,
 ) {
     // Create iroh endpoint.
-    let secret_key = SecretKey::generate(&mut rand::rng());
-    let endpoint = match Endpoint::builder().secret_key(secret_key).alpns(vec![COLLAB_ALPN.to_vec()]).bind().await {
+    let secret_key = SecretKey::from_bytes(&rand::random::<[u8; 32]>());
+    let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0)
+        .secret_key(secret_key)
+        .alpns(vec![COLLAB_ALPN.to_vec()])
+        .bind()
+        .await
+    {
         Ok(ep) => ep,
         Err(e) => {
             let msg = format!("Failed to bind iroh endpoint: {e}");
@@ -1176,7 +1181,7 @@ async fn join_main(
     };
 
     // Create endpoint and connect to host.
-    let endpoint = match Endpoint::builder().alpns(vec![COLLAB_ALPN.to_vec()]).bind().await {
+    let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0).alpns(vec![COLLAB_ALPN.to_vec()]).bind().await {
         Ok(ep) => ep,
         Err(e) => {
             let msg = format!("Failed to bind iroh endpoint: {e}");

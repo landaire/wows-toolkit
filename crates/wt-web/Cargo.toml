@@ -24,8 +24,8 @@ iroh = { workspace = true, default-features = false }
 rkyv = { workspace = true }
 tracing = { workspace = true }
 web-time = { workspace = true }
-png = "0.17"
-rand = "0.9"
+png = "0.18"
+rand = "0.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -34,5 +34,5 @@ web-sys = { version = "0.3", features = ["Window", "Location", "Storage", "Perfo
 js-sys = "0.3"
 tracing-wasm = "0.2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }

@@ -1231,7 +1231,7 @@ fn image_from_png(png_data: &[u8]) -> Result<egui::ColorImage, String> {
     let cursor = std::io::Cursor::new(png_data);
     let decoder = png::Decoder::new(cursor);
     let mut reader = decoder.read_info().map_err(|e| format!("PNG decode error: {e}"))?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![0u8; reader.output_buffer_size().ok_or("unknown output buffer size")?];
     let info = reader.next_frame(&mut buf).map_err(|e| format!("PNG frame error: {e}"))?;
     let bytes = &buf[..info.buffer_size()];
 

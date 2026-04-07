@@ -319,7 +319,7 @@ pub struct SessionStatsChartConfig {
 pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
     let mut dock = egui_dock::DockState::new(vec![StatsSubTab::Overview]);
     dock.split(
-        (egui_dock::SurfaceIndex::main(), egui_dock::NodeIndex::root()),
+        egui_dock::NodePath::MAIN_ROOT,
         egui_dock::Split::Right,
         0.5,
         egui_dock::Node::leaf(StatsSubTab::Charts(0)),
@@ -584,8 +584,8 @@ impl TabState {
     /// Returns the replay shown in the currently focused (or first) replay dock tab, if any.
     pub fn focused_replay(&self) -> Option<Arc<RwLock<Replay>>> {
         // Try focused leaf first
-        if let Some((si, ni)) = self.replay_dock_state.focused_leaf()
-            && let Some(leaf) = self.replay_dock_state[si][ni].get_leaf()
+        if let Some(path) = self.replay_dock_state.focused_leaf()
+            && let Some(leaf) = self.replay_dock_state[path.surface][path.node].get_leaf()
             && let Some(tab) = leaf.tabs.get(leaf.active.0)
         {
             return Some(Arc::clone(&tab.replay));
@@ -825,8 +825,8 @@ impl TabState {
 
         // Focus the Overview sub-tab automatically
         let mut p = self.persisted.write();
-        if let Some((surface, node, tab_idx)) = p.stats_dock_state.find_tab(&StatsSubTab::Overview) {
-            p.stats_dock_state.set_active_tab((surface, node, tab_idx));
+        if let Some(tab_path) = p.stats_dock_state.find_tab(&StatsSubTab::Overview) {
+            let _ = p.stats_dock_state.set_active_tab(tab_path);
         }
     }
 

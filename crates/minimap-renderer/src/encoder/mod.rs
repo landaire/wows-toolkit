@@ -75,7 +75,10 @@ pub fn check_encoder() -> EncoderStatus {
             Err(e) => {
                 status.gpu_error = Some(format!("Vulkan init failed: {e:?}"));
             }
-            Ok(instance) => match instance.create_adapter(None) {
+            Ok(instance) => match instance.create_adapter(&vk_video::parameters::VulkanAdapterDescriptor {
+                supports_encoding: true,
+                ..Default::default()
+            }) {
                 Err(e) => {
                     status.gpu_error = Some(format!("No Vulkan adapter: {e:?}"));
                 }

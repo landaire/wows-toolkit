@@ -49,7 +49,7 @@ half = { version = "2", optional = true }
 image_dds = { workspace = true, optional = true, features = ["ddsfile", "image"] }
 image = { workspace = true, optional = true, features = ["png"] }
 unidecode = { version = "0.3", optional = true }
-vfs = { version = "0.12", optional = true }
+vfs = { version = "0.13", optional = true }
 async-trait = { version = "0.1", optional = true }
 async-std = { version = "1.13", optional = true }
 futures = { version = "0.3", optional = true }

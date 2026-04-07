@@ -3389,7 +3389,7 @@ impl ToolkitTabViewer<'_> {
                 fallback_maps.show_multi_selection_context_menu(ui, selected_ids);
             });
 
-        let (_response, actions) = tree.show(ui, |builder| {
+        let (response, actions) = tree.show(ui, |builder| {
             for (group_name, replays) in &groups {
                 let win_rate = win_rate_label(replays);
                 let group_id = egui::Id::new((group_id_salt, group_name));
@@ -3477,6 +3477,23 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Workaround: egui_ltreeview 0.7 doesn't fire Action::Activate on double-click.
+        // Fall back to checking the response directly and opening the selected replay.
+        if replay_to_open.is_none() && response.double_clicked() {
+            let tree_id = ui.make_persistent_id(tree_id_salt);
+            let selected = ui.ctx().data(|data| {
+                data.get_temp::<egui_ltreeview::TreeViewState<egui::Id>>(tree_id).map(|state| state.selected().clone())
+            });
+            if let Some(selected_ids) = selected {
+                for id in &selected_ids {
+                    if let Some(replay) = id_to_replay.get(id) {
+                        replay_to_open = Some(replay.clone());
+                        break;
+                    }
+                }
             }
         }
 

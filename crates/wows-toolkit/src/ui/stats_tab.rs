@@ -34,7 +34,7 @@ struct StatsTabViewer<'a> {
     chart_tab_count: usize,
     /// Pending tab additions (surface, node) — applied after show_inside returns,
     /// because the dock state is swapped out during rendering.
-    pending_adds: Vec<(egui_dock::SurfaceIndex, egui_dock::NodeIndex)>,
+    pending_adds: Vec<egui_dock::NodePath>,
 }
 
 impl TabViewer for StatsTabViewer<'_> {
@@ -106,8 +106,8 @@ impl TabViewer for StatsTabViewer<'_> {
         OnCloseResponse::Close
     }
 
-    fn on_add(&mut self, surface: egui_dock::SurfaceIndex, node: egui_dock::NodeIndex) {
-        self.pending_adds.push((surface, node));
+    fn on_add(&mut self, path: egui_dock::NodePath) {
+        self.pending_adds.push(path);
     }
 
     fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
@@ -224,13 +224,13 @@ impl ToolkitTabViewer<'_> {
             .show_inside(ui, &mut viewer);
 
         // Apply pending tab additions now that we have the real dock_state
-        for (surface, node) in viewer.pending_adds {
+        for path in viewer.pending_adds {
             let mut p = self.tab_state.persisted.write();
             let id = p.next_chart_tab_id;
             p.next_chart_tab_id += 1;
             drop(p);
             let tab = StatsSubTab::Charts(id);
-            if let Some(leaf) = dock_state[surface][node].get_leaf_mut() {
+            if let Some(leaf) = dock_state[path.surface][path.node].get_leaf_mut() {
                 leaf.append_tab(tab);
             }
         }

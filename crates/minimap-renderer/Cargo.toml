@@ -80,8 +80,8 @@ openh264 = { version = "0.9", features = ["source"], optional = true }
 
 # Vulkan Video encoder (Linux/Windows only)
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-vk-video = { version = "0.2", optional = true }
-wgpu = { version = "28", optional = true }
+vk-video = { version = "0.3", optional = true }
+wgpu = { version = "29", optional = true }
 
 # VideoToolbox encoder (macOS only)
 [target.'cfg(target_os = "macos")'.dependencies]

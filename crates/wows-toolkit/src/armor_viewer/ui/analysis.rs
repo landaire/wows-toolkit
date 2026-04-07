@@ -31,9 +31,9 @@ pub struct TrajectoryActions {
 }
 /// Programmatically focus a specific analysis tab in the dock.
 pub fn focus_analysis_tab(dock_state: &mut DockState<AnalysisTab>, tab: AnalysisTab) {
-    if let Some((surface, node, tab_idx)) = dock_state.find_tab(&tab) {
-        dock_state.set_active_tab((surface, node, tab_idx));
-        dock_state.set_focused_node_and_surface((surface, node));
+    if let Some(tab_path) = dock_state.find_tab(&tab) {
+        let _ = dock_state.set_active_tab(tab_path);
+        dock_state.set_focused_node_and_surface(tab_path.node_path());
     }
 }
 /// Per-frame viewer struct implementing `egui_dock::TabViewer` for analysis tabs.

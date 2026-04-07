@@ -1432,7 +1432,7 @@ impl ToolkitTabViewer<'_> {
             tree.set_focused_node(node_idx);
             tree.push_to_focused_leaf(pane);
             // Focus the new tab
-            tree.set_active_tab(node_idx, egui_dock::TabIndex(tab_count));
+            let _ = tree.set_active_tab(node_idx, egui_dock::TabIndex(tab_count));
         } else {
             // First search: split below the browser
             tree.split_below(NodeIndex::root(), 0.6, vec![pane]);
