@@ -258,6 +258,12 @@ async fn load_armor_viewer_defaults(pool: &SqlitePool, ts: &mut TabState) -> Res
         p.armor_viewer_defaults.hull_all_visible = row.hull_all_visible;
         p.armor_viewer_defaults.armor_all_visible = row.armor_all_visible;
         p.armor_viewer_defaults.show_splash_boxes = row.show_splash_boxes;
+        p.armor_viewer_defaults.show_legend = row.show_legend;
+        p.armor_viewer_defaults.legend_collapsed = row.legend_collapsed;
+        p.armor_viewer_defaults.legend_pos = match (row.legend_pos_x, row.legend_pos_y) {
+            (Some(x), Some(y)) => Some([x as f32, y as f32]),
+            _ => None,
+        };
     }
     info!("  loaded armor viewer defaults");
     Ok(())

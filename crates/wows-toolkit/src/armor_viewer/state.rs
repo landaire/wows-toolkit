@@ -83,6 +83,9 @@ pub struct ArmorViewerDefaults {
     pub hull_all_visible: bool,
     pub armor_all_visible: bool,
     pub show_splash_boxes: bool,
+    pub show_legend: bool,
+    pub legend_collapsed: bool,
+    pub legend_pos: Option<[f32; 2]>,
 }
 
 impl Default for ArmorViewerDefaults {
@@ -97,6 +100,9 @@ impl Default for ArmorViewerDefaults {
             hull_all_visible: false,
             armor_all_visible: true,
             show_splash_boxes: false,
+            show_legend: true,
+            legend_collapsed: false,
+            legend_pos: None,
         }
     }
 }

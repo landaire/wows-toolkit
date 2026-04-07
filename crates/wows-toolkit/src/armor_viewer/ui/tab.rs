@@ -604,14 +604,41 @@ impl ToolkitTabViewer<'_> {
         // Global armor thickness legend (shown once, not per-pane)
         let any_ship_loaded = state.dock_state.iter_all_tabs().any(|(_, tab)| tab.loaded_armor.is_some());
         if any_ship_loaded {
-            egui::Window::new(t!("ui.armor.armor_thickness").as_ref())
-                .id(egui::Id::new("armor_legend_global"))
+            let defaults = self.tab_state.persisted.read().armor_viewer_defaults.clone();
+            let mut open = defaults.show_legend;
+            let window_id = egui::Id::new("armor_legend_global");
+
+            let window = egui::Window::new(t!("ui.armor.armor_thickness").as_ref())
+                .id(window_id)
+                .open(&mut open)
+                .default_open(!defaults.legend_collapsed)
                 .collapsible(true)
                 .resizable(false)
                 .title_bar(true)
-                .show(ui.ctx(), |ui| {
-                    show_armor_legend(ui);
-                });
+                .default_pos(defaults.legend_pos.map(|[x, y]| egui::pos2(x, y)).unwrap_or(egui::pos2(10.0, 100.0)));
+
+            let response = window.show(ui.ctx(), |ui| {
+                show_armor_legend(ui);
+            });
+
+            if let Some(inner) = &response {
+                let pos = inner.response.rect.min;
+                let collapsed = inner.inner.is_none();
+                let pos_changed = defaults
+                    .legend_pos
+                    .map(|[x, y]| (pos.x - x).abs() > 0.5 || (pos.y - y).abs() > 0.5)
+                    .unwrap_or(true);
+
+                if open != defaults.show_legend || collapsed != defaults.legend_collapsed || pos_changed {
+                    let mut p = self.tab_state.persisted.write();
+                    p.armor_viewer_defaults.show_legend = open;
+                    p.armor_viewer_defaults.legend_collapsed = collapsed;
+                    p.armor_viewer_defaults.legend_pos = Some([pos.x, pos.y]);
+                }
+            }
+            if !open && open != defaults.show_legend {
+                self.tab_state.persisted.write().armor_viewer_defaults.show_legend = false;
+            }
         }
 
         // Mirror cameras: broadcast the interacted pane's camera to all others.
@@ -678,8 +705,13 @@ impl ToolkitTabViewer<'_> {
         }
 
         // Apply saved defaults from Display popover (signal set inside render_armor_pane)
-        if let Some(new_defaults) = save_defaults_cell.take() {
-            self.tab_state.persisted.write().armor_viewer_defaults = new_defaults;
+        if let Some(mut new_defaults) = save_defaults_cell.take() {
+            let mut p = self.tab_state.persisted.write();
+            // Preserve legend state -- it's managed by the legend window, not pane settings
+            new_defaults.show_legend = p.armor_viewer_defaults.show_legend;
+            new_defaults.legend_collapsed = p.armor_viewer_defaults.legend_collapsed;
+            new_defaults.legend_pos = p.armor_viewer_defaults.legend_pos;
+            p.armor_viewer_defaults = new_defaults;
         }
 
         // Auto-snapshot active pane's display options so new panes/loads inherit them.
@@ -1441,6 +1473,8 @@ fn render_armor_pane(ui: &mut egui::Ui, pane: &mut ArmorPane, ctx: &ArmorPaneVie
                                     hull_all_visible: hull_all_on,
                                     armor_all_visible: armor_all_on,
                                     show_splash_boxes: pane.show_splash_boxes,
+                                    // Preserve legend state -- it's updated separately by the window itself
+                                    ..Default::default()
                                 }));
                             }
                         });

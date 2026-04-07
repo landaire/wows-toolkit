@@ -310,6 +310,10 @@ async fn save_armor_viewer_defaults(pool: &SqlitePool, ctx: &SaveContext) -> Res
             hull_all_visible: d.hull_all_visible,
             armor_all_visible: d.armor_all_visible,
             show_splash_boxes: d.show_splash_boxes,
+            show_legend: d.show_legend,
+            legend_collapsed: d.legend_collapsed,
+            legend_pos_x: d.legend_pos.map(|p| p[0] as f64),
+            legend_pos_y: d.legend_pos.map(|p| p[1] as f64),
         }
     };
     queries::save_armor_viewer_defaults(pool, &row).await?;

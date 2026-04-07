@@ -160,6 +160,10 @@ pub struct ArmorViewerDefaultsRow {
     pub hull_all_visible: bool,
     pub armor_all_visible: bool,
     pub show_splash_boxes: bool,
+    pub show_legend: bool,
+    pub legend_collapsed: bool,
+    pub legend_pos_x: Option<f64>,
+    pub legend_pos_y: Option<f64>,
 }
 
 /// Save armor viewer defaults (upsert single row).
@@ -167,12 +171,13 @@ pub async fn save_armor_viewer_defaults(pool: &SqlitePool, d: &ArmorViewerDefaul
     sqlx::query(
         "INSERT INTO armor_viewer_defaults \
          (id, show_plate_edges, show_waterline, show_zero_mm, armor_opacity, waterline_opacity, \
-          hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+          hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes, \
+          show_legend, legend_collapsed, legend_pos_x, legend_pos_y) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
          ON CONFLICT(id) DO UPDATE SET \
          show_plate_edges=?1, show_waterline=?2, show_zero_mm=?3, armor_opacity=?4, \
          waterline_opacity=?5, hull_opaque=?6, hull_all_visible=?7, armor_all_visible=?8, \
-         show_splash_boxes=?9",
+         show_splash_boxes=?9, show_legend=?10, legend_collapsed=?11, legend_pos_x=?12, legend_pos_y=?13",
     )
     .bind(d.show_plate_edges)
     .bind(d.show_waterline)
@@ -183,6 +188,10 @@ pub async fn save_armor_viewer_defaults(pool: &SqlitePool, d: &ArmorViewerDefaul
     .bind(d.hull_all_visible)
     .bind(d.armor_all_visible)
     .bind(d.show_splash_boxes)
+    .bind(d.show_legend)
+    .bind(d.legend_collapsed)
+    .bind(d.legend_pos_x)
+    .bind(d.legend_pos_y)
     .execute(pool)
     .await?;
     Ok(())
@@ -192,7 +201,8 @@ pub async fn save_armor_viewer_defaults(pool: &SqlitePool, d: &ArmorViewerDefaul
 pub async fn get_armor_viewer_defaults(pool: &SqlitePool) -> Result<Option<ArmorViewerDefaultsRow>, sqlx::Error> {
     sqlx::query_as(
         "SELECT show_plate_edges, show_waterline, show_zero_mm, armor_opacity, waterline_opacity, \
-                    hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes \
+                    hull_opaque, hull_all_visible, armor_all_visible, show_splash_boxes, \
+                    show_legend, legend_collapsed, legend_pos_x, legend_pos_y \
                     FROM armor_viewer_defaults WHERE id = 1",
     )
     .fetch_optional(pool)

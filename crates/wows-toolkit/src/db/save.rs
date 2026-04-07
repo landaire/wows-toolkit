@@ -47,7 +47,7 @@ pub fn spawn_save_task(
     runtime.spawn(async move {
         // Periodic timer for capturing window geometry (which changes
         // continuously during resize/move and has no discrete event).
-        let mut geometry_interval = tokio::time::interval(Duration::from_secs(30));
+        let mut geometry_interval = tokio::time::interval(Duration::from_secs(5));
         // Skip the first immediate tick.
         geometry_interval.tick().await;
 
@@ -92,7 +92,9 @@ fn capture_window_settings(egui_ctx: &egui::Context, ctx: &SaveContext) {
     // points, but with_inner_size expects zoom=1.0 points. Without this, the
     // window shrinks on every launch when zoom != 1.0.
     let main_info = egui_ctx.input(|i| i.viewport().clone());
-    tracker.settings.insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info, Some(egui_ctx.zoom_factor())));
+    tracker
+        .settings
+        .insert(WindowKind::Main, WindowSettings::from_viewport_info(&main_info, Some(egui_ctx.zoom_factor())));
 
     // Secondary/deferred viewports don't need zoom compensation.
     for &(kind, viewport_id) in &viewports {
