@@ -89,8 +89,11 @@ pub struct Metadata {
     game_type: String,
     match_group: String,
     version: Version,
+    #[serde(default)]
     max_duration: u32,
+    #[serde(default)]
     played_duration: Option<f32>,
+    #[serde(default)]
     extra_duration: Option<f32>,
     timestamp: Timestamp,
     battle_result: Option<BattleResult>,
