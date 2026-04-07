@@ -85,6 +85,14 @@ struct Args {
     #[arg(long)]
     no_armament: bool,
 
+    /// Hide the kill feed
+    #[arg(long)]
+    no_kill_feed: bool,
+
+    /// Hide chat messages
+    #[arg(long)]
+    no_chat: bool,
+
     /// Show position trail heatmap (rainbow coloring)
     #[arg(long)]
     show_trails: bool,
@@ -240,6 +248,8 @@ fn main() -> Result<(), Report> {
         no_buildings: args.no_buildings,
         no_turret_direction: args.no_turret_direction,
         no_armament: args.no_armament,
+        no_kill_feed: args.no_kill_feed,
+        no_chat: args.no_chat,
         show_trails: args.show_trails,
         no_dead_trails: args.no_dead_trails,
         show_speed_trails: args.show_speed_trails,

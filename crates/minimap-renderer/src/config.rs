@@ -86,6 +86,8 @@ pub struct CliOverrides {
     pub no_buildings: bool,
     pub no_turret_direction: bool,
     pub no_armament: bool,
+    pub no_kill_feed: bool,
+    pub no_chat: bool,
     pub show_trails: bool,
     pub no_dead_trails: bool,
     pub show_speed_trails: bool,
@@ -140,8 +142,8 @@ impl Default for RendererConfig {
             show_smoke: true,
             show_score: true,
             show_timer: true,
-            show_kill_feed: false,
-            show_chat: false,
+            show_kill_feed: true,
+            show_chat: true,
             show_consumables: true,
             show_armament: true,
             show_trails: false,
@@ -302,6 +304,12 @@ show_ship_config = false
         }
         if overrides.show_ship_config {
             self.show_ship_config = true;
+        }
+        if overrides.no_kill_feed {
+            self.show_kill_feed = false;
+        }
+        if overrides.no_chat {
+            self.show_chat = false;
         }
     }
 }
