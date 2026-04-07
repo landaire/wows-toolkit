@@ -34,5 +34,6 @@ run = [
     "cargo set-version -p wows_replays --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wows_minimap_renderer --bump {{arg(name=\"level\", i=0)}}",
     "cargo set-version -p wows-data-mgr --bump {{arg(name=\"level\", i=0)}}",
-    "cargo upgrade -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-data-mgr --incompatible allow --pinned allow",
+    "cargo set-version -p wt-translations --bump {{arg(name=\"level\", i=0)}}",
+    "cargo upgrade -p wowsunpack -p wows_replays -p wows_minimap_renderer -p wows-data-mgr -p wt-translations --incompatible allow --pinned allow",
 ]
