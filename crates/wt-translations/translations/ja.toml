@@ -172,6 +172,17 @@ heading = "World of Warships 設定"
 description = "World of Warships のインストールパス"
 directory_hint = "World of Warships ディレクトリ"
 
+[ui.settings.wows.cache]
+auto_dump = "古いリプレイの互換性のためにゲームデータをキャッシュ"
+directory_label = "キャッシュディレクトリ："
+browse = "参照"
+open_folder = "フォルダを開く"
+delete_old = "古いバージョンを削除"
+stats = "ゲームデータキャッシュ：%{count}バージョンで%{size}"
+
+[ui.task]
+batch_render_progress = "レンダリング中 %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "リプレイ設定"
 description = "リプレイ結果テーブルに表示する列を設定"
@@ -245,6 +256,10 @@ set_session_stats_one = "セッション統計として設定 (1 リプレイ)"
 set_session_stats_many = "セッション統計として設定 (%{count} リプレイ)"
 add_session_stats_one = "セッション統計に追加 (1 リプレイ)"
 add_session_stats_many = "セッション統計に追加 (%{count} リプレイ)"
+render_to_video = "動画にエクスポート"
+render_to_video_many = "%{count}件のリプレイを動画にエクスポート"
+render_to_clipboard = "クリップボードにエクスポート"
+render_to_clipboard_many = "%{count}件のリプレイをクリップボードにエクスポート"
 
 [ui.replay.column]
 actions = "アクション"

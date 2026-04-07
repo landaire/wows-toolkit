@@ -10815,6 +10815,7 @@ dependencies = [
  "web-time",
  "wgpu",
  "winresource",
+ "wows-data-mgr",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",

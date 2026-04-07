@@ -5,9 +5,10 @@ use std::path::PathBuf;
 
 mod detect;
 mod download;
-mod dump;
-mod manifest;
-mod registry;
+
+use wows_data_mgr::dump;
+use wows_data_mgr::manifest;
+use wows_data_mgr::registry;
 
 #[derive(Parser)]
 #[command(name = "wows-data-mgr", about = "Download and manage World of Warships game data")]
@@ -243,7 +244,10 @@ fn main() -> Result<(), Report> {
                 detect::detect_version_at_path(&game_dir, target).unwrap_or_else(|_| "unknown".to_string())
             };
 
-            dump::dump_renderer_data(&game_dir, target, &version_str, &output)?;
+            println!("Building VFS from game directory...");
+            let pb = dump::create_progress_bar(&game_dir);
+            dump::dump_renderer_data(&game_dir, target, &version_str, &output, pb.as_ref(), false)?;
+            println!("Dumped renderer data to {}", dump::dump_dir(&output, &version_str, target).display());
         }
 
         Commands::Register { latest, version, build, path } => {

@@ -965,12 +965,22 @@ impl TabState {
     #[must_use]
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
         let (tx, rx) = mpsc::channel();
-        let locale = self.persisted.read().settings.app.locale.clone().unwrap();
+        let settings = self.persisted.read();
+        let locale = settings.settings.app.locale.clone().unwrap();
+        let auto_dump = settings.settings.game.auto_dump_game_data;
+        let cache_dir = settings.settings.game.game_data_cache_dir.clone();
+        drop(settings);
         let fallback_constants: serde_json::Value =
             serde_json::from_str(include_str!("../../../embedded_resources/constants.json"))
                 .expect("failed to parse embedded constants JSON");
         let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
-            let _ = tx.send(crate::task::load_wows_files(wows_directory, locale.as_str(), &fallback_constants));
+            let _ = tx.send(crate::task::load_wows_files(
+                wows_directory,
+                locale.as_str(),
+                &fallback_constants,
+                auto_dump,
+                cache_dir,
+            ));
         });
 
         BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }

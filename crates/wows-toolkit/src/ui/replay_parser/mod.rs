@@ -217,13 +217,13 @@ fn show_leaf_context_menu(
         });
         ui.close_kind(UiKind::Menu);
     }
-    if ui.button("Render to Video").clicked() {
+    if ui.button(t!("ui.replay.context.render_to_video")).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("batch_render_replays"), vec![replay_weak.clone()]);
         });
         ui.close_kind(UiKind::Menu);
     }
-    if ui.button("Render to Clipboard").clicked() {
+    if ui.button(t!("ui.replay.context.render_to_clipboard")).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("batch_render_clipboard"), vec![replay_weak.clone()]);
         });
@@ -252,16 +252,22 @@ fn show_group_context_menu(ui: &mut egui::Ui, paths: &[std::path::PathBuf], repl
     let count = replays.len();
 
     // Batch render
-    let render_label =
-        if count == 1 { "Render to Video".to_string() } else { format!("Render {} Replays to Video", count) };
+    let render_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_video").into()
+    } else {
+        t!("ui.replay.context.render_to_video_many", count = count).into()
+    };
     if ui.button(render_label).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("batch_render_replays"), replays.to_vec());
         });
         ui.close_kind(UiKind::Menu);
     }
-    let clipboard_label =
-        if count == 1 { "Render to Clipboard".to_string() } else { format!("Render {} Replays to Clipboard", count) };
+    let clipboard_label: String = if count == 1 {
+        t!("ui.replay.context.render_to_clipboard").into()
+    } else {
+        t!("ui.replay.context.render_to_clipboard_many", count = count).into()
+    };
     if ui.button(clipboard_label).clicked() {
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new("batch_render_clipboard"), replays.to_vec());
@@ -369,18 +375,21 @@ impl GroupedTreeMaps {
             let count = selected_replays.len();
 
             // Batch render
-            let render_label =
-                if count == 1 { "Render to Video".to_string() } else { format!("Render {} Replays to Video", count) };
+            let render_label: String = if count == 1 {
+                t!("ui.replay.context.render_to_video").into()
+            } else {
+                t!("ui.replay.context.render_to_video_many", count = count).into()
+            };
             if ui.button(render_label).clicked() {
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(egui::Id::new("batch_render_replays"), selected_replays.clone());
                 });
                 ui.close_kind(UiKind::Menu);
             }
-            let clipboard_label = if count == 1 {
-                "Render to Clipboard".to_string()
+            let clipboard_label: String = if count == 1 {
+                t!("ui.replay.context.render_to_clipboard").into()
             } else {
-                format!("Render {} Replays to Clipboard", count)
+                t!("ui.replay.context.render_to_clipboard_many", count = count).into()
             };
             if ui.button(clipboard_label).clicked() {
                 ui.ctx().data_mut(|data| {

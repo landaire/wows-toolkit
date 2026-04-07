@@ -172,6 +172,17 @@ heading = "World of Warships 설정"
 description = "World of Warships 설치 경로"
 directory_hint = "World of Warships 디렉토리"
 
+[ui.settings.wows.cache]
+auto_dump = "이전 리플레이 호환성을 위해 게임 데이터 캐시"
+directory_label = "캐시 디렉터리:"
+browse = "찾아보기"
+open_folder = "폴더 열기"
+delete_old = "이전 버전 삭제"
+stats = "게임 데이터 캐시: %{count}개 버전에 %{size}"
+
+[ui.task]
+batch_render_progress = "렌더링 중 %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "리플레이 설정"
 description = "리플레이 결과 테이블에 표시할 열 설정"
@@ -245,6 +256,10 @@ set_session_stats_one = "세션 통계로 설정 (리플레이 1개)"
 set_session_stats_many = "세션 통계로 설정 (%{count}개 리플레이)"
 add_session_stats_one = "세션 통계에 추가 (리플레이 1개)"
 add_session_stats_many = "세션 통계에 추가 (%{count}개 리플레이)"
+render_to_video = "동영상으로 내보내기"
+render_to_video_many = "%{count}개의 리플레이를 동영상으로 내보내기"
+render_to_clipboard = "클립보드로 내보내기"
+render_to_clipboard_many = "%{count}개의 리플레이를 클립보드로 내보내기"
 
 [ui.replay.column]
 actions = "작업"

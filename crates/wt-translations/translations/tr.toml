@@ -148,6 +148,17 @@ heading = "World of Warships Ayarları"
 description = "World of Warships kurulum yolu"
 directory_hint = "World of Warships Dizini"
 
+[ui.settings.wows.cache]
+auto_dump = "Eski tekrarlar için oyun verilerini önbelleğe al"
+directory_label = "Önbellek dizini:"
+browse = "Gözat"
+open_folder = "Klasörü aç"
+delete_old = "Eski sürümleri sil"
+stats = "Oyun verisi önbelleği: %{count} sürümde %{size}"
+
+[ui.task]
+batch_render_progress = "İşleniyor %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Tekrar Ayarları"
 description = "Tekrar sonuçları tablosunda hangi sütunların görüneceğini yapılandırın"
@@ -219,6 +230,10 @@ set_session_stats_one = "Oturum İstatistikleri Olarak Ayarla (1 tekrar)"
 set_session_stats_many = "Oturum İstatistikleri Olarak Ayarla (%{count} tekrar)"
 add_session_stats_one = "Oturum İstatistiklerine Ekle (1 tekrar)"
 add_session_stats_many = "Oturum İstatistiklerine Ekle (%{count} tekrar)"
+render_to_video = "Videoya aktar"
+render_to_video_many = "%{count} tekrarı videoya aktar"
+render_to_clipboard = "Panoya aktar"
+render_to_clipboard_many = "%{count} tekrarı panoya aktar"
 
 [ui.replay.column]
 actions = "İşlemler"

@@ -148,6 +148,17 @@ heading = "Ustawienia World of Warships"
 description = "Ścieżka do instalacji World of Warships"
 directory_hint = "Katalog World of Warships"
 
+[ui.settings.wows.cache]
+auto_dump = "Zapisuj dane gry dla kompatybilności ze starszymi powtórkami"
+directory_label = "Katalog pamięci podręcznej:"
+browse = "Przeglądaj"
+open_folder = "Otwórz folder"
+delete_old = "Usuń stare wersje"
+stats = "Pamięć podręczna: %{size} w %{count} wersji(ach)"
+
+[ui.task]
+batch_render_progress = "Renderowanie %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Ustawienia powtórek"
 description = "Konfiguracja kolumn wyświetlanych w tabeli wyników powtórek"
@@ -219,6 +230,10 @@ set_session_stats_one = "Ustaw jako statystyki sesji (1 powtórka)"
 set_session_stats_many = "Ustaw jako statystyki sesji (%{count} powtórek)"
 add_session_stats_one = "Dodaj do statystyk sesji (1 powtórka)"
 add_session_stats_many = "Dodaj do statystyk sesji (%{count} powtórek)"
+render_to_video = "Eksportuj jako wideo"
+render_to_video_many = "Eksportuj %{count} powtórek jako wideo"
+render_to_clipboard = "Eksportuj do schowka"
+render_to_clipboard_many = "Eksportuj %{count} powtórek do schowka"
 
 [ui.replay.column]
 actions = "Akcje"

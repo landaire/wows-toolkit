@@ -49,11 +49,23 @@ pub struct WoWsDataMap {
     wows_dir: PathBuf,
     locale: String,
     network_job_tx: Option<mpsc::Sender<NetworkJob>>,
+    /// Custom game data cache directory. Empty means use the default.
+    game_data_cache_dir: String,
 }
 
 impl WoWsDataMap {
     pub fn new(wows_dir: PathBuf, locale: String) -> Self {
-        Self { builds: Arc::new(RwLock::new(HashMap::new())), wows_dir, locale, network_job_tx: None }
+        Self {
+            builds: Arc::new(RwLock::new(HashMap::new())),
+            wows_dir,
+            locale,
+            network_job_tx: None,
+            game_data_cache_dir: String::new(),
+        }
+    }
+
+    pub fn set_game_data_cache_dir(&mut self, dir: String) {
+        self.game_data_cache_dir = dir;
     }
 
     pub fn set_network_job_tx(&mut self, tx: mpsc::Sender<NetworkJob>) {
@@ -113,11 +125,21 @@ impl WoWsDataMap {
                 None => continue,
             };
 
+            let mut found = false;
             for dir in &attempted_dirs {
-                let mo_path = self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
-                if !mo_path.exists() {
+                // Try live install first, then dump directory
+                let live_path = self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
+                let dump_path =
+                    data.dump_dir.as_ref().map(|d| d.join(format!("translations/{dir}/LC_MESSAGES/global.mo")));
+                let mo_path = if live_path.exists() {
+                    live_path
+                } else if let Some(ref dp) = dump_path
+                    && dp.exists()
+                {
+                    dp.clone()
+                } else {
                     continue;
-                }
+                };
                 match std::fs::File::open(&mo_path).and_then(|f| {
                     gettext::Catalog::parse(f).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                 }) {
@@ -129,7 +151,11 @@ impl WoWsDataMap {
                         warn!(build, path = ?mo_path, error = %e, "Failed to reload translations");
                     }
                 }
+                found = true;
                 break;
+            }
+            if !found {
+                debug!(build, "No translations found for any attempted locale");
             }
         }
     }
@@ -152,37 +178,67 @@ impl WoWsDataMap {
             return Some(data);
         }
 
-        // Try to load from disk
-        let build_dir = self.wows_dir.join("bin").join(build.to_string());
-        if !build_dir.exists() {
-            return None;
-        }
-
-        debug!("Lazily loading game data for build {}", build);
         let fallback_constants = {
-            // Use any already-loaded build's constants as fallback
             let builds = self.builds.read();
             builds.values().next().map(|d| d.read().replay_constants.read().clone())
         };
         let fallback_constants = fallback_constants.unwrap_or_default();
 
-        match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants) {
-            Ok(wows_data) => {
-                // If we used fallback constants, request the correct version from the network
-                if !wows_data.replay_constants_exact_match
-                    && let Some(tx) = &self.network_job_tx
-                {
-                    let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+        // Try to load from the live game install first
+        let build_dir = self.wows_dir.join("bin").join(build.to_string());
+        if build_dir.exists() {
+            debug!("Lazily loading game data for build {}", build);
+            match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants) {
+                Ok(wows_data) => {
+                    if !wows_data.replay_constants_exact_match
+                        && let Some(tx) = &self.network_job_tx
+                    {
+                        let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+                    }
+                    let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                    self.insert(build, Arc::clone(&shared));
+                    return Some(shared);
                 }
-                let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
-                self.insert(build, Arc::clone(&shared));
-                Some(shared)
-            }
-            Err(e) => {
-                warn!("Could not load data for build {}: {}", build, e);
-                None
+                Err(e) => {
+                    warn!("Could not load data for build {} from live install: {}", build, e);
+                }
             }
         }
+
+        // Fall back to auto-dumped game data
+        if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir)
+            && let Ok(entries) = std::fs::read_dir(&dump_base)
+        {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
+                    debug!("Loading game data for build {} from dump: {}", build, entry.path().display());
+                    match crate::task::replays::load_wows_data_from_dump(
+                        &entry.path(),
+                        build,
+                        &self.locale,
+                        &fallback_constants,
+                    ) {
+                        Ok(wows_data) => {
+                            if !wows_data.replay_constants_exact_match
+                                && let Some(tx) = &self.network_job_tx
+                            {
+                                let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
+                            }
+                            let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                            self.insert(build, Arc::clone(&shared));
+                            return Some(shared);
+                        }
+                        Err(e) => {
+                            warn!("Could not load data for build {} from dump: {}", build, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -225,6 +281,10 @@ pub struct WorldOfWarshipsData {
 
     #[allow(dead_code)]
     pub build_dir: PathBuf,
+
+    /// If this data was loaded from a dump directory (not the live install),
+    /// this holds the dump path for translation reloading.
+    pub dump_dir: Option<PathBuf>,
 }
 
 impl WorldOfWarshipsData {

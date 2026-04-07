@@ -15,7 +15,7 @@ use language_tags::LanguageTag;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rootcause::Report;
-use rootcause::prelude::ResultExt;
+use rootcause::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;
@@ -277,6 +277,7 @@ pub fn load_wows_data_for_build(
         replay_constants_exact_match,
         replays_dir: PathBuf::new(), // Set by caller
         build_dir,
+        dump_dir: None,
     })
 }
 
@@ -285,6 +286,8 @@ pub fn load_wows_files(
     wows_directory: PathBuf,
     locale: &str,
     fallback_constants: &serde_json::Value,
+    auto_dump: bool,
+    game_data_cache_dir: String,
 ) -> Result<BackgroundTaskCompletion, Report> {
     if !wows_directory.exists() {
         debug!("WoWs directory does not exist: {:?}", wows_directory);
@@ -376,6 +379,24 @@ pub fn load_wows_files(
     // Clean up stale caches for builds that no longer exist
     crate::util::game_params::cleanup_stale_caches(&available_builds);
 
+    // Auto-dump game data for this version so replays still work after a game update
+    if auto_dump
+        && let Some(ref fv) = data.full_version
+        && let Some(dump_base) = game_data_dump_base_with_override(&game_data_cache_dir)
+    {
+        let version_str = format!("{}.{}.{}", fv.major, fv.minor, fv.patch);
+        if !wows_data_mgr::dump::dump_exists(&dump_base, &version_str, fv.build) {
+            let game_dir = wows_directory.clone();
+            let build = fv.build;
+            let vs = version_str.clone();
+            crate::util::thread::spawn_logged("auto-dump-game-data", move || {
+                if let Err(e) = wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true) {
+                    tracing::warn!("Auto-dump failed for {vs}_{build}: {e}");
+                }
+            });
+        }
+    }
+
     debug!("Sending background task completion");
 
     Ok(BackgroundTaskCompletion::DataLoaded {
@@ -383,6 +404,114 @@ pub fn load_wows_files(
         wows_data: Box::new(data),
         replays,
         available_builds,
+    })
+}
+
+/// Returns the base directory for auto-dumped game data.
+/// Uses the custom path from settings if set, otherwise the default app data location.
+pub fn game_data_dump_base() -> Option<PathBuf> {
+    // Try to read the custom path from settings (requires db to be loaded).
+    // This is called from background threads that may not have access to TabState,
+    // so we also accept it as a parameter in the dump trigger path.
+    crate::storage_dir().map(|d| d.join("game_data"))
+}
+
+/// Returns the base directory for auto-dumped game data, preferring a custom path if set.
+pub fn game_data_dump_base_with_override(custom_dir: &str) -> Option<PathBuf> {
+    if !custom_dir.is_empty() {
+        let p = PathBuf::from(custom_dir);
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
+    game_data_dump_base()
+}
+
+/// Load game data from a previously dumped directory.
+/// Used as a fallback when the live game install no longer has the build.
+pub fn load_wows_data_from_dump(
+    dump_dir: &Path,
+    build: u32,
+    locale: &str,
+    fallback_constants: &serde_json::Value,
+) -> Result<WorldOfWarshipsData, Report> {
+    use wowsunpack::game_params::provider::GameMetadataProvider;
+    use wowsunpack::vfs::impls::physical::PhysicalFS;
+
+    debug!("Loading game data from dump: {}", dump_dir.display());
+
+    let vfs_root = dump_dir.join("vfs");
+    if !vfs_root.exists() {
+        bail!("VFS directory not found in dump: {}", vfs_root.display());
+    }
+    let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+
+    // Load translations from dump
+    let bcp47 = locale.replace('_', "-");
+    let primary_lang = bcp47
+        .parse::<LanguageTag>()
+        .map(|tag| tag.primary_language().to_string())
+        .unwrap_or_else(|_| locale.to_string());
+    let attempted_dirs = [locale, &primary_lang, "en"];
+    let mut found_catalog = None;
+    for dir in attempted_dirs {
+        let mo_path = dump_dir.join(format!("translations/{dir}/LC_MESSAGES/global.mo"));
+        if !mo_path.exists() {
+            continue;
+        }
+        if let Ok(file) = File::open(&mo_path)
+            && let Ok(catalog) = Catalog::parse(file)
+        {
+            found_catalog = Some(catalog);
+            break;
+        }
+    }
+
+    // Load GameParams from rkyv cache
+    let rkyv_path = dump_dir.join("game_params.rkyv");
+    debug!("Loading GameParams from rkyv: {}", rkyv_path.display());
+    let rkyv_data = std::fs::read(&rkyv_path).context_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+    let params: Vec<wowsunpack::game_params::types::Param> =
+        rkyv::from_bytes::<Vec<wowsunpack::game_params::types::Param>, rkyv::rancor::Error>(&rkyv_data)
+            .map_err(|e| report!("Failed to deserialize GameParams from dump: {e}"))?;
+
+    let metadata_provider = GameMetadataProvider::from_params_no_specs(params)
+        .map_err(|e| report!("Failed to build GameMetadataProvider from dump: {e:?}"))?;
+    if let Some(catalog) = found_catalog {
+        metadata_provider.set_translations(catalog);
+    }
+    let metadata_provider = Some(Arc::new(metadata_provider));
+
+    // Load icons
+    let icons = load_ship_icons(&vfs);
+    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
+    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
+
+    // Load constants
+    let (replay_constants, replay_constants_exact_match) = match load_versioned_constants_from_disk_with_fallback(build)
+    {
+        Some((data, exact)) => (data, exact),
+        None => (fallback_constants.clone(), false),
+    };
+    let game_constants = build_game_constants(&vfs, &replay_constants, build);
+
+    Ok(WorldOfWarshipsData {
+        game_metadata: metadata_provider,
+        vfs,
+        filtered_files: Vec::new(), // No file browser for dump-based data
+        patch_version: build as usize,
+        full_version: None,
+        build_number: build,
+        ship_icons: icons,
+        ribbon_icons,
+        subribbon_icons,
+        achievement_icons: HashMap::new(),
+        game_constants: Arc::new(game_constants),
+        replay_constants: Arc::new(RwLock::new(replay_constants)),
+        replay_constants_exact_match,
+        replays_dir: PathBuf::new(),
+        build_dir: dump_dir.to_path_buf(),
+        dump_dir: Some(dump_dir.to_path_buf()),
     })
 }
 

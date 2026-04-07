@@ -148,6 +148,17 @@ heading = "Nastavení World of Warships"
 description = "Cesta k instalaci World of Warships"
 directory_hint = "Adresář World of Warships"
 
+[ui.settings.wows.cache]
+auto_dump = "Ukládat herní data pro kompatibilitu starších záznamů"
+directory_label = "Adresář mezipaměti:"
+browse = "Procházet"
+open_folder = "Otevřít složku"
+delete_old = "Smazat starší verze"
+stats = "Mezipaměť herních dat: %{size} v %{count} verzích"
+
+[ui.task]
+batch_render_progress = "Vykreslování %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Nastavení záznamů"
 description = "Nastavte, které sloupce se zobrazí v tabulce výsledků záznamů"
@@ -219,6 +230,10 @@ set_session_stats_one = "Nastavit jako statistiky relace (1 záznam)"
 set_session_stats_many = "Nastavit jako statistiky relace (%{count} záznamů)"
 add_session_stats_one = "Přidat ke statistikám relace (1 záznam)"
 add_session_stats_many = "Přidat ke statistikám relace (%{count} záznamů)"
+render_to_video = "Exportovat jako video"
+render_to_video_many = "Exportovat %{count} záznamů jako video"
+render_to_clipboard = "Exportovat do schránky"
+render_to_clipboard_many = "Exportovat %{count} záznamů do schránky"
 
 [ui.replay.column]
 actions = "Akce"

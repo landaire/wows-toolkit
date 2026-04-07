@@ -22,6 +22,7 @@
 //! }
 //! ```
 
+pub mod dump;
 pub mod manifest;
 pub mod registry;
 

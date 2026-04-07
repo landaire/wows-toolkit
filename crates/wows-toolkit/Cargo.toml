@@ -49,6 +49,7 @@ humansize = "2.1.3"
 thiserror = { workspace = true }
 glob = { workspace = true }
 home = "0.5"
+wows-data-mgr = { workspace = true }
 itertools = { workspace = true }
 gettext = { workspace = true }
 language-tags = "0.3"

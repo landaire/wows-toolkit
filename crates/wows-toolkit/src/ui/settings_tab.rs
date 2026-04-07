@@ -151,6 +151,70 @@ impl ToolkitTabViewer<'_> {
                 });
             });
 
+            // Game data cache settings
+            {
+                let mut auto_dump = self.tab_state.persisted.read().settings.game.auto_dump_game_data;
+                ui.checkbox(&mut auto_dump, t!("ui.settings.wows.cache.auto_dump"));
+                if auto_dump != self.tab_state.persisted.read().settings.game.auto_dump_game_data {
+                    self.tab_state.persisted.write().settings.game.auto_dump_game_data = auto_dump;
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(t!("ui.settings.wows.cache.directory_label"));
+                    let mut cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+                    let default_label = crate::task::replays::game_data_dump_base()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut cache_dir)
+                            .hint_text(&default_label)
+                            .desired_width(ui.available_width() - 70.0),
+                    );
+                    if response.changed() {
+                        self.tab_state.persisted.write().settings.game.game_data_cache_dir = cache_dir;
+                    }
+                    if ui.button(t!("ui.settings.wows.cache.browse")).clicked()
+                        && let Some(folder) = rfd::FileDialog::new().pick_folder()
+                    {
+                        self.tab_state.persisted.write().settings.game.game_data_cache_dir =
+                            folder.to_string_lossy().into_owned();
+                    }
+                });
+
+                let cache_dir_setting = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+                if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir_setting)
+                    && dump_base.exists()
+                {
+                    let (total_size, version_count) = compute_dump_cache_stats(&dump_base);
+                    if version_count > 0 {
+                        ui.horizontal(|ui| {
+                            ui.label(t!(
+                                "ui.settings.wows.cache.stats",
+                                size = humansize::format_size(total_size, humansize::BINARY),
+                                count = version_count,
+                            ));
+                            if ui.button(t!("ui.settings.wows.cache.open_folder")).clicked() {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let _ = std::process::Command::new("explorer.exe").arg(&dump_base).spawn();
+                                }
+                                #[cfg(target_os = "linux")]
+                                {
+                                    let _ = std::process::Command::new("xdg-open").arg(&dump_base).spawn();
+                                }
+                                #[cfg(target_os = "macos")]
+                                {
+                                    let _ = std::process::Command::new("open").arg(&dump_base).spawn();
+                                }
+                            }
+                            if version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
+                                delete_old_dump_versions(&dump_base);
+                            }
+                        });
+                    }
+                }
+            }
+
             ui.add_space(12.0);
 
             // ── Replay Settings ───────────────────────────────────────
@@ -359,5 +423,59 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
+    }
+}
+
+/// Compute total size and version count for the game data dump cache.
+fn compute_dump_cache_stats(dump_base: &std::path::Path) -> (u64, usize) {
+    let mut total_size = 0u64;
+    let mut count = 0usize;
+    if let Ok(entries) = std::fs::read_dir(dump_base) {
+        for entry in entries.flatten() {
+            if entry.path().join("metadata.toml").exists() {
+                count += 1;
+                total_size += dir_size(&entry.path());
+            }
+        }
+    }
+    (total_size, count)
+}
+
+/// Recursively compute directory size in bytes.
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let ft = entry.file_type().unwrap_or_else(|_| unreachable!());
+            if ft.is_file() {
+                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            } else if ft.is_dir() {
+                total += dir_size(&entry.path());
+            }
+        }
+    }
+    total
+}
+
+/// Delete all dump versions except the most recent one (by directory name sort order).
+fn delete_old_dump_versions(dump_base: &std::path::Path) {
+    let mut versions: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dump_base) {
+        for entry in entries.flatten() {
+            if entry.path().join("metadata.toml").exists() {
+                versions.push(entry.path());
+            }
+        }
+    }
+    if versions.len() <= 1 {
+        return;
+    }
+    // Sort by name so the latest version (highest build number) is last
+    versions.sort();
+    // Keep the last one, delete the rest
+    for dir in &versions[..versions.len() - 1] {
+        if let Err(e) = std::fs::remove_dir_all(dir) {
+            tracing::warn!("Failed to delete old dump {}: {e}", dir.display());
+        }
     }
 }

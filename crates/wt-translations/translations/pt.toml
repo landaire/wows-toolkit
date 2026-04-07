@@ -148,6 +148,17 @@ heading = "Definições do World of Warships"
 description = "Caminho para a sua instalação do World of Warships"
 directory_hint = "Diretório do World of Warships"
 
+[ui.settings.wows.cache]
+auto_dump = "Guardar dados do jogo para compatibilidade com replays antigos"
+directory_label = "Diretório de cache:"
+browse = "Procurar"
+open_folder = "Abrir pasta"
+delete_old = "Eliminar versões antigas"
+stats = "Cache de dados: %{size} em %{count} versão(ões)"
+
+[ui.task]
+batch_render_progress = "A renderizar %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Definições de replay"
 description = "Configure quais colunas aparecem na tabela de resultados de replay"
@@ -219,6 +230,10 @@ set_session_stats_one = "Definir como estatísticas de sessão (1 replay)"
 set_session_stats_many = "Definir como estatísticas de sessão (%{count} replays)"
 add_session_stats_one = "Adicionar às estatísticas de sessão (1 replay)"
 add_session_stats_many = "Adicionar às estatísticas de sessão (%{count} replays)"
+render_to_video = "Exportar como vídeo"
+render_to_video_many = "Exportar %{count} replays como vídeo"
+render_to_clipboard = "Exportar para a área de transferência"
+render_to_clipboard_many = "Exportar %{count} replays para a área de transferência"
 
 [ui.replay.column]
 actions = "Ações"

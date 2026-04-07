@@ -937,6 +937,9 @@ impl WowsToolkitApp {
                         if let Some(tx) = self.tab_state.network_job_tx.clone() {
                             map.set_network_job_tx(tx);
                         }
+                        map.set_game_data_cache_dir(
+                            self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone(),
+                        );
                         map.insert(build_number, Arc::clone(wows_data_ref));
                         self.tab_state.wows_data_map = Some(map);
                     }

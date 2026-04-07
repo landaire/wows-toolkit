@@ -276,6 +276,10 @@ pub struct GameSettings {
     pub current_replay_path: PathBuf,
     pub constants_file_commit: Option<String>,
     pub has_052_game_params_fix: bool,
+    /// Automatically dump game data on load so old replays work after a game update.
+    pub auto_dump_game_data: bool,
+    /// Custom directory for game data cache. When empty, uses the default app data location.
+    pub game_data_cache_dir: String,
 }
 
 impl Default for GameSettings {
@@ -285,6 +289,8 @@ impl Default for GameSettings {
             current_replay_path: Default::default(),
             constants_file_commit: None,
             has_052_game_params_fix: true,
+            auto_dump_game_data: false,
+            game_data_cache_dir: String::new(),
         }
     }
 }

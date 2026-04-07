@@ -172,6 +172,17 @@ heading = "World of Warships-instellingen"
 description = "Pad naar uw World of Warships-installatie"
 directory_hint = "World of Warships-map"
 
+[ui.settings.wows.cache]
+auto_dump = "Spelgegevens cachen voor compatibiliteit met oudere replays"
+directory_label = "Cachemap:"
+browse = "Bladeren"
+open_folder = "Map openen"
+delete_old = "Oude versies verwijderen"
+stats = "Spelgegevenscache: %{size} in %{count} versie(s)"
+
+[ui.task]
+batch_render_progress = "Renderen %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Replay-instellingen"
 description = "Configureer welke kolommen in de replayresultatentabel verschijnen"
@@ -245,6 +256,10 @@ set_session_stats_one = "Instellen als sessiestatistieken (1 replay)"
 set_session_stats_many = "Instellen als sessiestatistieken (%{count} replays)"
 add_session_stats_one = "Toevoegen aan sessiestatistieken (1 replay)"
 add_session_stats_many = "Toevoegen aan sessiestatistieken (%{count} replays)"
+render_to_video = "Exporteren als video"
+render_to_video_many = "%{count} replays exporteren als video"
+render_to_clipboard = "Exporteren naar klembord"
+render_to_clipboard_many = "%{count} replays exporteren naar klembord"
 
 [ui.replay.column]
 actions = "Acties"

@@ -172,6 +172,17 @@ heading = "World of Warships 设置"
 description = "您的 World of Warships 安装路径"
 directory_hint = "World of Warships 目录"
 
+[ui.settings.wows.cache]
+auto_dump = "缓存游戏数据以兼容旧回放"
+directory_label = "缓存目录："
+browse = "浏览"
+open_folder = "打开文件夹"
+delete_old = "删除旧版本"
+stats = "游戏数据缓存：%{count}个版本共%{size}"
+
+[ui.task]
+batch_render_progress = "渲染中 %{current}/%{total}：%{name}"
+
 [ui.settings.replay]
 heading = "回放设置"
 description = "配置回放结果表中显示的列"
@@ -245,6 +256,10 @@ set_session_stats_one = "设为会话统计（1 个回放）"
 set_session_stats_many = "设为会话统计（%{count} 个回放）"
 add_session_stats_one = "添加到会话统计（1 个回放）"
 add_session_stats_many = "添加到会话统计（%{count} 个回放）"
+render_to_video = "导出为视频"
+render_to_video_many = "导出%{count}个回放为视频"
+render_to_clipboard = "导出到剪贴板"
+render_to_clipboard_many = "导出%{count}个回放到剪贴板"
 
 [ui.replay.column]
 actions = "操作"

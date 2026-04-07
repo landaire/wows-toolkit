@@ -9,6 +9,7 @@ use std::sync::mpsc::TryRecvError;
 
 use parking_lot::RwLock;
 use rootcause::Report;
+use rust_i18n::t;
 
 use crate::data::wows_data::WorldOfWarshipsData;
 #[cfg(feature = "mod_manager")]
@@ -258,11 +259,11 @@ impl BackgroundTask {
                         let p = progress.lock();
                         let pct =
                             if p.total_frames > 0 { p.completed_frames as f32 / p.total_frames as f32 } else { 0.0 };
-                        ui.add(egui::ProgressBar::new(pct).text(format!(
-                            "Rendering {}/{}: {}",
-                            p.current_index + 1,
-                            p.total_replays,
-                            p.current_name,
+                        ui.add(egui::ProgressBar::new(pct).text(t!(
+                            "ui.task.batch_render_progress",
+                            current = p.current_index + 1,
+                            total = p.total_replays,
+                            name = &p.current_name,
                         )));
                     }
                     BackgroundTaskKind::LoadingPersonalRatingData

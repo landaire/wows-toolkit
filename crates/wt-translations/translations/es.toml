@@ -148,6 +148,17 @@ heading = "Configuración de World of Warships"
 description = "Ruta a su instalación de World of Warships"
 directory_hint = "Directorio de World of Warships"
 
+[ui.settings.wows.cache]
+auto_dump = "Guardar datos del juego para compatibilidad con repeticiones antiguas"
+directory_label = "Directorio de caché:"
+browse = "Explorar"
+open_folder = "Abrir carpeta"
+delete_old = "Eliminar versiones antiguas"
+stats = "Caché de datos: %{size} en %{count} versión(es)"
+
+[ui.task]
+batch_render_progress = "Renderizando %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Configuración de repeticiones"
 description = "Configure qué columnas aparecen en la tabla de resultados de repeticiones"
@@ -219,6 +230,10 @@ set_session_stats_one = "Establecer como estadísticas de sesión (1 repetición
 set_session_stats_many = "Establecer como estadísticas de sesión (%{count} repeticiones)"
 add_session_stats_one = "Añadir a estadísticas de sesión (1 repetición)"
 add_session_stats_many = "Añadir a estadísticas de sesión (%{count} repeticiones)"
+render_to_video = "Exportar como vídeo"
+render_to_video_many = "Exportar %{count} repeticiones como vídeo"
+render_to_clipboard = "Exportar al portapapeles"
+render_to_clipboard_many = "Exportar %{count} repeticiones al portapapeles"
 
 [ui.replay.column]
 actions = "Acciones"

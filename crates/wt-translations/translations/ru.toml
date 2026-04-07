@@ -148,6 +148,17 @@ heading = "Настройки World of Warships"
 description = "Путь к установке World of Warships"
 directory_hint = "Каталог World of Warships"
 
+[ui.settings.wows.cache]
+auto_dump = "Кэшировать игровые данные для совместимости со старыми повторами"
+directory_label = "Каталог кэша:"
+browse = "Обзор"
+open_folder = "Открыть папку"
+delete_old = "Удалить старые версии"
+stats = "Кэш игровых данных: %{size} в %{count} версии(ях)"
+
+[ui.task]
+batch_render_progress = "Рендеринг %{current}/%{total}: %{name}"
+
 [ui.settings.replay]
 heading = "Настройки реплеев"
 description = "Настройте отображаемые столбцы в таблице результатов реплеев"
@@ -219,6 +230,10 @@ set_session_stats_one = "Задать как статистику сессии (
 set_session_stats_many = "Задать как статистику сессии (%{count} реплеев)"
 add_session_stats_one = "Добавить к статистике сессии (1 реплей)"
 add_session_stats_many = "Добавить к статистике сессии (%{count} реплеев)"
+render_to_video = "Экспорт в видео"
+render_to_video_many = "Экспорт %{count} повторов в видео"
+render_to_clipboard = "Экспорт в буфер обмена"
+render_to_clipboard_many = "Экспорт %{count} повторов в буфер обмена"
 
 [ui.replay.column]
 actions = "Действия"

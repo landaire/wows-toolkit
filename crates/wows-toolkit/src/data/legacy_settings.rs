@@ -219,6 +219,8 @@ impl LegacyWowsToolkitApp {
                 current_replay_path: s.current_replay_path,
                 constants_file_commit: s.constants_file_commit,
                 has_052_game_params_fix: s.has_052_game_params_fix,
+                auto_dump_game_data: false,
+                game_data_cache_dir: String::new(),
             },
             replay: s.replay_settings,
             renderer: s.renderer_options,
