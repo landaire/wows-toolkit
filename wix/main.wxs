@@ -1,0 +1,81 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="WoWs Toolkit"
+           Manufacturer="Lander Brandt"
+           Version="$(var.Version)"
+           UpgradeCode="A7E3B1D4-5F28-4C96-9A1E-3D6B8F2C4E0A"
+           Scope="perUser"
+           Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <!-- App icon shown in Add/Remove Programs -->
+    <Icon Id="AppIcon" SourceFile="assets\wows_toolkit.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="AppIcon"/>
+
+    <!-- Installer banner (493x58) and license -->
+    <WixVariable Id="WixUIBannerBmp" Value="wix\banner.bmp"/>
+    <WixVariable Id="WixUILicenseRtf" Value="wix\license.rtf"/>
+
+    <!-- Install to %LocalAppData%\WoWs Toolkit -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="WoWs Toolkit">
+
+        <Component Id="MainExecutable">
+          <File Id="exe0"
+                Source="$(var.BinDir)\wows_toolkit.exe"/>
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="WoWs Toolkit">
+        <Component Id="ApplicationShortcut">
+          <Shortcut Id="StartMenuShortcut"
+                    Name="WoWs Toolkit"
+                    Description="World of Warships Toolkit"
+                    Target="[#exe0]"
+                    Icon="AppIcon"
+                    WorkingDirectory="INSTALLFOLDER"/>
+          <RemoveFolder Id="CleanUpShortcut" On="uninstall"/>
+          <RegistryValue Root="HKCU" Key="Software\WoWsToolkit"
+                         Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Application" Level="1">
+      <ComponentRef Id="MainExecutable"/>
+      <ComponentRef Id="ApplicationShortcut"/>
+    </Feature>
+
+    <Property Id="ARPHELPLINK" Value="https://github.com/landaire/wows-toolkit"/>
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize"/>
+
+    <!-- Launch after install -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch WoWs Toolkit"/>
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
+    <Property Id="WixShellExecTarget" Value="[#exe0]"/>
+    <CustomAction Id="LaunchApplication" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X64"/>
+
+    <!--
+      Custom UI: Welcome -> License -> Install -> Exit.
+      Based on WixUI_InstallDir with the directory picker skipped.
+    -->
+    <UI>
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER"/>
+
+      <!-- Skip directory picker: License jumps straight to VerifyReadyDlg -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="999"/>
+      <!-- Back from VerifyReadyDlg goes to License -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" Order="999"/>
+
+      <!-- Launch app on finish -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed"/>
+    </UI>
+  </Package>
+</Wix>

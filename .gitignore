@@ -7,3 +7,6 @@ wows_toolkit.log.*
 dump_out/
 game_data/
 .steam-user
+.wix
+wix/banner.bmp
+wix/license.rtf

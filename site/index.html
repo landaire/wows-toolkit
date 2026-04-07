@@ -698,13 +698,15 @@
 
                     // Detect platform and pick the right asset
                     const ua = navigator.userAgent.toLowerCase();
-                    let suffix = "_windows.zip";
-                    if (ua.includes("mac")) suffix = "_macos.dmg";
-                    else if (ua.includes("linux")) suffix = ".flatpak";
-
-                    const asset = data.assets?.find((a) =>
-                        a.name.endsWith(suffix),
-                    );
+                    let asset;
+                    if (ua.includes("mac")) {
+                        asset = data.assets?.find((a) => a.name.endsWith("_macos.dmg"));
+                    } else if (ua.includes("linux")) {
+                        asset = data.assets?.find((a) => a.name.endsWith(".flatpak"));
+                    } else {
+                        asset = data.assets?.find((a) => a.name.endsWith(".msi"))
+                            || data.assets?.find((a) => a.name.endsWith("_windows.zip"));
+                    }
                     if (asset)
                         document.getElementById("download-btn").href =
                             asset.browser_download_url;

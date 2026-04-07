@@ -50,6 +50,18 @@ jobs:
           files: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\wows_toolkit.exe
           file-digest: SHA256
 
+      - name: Build MSI installer
+        run: ./scripts/build-msi.ps1 -SkipBuild
+
+      - name: Sign MSI
+        uses: azure/trusted-signing-action@v1
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: wows-toolkit
+          certificate-profile-name: wows-toolkit
+          files: ${{ github.workspace }}\target\wix\*.msi
+          file-digest: SHA256
+
       - name: Create zip archive
         run: |
           Copy-Item -Recurse "crates/wt-translations/translations" "translations"
@@ -61,6 +73,7 @@ jobs:
           files: |
             wows_toolkit_${{ github.event.release.tag_name }}_windows.zip
             target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb
+            target/wix/*.msi
 
   # ── Linux (Flatpak) ───────────────────────────────────────────────────
   linux:
