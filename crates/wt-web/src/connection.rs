@@ -94,8 +94,8 @@ async fn run_connection(
     tracing::info!("Connecting to host: {}", host_public_key.fmt_short());
 
     // Create iroh endpoint.
-    let secret_key = iroh::SecretKey::generate(&mut rand::rng());
-    let endpoint = iroh::Endpoint::builder()
+    let secret_key = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
+    let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
         .secret_key(secret_key)
         .alpns(vec![COLLAB_ALPN.to_vec()])
         .bind()
