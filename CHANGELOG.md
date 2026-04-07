@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.66] - 2026-04-07
+
+### 🚀 Features
+
+- Persist armor thickness legend position/collapse state
+
+### 🐛 Bug Fixes
+
+- Windows would change size actively
+
 ## [0.1.65] - 2026-04-07
 
 ### 🚀 Features
