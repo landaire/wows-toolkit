@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.65] - 2026-04-07
+
+### 🚀 Features
+
+- Minimap renderer now respects chat/kill feed enable/disable options
+- Add `max_duration`, `played_duration`, and `extra_duration` fields to exported match metadata
+- Add MSI installer to releases
+- Add batch replay export
+- Add --recreate-game-params arg to minimap renderer CLI to recreate the cache if the internal format changes
+- Add application setting to enable persisting data required for old replay compatibility
+
+### 🐛 Bug Fixes
+
+- *(wowsunpack)* Update to pickled 2.0-alpha4 to fix bugs surfaced in WoWs v15.3 + delete flaky tests
+- Window sizes would shrink/grow after restarting the app when a non-1.0 scaling factor was applied
+- Wows-data-mgr now exports the `gui/ships_silhouettes` directory so that CLI renderers can render the HP bar silhouette
+- Rendered videos did not appropriately display CJK text
+- Updating the application language will update any parsed replays' text
+- Protocol tests were failing
+
+### Core
+
+- Update dependencies
+
 ## [0.1.64] - 2026-03-20
 
 ### 🚀 Features
@@ -48,15 +72,15 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
-- Constants fallback sometimes was unreliable, which might break constants data updates
 - Main app window position was not being restored on startup
 - Completely remove logic involving bundled constants data, except for using it as a fallback
 
-## [0.1.60] - 2026-03-13
+## [0.1.60] - 2026-03-14
 
 ### 🐛 Bug Fixes
 
 - Settings were not properly persisted on change
+- Constants fallback sometimes was unreliable, which might break constants data updates
 
 ### App
 
@@ -832,6 +856,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 
+- *(replays)* Add base xp
 - *(replays)* Add checkbox to auto-load most recent replay
 - *(replays)* Colorize base XP and damage
 - Add new player tracker tab
@@ -839,30 +864,18 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Bug Fixes
 
+- *(replays)* Fixed total damage numbers reflecting incorrect teams
 - *(replays)* Fix operation replays failing to load
 
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update gui
 
 ### Replays
 
 - Adjust some table column sizes
 - Enable auto loading of latest replay by default
-
-## [0.1.22] - 2024-11-13
-
-### 🚀 Features
-
-- *(replays)* Add base xp
-
-### 🐛 Bug Fixes
-
-- *(replays)* Fixed total damage numbers reflecting incorrect teams
-
-### ⚙️ Miscellaneous Tasks
-
-- Update changelog
 
 ## [0.1.21] - 2024-11-12
 
