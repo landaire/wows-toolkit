@@ -2161,6 +2161,73 @@ impl UiReport {
         self.battle_result
     }
 
+    /// Re-derive all translation-dependent display strings (ship names, species,
+    /// bot names, achievements, ribbons) from the current locale. Call this after
+    /// the user changes language so the report reflects the new translations
+    /// without rebuilding from scratch.
+    pub fn refresh_translations(&mut self) {
+        let wows_data = self.wows_data.read();
+        let Some(metadata_provider) = wows_data.game_metadata.as_ref() else {
+            return;
+        };
+
+        for report in &mut self.player_reports {
+            let vehicle_param = report.player.vehicle();
+            let player_state = report.player.initial_state();
+
+            // Ship name
+            report.ship_name = metadata_provider
+                .localized_name_from_param(vehicle_param)
+                .unwrap_or_else(|| format!("{}", vehicle_param.id()));
+
+            // Ship species text
+            if let Some(species) = vehicle_param.species().and_then(|r| r.known().cloned())
+                && let Some(name) = metadata_provider.localized_name_from_id(&species.translation_id())
+            {
+                report.ship_species_text = name;
+            }
+
+            // Bot display name
+            if player_state.is_bot() && player_state.username().starts_with("IDS_") {
+                let display_name = metadata_provider
+                    .localized_name_from_id(player_state.username())
+                    .unwrap_or_else(|| player_state.username().to_string());
+                let name_color =
+                    if player_state.is_abuser() { Color32::from_rgb(0xFF, 0xC0, 0xCB) } else { report.color };
+                report.name_text = RichText::new(&display_name).color(name_color);
+            }
+
+            // Translated build
+            report.translated_build = models::TranslatedBuild::new(&report.player, metadata_provider);
+
+            // Achievements (icon_key holds the ui_name used for translation lookup)
+            for achievement in &mut report.achievements {
+                if let Some(name) = wowsunpack::game_params::translations::translate_achievement_name(
+                    &achievement.icon_key,
+                    metadata_provider.as_ref(),
+                ) {
+                    achievement.display_name = name;
+                }
+                if let Some(desc) = wowsunpack::game_params::translations::translate_achievement_description(
+                    &achievement.icon_key,
+                    metadata_provider.as_ref(),
+                ) {
+                    achievement.description = desc;
+                }
+            }
+
+            // Ribbons (name holds the RIBBON_* key used for translation lookup)
+            for ribbon in report.ribbons.values_mut() {
+                if let Some(translation) =
+                    wowsunpack::game_params::translations::translate_ribbon(&ribbon.name, metadata_provider.as_ref())
+                {
+                    ribbon.display_name = translation.display_name;
+                    ribbon.description = translation.description;
+                }
+            }
+        }
+    }
+
     /// Populate Personal Rating for all players using the provided PR data
     pub fn populate_personal_ratings(&mut self, pr_data: &crate::util::personal_rating::PersonalRatingData) {
         for report in &mut self.player_reports {
