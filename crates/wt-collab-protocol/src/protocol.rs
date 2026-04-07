@@ -707,7 +707,7 @@ mod tests {
 
     #[test]
     fn token_encode_decode_roundtrip() {
-        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let key = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
         let public = key.public();
         let token = encode_token(&public);
         let decoded = decode_token(&token).unwrap();
@@ -716,7 +716,7 @@ mod tests {
 
     #[test]
     fn token_has_prefix() {
-        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let key = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
         let token = encode_token(&key.public());
         assert!(token.starts_with(TOKEN_PREFIX));
     }
@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn decode_token_trims_whitespace() {
-        let key = iroh::SecretKey::generate(&mut rand::rng());
+        let key = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
         let token = encode_token(&key.public());
         let padded = format!("  {token}  \n");
         let decoded = decode_token(&padded).unwrap();
@@ -750,8 +750,8 @@ mod tests {
 
     #[test]
     fn different_keys_produce_different_tokens() {
-        let key1 = iroh::SecretKey::generate(&mut rand::rng());
-        let key2 = iroh::SecretKey::generate(&mut rand::rng());
+        let key1 = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
+        let key2 = iroh::SecretKey::from_bytes(&rand::random::<[u8; 32]>());
         let token1 = encode_token(&key1.public());
         let token2 = encode_token(&key2.public());
         assert_ne!(token1, token2);
