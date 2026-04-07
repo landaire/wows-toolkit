@@ -10,12 +10,17 @@
 # To download the latest:
 #   cargo run -p wows-data-mgr -- download --latest
 
-[versions.11965230]
-version = "15.1.0"
+[versions.12267945]
+version = "15.3.0"
 depot_id = 552993
-manifest_id = "7417710726139444358"
+manifest_id = "7208468597657842647"
 
 [versions.12116141]
 version = "15.2.0"
 depot_id = 552993
 manifest_id = "4224240752247274225"
+
+[versions.11965230]
+version = "15.1.0"
+depot_id = 552993
+manifest_id = "7417710726139444358"
