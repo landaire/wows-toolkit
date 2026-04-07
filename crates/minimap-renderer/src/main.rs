@@ -126,6 +126,11 @@ struct Args {
     #[arg(short = 'c', long = "constants")]
     constants: Option<PathBuf>,
 
+    /// Recreate game_params.rkyv from VFS GameParams.data if deserialization fails
+    /// (useful when the internal format changes between versions)
+    #[arg(long)]
+    recreate_game_params: bool,
+
     /// The replay file to process
     #[arg(required_unless_present_any = ["generate_config", "check_encoder"])]
     replay: Option<PathBuf>,
@@ -175,7 +180,7 @@ fn main() -> Result<(), Report> {
     // Load game data from either a full game install or pre-extracted directory
     let (vfs_owned, specs, game_params, controller_game_params) = if let Some(ref extracted) = args.extracted_dir {
         let resolved = resolve_extracted_dir(extracted, &replay_version)?;
-        load_from_extracted(&resolved, &replay_version)?
+        load_from_extracted(&resolved, &replay_version, args.recreate_game_params)?
     } else {
         let game_dir = args.game_dir.as_ref().expect("game directory is required");
         load_from_game_dir(game_dir, &replay_version)?
@@ -487,7 +492,11 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
 }
 
 /// Load game data from a pre-extracted renderer data directory.
-fn load_from_extracted(extracted_dir: &std::path::Path, _replay_version: &Version) -> Result<LoadedGameData, Report> {
+fn load_from_extracted(
+    extracted_dir: &std::path::Path,
+    _replay_version: &Version,
+    recreate_game_params: bool,
+) -> Result<LoadedGameData, Report> {
     use std::borrow::Cow;
     use std::io::Read;
     use wowsunpack::data::DataFileWithCallback;
@@ -514,14 +523,36 @@ fn load_from_extracted(extracted_dir: &std::path::Path, _replay_version: &Versio
         parse_scripts(&loader).map_err(|e| report!("Failed to parse entity specs: {e:?}"))?
     };
 
-    // Load GameParams from rkyv cache
+    // Load GameParams: try rkyv cache first, fall back to VFS if --recreate-game-params
     let rkyv_path = extracted_dir.join("game_params.rkyv");
-    info!("Loading game params from rkyv cache");
-    let rkyv_data = std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
-    let params: Vec<Param> = rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&rkyv_data)
-        .map_err(|e| report!("Failed to deserialize GameParams: {e}"))?;
+    let params: Vec<Param> = if rkyv_path.exists() {
+        info!("Loading game params from rkyv cache");
+        let rkyv_data = std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+        match rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&rkyv_data) {
+            Ok(params) => params,
+            Err(e) if recreate_game_params => {
+                warn!("Failed to deserialize game_params.rkyv ({e}), recreating from GameParams.data");
 
-    // Use from_params_no_specs since we already have specs separately
+                recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
+            }
+            Err(e) => {
+                bail!(
+                    "Failed to deserialize GameParams: {e}\n\
+                       Hint: the rkyv format may have changed. Pass --recreate-game-params to rebuild from GameParams.data"
+                );
+            }
+        }
+    } else if recreate_game_params {
+        info!("game_params.rkyv not found, creating from GameParams.data");
+        recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
+    } else {
+        bail!(
+            "game_params.rkyv not found at {}\n\
+               Hint: pass --recreate-game-params to create it from GameParams.data",
+            rkyv_path.display()
+        );
+    };
+
     let mut game_params = GameMetadataProvider::from_params_no_specs(params.clone())
         .map_err(|e| report!("Failed to build GameMetadataProvider: {e:?}"))?;
     let mut controller_game_params = GameMetadataProvider::from_params_no_specs(params)
@@ -532,6 +563,20 @@ fn load_from_extracted(extracted_dir: &std::path::Path, _replay_version: &Versio
     load_translations(&mo_path, &mut game_params, &mut controller_game_params);
 
     Ok((vfs, specs, game_params, controller_game_params))
+}
+
+/// Load GameParams from VFS, serialize to rkyv, and write the cache file.
+fn recreate_rkyv_from_vfs(vfs: &VfsPath, rkyv_path: &std::path::Path) -> Result<Vec<Param>, Report> {
+    use std::sync::Arc;
+
+    let game_metadata =
+        GameMetadataProvider::from_vfs(vfs).map_err(|e| report!("Failed to load GameParams from VFS: {e:?}"))?;
+    let params: Vec<Param> = game_metadata.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
+    let bytes =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize GameParams: {e}"))?;
+    std::fs::write(rkyv_path, &bytes).attach_with(|| format!("Failed to write {}", rkyv_path.display()))?;
+    info!("Wrote {} ({} bytes)", rkyv_path.display(), bytes.len());
+    Ok(params)
 }
 
 fn load_translations(
