@@ -43,8 +43,7 @@ impl BuildsIndex {
                 .attach_with(|| format!("Failed to create directory {}", parent.display()))?;
         }
         let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, &contents)
-            .attach_with(|| format!("Failed to write {}", tmp.display()))?;
+        std::fs::write(&tmp, &contents).attach_with(|| format!("Failed to write {}", tmp.display()))?;
         std::fs::rename(&tmp, path)
             .attach_with(|| format!("Failed to rename {} to {}", tmp.display(), path.display()))?;
         Ok(())
@@ -127,8 +126,7 @@ impl BuildMetadata {
     pub fn save(&self, path: &Path) -> Result<(), rootcause::Report> {
         use rootcause::prelude::*;
         let contents = toml::to_string_pretty(self).attach_with(|| "Failed to serialize metadata.toml")?;
-        std::fs::write(path, &contents)
-            .attach_with(|| format!("Failed to write {}", path.display()))?;
+        std::fs::write(path, &contents).attach_with(|| format!("Failed to write {}", path.display()))?;
         Ok(())
     }
 

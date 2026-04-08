@@ -24,6 +24,8 @@
 
 pub mod builds;
 pub mod cas;
+#[cfg(feature = "constants")]
+pub mod constants;
 pub mod dump;
 pub mod manifest;
 pub mod registry;

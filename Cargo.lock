@@ -10672,14 +10672,18 @@ name = "wows-data-mgr"
 version = "0.7.0"
 dependencies = [
  "clap",
+ "http-body",
+ "http-body-util",
  "indicatif",
  "jiff",
+ "octocrab",
  "rkyv",
  "rootcause",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "tokio",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",

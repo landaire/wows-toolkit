@@ -27,7 +27,7 @@ name = "wows-toolkit"
 wowsunpack = { version = "0.31.0", path = "crates/wowsunpack", default-features = false }
 wows_replays = { version = "0.32.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.25.0", path = "crates/minimap-renderer", default-features = false }
-wows-data-mgr = { version = "0.7.0", path = "crates/wows-data-mgr" }
+wows-data-mgr = { version = "0.7.0", path = "crates/wows-data-mgr", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { version = "0.2.0", path = "crates/wt-translations" }

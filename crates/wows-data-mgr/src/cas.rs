@@ -45,8 +45,7 @@ pub fn store(cas_root: &Path, data: &[u8]) -> Result<String, rootcause::Report> 
         std::fs::create_dir_all(parent)
             .attach_with(|| format!("Failed to create CAS directory {}", parent.display()))?;
     }
-    std::fs::write(&path, data)
-        .attach_with(|| format!("Failed to write CAS object {}", path.display()))?;
+    std::fs::write(&path, data).attach_with(|| format!("Failed to write CAS object {}", path.display()))?;
     Ok(hash)
 }
 

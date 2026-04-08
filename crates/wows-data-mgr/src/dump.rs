@@ -126,6 +126,24 @@ pub fn dump_renderer_data(
     // Copy all language translations (stored directly)
     dump_all_translations(game_dir, build, &output_dir)?;
 
+    // Fetch and store versioned constants (non-fatal)
+    #[cfg(feature = "constants")]
+    {
+        match crate::constants::fetch_versioned_constants_blocking(build) {
+            Ok((data, actual_build)) => {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&data) {
+                    let _ = std::fs::write(output_dir.join("constants.json"), &bytes);
+                    if actual_build != build {
+                        tracing::info!("Stored constants from build {actual_build} (fallback for {build})");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Could not fetch constants for build {build}: {e}");
+            }
+        }
+    }
+
     // Write enhanced metadata with file hashes
     let metadata = BuildMetadata { version: version_str.to_string(), build, files: file_hashes };
     metadata.save(&output_dir.join("metadata.toml"))?;

@@ -254,100 +254,23 @@ impl NetworkingThread {
             return;
         }
 
-        // List available builds from GitHub
-        let available_builds = match self.list_available_constants_builds() {
-            Some(builds) => builds,
-            None => {
-                let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetchFailed {
-                    build: target_build,
-                    msg: "Failed to list available builds from GitHub".into(),
-                });
-                return;
-            }
-        };
-
-        // Try exact build first
-        if available_builds.contains(&target_build)
-            && let Some(data) = self.fetch_constants_for_build(target_build)
-        {
-            save_versioned_constants(target_build, &data);
-            debug!("fetched exact match from GitHub");
-            let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
-            return;
-        }
-
-        // Walk down to the nearest previous build.
-        // Only cache under the actual source build — never under the target build,
-        // so that future startups re-attempt the fetch when the real data appears.
-        for &available_build in available_builds.iter().rev() {
-            if available_build >= target_build {
-                continue;
-            }
-            // Check disk for this fallback
-            if load_versioned_constants_from_disk(available_build).is_some() {
-                debug!(available_build, "using cached fallback from disk");
-                let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
-                return;
-            }
-            // Fetch from GitHub
-            if let Some(data) = self.fetch_constants_for_build(available_build) {
-                debug!(available_build, "fetched fallback from GitHub");
-                save_versioned_constants(available_build, &data);
-                let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
-                return;
-            }
-        }
-
-        let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetchFailed {
-            build: target_build,
-            msg: "No matching build found on GitHub".into(),
-        });
-    }
-
-    /// List available versioned constants builds from GitHub (data/versions/ directory).
-    fn list_available_constants_builds(&self) -> Option<Vec<u32>> {
-        self.runtime.block_on(async {
-            let items = octocrab::instance()
-                .repos("padtrack", "wows-constants")
-                .get_content()
-                .path("data/versions")
-                .r#ref("main")
-                .send()
-                .await
-                .ok()?;
-            let mut builds: Vec<u32> =
-                items.items.iter().filter_map(|item| item.name.strip_suffix(".json")?.parse::<u32>().ok()).collect();
-            builds.sort();
-            Some(builds)
-        })
-    }
-
-    /// Fetch a specific build's constants JSON from GitHub.
-    fn fetch_constants_for_build(&self, build: u32) -> Option<serde_json::Value> {
-        self.runtime.block_on(async {
-            let path = format!("data/versions/{build}.json");
-            let response = octocrab::instance()
-                .repos("padtrack", "wows-constants")
-                .raw_file(Reference::Branch("main".to_string()), &path)
-                .await
-                .ok()?;
-
-            let mut body = response.into_body();
-            let mut result = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
-
-            while let Some(frame) = body.frame().await {
-                match frame {
-                    Ok(frame) => {
-                        if let Some(data) = frame.data_ref() {
-                            result.extend_from_slice(data);
-                        }
-                    }
-                    Err(_) => return None,
+        // Delegate to the shared constants module in wows-data-mgr
+        match self.runtime.block_on(wows_data_mgr::constants::fetch_versioned_constants(target_build)) {
+            Ok((data, actual_build)) => {
+                save_versioned_constants(actual_build, &data);
+                if actual_build != target_build {
+                    debug!(actual_build, "fetched fallback from GitHub");
+                } else {
+                    debug!("fetched exact match from GitHub");
                 }
+                let _ = self.result_tx.send(NetworkResult::VersionedConstantsFetched { build: target_build });
             }
-
-            serde_json::from_slice(&result).ok()
-        })
+            Err(e) => {
+                let _ = self
+                    .result_tx
+                    .send(NetworkResult::VersionedConstantsFetchFailed { build: target_build, msg: format!("{e}") });
+            }
+        }
     }
 }
 
