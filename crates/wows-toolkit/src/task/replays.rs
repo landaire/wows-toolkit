@@ -49,6 +49,7 @@ use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
 use super::BackgroundTaskKind;
 
+use crate::task::networking::load_versioned_constants_from_disk;
 use crate::task::networking::load_versioned_constants_from_disk_with_fallback;
 
 pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
@@ -392,6 +393,15 @@ pub fn load_wows_files(
             crate::util::thread::spawn_logged("auto-dump-game-data", move || {
                 if let Err(e) = wows_data_mgr::dump::dump_renderer_data(&game_dir, build, &vs, &dump_base, None, true) {
                     tracing::warn!("Auto-dump failed for {vs}_{build}: {e}");
+                } else {
+                    // Copy constants.json into the dump if available on disk
+                    if let Some(constants) = load_versioned_constants_from_disk(build) {
+                        let dump_dir = wows_data_mgr::dump::dump_dir(&dump_base, &vs, build);
+                        let dest = dump_dir.join("constants.json");
+                        if let Ok(bytes) = serde_json::to_vec_pretty(&constants) {
+                            let _ = std::fs::write(&dest, bytes);
+                        }
+                    }
                 }
             });
         }
@@ -487,11 +497,23 @@ pub fn load_wows_data_from_dump(
     let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
     let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
 
-    // Load constants
-    let (replay_constants, replay_constants_exact_match) = match load_versioned_constants_from_disk_with_fallback(build)
-    {
-        Some((data, exact)) => (data, exact),
-        None => (fallback_constants.clone(), false),
+    // Load constants: try dump dir first, then disk cache, then fallback
+    let (replay_constants, replay_constants_exact_match) = {
+        let dump_constants_path = dump_dir.join("constants.json");
+        if dump_constants_path.exists() {
+            if let Ok(data) = std::fs::read(&dump_constants_path)
+                && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data)
+            {
+                (json, true)
+            } else {
+                (fallback_constants.clone(), false)
+            }
+        } else {
+            match load_versioned_constants_from_disk_with_fallback(build) {
+                Some((data, exact)) => (data, exact),
+                None => (fallback_constants.clone(), false),
+            }
+        }
     };
     let game_constants = build_game_constants(&vfs, &replay_constants, build);
 

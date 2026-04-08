@@ -205,33 +205,65 @@ impl WoWsDataMap {
             }
         }
 
-        // Fall back to auto-dumped game data
-        if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir)
-            && let Ok(entries) = std::fs::read_dir(&dump_base)
-        {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
-                    debug!("Loading game data for build {} from dump: {}", build, entry.path().display());
-                    match crate::task::replays::load_wows_data_from_dump(
-                        &entry.path(),
-                        build,
-                        &self.locale,
-                        &fallback_constants,
-                    ) {
-                        Ok(wows_data) => {
-                            if !wows_data.replay_constants_exact_match
-                                && let Some(tx) = &self.network_job_tx
-                            {
-                                let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
-                            }
-                            let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
-                            self.insert(build, Arc::clone(&shared));
-                            return Some(shared);
+        // Fall back to auto-dumped game data via BuildsIndex
+        if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&self.game_data_cache_dir) {
+            let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
+
+            // Construct version string for cross-region fallback
+            let version_hint = {
+                let builds = self.builds.read();
+                builds.values().next().and_then(|d| {
+                    d.read().full_version.as_ref().map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch))
+                })
+            };
+
+            if let Some((entry, exact)) = index.resolve_build(build, version_hint.as_deref()) {
+                if !exact {
+                    warn!("No exact data for build {}; using {} (build {})", build, entry.version, entry.build);
+                }
+                let dump_dir = dump_base.join(&entry.dir);
+                debug!("Loading game data for build {} from dump: {}", build, dump_dir.display());
+                match crate::task::replays::load_wows_data_from_dump(
+                    &dump_dir,
+                    build,
+                    &self.locale,
+                    &fallback_constants,
+                ) {
+                    Ok(wows_data) => {
+                        if !wows_data.replay_constants_exact_match
+                            && let Some(tx) = &self.network_job_tx
+                        {
+                            let _ = tx.send(NetworkJob::FetchVersionedConstants { build });
                         }
-                        Err(e) => {
-                            warn!("Could not load data for build {} from dump: {}", build, e);
+                        let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                        self.insert(build, Arc::clone(&shared));
+                        return Some(shared);
+                    }
+                    Err(e) => {
+                        warn!("Could not load data for build {} from dump: {}", build, e);
+                    }
+                }
+            } else if index.builds.is_empty() {
+                // Legacy fallback: scan directories for old-format dumps without builds.toml
+                if let Ok(entries) = std::fs::read_dir(&dump_base) {
+                    for entry in entries.flatten() {
+                        let name_str = entry.file_name().to_string_lossy().to_string();
+                        if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
+                            match crate::task::replays::load_wows_data_from_dump(
+                                &entry.path(),
+                                build,
+                                &self.locale,
+                                &fallback_constants,
+                            ) {
+                                Ok(wows_data) => {
+                                    let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                                    self.insert(build, Arc::clone(&shared));
+                                    return Some(shared);
+                                }
+                                Err(e) => {
+                                    warn!("Could not load build {} from legacy dump: {}", build, e);
+                                }
+                            }
                         }
                     }
                 }

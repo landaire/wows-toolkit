@@ -862,6 +862,23 @@ impl WowsToolkitApp {
                             }
                         }
                     }
+
+                    // Copy fetched constants into the dump directory if it exists
+                    if let Some(constants) = crate::task::networking::load_versioned_constants_from_disk(build) {
+                        let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+                        if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) {
+                            let builds_index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
+                            if let Some(entry) = builds_index.find_by_build(build) {
+                                let dest = dump_base.join(&entry.dir).join("constants.json");
+                                if !dest.exists()
+                                    && let Ok(bytes) = serde_json::to_vec_pretty(&constants)
+                                {
+                                    let _ = std::fs::write(&dest, bytes);
+                                    debug!("Copied constants.json to dump for build {build}");
+                                }
+                            }
+                        }
+                    }
                 }
                 NetworkResult::VersionedConstantsFetchFailed { build, msg } => {
                     warn!("Versioned constants fetch failed for build {}: {}", build, msg);

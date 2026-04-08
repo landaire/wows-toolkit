@@ -186,9 +186,11 @@ fn main() -> Result<(), Report> {
     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
     // Load game data from either a full game install or pre-extracted directory
-    let (vfs_owned, specs, game_params, controller_game_params) = if let Some(ref extracted) = args.extracted_dir {
-        let resolved = resolve_extracted_dir(extracted, &replay_version)?;
-        load_from_extracted(&resolved, &replay_version, args.recreate_game_params)?
+    let resolved_extracted: Option<PathBuf> =
+        args.extracted_dir.as_ref().map(|extracted| resolve_extracted_dir(extracted, &replay_version)).transpose()?;
+
+    let (vfs_owned, specs, game_params, controller_game_params) = if let Some(ref resolved) = resolved_extracted {
+        load_from_extracted(resolved, &replay_version, args.recreate_game_params)?
     } else {
         let game_dir = args.game_dir.as_ref().expect("game directory is required");
         load_from_game_dir(game_dir, &replay_version)?
@@ -207,6 +209,22 @@ fn main() -> Result<(), Report> {
 
     // Load game constants from game data (falls back to hardcoded defaults per-field)
     let mut game_constants = GameConstants::from_vfs(vfs);
+
+    // Auto-load constants.json from extracted dir if present (and no explicit --constants)
+    if args.constants.is_none()
+        && let Some(ref resolved) = resolved_extracted
+    {
+        let auto_constants = resolved.join("constants.json");
+        if auto_constants.exists()
+            && let Ok(data) = std::fs::read_to_string(&auto_constants)
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&data)
+        {
+            game_constants.merge_replay_constants(&json, replay_version.build);
+            info!("Merged constants from dump: {}", auto_constants.display());
+        }
+    }
+
+    // Explicit --constants flag takes priority (overrides auto-loaded)
     if let Some(ref constants_path) = args.constants {
         let data = std::fs::read_to_string(constants_path)
             .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", constants_path.display()));
@@ -480,16 +498,26 @@ fn resolve_extracted_dir(path: &std::path::Path, replay_version: &Version) -> Re
         return Ok(matched.0.clone());
     }
 
-    // No match — fail with available versions
-    if candidates.len() == 1 {
-        let (_, ref meta) = candidates[0];
-        bail!(
-            "No exact build match for replay (build {}). Only available: {} (build {}). \
-             Download or extract the correct build.",
-            replay_version.build,
-            meta.version,
-            meta.build
+    // Try version-based fallback via BuildsIndex (supports cross-region replays)
+    let builds_path = path.join("builds.toml");
+    if builds_path.exists() {
+        let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
+        let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+        if let Some((entry, _exact)) = index.resolve_build(replay_version.build, Some(&version_str)) {
+            let resolved = path.join(&entry.dir);
+            warn!("No exact data for build {}; using {} (build {})", replay_version.build, entry.version, entry.build);
+            return Ok(resolved);
+        }
+    }
+
+    // Also try version prefix match on candidates (legacy dumps without builds.toml)
+    let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
+    if let Some(matched) = candidates.iter().find(|(_, m)| m.version == version_str) {
+        warn!(
+            "No exact data for build {}; using {} (build {})",
+            replay_version.build, matched.1.version, matched.1.build
         );
+        return Ok(matched.0.clone());
     }
 
     let available: Vec<String> = candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();

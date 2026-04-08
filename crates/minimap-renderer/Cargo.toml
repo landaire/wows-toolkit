@@ -39,7 +39,7 @@ rendering = [
     "wowsunpack/vfs",
     "wowsunpack/parsing",
 ]
-bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "rendering", "rkyv"]
+bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wowsunpack/rkyv"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
 vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
@@ -71,6 +71,7 @@ rootcause = { workspace = true, optional = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
+wows-data-mgr = { workspace = true, optional = true }
 
 # YUV conversion (shared by vulkan and videotoolbox backends)
 yuvutils-rs = { version = "0.8", optional = true }

@@ -22,6 +22,8 @@
 //! }
 //! ```
 
+pub mod builds;
+pub mod cas;
 pub mod dump;
 pub mod manifest;
 pub mod registry;

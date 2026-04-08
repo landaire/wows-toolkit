@@ -74,6 +74,21 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Remove a previously dumped build, cleaning up deduplicated storage
+    Remove {
+        /// Remove by build number
+        #[arg(long, conflicts_with = "version")]
+        build: Option<u32>,
+
+        /// Remove all builds matching a version string (e.g. 15.1 or 15.1.0)
+        #[arg(long, conflicts_with = "build")]
+        version: Option<String>,
+
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Register an existing WoWs installation without downloading
     Register {
         /// Register as the "latest" path — always use whatever builds exist here
@@ -248,6 +263,29 @@ fn main() -> Result<(), Report> {
             let pb = dump::create_progress_bar(&game_dir);
             dump::dump_renderer_data(&game_dir, target, &version_str, &output, pb.as_ref(), false)?;
             println!("Dumped renderer data to {}", dump::dump_dir(&output, &version_str, target).display());
+        }
+
+        Commands::Remove { build, version, output } => {
+            let index = wows_data_mgr::builds::BuildsIndex::load(&output.join("builds.toml"));
+
+            if let Some(target_build) = build {
+                println!("Removing build {target_build}...");
+                dump::remove_build(&output, target_build)?;
+                println!("Build {target_build} removed.");
+            } else if let Some(ref version_query) = version {
+                let matches = index.find_by_version(version_query);
+                if matches.is_empty() {
+                    bail!("No builds found matching version '{version_query}'");
+                }
+                let builds_to_remove: Vec<u32> = matches.iter().map(|e| e.build).collect();
+                for b in &builds_to_remove {
+                    println!("Removing build {b}...");
+                    dump::remove_build(&output, *b)?;
+                    println!("Build {b} removed.");
+                }
+            } else {
+                bail!("Specify either --build or --version");
+            }
         }
 
         Commands::Register { latest, version, build, path } => {
