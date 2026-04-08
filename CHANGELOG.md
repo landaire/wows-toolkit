@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.67] - 2026-04-08
+
+### 🐛 Bug Fixes
+
+- Bump pickled dep to reduce RAM usage when converting GameParams
+
 ## [0.1.66] - 2026-04-07
 
 ### 🚀 Features
@@ -11,6 +17,10 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Bug Fixes
 
 - Windows would change size actively
+
+### ⚙️ Miscellaneous Tasks
+
+- Add 15.3 to `game_versions.toml` (#34)
 
 ## [0.1.65] - 2026-04-07
 
