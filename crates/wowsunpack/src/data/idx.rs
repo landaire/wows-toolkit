@@ -23,6 +23,8 @@ use crate::data::parser_utils::read_null_terminated_string;
 pub enum IdxError {
     #[error("File has incorrect endian markers")]
     IncorrectEndian,
+    #[error("Unsupported idx version: 0x{0:08x}")]
+    UnsupportedVersion(u32),
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("I/O error")]
@@ -91,13 +93,21 @@ pub struct Volume {
 
 // --- Internal parsing structures ---
 
+/// Known idx format versions (the u32 at header offset 4).
+const VERSION_V20: u32 = 0x01010004;
+const VERSION_V40: u32 = 0x02000000;
+
 struct Header {
-    endianness: u32,
-    _murmur_hash: u32,
+    /// Format version identifier.
     version: u32,
+    /// Murmur hash checksum of the data after the header.
+    _murmur_hash: u32,
+    /// Architecture bitness (u16 at offset 12) + endianness (u16 at offset 14).
+    _arch_endian: u32,
 }
 
-struct ResourceMetadata {
+/// Metadata for v0x40 format: 4 u32 counts + 3 u64 pointers.
+struct ResourceMetadataV40 {
     resources_count: u32,
     file_infos_count: u32,
     volumes_count: u32,
@@ -107,6 +117,17 @@ struct ResourceMetadata {
     volumes_table_pointer: u64,
 }
 
+/// Metadata for v0x20 format: 3 x (u32 count, u32 pointer).
+/// Pointers are relative to the metadata start (offset 16).
+struct ResourceMetadataV20 {
+    resources_count: u32,
+    resources_table_pointer: u32,
+    file_infos_count: u32,
+    file_infos_table_pointer: u32,
+    volumes_count: u32,
+    volumes_table_pointer: u32,
+}
+
 // --- Winnow parsers ---
 
 fn parse_header(input: &mut &[u8]) -> WResult<Header> {
@@ -114,13 +135,13 @@ fn parse_header(input: &mut &[u8]) -> WResult<Header> {
     if magic != IDX_MAGIC {
         return Err(winnow::error::ErrMode::Cut(winnow::error::ContextError::new()));
     }
-    let endianness = le_u32.parse_next(input)?;
-    let murmur_hash = le_u32.parse_next(input)?;
     let version = le_u32.parse_next(input)?;
-    Ok(Header { endianness, _murmur_hash: murmur_hash, version })
+    let murmur_hash = le_u32.parse_next(input)?;
+    let arch_endian = le_u32.parse_next(input)?;
+    Ok(Header { version, _murmur_hash: murmur_hash, _arch_endian: arch_endian })
 }
 
-fn parse_resource_metadata(input: &mut &[u8]) -> WResult<ResourceMetadata> {
+fn parse_resource_metadata_v40(input: &mut &[u8]) -> WResult<ResourceMetadataV40> {
     let resources_count = le_u32.parse_next(input)?;
     let file_infos_count = le_u32.parse_next(input)?;
     let volumes_count = le_u32.parse_next(input)?;
@@ -128,7 +149,7 @@ fn parse_resource_metadata(input: &mut &[u8]) -> WResult<ResourceMetadata> {
     let resources_table_pointer = le_u64.parse_next(input)?;
     let file_infos_table_pointer = le_u64.parse_next(input)?;
     let volumes_table_pointer = le_u64.parse_next(input)?;
-    Ok(ResourceMetadata {
+    Ok(ResourceMetadataV40 {
         resources_count,
         file_infos_count,
         volumes_count,
@@ -139,7 +160,24 @@ fn parse_resource_metadata(input: &mut &[u8]) -> WResult<ResourceMetadata> {
     })
 }
 
-fn parse_file_info(input: &mut &[u8]) -> WResult<FileInfo> {
+fn parse_resource_metadata_v20(input: &mut &[u8]) -> WResult<ResourceMetadataV20> {
+    let resources_count = le_u32.parse_next(input)?;
+    let resources_table_pointer = le_u32.parse_next(input)?;
+    let file_infos_count = le_u32.parse_next(input)?;
+    let file_infos_table_pointer = le_u32.parse_next(input)?;
+    let volumes_count = le_u32.parse_next(input)?;
+    let volumes_table_pointer = le_u32.parse_next(input)?;
+    Ok(ResourceMetadataV20 {
+        resources_count,
+        resources_table_pointer,
+        file_infos_count,
+        file_infos_table_pointer,
+        volumes_count,
+        volumes_table_pointer,
+    })
+}
+
+fn parse_file_info_v40(input: &mut &[u8]) -> WResult<FileInfo> {
     let resource_id = le_u64.parse_next(input)?;
     let volume_id = le_u64.parse_next(input)?;
     let offset = le_u64.parse_next(input)?;
@@ -151,12 +189,22 @@ fn parse_file_info(input: &mut &[u8]) -> WResult<FileInfo> {
     Ok(FileInfo { resource_id, volume_id, offset, compression_info, size, crc32, unpacked_size, padding })
 }
 
-/// Parse a single PackedFileMetadata entry.
+fn parse_file_info_v20(input: &mut &[u8]) -> WResult<FileInfo> {
+    let offset = le_u64.parse_next(input)?;
+    let _padding = le_u32.parse_next(input)?;
+    let size = le_u32.parse_next(input)?;
+    let crc32 = le_u32.parse_next(input)?;
+    let unpacked_size = le_u32.parse_next(input)?;
+    let compression_info = le_u64.parse_next(input)?;
+    let resource_id = le_u64.parse_next(input)?;
+    let volume_id = le_u64.parse_next(input)?;
+    Ok(FileInfo { resource_id, volume_id, offset, compression_info, size, crc32, unpacked_size, padding: 0 })
+}
+
+/// Parse a v0x40 PackedFileMetadata entry (32 bytes).
 ///
-/// Each entry is 32 bytes of fixed fields, but the filename is stored at a relative
-/// offset (`filename_ptr`) from the start of the entry. We need the full `file_data`
-/// to resolve it.
-fn parse_packed_file_metadata(file_data: &[u8], entry_offset: usize) -> Result<PackedFileMetadata, IdxError> {
+/// Filename is stored at a relative offset from the entry start.
+fn parse_packed_file_metadata_v40(file_data: &[u8], entry_offset: usize) -> Result<PackedFileMetadata, IdxError> {
     let input = &mut &file_data[entry_offset..];
     let resource_ptr: u64 =
         le_u64.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
@@ -180,11 +228,45 @@ fn parse_packed_file_metadata(file_data: &[u8], entry_offset: usize) -> Result<P
     Ok(PackedFileMetadata { resource_ptr, id, parent_id, filename })
 }
 
-/// Parse a single Volume entry.
+/// Parse a v0x20 PackedFileMetadata entry (24 bytes).
 ///
-/// Each entry has fixed fields, and the volume name is at a relative offset
-/// (`name_ptr`) from the start of the entry.
-fn parse_volume(file_data: &[u8], entry_offset: usize) -> Result<Volume, IdxError> {
+/// Layout: `[u64 name_hash][u64 parent_id][u32 name_len][u32 name_ptr]`
+/// `name_ptr` is relative to the name field's own file offset (entry + 16).
+fn parse_packed_file_metadata_v20(file_data: &[u8], entry_offset: usize) -> Result<PackedFileMetadata, IdxError> {
+    let input = &mut &file_data[entry_offset..];
+    let id: u64 = le_u64
+        .parse_next(input)
+        .map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| IdxError::ParseError(format!("id: {e}")))?;
+    let parent_id: u64 =
+        le_u64.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("parent_id: {e}"))
+        })?;
+    let name_len: u32 =
+        le_u32.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("name_len: {e}"))
+        })?;
+    let name_ptr: u32 =
+        le_u32.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("name_ptr: {e}"))
+        })?;
+
+    // name_ptr is relative to the name field's own offset in the file
+    let name_field_offset = entry_offset + 16;
+    let name_abs = name_field_offset + name_ptr as usize;
+    let name_end = (name_abs + name_len as usize).min(file_data.len());
+    let raw = &file_data[name_abs..name_end];
+    // Trim trailing nulls
+    let trimmed = match raw.iter().position(|&b| b == 0) {
+        Some(pos) => &raw[..pos],
+        None => raw,
+    };
+    let filename = String::from_utf8_lossy(trimmed).into_owned();
+
+    Ok(PackedFileMetadata { resource_ptr: 0, id, parent_id, filename })
+}
+
+/// Parse a v0x40 Volume entry (24 bytes).
+fn parse_volume_v40(file_data: &[u8], entry_offset: usize) -> Result<Volume, IdxError> {
     let input = &mut &file_data[entry_offset..];
     let _len: u64 = le_u64.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
         IdxError::ParseError(format!("volume len: {e}"))
@@ -199,7 +281,51 @@ fn parse_volume(file_data: &[u8], entry_offset: usize) -> Result<Volume, IdxErro
         })?;
 
     let name_offset = entry_offset + name_ptr as usize;
-    let filename = read_null_terminated_string(file_data, name_offset).to_owned();
+    let mut filename = read_null_terminated_string(file_data, name_offset).to_owned();
+
+    // Early v0x40 files still use BigWorld path convention: "//.//name.pkg"
+    // Strip the prefix so the name matches the actual file on disk.
+    if let Some(stripped) = filename.strip_prefix("//.//") {
+        filename = stripped.to_string();
+    }
+
+    Ok(Volume { volume_id, filename })
+}
+
+/// Parse a v0x20 Volume entry (16 bytes).
+///
+/// Layout: `[u64 volume_id][u32 name_len][u32 name_ptr]`
+/// `name_ptr` is relative to the name field's own file offset (entry + 8).
+fn parse_volume_v20(file_data: &[u8], entry_offset: usize) -> Result<Volume, IdxError> {
+    let input = &mut &file_data[entry_offset..];
+    let volume_id: u64 =
+        le_u64.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("volume_id: {e}"))
+        })?;
+    let name_len: u32 =
+        le_u32.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("volume name_len: {e}"))
+        })?;
+    let name_ptr: u32 =
+        le_u32.parse_next(input).map_err(|e: winnow::error::ErrMode<winnow::error::ContextError>| {
+            IdxError::ParseError(format!("volume name_ptr: {e}"))
+        })?;
+
+    let name_field_offset = entry_offset + 8;
+    let name_abs = name_field_offset + name_ptr as usize;
+    let name_end = (name_abs + name_len as usize).min(file_data.len());
+    let raw = &file_data[name_abs..name_end];
+    let trimmed = match raw.iter().position(|&b| b == 0) {
+        Some(pos) => &raw[..pos],
+        None => raw,
+    };
+    let mut filename = String::from_utf8_lossy(trimmed).into_owned();
+
+    // v0x20 volume names use BigWorld path convention: "//.//name.pkg"
+    // Strip the prefix so the name matches the actual file on disk.
+    if let Some(stripped) = filename.strip_prefix("//.//") {
+        filename = stripped.to_string();
+    }
 
     Ok(Volume { volume_id, filename })
 }
@@ -210,46 +336,86 @@ pub fn parse(file_data: &[u8]) -> Result<IdxFile, IdxError> {
 
     let header = parse_header(input).map_err(|e| IdxError::ParseError(format!("header: {e}")))?;
 
-    if header.endianness != 0x02000000 && header.version != 0x40 {
-        return Err(IdxError::IncorrectEndian);
+    match header.version {
+        VERSION_V40 => parse_v40(file_data),
+        VERSION_V20 => parse_v20(file_data),
+        other => Err(IdxError::UnsupportedVersion(other)),
     }
+}
 
-    // The resource metadata starts right after the 16-byte header
-    let resources_meta_offset = 16usize;
-    let meta_input = &mut &file_data[resources_meta_offset..];
+/// Parse a v0x40 (modern) idx file.
+fn parse_v40(file_data: &[u8]) -> Result<IdxFile, IdxError> {
+    let meta_offset = 16usize;
+    let meta_input = &mut &file_data[meta_offset..];
     let meta =
-        parse_resource_metadata(meta_input).map_err(|e| IdxError::ParseError(format!("resource metadata: {e}")))?;
+        parse_resource_metadata_v40(meta_input).map_err(|e| IdxError::ParseError(format!("resource metadata: {e}")))?;
 
-    // Parse resources table
-    let resources_table_offset = resources_meta_offset + meta.resources_table_pointer as usize;
-    // Each PackedFileMetadata entry is 32 bytes of fixed fields
+    // Parse resources table (32-byte entries)
+    let resources_table_offset = meta_offset + meta.resources_table_pointer as usize;
     const RESOURCE_ENTRY_SIZE: usize = 32;
     let mut resources = Vec::with_capacity(meta.resources_count as usize);
     for i in 0..meta.resources_count as usize {
         let entry_offset = resources_table_offset + i * RESOURCE_ENTRY_SIZE;
-        resources.push(parse_packed_file_metadata(file_data, entry_offset)?);
+        resources.push(parse_packed_file_metadata_v40(file_data, entry_offset)?);
     }
 
-    // Parse file infos table
-    let file_infos_table_offset = resources_meta_offset + meta.file_infos_table_pointer as usize;
-    // Each FileInfo entry is 48 bytes
+    // Parse file infos table (48-byte entries)
+    let file_infos_table_offset = meta_offset + meta.file_infos_table_pointer as usize;
     const FILE_INFO_ENTRY_SIZE: usize = 48;
     let mut file_infos = Vec::with_capacity(meta.file_infos_count as usize);
     for i in 0..meta.file_infos_count as usize {
         let entry_offset = file_infos_table_offset + i * FILE_INFO_ENTRY_SIZE;
         let fi_input = &mut &file_data[entry_offset..];
-        let fi = parse_file_info(fi_input).map_err(|e| IdxError::ParseError(format!("file_info[{i}]: {e}")))?;
+        let fi = parse_file_info_v40(fi_input).map_err(|e| IdxError::ParseError(format!("file_info[{i}]: {e}")))?;
         file_infos.push(fi);
     }
 
-    // Parse volumes table
-    let volumes_table_offset = resources_meta_offset + meta.volumes_table_pointer as usize;
-    // Each Volume entry is 24 bytes of fixed fields
+    // Parse volumes table (24-byte entries)
+    let volumes_table_offset = meta_offset + meta.volumes_table_pointer as usize;
     const VOLUME_ENTRY_SIZE: usize = 24;
     let mut volumes = Vec::with_capacity(meta.volumes_count as usize);
     for i in 0..meta.volumes_count as usize {
         let entry_offset = volumes_table_offset + i * VOLUME_ENTRY_SIZE;
-        volumes.push(parse_volume(file_data, entry_offset)?);
+        volumes.push(parse_volume_v40(file_data, entry_offset)?);
+    }
+
+    Ok(IdxFile { resources, file_infos, volumes })
+}
+
+/// Parse a v0x20 (legacy BigWorld) idx file.
+fn parse_v20(file_data: &[u8]) -> Result<IdxFile, IdxError> {
+    let meta_offset = 16usize;
+    let meta_input = &mut &file_data[meta_offset..];
+    let meta =
+        parse_resource_metadata_v20(meta_input).map_err(|e| IdxError::ParseError(format!("resource metadata: {e}")))?;
+
+    // Parse resources table (24-byte entries, pointers relative to meta_offset)
+    let resources_table_offset = meta_offset + meta.resources_table_pointer as usize;
+    const RESOURCE_ENTRY_SIZE: usize = 24;
+    let mut resources = Vec::with_capacity(meta.resources_count as usize);
+    for i in 0..meta.resources_count as usize {
+        let entry_offset = resources_table_offset + i * RESOURCE_ENTRY_SIZE;
+        resources.push(parse_packed_file_metadata_v20(file_data, entry_offset)?);
+    }
+
+    // Parse file infos table (48-byte entries)
+    let file_infos_table_offset = meta_offset + meta.file_infos_table_pointer as usize;
+    const FILE_INFO_ENTRY_SIZE: usize = 48;
+    let mut file_infos = Vec::with_capacity(meta.file_infos_count as usize);
+    for i in 0..meta.file_infos_count as usize {
+        let entry_offset = file_infos_table_offset + i * FILE_INFO_ENTRY_SIZE;
+        let fi_input = &mut &file_data[entry_offset..];
+        let fi = parse_file_info_v20(fi_input).map_err(|e| IdxError::ParseError(format!("file_info[{i}]: {e}")))?;
+        file_infos.push(fi);
+    }
+
+    // Parse volumes table (16-byte entries)
+    let volumes_table_offset = meta_offset + meta.volumes_table_pointer as usize;
+    const VOLUME_ENTRY_SIZE: usize = 16;
+    let mut volumes = Vec::with_capacity(meta.volumes_count as usize);
+    for i in 0..meta.volumes_count as usize {
+        let entry_offset = volumes_table_offset + i * VOLUME_ENTRY_SIZE;
+        volumes.push(parse_volume_v20(file_data, entry_offset)?);
     }
 
     Ok(IdxFile { resources, file_infos, volumes })
