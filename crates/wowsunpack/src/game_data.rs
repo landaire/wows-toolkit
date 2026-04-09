@@ -135,7 +135,8 @@ pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, 
                 Err(e) => {
                     let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                     // Log the first 16 bytes as hex for debugging unknown formats
-                    let header_hex: String = data.iter().take(16).map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+                    let header_hex: String =
+                        data.iter().take(16).map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
                     eprintln!("WARN: Failed to parse idx file {filename}: {e} (header: {header_hex})");
                     idx_errors.push((filename, e));
                 }
@@ -160,15 +161,18 @@ pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, 
     if let Ok(root) = pkg_vfs.read_dir() {
         let count = root.count();
         if count == 0 && !idx_files.is_empty() {
-            eprintln!("WARN: VFS is empty despite {} idx files parsing successfully for build {build}", idx_files.len());
+            eprintln!(
+                "WARN: VFS is empty despite {} idx files parsing successfully for build {build}",
+                idx_files.len()
+            );
             // List available pkg files on disk
             let mut on_disk = Vec::new();
             if let Ok(entries) = read_dir(&pkgs_dir) {
                 for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if name.ends_with(".pkg") {
-                            on_disk.push(name.to_string());
-                        }
+                    if let Some(name) = entry.file_name().to_str()
+                        && name.ends_with(".pkg")
+                    {
+                        on_disk.push(name.to_string());
                     }
                 }
             }
@@ -178,9 +182,13 @@ pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, 
                 eprintln!("    {pkg}");
             }
             for (i, idx) in idx_files.iter().enumerate() {
-                let fname = idx_errors.iter().find(|(_, _)| false).map(|(n, _)| n.as_str()).unwrap_or("?");
-                eprintln!("  idx[{i}]: {} resources, {} file_infos, {} volumes",
-                    idx.resources.len(), idx.file_infos.len(), idx.volumes.len());
+                let _fname = idx_errors.iter().find(|(_, _)| false).map(|(n, _)| n.as_str()).unwrap_or("?");
+                eprintln!(
+                    "  idx[{i}]: {} resources, {} file_infos, {} volumes",
+                    idx.resources.len(),
+                    idx.file_infos.len(),
+                    idx.volumes.len()
+                );
                 for vol in &idx.volumes {
                     let exists = on_disk.iter().any(|p| p == &vol.filename);
                     eprintln!("    volume {}: {} (exists: {})", vol.volume_id, vol.filename, exists);
@@ -189,8 +197,11 @@ pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, 
         }
     }
     if !idx_errors.is_empty() {
-        eprintln!("WARN: {}/{} idx files failed to parse for build {build}:",
-            idx_errors.len(), idx_errors.len() + idx_files.len());
+        eprintln!(
+            "WARN: {}/{} idx files failed to parse for build {build}:",
+            idx_errors.len(),
+            idx_errors.len() + idx_files.len()
+        );
         for (name, e) in &idx_errors {
             eprintln!("  {name}: {e}");
         }

@@ -16,6 +16,9 @@ use pickled::DeOptions;
 
 /// Converts a raw pickled GameParams.data file to its pickled representation. This operation is quite
 /// expensive.
+///
+/// Uses `decode_strings()` which tries UTF-8 first, then falls back to latin1 decoding.
+/// This handles both modern builds (UTF-8) and old builds (Python 2 latin1 byte strings).
 pub fn game_params_to_pickle(mut game_params_data: Vec<u8>) -> Result<pickled::Value, crate::error::GameDataError> {
     game_params_data.reverse();
 

@@ -79,11 +79,7 @@ fn relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
     let to_components: Vec<_> = to_path.components().collect();
 
     // Find the common prefix length
-    let common = from_components
-        .iter()
-        .zip(to_components.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
+    let common = from_components.iter().zip(to_components.iter()).take_while(|(a, b)| a == b).count();
 
     // Walk up from `from_dir` for each remaining component
     let ups = from_components.len() - common;

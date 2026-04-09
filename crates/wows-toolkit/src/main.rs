@@ -93,11 +93,7 @@ fn main() -> eframe::Result<()> {
         setup.instance_descriptor.backends = wgpu::Backends::DX12;
     }
 
-    let native_options = eframe::NativeOptions {
-        viewport,
-        wgpu_options,
-        ..Default::default()
-    };
+    let native_options = eframe::NativeOptions { viewport, wgpu_options, ..Default::default() };
     eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,

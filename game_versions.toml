@@ -1,26 +1,848 @@
 # Known World of Warships game versions.
 #
-# Maps build numbers to game versions and Steam depot manifest IDs.
-# Build numbers are the directory names under bin/ in a WoWs installation.
-# Manifest IDs can be found on SteamDB: https://steamdb.info/depot/552993/
+# Steam App ID: 552990
+# Depots:
+#   552993 - World of Warships Client (~59 GiB) - idx, pkg, exe, scripts
+#   552991 - World of Warships Content (~20 GiB) - additional game assets
+#   552994 - World of Warships Localizations (~252 MiB) - translation .mo files
+#   552992 - World of Warships Full app_type (163 B) - marker depot
+#   552996 - World of Warships Wallpapers (~2.76 MiB)
 #
-# To download a specific version:
-#   cargo run -p wows-data-mgr -- download --version 15.1
+# A complete game install requires depots 552993 + 552991 + 552994.
 #
-# To download the latest:
-#   cargo run -p wows-data-mgr -- download --latest
-
-[versions.12267945]
-version = "15.3.0"
-depot_id = 552993
-manifest_id = "7208468597657842647"
+# Each build's manifest IDs point to the depot manifest where that
+# build was first introduced.
 
 [versions.12116141]
 version = "15.2.0"
-depot_id = 552993
-manifest_id = "4224240752247274225"
+client_depot_id = 552993
+client_manifest_id = "4224240752247274225"
+content_depot_id = 552991
+content_manifest_id = "7097587699703874977"
+localization_depot_id = 552994
+localization_manifest_id = "3358800545328836852"
 
 [versions.11965230]
 version = "15.1.0"
-depot_id = 552993
-manifest_id = "7417710726139444358"
+client_depot_id = 552993
+client_manifest_id = "4224240752247274225"
+content_depot_id = 552991
+content_manifest_id = "7097587699703874977"
+localization_depot_id = 552994
+localization_manifest_id = "3358800545328836852"
+
+[versions.11791718]
+version = "15.0.0"
+client_depot_id = 552993
+client_manifest_id = "5378837858148216116"
+content_depot_id = 552991
+content_manifest_id = "6857579112563866042"
+localization_depot_id = 552994
+localization_manifest_id = "8551579783598679885"
+
+[versions.11189791]
+version = "14.11.0"
+client_depot_id = 552993
+client_manifest_id = "5378837858148216116"
+content_depot_id = 552991
+content_manifest_id = "6857579112563866042"
+localization_depot_id = 552994
+localization_manifest_id = "8551579783598679885"
+
+[versions.10846255]
+version = "14.10.0"
+client_depot_id = 552993
+client_manifest_id = "4940513070671221032"
+content_depot_id = 552991
+content_manifest_id = "2342614899552624692"
+localization_depot_id = 552994
+localization_manifest_id = "7754030236106718494"
+
+[versions.10695045]
+version = "14.9.0"
+client_depot_id = 552993
+client_manifest_id = "4940513070671221032"
+content_depot_id = 552991
+content_manifest_id = "2342614899552624692"
+localization_depot_id = 552994
+localization_manifest_id = "7754030236106718494"
+
+[versions.10536618]
+version = "14.8.0"
+client_depot_id = 552993
+client_manifest_id = "3297460874949099173"
+
+[versions.10448683]
+version = "14.7.1"
+client_depot_id = 552993
+client_manifest_id = "3297460874949099173"
+
+[versions.10222255]
+version = "14.6.0"
+client_depot_id = 552993
+client_manifest_id = "8721607704954674717"
+content_depot_id = 552991
+content_manifest_id = "7107644640575344932"
+localization_depot_id = 552994
+localization_manifest_id = "2132374081662304892"
+
+[versions.10087791]
+version = "14.5.0"
+client_depot_id = 552993
+client_manifest_id = "8721607704954674717"
+content_depot_id = 552991
+content_manifest_id = "7107644640575344932"
+localization_depot_id = 552994
+localization_manifest_id = "2132374081662304892"
+
+[versions.9953613]
+version = "14.4.0"
+client_depot_id = 552993
+client_manifest_id = "1171282057117057621"
+content_depot_id = 552991
+content_manifest_id = "6094548451524883883"
+localization_depot_id = 552994
+localization_manifest_id = "6462283253548600918"
+
+[versions.9773198]
+version = "14.3.0"
+client_depot_id = 552993
+client_manifest_id = "1171282057117057621"
+content_depot_id = 552991
+content_manifest_id = "6094548451524883883"
+localization_depot_id = 552994
+localization_manifest_id = "6462283253548600918"
+
+[versions.9643943]
+version = "14.2.0"
+client_depot_id = 552993
+client_manifest_id = "3800957381636334798"
+content_depot_id = 552991
+content_manifest_id = "6353716729053047228"
+localization_depot_id = 552994
+localization_manifest_id = "8915400498449727184"
+
+[versions.9531281]
+version = "14.1.0"
+client_depot_id = 552993
+client_manifest_id = "3800957381636334798"
+content_depot_id = 552991
+content_manifest_id = "6353716729053047228"
+localization_depot_id = 552994
+localization_manifest_id = "8915400498449727184"
+
+[versions.9398142]
+version = "14.0.0"
+client_depot_id = 552993
+client_manifest_id = "3894334864610144982"
+content_depot_id = 552991
+content_manifest_id = "8269317273192016073"
+localization_depot_id = 552994
+localization_manifest_id = "2136345304088838730"
+
+[versions.9251401]
+version = "13.11.0"
+client_depot_id = 552993
+client_manifest_id = "3894334864610144982"
+content_depot_id = 552991
+content_manifest_id = "8269317273192016073"
+localization_depot_id = 552994
+localization_manifest_id = "2136345304088838730"
+
+[versions.9129736]
+version = "13.10.0"
+client_depot_id = 552993
+client_manifest_id = "2599089090813028730"
+content_depot_id = 552991
+content_manifest_id = "5183144642990309482"
+localization_depot_id = 552994
+localization_manifest_id = "1051299604100026000"
+
+[versions.9005609]
+version = "13.9.0"
+client_depot_id = 552993
+client_manifest_id = "2599089090813028730"
+content_depot_id = 552991
+content_manifest_id = "5183144642990309482"
+localization_depot_id = 552994
+localization_manifest_id = "1051299604100026000"
+
+[versions.8893005]
+version = "13.8.0"
+client_depot_id = 552993
+client_manifest_id = "6750454287206955956"
+
+[versions.8777660]
+version = "13.7.0"
+client_depot_id = 552993
+client_manifest_id = "6750454287206955956"
+
+[versions.8663598]
+version = "13.6.0"
+client_depot_id = 552993
+client_manifest_id = "7511061544793338253"
+content_depot_id = 552991
+content_manifest_id = "3368921771693127887"
+localization_depot_id = 552994
+localization_manifest_id = "3391020992967817660"
+
+[versions.8592466]
+version = "13.5.1"
+client_depot_id = 552993
+client_manifest_id = "7511061544793338253"
+content_depot_id = 552991
+content_manifest_id = "3368921771693127887"
+localization_depot_id = 552994
+localization_manifest_id = "3391020992967817660"
+
+[versions.8385097]
+version = "13.4.0"
+client_depot_id = 552993
+client_manifest_id = "447311930817609564"
+content_depot_id = 552991
+content_manifest_id = "7728108198621516047"
+localization_depot_id = 552994
+localization_manifest_id = "7969287945175400614"
+
+[versions.8260685]
+version = "13.3.0"
+client_depot_id = 552993
+client_manifest_id = "447311930817609564"
+content_depot_id = 552991
+content_manifest_id = "7728108198621516047"
+localization_depot_id = 552994
+localization_manifest_id = "7969287945175400614"
+
+[versions.8151735]
+version = "13.2.0"
+client_depot_id = 552993
+client_manifest_id = "1021159401633104779"
+content_depot_id = 552991
+content_manifest_id = "6915690873364546160"
+localization_depot_id = 552994
+localization_manifest_id = "3989682988957185780"
+
+[versions.8026723]
+version = "13.1.0"
+client_depot_id = 552993
+client_manifest_id = "1021159401633104779"
+content_depot_id = 552991
+content_manifest_id = "6915690873364546160"
+localization_depot_id = 552994
+localization_manifest_id = "3989682988957185780"
+
+[versions.7919265]
+version = "13.0.0"
+client_depot_id = 552993
+client_manifest_id = "2666502953567158472"
+content_depot_id = 552991
+content_manifest_id = "1299365531644492525"
+localization_depot_id = 552994
+localization_manifest_id = "7000831367654891796"
+
+[versions.7814610]
+version = "12.11.1"
+client_depot_id = 552993
+client_manifest_id = "2666502953567158472"
+content_depot_id = 552991
+content_manifest_id = "1299365531644492525"
+localization_depot_id = 552994
+localization_manifest_id = "7000831367654891796"
+
+[versions.7708495]
+version = "12.10.0"
+client_depot_id = 552993
+client_manifest_id = "5007896721989067424"
+content_depot_id = 552991
+content_manifest_id = "6399496775127819564"
+localization_depot_id = 552994
+localization_manifest_id = "9125389607239692031"
+
+[versions.7609128]
+version = "12.9.0"
+client_depot_id = 552993
+client_manifest_id = "5007896721989067424"
+content_depot_id = 552991
+content_manifest_id = "6399496775127819564"
+localization_depot_id = 552994
+localization_manifest_id = "9125389607239692031"
+
+[versions.7499736]
+version = "12.8.0"
+client_depot_id = 552993
+client_manifest_id = "6129853038752643017"
+
+[versions.7377166]
+version = "12.7.0"
+client_depot_id = 552993
+client_manifest_id = "6129853038752643017"
+
+[versions.7266701]
+version = "12.6.0"
+client_depot_id = 552993
+client_manifest_id = "1307920932364564365"
+content_depot_id = 552991
+content_manifest_id = "4608022178994534184"
+localization_depot_id = 552994
+localization_manifest_id = "9214896115635526201"
+
+[versions.7163377]
+version = "12.5.0"
+client_depot_id = 552993
+client_manifest_id = "1307920932364564365"
+content_depot_id = 552991
+content_manifest_id = "4608022178994534184"
+localization_depot_id = 552994
+localization_manifest_id = "9214896115635526201"
+
+[versions.7062104]
+version = "12.4.0"
+client_depot_id = 552993
+client_manifest_id = "7047936978763354291"
+content_depot_id = 552991
+content_manifest_id = "7039146200239011118"
+localization_depot_id = 552994
+localization_manifest_id = "3097277469200057413"
+
+[versions.6965290]
+version = "12.3.1"
+client_depot_id = 552993
+client_manifest_id = "7047936978763354291"
+content_depot_id = 552991
+content_manifest_id = "7039146200239011118"
+localization_depot_id = 552994
+localization_manifest_id = "3097277469200057413"
+
+[versions.6887869]
+version = "12.2.0"
+client_depot_id = 552993
+client_manifest_id = "2551672523515060214"
+content_depot_id = 552991
+content_manifest_id = "8514238484773841729"
+localization_depot_id = 552994
+localization_manifest_id = "2051948044253189298"
+
+[versions.6831266]
+version = "12.1.0"
+client_depot_id = 552993
+client_manifest_id = "2551672523515060214"
+content_depot_id = 552991
+content_manifest_id = "8514238484773841729"
+localization_depot_id = 552994
+localization_manifest_id = "2051948044253189298"
+
+[versions.6775398]
+version = "12.0.0"
+client_depot_id = 552993
+client_manifest_id = "6776502716017776832"
+content_depot_id = 552991
+content_manifest_id = "112259149573857676"
+localization_depot_id = 552994
+localization_manifest_id = "7018887890030645252"
+
+[versions.6623042]
+version = "0.11.11"
+client_depot_id = 552993
+client_manifest_id = "9175528898009386538"
+content_depot_id = 552991
+content_manifest_id = "8323953113182017905"
+localization_depot_id = 552994
+localization_manifest_id = "8705913767523448622"
+
+[versions.6474624]
+version = "0.11.10"
+client_depot_id = 552993
+client_manifest_id = "4480470916820855095"
+content_depot_id = 552991
+content_manifest_id = "2068710946490509999"
+localization_depot_id = 552994
+localization_manifest_id = "8068402063857010401"
+
+[versions.6359964]
+version = "0.11.9"
+client_depot_id = 552993
+client_manifest_id = "8412513477922980521"
+content_depot_id = 552991
+content_manifest_id = "2208245104665696837"
+localization_depot_id = 552994
+localization_manifest_id = "7449322987699961629"
+
+[versions.6223574]
+version = "0.11.8"
+client_depot_id = 552993
+client_manifest_id = "7571793018546217830"
+content_depot_id = 552991
+content_manifest_id = "2034718977017954551"
+localization_depot_id = 552994
+localization_manifest_id = "7069134747345070978"
+
+[versions.6081105]
+version = "11.7.0"
+client_depot_id = 552993
+client_manifest_id = "6737481004365298724"
+content_depot_id = 552991
+content_manifest_id = "5936350483682413813"
+localization_depot_id = 552994
+localization_manifest_id = "7155260051231111784"
+
+[versions.5915585]
+version = "11.6.0"
+client_depot_id = 552993
+client_manifest_id = "6791242355553147175"
+content_depot_id = 552991
+content_manifest_id = "4264611915608185921"
+localization_depot_id = 552994
+localization_manifest_id = "6372632700708235458"
+
+[versions.5771708]
+version = "11.5.0"
+client_depot_id = 552993
+client_manifest_id = "2307631077707277271"
+content_depot_id = 552991
+content_manifest_id = "136430800569235823"
+localization_depot_id = 552994
+localization_manifest_id = "2234622850265895376"
+
+[versions.5624555]
+version = "11.4.0"
+client_depot_id = 552993
+client_manifest_id = "9157410306620382194"
+content_depot_id = 552991
+content_manifest_id = "2225677358528327961"
+localization_depot_id = 552994
+localization_manifest_id = "6917688704460035782"
+
+[versions.5450485]
+version = "11.3.0"
+client_depot_id = 552993
+client_manifest_id = "3830028349811179399"
+content_depot_id = 552991
+content_manifest_id = "1207448388393577906"
+localization_depot_id = 552994
+localization_manifest_id = "5102888449828483669"
+
+[versions.5315992]
+version = "11.2.0"
+client_depot_id = 552993
+client_manifest_id = "2139188497555425492"
+content_depot_id = 552991
+content_manifest_id = "8025201683014758511"
+localization_depot_id = 552994
+localization_manifest_id = "6375604843147005002"
+
+[versions.5241351]
+version = "11.1.1"
+client_depot_id = 552993
+client_manifest_id = "2139188497555425492"
+content_depot_id = 552991
+content_manifest_id = "8025201683014758511"
+localization_depot_id = 552994
+localization_manifest_id = "6375604843147005002"
+
+[versions.5045210]
+version = "11.0.0"
+client_depot_id = 552993
+client_manifest_id = "9164482938081876281"
+content_depot_id = 552991
+content_manifest_id = "559398863964190481"
+localization_depot_id = 552994
+localization_manifest_id = "1109837506104881521"
+
+[versions.4883153]
+version = "10.11.0"
+client_depot_id = 552993
+client_manifest_id = "8770082211333113373"
+content_depot_id = 552991
+content_manifest_id = "5389178629493804475"
+localization_depot_id = 552994
+localization_manifest_id = "1860048447600677681"
+
+[versions.4747907]
+version = "10.10.0"
+client_depot_id = 552993
+client_manifest_id = "8185364335665384073"
+content_depot_id = 552991
+content_manifest_id = "2674531131120215339"
+localization_depot_id = 552994
+localization_manifest_id = "3958275711994530018"
+
+[versions.4610639]
+version = "10.9.0"
+client_depot_id = 552993
+client_manifest_id = "1576035243842798534"
+content_depot_id = 552991
+content_manifest_id = "7874684993208547915"
+localization_depot_id = 552994
+localization_manifest_id = "3146101327891304347"
+
+[versions.4462593]
+version = "10.8.0"
+client_depot_id = 552993
+client_manifest_id = "3690538486057757507"
+content_depot_id = 552991
+content_manifest_id = "376645755637200803"
+localization_depot_id = 552994
+localization_manifest_id = "3200369767740561930"
+
+[versions.4365481]
+version = "10.7.2"
+client_depot_id = 552993
+client_manifest_id = "3690538486057757507"
+content_depot_id = 552991
+content_manifest_id = "376645755637200803"
+localization_depot_id = 552994
+localization_manifest_id = "3200369767740561930"
+
+[versions.4181350]
+version = "10.6.0"
+client_depot_id = 552993
+client_manifest_id = "8349791412794743785"
+content_depot_id = 552991
+content_manifest_id = "2871321342723939083"
+localization_depot_id = 552994
+localization_manifest_id = "4221960318504832089"
+
+[versions.4046169]
+version = "10.5.0"
+client_depot_id = 552993
+client_manifest_id = "7839188618588818171"
+content_depot_id = 552991
+content_manifest_id = "5914905949947366094"
+localization_depot_id = 552994
+localization_manifest_id = "7629948604124697521"
+
+[versions.3912232]
+version = "10.4.0"
+client_depot_id = 552993
+client_manifest_id = "4987722050228228733"
+content_depot_id = 552991
+content_manifest_id = "2007540539598685122"
+localization_depot_id = 552994
+localization_manifest_id = "3643086442855626660"
+
+[versions.3747819]
+version = "10.3.0"
+client_depot_id = 552993
+client_manifest_id = "1714398024726026445"
+content_depot_id = 552991
+content_manifest_id = "4101473698404159805"
+localization_depot_id = 552994
+localization_manifest_id = "5785759513331747235"
+
+[versions.3611516]
+version = "10.2.0"
+client_depot_id = 552993
+client_manifest_id = "6053617051144412888"
+content_depot_id = 552991
+content_manifest_id = "2593193760167938326"
+localization_depot_id = 552994
+localization_manifest_id = "9010168966002069037"
+
+[versions.3471783]
+version = "10.1.0"
+client_depot_id = 552993
+client_manifest_id = "6973757005923637813"
+content_depot_id = 552991
+content_manifest_id = "6650609708895715451"
+localization_depot_id = 552994
+localization_manifest_id = "1639803982249523883"
+
+[versions.3343484]
+version = "10.0.0"
+client_depot_id = 552993
+client_manifest_id = "3170005166955806730"
+content_depot_id = 552991
+content_manifest_id = "7607151756795740491"
+localization_depot_id = 552994
+localization_manifest_id = "8832957189439599954"
+
+[versions.3245976]
+version = "9.12.0"
+client_depot_id = 552993
+client_manifest_id = "3170005166955806730"
+content_depot_id = 552991
+content_manifest_id = "7607151756795740491"
+localization_depot_id = 552994
+localization_manifest_id = "8832957189439599954"
+
+[versions.3052606]
+version = "9.10.0"
+client_depot_id = 552993
+client_manifest_id = "1306466939678514558"
+content_depot_id = 552991
+content_manifest_id = "7071986952780269842"
+localization_depot_id = 552994
+localization_manifest_id = "647247723462190443"
+
+[versions.2979658]
+version = "9.9.1"
+client_depot_id = 552993
+client_manifest_id = "1306466939678514558"
+content_depot_id = 552991
+content_manifest_id = "7071986952780269842"
+localization_depot_id = 552994
+localization_manifest_id = "647247723462190443"
+
+[versions.2832630]
+version = "9.8.0"
+client_depot_id = 552993
+client_manifest_id = "864300845363822408"
+content_depot_id = 552991
+content_manifest_id = "129062823040605921"
+localization_depot_id = 552994
+localization_manifest_id = "6156348494168282147"
+
+[versions.2744482]
+version = "9.7.0"
+client_depot_id = 552993
+client_manifest_id = "864300845363822408"
+content_depot_id = 552991
+content_manifest_id = "129062823040605921"
+localization_depot_id = 552994
+localization_manifest_id = "6156348494168282147"
+
+[versions.2643263]
+version = "9.5.1"
+client_depot_id = 552993
+client_manifest_id = "2780987137217924955"
+content_depot_id = 552991
+content_manifest_id = "7697296018780975887"
+localization_depot_id = 552994
+localization_manifest_id = "7885051895985848767"
+
+[versions.2591463]
+version = "9.5.0"
+client_depot_id = 552993
+client_manifest_id = "2780987137217924955"
+content_depot_id = 552991
+content_manifest_id = "7697296018780975887"
+localization_depot_id = 552994
+localization_manifest_id = "7885051895985848767"
+
+[versions.2466969]
+version = "9.3.1"
+client_depot_id = 552993
+client_manifest_id = "728775844461842480"
+content_depot_id = 552991
+content_manifest_id = "1770346061135014060"
+
+[versions.2404350]
+version = "9.3.0"
+client_depot_id = 552993
+client_manifest_id = "6740565788338159812"
+content_depot_id = 552991
+content_manifest_id = "7051011982633182811"
+
+[versions.2316552]
+version = "9.2.0"
+client_depot_id = 552993
+client_manifest_id = "23095172913637102"
+content_depot_id = 552991
+content_manifest_id = "9016502718524641299"
+
+[versions.2270610]
+version = "9.1.1"
+client_depot_id = 552993
+client_manifest_id = "23095172913637102"
+content_depot_id = 552991
+content_manifest_id = "9016502718524641299"
+
+[versions.2171354]
+version = "9.0.0"
+client_depot_id = 552993
+client_manifest_id = "1153655965461519113"
+content_depot_id = 552991
+content_manifest_id = "1563212583882490697"
+
+[versions.2118554]
+version = "8.11.0"
+client_depot_id = 552993
+client_manifest_id = "1153655965461519113"
+content_depot_id = 552991
+content_manifest_id = "1563212583882490697"
+
+[versions.2030144]
+version = "8.10.0"
+client_depot_id = 552993
+client_manifest_id = "4764664797377999092"
+content_depot_id = 552991
+content_manifest_id = "4299359938254086158"
+
+[versions.1991370]
+version = "8.9.1"
+client_depot_id = 552993
+client_manifest_id = "4764664797377999092"
+content_depot_id = 552991
+content_manifest_id = "4299359938254086158"
+
+[versions.1860153]
+version = "8.8.0"
+client_depot_id = 552993
+client_manifest_id = "5161884972092967012"
+content_depot_id = 552991
+content_manifest_id = "3742300118484588783"
+
+[versions.1818869]
+version = "8.7.1"
+client_depot_id = 552993
+client_manifest_id = "5161884972092967012"
+content_depot_id = 552991
+content_manifest_id = "3742300118484588783"
+
+[versions.1690929]
+version = "8.6.0"
+client_depot_id = 552993
+client_manifest_id = "871013669688804866"
+content_depot_id = 552991
+content_manifest_id = "3005497203329374680"
+
+[versions.1631917]
+version = "8.5.1"
+client_depot_id = 552993
+client_manifest_id = "871013669688804866"
+content_depot_id = 552991
+content_manifest_id = "3005497203329374680"
+
+[versions.1549228]
+version = "8.4.0"
+client_depot_id = 552993
+client_manifest_id = "975304442109717000"
+content_depot_id = 552991
+content_manifest_id = "4444166174158738468"
+
+[versions.1491147]
+version = "8.3.1"
+client_depot_id = 552993
+client_manifest_id = "975304442109717000"
+content_depot_id = 552991
+content_manifest_id = "4444166174158738468"
+
+[versions.1427460]
+version = "8.2.0"
+client_depot_id = 552993
+client_manifest_id = "1074277594220615070"
+content_depot_id = 552991
+content_manifest_id = "7646830864488964585"
+
+[versions.1374796]
+version = "8.1.1"
+client_depot_id = 552993
+client_manifest_id = "1074277594220615070"
+content_depot_id = 552991
+content_manifest_id = "7646830864488964585"
+
+[versions.1150515]
+version = "7.10.2"
+client_depot_id = 552993
+client_manifest_id = "615893679227002897"
+content_depot_id = 552991
+content_manifest_id = "8733849540126272419"
+
+[versions.1130563]
+version = "7.10.1"
+client_depot_id = 552993
+client_manifest_id = "615893679227002897"
+content_depot_id = 552991
+content_manifest_id = "8733849540126272419"
+
+[versions.1037117]
+version = "7.9.0"
+client_depot_id = 552993
+client_manifest_id = "3369323657809411380"
+content_depot_id = 552991
+content_manifest_id = "6242807070985426666"
+
+[versions.987447]
+version = "7.8.0"
+client_depot_id = 552993
+client_manifest_id = "970286620692337853"
+content_depot_id = 552991
+content_manifest_id = "564199944778090292"
+
+[versions.346043]
+version = "0.7.6"
+client_depot_id = 552993
+client_manifest_id = "9140850913805784134"
+content_depot_id = 552991
+content_manifest_id = "9086008740730338225"
+
+[versions.344738]
+version = "0.7.5"
+client_depot_id = 552993
+client_manifest_id = "9140850913805784134"
+content_depot_id = 552991
+content_manifest_id = "9086008740730338225"
+
+[versions.342524]
+version = "0.7.5"
+client_depot_id = 552993
+client_manifest_id = "6080072864479690021"
+content_depot_id = 552991
+content_manifest_id = "5703999540903024020"
+
+[versions.338496]
+version = "0.7.4"
+client_depot_id = 552993
+client_manifest_id = "6080072864479690021"
+content_depot_id = 552991
+content_manifest_id = "5703999540903024020"
+
+[versions.329111]
+version = "0.7.3"
+client_depot_id = 552993
+client_manifest_id = "4618315485103430965"
+content_depot_id = 552991
+content_manifest_id = "1351167264285215528"
+
+[versions.327674]
+version = "0.7.2"
+client_depot_id = 552993
+client_manifest_id = "4618315485103430965"
+content_depot_id = 552991
+content_manifest_id = "1351167264285215528"
+
+[versions.316925]
+version = "0.7.1"
+client_depot_id = 552993
+client_manifest_id = "161113114740847507"
+content_depot_id = 552991
+content_manifest_id = "5829977036017096901"
+
+[versions.313919]
+version = "0.7.0"
+client_depot_id = 552993
+client_manifest_id = "161113114740847507"
+content_depot_id = 552991
+content_manifest_id = "5829977036017096901"
+
+[versions.308625]
+version = "0.6.15"
+client_depot_id = 552993
+client_manifest_id = "7727326256887231585"
+content_depot_id = 552991
+content_manifest_id = "8750437277116959815"
+
+[versions.306965]
+version = "0.6.15"
+client_depot_id = 552993
+client_manifest_id = "7727326256887231585"
+content_depot_id = 552991
+content_manifest_id = "8750437277116959815"
+
+[versions.297724]
+version = "0.6.13"
+client_depot_id = 552993
+client_manifest_id = "7419113183478869343"
+content_depot_id = 552991
+content_manifest_id = "3150667746326174940"
+localization_depot_id = 552994
+localization_manifest_id = "2888836330268230843"
+
+[versions.296659]
+version = "0.6.13"
+client_depot_id = 552993
+client_manifest_id = "7419113183478869343"
+content_depot_id = 552991
+content_manifest_id = "3150667746326174940"
+localization_depot_id = 552994
+localization_manifest_id = "2888836330268230843"

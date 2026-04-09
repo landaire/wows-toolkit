@@ -123,8 +123,7 @@ pub fn dump_renderer_data(
     let game_params_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let gmp = GameMetadataProvider::from_vfs(&vfs_clone)?;
         let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-        let bytes =
-            rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
         Ok::<_, rootcause::Report>(bytes)
     }));
     match game_params_result {

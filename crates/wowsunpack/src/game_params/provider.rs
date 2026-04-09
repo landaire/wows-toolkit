@@ -375,44 +375,28 @@ fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewP
         .cost_elite_xp(game_param_to_type!(personality, "costELXP", usize))
         .cost_gold(game_param_to_type!(personality, "costGold", usize))
         .cost_xp(game_param_to_type!(personality, "costXP", usize))
-        .has_custom_background(
-            personality
-                .get(&HashableValue::String("hasCustomBackground".to_string().into()))
-                .and_then(|v| v.bool_ref().copied())
-                .unwrap_or(false),
+        .maybe_has_custom_background(personality.get(&pk("hasCustomBackground")).and_then(|v| v.bool_ref().copied()))
+        .maybe_has_overlay(personality.get(&pk("hasOverlay")).and_then(|v| v.bool_ref().copied()))
+        .maybe_has_rank(personality.get(&pk("hasRank")).and_then(|v| v.bool_ref().copied()))
+        .maybe_has_sample_voiceover(personality.get(&pk("hasSampleVO")).and_then(|v| v.bool_ref().copied()))
+        .maybe_is_animated(personality.get(&pk("isAnimated")).and_then(|v| v.bool_ref().copied()))
+        .maybe_is_person(personality.get(&pk("isPerson")).and_then(|v| v.bool_ref().copied()))
+        .maybe_is_retrainable(personality.get(&pk("isRetrainable")).and_then(|v| v.bool_ref().copied()))
+        .maybe_is_unique(personality.get(&pk("isUnique")).and_then(|v| v.bool_ref().copied()))
+        .maybe_peculiarity(
+            personality.get(&pk("peculiarity")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()),
         )
-        .has_overlay(
-            personality
-                .get(&HashableValue::String("hasOverlay".to_string().into()))
-                .and_then(|v| v.bool_ref().copied())
-                .unwrap_or(false),
-        )
-        .has_rank(
-            personality
-                .get(&HashableValue::String("hasRank".to_string().into()))
-                .and_then(|v| v.bool_ref().copied())
-                .unwrap_or(false),
-        )
-        .has_sample_voiceover(
-            personality
-                .get(&HashableValue::String("hasSampleVO".to_string().into()))
-                .and_then(|v| v.bool_ref().copied())
-                .unwrap_or(false),
-        )
-        .is_animated(game_param_to_type!(personality, "isAnimated", bool))
-        .is_person(game_param_to_type!(personality, "isPerson", bool))
-        .is_retrainable(game_param_to_type!(personality, "isRetrainable", bool))
-        .is_unique(game_param_to_type!(personality, "isUnique", bool))
-        .peculiarity(game_param_to_type!(personality, "peculiarity", String))
-        .permissions(game_param_to_type!(personality, "permissions", u32))
+        .maybe_permissions(personality.get(&pk("permissions")).and_then(|v| v.i64_ref()).map(|&v| v as u32))
         .person_name(game_param_to_type!(personality, "personName", String))
-        .subnation(game_param_to_type!(personality, "subnation", String))
+        .maybe_subnation(personality.get(&pk("subnation")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()))
         .tags(
-            game_param_to_type!(personality, "tags", &[()])
-                .inner()
-                .iter()
-                .map(|value| value.string_ref().expect("peculiarity entry is not a string").inner().to_owned())
-                .collect(),
+            personality
+                .get(&pk("tags"))
+                .and_then(|v| v.list_ref())
+                .map(|list| {
+                    list.inner().iter().filter_map(|value| value.string_ref().map(|s| s.inner().to_owned())).collect()
+                })
+                .unwrap_or_default(),
         )
         .ships(ships)
         .build()
@@ -516,7 +500,7 @@ fn build_ability(ability_data: &BTreeMap<HashableValue, Value>) -> Ability {
         .build()
 }
 
-/// Helper: read a pickled dict string key.
+/// Helper: create a pickled dict key. Checks for `String` first, then `Bytes`.
 fn pk(key: &str) -> HashableValue {
     HashableValue::String(key.to_string().into())
 }
@@ -1015,13 +999,14 @@ impl GameMetadataProvider {
         let pickled_params: Value = game_params_to_pickle(game_params_data)?;
 
         let params_dict = if let Some(params_dict) = pickled_params.dict_or_object_dict() {
-            let params_dict = params_dict.inner();
-            params_dict
-                .get(&pk(""))
-                .expect("failed to get default game_params")
-                .dict_or_object_dict()
-                .expect("game params is not a dict")
-                .clone()
+            let inner = params_dict.inner();
+            if let Some(nested) = inner.get(&pk("")) {
+                // Modern format: {"": {param_name: param_data, ...}}
+                nested.dict_or_object_dict().expect("game params is not a dict").clone()
+            } else {
+                // Old format: {param_name: param_data, ...} (flat, no wrapper key)
+                params_dict.clone()
+            }
         } else if let Some(params_list) = pickled_params.list_ref() {
             let params = &params_list.inner()[0];
             params.dict_or_object_dict().expect("First element of GameParams list is not a dictionary").clone()
@@ -1037,299 +1022,298 @@ impl GameMetadataProvider {
             .inner()
             .values()
             .filter_map(|param| {
-                if param.is_none() {
-                    return None;
+                // Wrap each param in catch_unwind so missing fields in old game
+                // versions skip the individual param rather than aborting everything.
+                let param = param.clone();
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    Self::parse_single_param(&param, &params_dict)
+                })) {
+                    Ok(result) => result,
+                    Err(_) => None, // silently skip params that panic
                 }
-
-                let param_data =
-                    param.dict_or_object_dict().expect("Params root level dictionary values are not dictionaries");
-                let param_data = param_data.inner();
-
-                param_data
-                    .get(&pk(keys::TYPEINFO))
-                    .and_then(|type_info| {
-                        type_info.dict_or_object_dict().and_then(|type_info_main| {
-                            let type_info = type_info_main.inner();
-                            let (nation, species, ty) = (
-                                type_info.get(&pk(keys::TYPEINFO_NATION))?,
-                                type_info.get(&pk(keys::TYPEINFO_SPECIES))?,
-                                type_info.get(&pk(keys::TYPEINFO_TYPE))?,
-                            );
-
-                            let (Value::String(nation), Value::String(ty)) = (nation, ty) else {
-                                return None;
-                            };
-
-                            Some((nation.clone(), species.clone(), ty.clone()))
-                        })
-                    })
-                    .and_then(|(nation, species, typ)| {
-                        let param_type = ParamType::from_name(typ.inner().as_str())?;
-                        let nation = nation.inner().clone();
-                        let species = species.string_ref().map(|s| Species::from_name(s.inner().as_str()));
-
-                        let parsed_param_data = match param_type {
-                            ParamType::Ship => Some(ParamData::Vehicle(build_ship(&param_data))),
-                            ParamType::Crew => {
-                                let money_training_level = game_param_to_type!(param_data, "moneyTrainingLevel", usize);
-
-                                let personality = game_param_to_type!(param_data, "CrewPersonality", HashMap<(), ()>);
-                                let personality = personality.inner();
-                                let crew_personality = build_crew_personality(&personality);
-
-                                let skills = game_param_to_type!(param_data, "Skills", Option<HashMap<(), ()>>);
-                                let skills = skills.map(|skills| build_crew_skills(&skills.inner()));
-
-                                Some(ParamData::Crew(
-                                    Crew::builder()
-                                        .money_training_level(money_training_level)
-                                        .personality(crew_personality)
-                                        .maybe_skills(skills)
-                                        .build(),
-                                ))
-                            }
-                            ParamType::Achievement => {
-                                let is_group = game_param_to_type!(param_data, "group", bool);
-                                let one_per_battle = game_param_to_type!(param_data, "onePerBattle", bool);
-                                let ui_type = game_param_to_type!(param_data, "uiType", String);
-                                let ui_name = game_param_to_type!(param_data, "uiName", String);
-
-                                Some(ParamData::Achievement(
-                                    Achievement::builder()
-                                        .is_group(is_group)
-                                        .one_per_battle(one_per_battle)
-                                        .ui_type(ui_type)
-                                        .ui_name(ui_name)
-                                        .build(),
-                                ))
-                            }
-                            ParamType::Ability => Some(ParamData::Ability(build_ability(&param_data))),
-                            ParamType::Exterior => {
-                                let camouflage = param_data
-                                    .get(&pk(keys::CAMOUFLAGE))
-                                    .and_then(|v| v.string_ref())
-                                    .map(|s| s.inner().to_string())
-                                    .filter(|s| !s.is_empty());
-                                let title = param_data
-                                    .get(&pk(keys::TITLE))
-                                    .and_then(|v| v.string_ref())
-                                    .map(|s| s.inner().to_string())
-                                    .filter(|s| !s.is_empty());
-                                Some(ParamData::Exterior(
-                                    Exterior::builder().maybe_camouflage(camouflage).maybe_title(title).build(),
-                                ))
-                            }
-                            ParamType::Modernization => {
-                                let modifiers = param_data
-                                    .get(&pk("modifiers"))
-                                    .and_then(|v| v.dict_or_object_dict())
-                                    .map(|d| build_skill_modifiers(&d.inner()))
-                                    .unwrap_or_default();
-                                Some(ParamData::Modernization(super::types::Modernization::new(modifiers)))
-                            }
-                            ParamType::Unit => Some(ParamData::Unit),
-                            ParamType::Drop => {
-                                let marker_name_active = param_data
-                                    .get(&pk("markerNameActive"))
-                                    .and_then(|v| v.string_ref())
-                                    .map(|s| s.inner().to_string())
-                                    .unwrap_or_default();
-                                let marker_name_inactive = param_data
-                                    .get(&pk("markerNameInactive"))
-                                    .and_then(|v| v.string_ref())
-                                    .map(|s| s.inner().to_string())
-                                    .unwrap_or_default();
-                                let sorting =
-                                    param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
-                                Some(ParamData::Drop(
-                                    super::types::BuffDrop::builder()
-                                        .marker_name_active(marker_name_active)
-                                        .marker_name_inactive(marker_name_inactive)
-                                        .sorting(sorting)
-                                        .build(),
-                                ))
-                            }
-                            ParamType::Aircraft => {
-                                let subtypes: Vec<String> = param_data
-                                    .get(&pk("planeSubtype"))
-                                    .and_then(|v| v.list_ref())
-                                    .map(|list| {
-                                        list.inner()
-                                            .iter()
-                                            .filter_map(|item| item.string_ref().map(|s| s.inner().to_string()))
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                let category = if subtypes.iter().any(|s| s == "airsupport") {
-                                    PlaneCategory::Airsupport
-                                } else if subtypes.iter().any(|s| s == "consumable") {
-                                    PlaneCategory::Consumable
-                                } else {
-                                    PlaneCategory::Controllable
-                                };
-                                // Resolve ammo type: bombName -> projectile dict -> ammoType
-                                let ammo_type = param_data
-                                    .get(&pk("bombName"))
-                                    .and_then(|v| v.string_ref())
-                                    .filter(|s| !s.inner().is_empty())
-                                    .and_then(|bomb_name| {
-                                        params_dict
-                                            .inner()
-                                            .get(&HashableValue::String(bomb_name.clone()))
-                                            .and_then(|proj| proj.dict_or_object_dict())
-                                            .and_then(|proj_dict| {
-                                                proj_dict
-                                                    .inner()
-                                                    .get(&pk("ammoType"))
-                                                    .and_then(|v| v.string_ref())
-                                                    .map(|s| s.inner().to_string())
-                                            })
-                                    })
-                                    .unwrap_or_default();
-                                Some(ParamData::Aircraft(
-                                    Aircraft::builder().category(category).ammo_type(ammo_type).build(),
-                                ))
-                            }
-                            ParamType::Projectile => {
-                                let ammo_type = param_data
-                                    .get(&pk("ammoType"))
-                                    .and_then(|v| v.string_ref())
-                                    .map(|s| s.inner().to_string())
-                                    .unwrap_or_default();
-                                let max_dist = param_data
-                                    .get(&pk(keys::MAX_DIST))
-                                    .and_then(|v| {
-                                        v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
-                                    })
-                                    .map(BigWorldDistance::from);
-                                let read_opt_f32 = |key: &str| -> Option<f32> {
-                                    param_data.get(&pk(key)).and_then(|v| {
-                                        v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
-                                    })
-                                };
-                                let read_opt_bool = |key: &str| -> Option<bool> {
-                                    param_data.get(&pk(key)).and_then(|v| v.bool_ref().copied())
-                                };
-                                let bullet_diametr = read_opt_f32("bulletDiametr");
-                                let bullet_mass = read_opt_f32("bulletMass");
-                                let bullet_speed = read_opt_f32("bulletSpeed");
-                                let bullet_krupp = read_opt_f32("bulletKrupp");
-                                let bullet_cap = read_opt_bool("bulletCap");
-                                let bullet_cap_normalize_max_angle = read_opt_f32("bulletCapNormalizeMaxAngle");
-                                let bullet_detonator = read_opt_f32("bulletDetonator");
-                                let bullet_detonator_threshold = read_opt_f32("bulletDetonatorThreshold");
-                                let bullet_ricochet_at = read_opt_f32("bulletRicochetAt");
-                                let bullet_always_ricochet_at = read_opt_f32("bulletAlwaysRicochetAt");
-                                let alpha_piercing_he = read_opt_f32("alphaPiercingHE");
-                                let alpha_piercing_cs = read_opt_f32("alphaPiercingCS");
-                                let alpha_damage = read_opt_f32("alphaDamage");
-                                let burn_prob = read_opt_f32("burnProb");
-                                let bullet_air_drag = read_opt_f32("bulletAirDrag");
-                                Some(ParamData::Projectile(
-                                    Projectile::builder()
-                                        .ammo_type(ammo_type)
-                                        .maybe_max_dist(max_dist)
-                                        .maybe_bullet_diametr(bullet_diametr)
-                                        .maybe_bullet_mass(bullet_mass)
-                                        .maybe_bullet_speed(bullet_speed)
-                                        .maybe_bullet_krupp(bullet_krupp)
-                                        .maybe_bullet_cap(bullet_cap)
-                                        .maybe_bullet_cap_normalize_max_angle(bullet_cap_normalize_max_angle)
-                                        .maybe_bullet_detonator(bullet_detonator)
-                                        .maybe_bullet_detonator_threshold(bullet_detonator_threshold)
-                                        .maybe_bullet_ricochet_at(bullet_ricochet_at)
-                                        .maybe_bullet_always_ricochet_at(bullet_always_ricochet_at)
-                                        .maybe_alpha_piercing_he(alpha_piercing_he)
-                                        .maybe_alpha_piercing_cs(alpha_piercing_cs)
-                                        .maybe_alpha_damage(alpha_damage)
-                                        .maybe_burn_prob(burn_prob)
-                                        .maybe_bullet_air_drag(bullet_air_drag)
-                                        .build(),
-                                ))
-                            }
-                            ParamType::Building => {
-                                let level = game_param_to_type!(param_data, "level", u32);
-                                let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_or_object_dict());
-                                let health = hull
-                                    .as_ref()
-                                    .and_then(|h| {
-                                        let inner = h.inner();
-                                        inner.get(&pk("health")).and_then(|v| {
-                                            v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32))
-                                        })
-                                    })
-                                    .unwrap_or(0.0);
-                                Some(ParamData::Building(
-                                    super::types::Building::builder().level(level).health(health).build(),
-                                ))
-                            }
-                            _ => {
-                                // Some params (e.g. Drops) have typeinfo.type = "Other"
-                                // but contain Drop-specific fields
-                                if param_data.contains_key(&pk("markerNameActive")) {
-                                    let marker_name_active = param_data
-                                        .get(&pk("markerNameActive"))
-                                        .and_then(|v| v.string_ref())
-                                        .map(|s| s.inner().to_string())
-                                        .unwrap_or_default();
-                                    let marker_name_inactive = param_data
-                                        .get(&pk("markerNameInactive"))
-                                        .and_then(|v| v.string_ref())
-                                        .map(|s| s.inner().to_string())
-                                        .unwrap_or_default();
-                                    let sorting =
-                                        param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
-                                    Some(ParamData::Drop(
-                                        super::types::BuffDrop::builder()
-                                            .marker_name_active(marker_name_active)
-                                            .marker_name_inactive(marker_name_inactive)
-                                            .sorting(sorting)
-                                            .build(),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            }
-                        }?;
-
-                        let id_value = param_data.get(&pk(keys::PARAM_ID)).expect("param has no id field");
-                        let id = GameParamId::from(
-                            *id_value.i64_ref().unwrap_or_else(|| panic!("param id is not an i64, got: {id_value:?}")),
-                        );
-
-                        let index = param_data
-                            .get(&pk(keys::PARAM_INDEX))
-                            .expect("param has no index field")
-                            .string_ref()
-                            .expect("param index is not a string")
-                            .inner()
-                            .clone();
-
-                        let name = param_data
-                            .get(&pk(keys::PARAM_NAME))
-                            .expect("param has no name field")
-                            .string_ref()
-                            .expect("param name is not a string")
-                            .inner()
-                            .clone();
-
-                        Some(
-                            Param::builder()
-                                .id(id)
-                                .index(index)
-                                .name(name)
-                                .maybe_species(species)
-                                .nation(nation)
-                                .data(parsed_param_data)
-                                .build(),
-                        )
-                    })
             })
             .collect::<Vec<Param>>();
 
         let params = new_params;
 
         Self::from_params_with_vfs(params, vfs)
+    }
+
+    /// Parse a single param from pickled dict data. Panics on missing fields are
+    /// caught by the caller's `catch_unwind`.
+    fn parse_single_param(param: &Value, params_dict: &Shared<BTreeMap<HashableValue, Value>>) -> Option<Param> {
+        if param.is_none() {
+            return None;
+        }
+
+        let param_data = param.dict_or_object_dict().expect("Params root level dictionary values are not dictionaries");
+        let param_data = param_data.inner();
+
+        let (nation, species, typ) = param_data.get(&pk(keys::TYPEINFO)).and_then(|type_info| {
+            type_info.dict_or_object_dict().and_then(|type_info_main| {
+                let type_info = type_info_main.inner();
+                let (nation, species, ty) = (
+                    type_info.get(&pk(keys::TYPEINFO_NATION))?,
+                    type_info.get(&pk(keys::TYPEINFO_SPECIES))?,
+                    type_info.get(&pk(keys::TYPEINFO_TYPE))?,
+                );
+
+                let (Value::String(nation), Value::String(ty)) = (nation, ty) else {
+                    return None;
+                };
+
+                Some((nation.clone(), species.clone(), ty.clone()))
+            })
+        })?;
+
+        let param_type = ParamType::from_name(typ.inner().as_str())?;
+        let nation = nation.inner().clone();
+        let species = species.string_ref().map(|s| Species::from_name(s.inner().as_str()));
+
+        let parsed_param_data = match param_type {
+            ParamType::Ship => Some(ParamData::Vehicle(build_ship(&param_data))),
+            ParamType::Crew => {
+                let money_training_level = game_param_to_type!(param_data, "moneyTrainingLevel", usize);
+
+                let personality = game_param_to_type!(param_data, "CrewPersonality", HashMap<(), ()>);
+                let personality = personality.inner();
+                let crew_personality = build_crew_personality(&personality);
+
+                let skills = game_param_to_type!(param_data, "Skills", Option<HashMap<(), ()>>);
+                let skills = skills.map(|skills| build_crew_skills(&skills.inner()));
+
+                Some(ParamData::Crew(
+                    Crew::builder()
+                        .money_training_level(money_training_level)
+                        .personality(crew_personality)
+                        .maybe_skills(skills)
+                        .build(),
+                ))
+            }
+            ParamType::Achievement => {
+                let is_group = game_param_to_type!(param_data, "group", bool);
+                let one_per_battle = game_param_to_type!(param_data, "onePerBattle", bool);
+                let ui_type = game_param_to_type!(param_data, "uiType", String);
+                let ui_name = game_param_to_type!(param_data, "uiName", String);
+
+                Some(ParamData::Achievement(
+                    Achievement::builder()
+                        .is_group(is_group)
+                        .one_per_battle(one_per_battle)
+                        .ui_type(ui_type)
+                        .ui_name(ui_name)
+                        .build(),
+                ))
+            }
+            ParamType::Ability => Some(ParamData::Ability(build_ability(&param_data))),
+            ParamType::Exterior => {
+                let camouflage = param_data
+                    .get(&pk(keys::CAMOUFLAGE))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .filter(|s| !s.is_empty());
+                let title = param_data
+                    .get(&pk(keys::TITLE))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .filter(|s| !s.is_empty());
+                Some(ParamData::Exterior(Exterior::builder().maybe_camouflage(camouflage).maybe_title(title).build()))
+            }
+            ParamType::Modernization => {
+                let modifiers = param_data
+                    .get(&pk("modifiers"))
+                    .and_then(|v| v.dict_or_object_dict())
+                    .map(|d| build_skill_modifiers(&d.inner()))
+                    .unwrap_or_default();
+                Some(ParamData::Modernization(super::types::Modernization::new(modifiers)))
+            }
+            ParamType::Unit => Some(ParamData::Unit),
+            ParamType::Drop => {
+                let marker_name_active = param_data
+                    .get(&pk("markerNameActive"))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .unwrap_or_default();
+                let marker_name_inactive = param_data
+                    .get(&pk("markerNameInactive"))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .unwrap_or_default();
+                let sorting = param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
+                Some(ParamData::Drop(
+                    super::types::BuffDrop::builder()
+                        .marker_name_active(marker_name_active)
+                        .marker_name_inactive(marker_name_inactive)
+                        .sorting(sorting)
+                        .build(),
+                ))
+            }
+            ParamType::Aircraft => {
+                let subtypes: Vec<String> = param_data
+                    .get(&pk("planeSubtype"))
+                    .and_then(|v| v.list_ref())
+                    .map(|list| {
+                        list.inner()
+                            .iter()
+                            .filter_map(|item| item.string_ref().map(|s| s.inner().to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let category = if subtypes.iter().any(|s| s == "airsupport") {
+                    PlaneCategory::Airsupport
+                } else if subtypes.iter().any(|s| s == "consumable") {
+                    PlaneCategory::Consumable
+                } else {
+                    PlaneCategory::Controllable
+                };
+                // Resolve ammo type: bombName -> projectile dict -> ammoType
+                let ammo_type = param_data
+                    .get(&pk("bombName"))
+                    .and_then(|v| v.string_ref())
+                    .filter(|s| !s.inner().is_empty())
+                    .and_then(|bomb_name| {
+                        params_dict
+                            .inner()
+                            .get(&HashableValue::String(bomb_name.clone()))
+                            .and_then(|proj| proj.dict_or_object_dict())
+                            .and_then(|proj_dict| {
+                                proj_dict
+                                    .inner()
+                                    .get(&pk("ammoType"))
+                                    .and_then(|v| v.string_ref())
+                                    .map(|s| s.inner().to_string())
+                            })
+                    })
+                    .unwrap_or_default();
+                Some(ParamData::Aircraft(Aircraft::builder().category(category).ammo_type(ammo_type).build()))
+            }
+            ParamType::Projectile => {
+                let ammo_type = param_data
+                    .get(&pk("ammoType"))
+                    .and_then(|v| v.string_ref())
+                    .map(|s| s.inner().to_string())
+                    .unwrap_or_default();
+                let max_dist = param_data
+                    .get(&pk(keys::MAX_DIST))
+                    .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
+                    .map(BigWorldDistance::from);
+                let read_opt_f32 = |key: &str| -> Option<f32> {
+                    param_data
+                        .get(&pk(key))
+                        .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
+                };
+                let read_opt_bool =
+                    |key: &str| -> Option<bool> { param_data.get(&pk(key)).and_then(|v| v.bool_ref().copied()) };
+                let bullet_diametr = read_opt_f32("bulletDiametr");
+                let bullet_mass = read_opt_f32("bulletMass");
+                let bullet_speed = read_opt_f32("bulletSpeed");
+                let bullet_krupp = read_opt_f32("bulletKrupp");
+                let bullet_cap = read_opt_bool("bulletCap");
+                let bullet_cap_normalize_max_angle = read_opt_f32("bulletCapNormalizeMaxAngle");
+                let bullet_detonator = read_opt_f32("bulletDetonator");
+                let bullet_detonator_threshold = read_opt_f32("bulletDetonatorThreshold");
+                let bullet_ricochet_at = read_opt_f32("bulletRicochetAt");
+                let bullet_always_ricochet_at = read_opt_f32("bulletAlwaysRicochetAt");
+                let alpha_piercing_he = read_opt_f32("alphaPiercingHE");
+                let alpha_piercing_cs = read_opt_f32("alphaPiercingCS");
+                let alpha_damage = read_opt_f32("alphaDamage");
+                let burn_prob = read_opt_f32("burnProb");
+                let bullet_air_drag = read_opt_f32("bulletAirDrag");
+                Some(ParamData::Projectile(
+                    Projectile::builder()
+                        .ammo_type(ammo_type)
+                        .maybe_max_dist(max_dist)
+                        .maybe_bullet_diametr(bullet_diametr)
+                        .maybe_bullet_mass(bullet_mass)
+                        .maybe_bullet_speed(bullet_speed)
+                        .maybe_bullet_krupp(bullet_krupp)
+                        .maybe_bullet_cap(bullet_cap)
+                        .maybe_bullet_cap_normalize_max_angle(bullet_cap_normalize_max_angle)
+                        .maybe_bullet_detonator(bullet_detonator)
+                        .maybe_bullet_detonator_threshold(bullet_detonator_threshold)
+                        .maybe_bullet_ricochet_at(bullet_ricochet_at)
+                        .maybe_bullet_always_ricochet_at(bullet_always_ricochet_at)
+                        .maybe_alpha_piercing_he(alpha_piercing_he)
+                        .maybe_alpha_piercing_cs(alpha_piercing_cs)
+                        .maybe_alpha_damage(alpha_damage)
+                        .maybe_burn_prob(burn_prob)
+                        .maybe_bullet_air_drag(bullet_air_drag)
+                        .build(),
+                ))
+            }
+            ParamType::Building => {
+                let level = game_param_to_type!(param_data, "level", u32);
+                let hull = param_data.get(&pk("hull")).and_then(|v| v.dict_or_object_dict());
+                let health = hull
+                    .as_ref()
+                    .and_then(|h| {
+                        let inner = h.inner();
+                        inner
+                            .get(&pk("health"))
+                            .and_then(|v| v.f64_ref().map(|f| *f as f32).or_else(|| v.i64_ref().map(|i| *i as f32)))
+                    })
+                    .unwrap_or(0.0);
+                Some(ParamData::Building(super::types::Building::builder().level(level).health(health).build()))
+            }
+            _ => {
+                // Some params (e.g. Drops) have typeinfo.type = "Other"
+                // but contain Drop-specific fields
+                if param_data.contains_key(&pk("markerNameActive")) {
+                    let marker_name_active = param_data
+                        .get(&pk("markerNameActive"))
+                        .and_then(|v| v.string_ref())
+                        .map(|s| s.inner().to_string())
+                        .unwrap_or_default();
+                    let marker_name_inactive = param_data
+                        .get(&pk("markerNameInactive"))
+                        .and_then(|v| v.string_ref())
+                        .map(|s| s.inner().to_string())
+                        .unwrap_or_default();
+                    let sorting = param_data.get(&pk("sorting")).and_then(|v| v.i64_ref()).copied().unwrap_or(0);
+                    Some(ParamData::Drop(
+                        super::types::BuffDrop::builder()
+                            .marker_name_active(marker_name_active)
+                            .marker_name_inactive(marker_name_inactive)
+                            .sorting(sorting)
+                            .build(),
+                    ))
+                } else {
+                    None
+                }
+            }
+        }?;
+
+        let id_value = param_data.get(&pk(keys::PARAM_ID)).expect("param has no id field");
+        let id = GameParamId::from(
+            *id_value.i64_ref().unwrap_or_else(|| panic!("param id is not an i64, got: {id_value:?}")),
+        );
+
+        let index = param_data
+            .get(&pk(keys::PARAM_INDEX))
+            .expect("param has no index field")
+            .string_ref()
+            .expect("param index is not a string")
+            .inner()
+            .clone();
+
+        let name = param_data
+            .get(&pk(keys::PARAM_NAME))
+            .expect("param has no name field")
+            .string_ref()
+            .expect("param name is not a string")
+            .inner()
+            .clone();
+
+        Some(
+            Param::builder()
+                .id(id)
+                .index(index)
+                .name(name)
+                .maybe_species(species)
+                .nation(nation)
+                .data(parsed_param_data)
+                .build(),
+        )
     }
 
     /// Constructs a GameMetadataProvider from a pre-built list of GameParams and a VFS.

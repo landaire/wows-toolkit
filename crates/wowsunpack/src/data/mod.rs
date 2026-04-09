@@ -68,9 +68,7 @@ impl Version {
         for node in doc.descendants() {
             if let Some(rest) = node.tag_name().name().strip_prefix("curVersion_") {
                 // Strip optional "Release_" or "release_" prefix (used in older versions)
-                let rest = rest.strip_prefix("Release_")
-                    .or_else(|| rest.strip_prefix("release_"))
-                    .unwrap_or(rest);
+                let rest = rest.strip_prefix("Release_").or_else(|| rest.strip_prefix("release_")).unwrap_or(rest);
                 let parts: Vec<&str> = rest.split('_').collect();
                 match parts.len() {
                     // Modern: major_minor_patch_build

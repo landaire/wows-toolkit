@@ -10669,7 +10669,7 @@ dependencies = [
 
 [[package]]
 name = "wows-data-mgr"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "http-body",
@@ -10692,7 +10692,7 @@ dependencies = [
 
 [[package]]
 name = "wows_minimap_renderer"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -10730,7 +10730,7 @@ dependencies = [
 
 [[package]]
 name = "wows_replays"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "bon",
  "flate2",
@@ -10835,7 +10835,7 @@ dependencies = [
 
 [[package]]
 name = "wowsunpack"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "async-std",
  "async-trait",
@@ -10876,7 +10876,6 @@ dependencies = [
  "variantly",
  "vfs",
  "winnow 1.0.1",
- "wows-data-mgr",
 ]
 
 [[package]]
@@ -10933,7 +10932,7 @@ dependencies = [
 
 [[package]]
 name = "wt-translations"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "wowsunpack",
 ]
