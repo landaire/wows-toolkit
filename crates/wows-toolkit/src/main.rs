@@ -88,7 +88,16 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_inner_size([600.0, 400.0]);
     }
 
-    let native_options = eframe::NativeOptions { viewport, ..Default::default() };
+    let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut setup) = wgpu_options.wgpu_setup {
+        setup.instance_descriptor.backends = wgpu::Backends::DX12;
+    }
+
+    let native_options = eframe::NativeOptions {
+        viewport,
+        wgpu_options,
+        ..Default::default()
+    };
     eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,
