@@ -15,8 +15,8 @@ egui = { workspace = true }
 eframe = { workspace = true, features = [
     "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
-    # "glow",
-    "wgpu",
+    "glow",
+    #"wgpu",
     "wayland",       # To support Linux (and CI)
 ] }
 egui_extras = { version = "0.34.1", features = ["syntect", "image", "svg"] }

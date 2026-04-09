@@ -2642,7 +2642,7 @@ impl eframe::App for WowsToolkitApp {
         });
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, ctx: std::option::Option<&eframe::glow::Context>) {
         // Signal the background save task to do a final save, then await completion.
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
