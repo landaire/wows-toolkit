@@ -6200,9 +6200,9 @@ dependencies = [
 
 [[package]]
 name = "pickled"
-version = "2.0.0-alpha6"
+version = "2.0.0-alpha7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f616c580f595a0988d9f6bae1b382707a78dbcd5a1ca082de4d5abbd4ca07e7"
+checksum = "0f0f7630841870cb8a853e749494fe14f9cd0afd094df4cd2babf52f5569bfe6"
 dependencies = [
  "byteorder",
  "iter-read",
