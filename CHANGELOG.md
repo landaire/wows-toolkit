@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.68] - 2026-04-09
+
+### 🚀 Features
+
+- Add content-addressed storage deduplication + better metadata tracking for dumped builds
+
+### 🐛 Bug Fixes
+
+- Another stab at fixing memory consumption
+
 ## [0.1.67] - 2026-04-08
 
 ### 🐛 Bug Fixes
