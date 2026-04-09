@@ -85,7 +85,7 @@ pub fn dump_renderer_data(
             .attach_with(|| format!("Failed to clean up partial dump at {}", output_dir.display()))?;
     }
 
-    let vfs = game_data::build_game_vfs(game_dir).attach_with(|| "Failed to build game VFS")?;
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build).attach_with(|| "Failed to build game VFS")?;
 
     // Extract VFS files through CAS
     let mut file_hashes: BTreeMap<String, String> = BTreeMap::new();
@@ -114,14 +114,31 @@ pub fn dump_renderer_data(
         pb.finish_and_clear();
     }
 
-    // Serialize GameParams via rkyv (stored directly, not in CAS)
-    let game_params = GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams: {e:?}"))?;
-    let params: Vec<Param> = game_params.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-    let bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize GameParams: {e}"))?;
     std::fs::create_dir_all(&output_dir)
         .attach_with(|| format!("Failed to create output directory {}", output_dir.display()))?;
-    std::fs::write(output_dir.join("game_params.rkyv"), &bytes).attach_with(|| "Failed to write game_params.rkyv")?;
+
+    // Serialize GameParams via rkyv (stored directly, not in CAS).
+    // Wrap in catch_unwind because old game data may have missing fields that cause panics.
+    let vfs_clone = vfs.clone();
+    let game_params_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let gmp = GameMetadataProvider::from_vfs(&vfs_clone)?;
+        let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
+        let bytes =
+            rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
+        Ok::<_, rootcause::Report>(bytes)
+    }));
+    match game_params_result {
+        Ok(Ok(bytes)) => {
+            std::fs::write(output_dir.join("game_params.rkyv"), &bytes)
+                .attach_with(|| "Failed to write game_params.rkyv")?;
+        }
+        Ok(Err(e)) => {
+            eprintln!("WARN: GameParams conversion failed for build {build}: {e:?}");
+        }
+        Err(_) => {
+            eprintln!("WARN: GameParams conversion panicked for build {build} (incompatible format)");
+        }
+    }
 
     // Copy all language translations (stored directly)
     dump_all_translations(game_dir, build, &output_dir)?;
@@ -303,7 +320,13 @@ fn extract_vfs_dir_cas(
         }
         let rel = entry.as_str();
         let mut buf = Vec::new();
-        entry.open_file().attach_with(|| format!("Failed to open VFS file: {rel}"))?.read_to_end(&mut buf)?;
+        match entry.open_file() {
+            Ok(mut f) => f.read_to_end(&mut buf)?,
+            Err(e) => {
+                tracing::warn!("Failed to open VFS file {rel}: {e}");
+                continue;
+            }
+        };
         store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
         if let Some(pb) = progress {
             pb.inc(1);
@@ -319,9 +342,21 @@ fn extract_vfs_file_cas(
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
 ) -> Result<(), Report> {
-    let file = vfs.join(vfs_path).attach_with(|| format!("VFS path not found: {vfs_path}"))?;
+    let file = match vfs.join(vfs_path) {
+        Ok(f) => f,
+        Err(_) => {
+            tracing::warn!("VFS path not found (skipping): {vfs_path}");
+            return Ok(());
+        }
+    };
     let mut buf = Vec::new();
-    file.open_file().attach_with(|| format!("Failed to open VFS file: {vfs_path}"))?.read_to_end(&mut buf)?;
+    match file.open_file() {
+        Ok(mut f) => f.read_to_end(&mut buf)?,
+        Err(_) => {
+            tracing::warn!("Could not open VFS file (skipping): {vfs_path}");
+            return Ok(());
+        }
+    };
     store_and_link(&buf, vfs_path, vfs_dir, cas_root, file_hashes)?;
     Ok(())
 }
@@ -358,7 +393,13 @@ fn extract_map_files_cas(
             }
             let rel = file_path.as_str();
             let mut buf = Vec::new();
-            file_path.open_file().attach_with(|| format!("Failed to open VFS file: {rel}"))?.read_to_end(&mut buf)?;
+            match file_path.open_file() {
+                Ok(mut f) => f.read_to_end(&mut buf)?,
+                Err(e) => {
+                    tracing::warn!("Failed to open VFS file {rel}: {e}");
+                    continue;
+                }
+            };
             store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
             if let Some(pb) = progress {
                 pb.inc(1);

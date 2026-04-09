@@ -72,6 +72,10 @@ enum Commands {
         /// Output directory (a subdirectory named <version>_<build> will be created)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Overwrite existing dump for this build
+        #[arg(long)]
+        force: bool,
     },
 
     /// Remove a previously dumped build, cleaning up deduplicated storage
@@ -235,7 +239,7 @@ fn main() -> Result<(), Report> {
             }
         }
 
-        Commands::DumpRendererData { latest, build, version, output } => {
+        Commands::DumpRendererData { latest, build, version, output, force } => {
             let target = if latest {
                 let builds = reg.available_builds();
                 *builds.last().ok_or_else(|| rootcause::report!("No builds available"))?
@@ -258,6 +262,31 @@ fn main() -> Result<(), Report> {
             } else {
                 detect::detect_version_at_path(&game_dir, target).unwrap_or_else(|_| "unknown".to_string())
             };
+
+            if force {
+                // Remove stale builds.toml entry for this build
+                let builds_path = output.join("builds.toml");
+                let mut index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+                if index.find_by_build(target).is_some() {
+                    // Find and remove the old directory
+                    if let Some(old_entry) = index.find_by_build(target).cloned() {
+                        let old_dir = output.join(&old_entry.dir);
+                        if old_dir.exists() {
+                            println!("Removing old dump at {}...", old_dir.display());
+                            std::fs::remove_dir_all(&old_dir)?;
+                        }
+                    }
+                    index.remove_build(target);
+                    index.save(&builds_path)?;
+                }
+
+                // Also remove the new version dir if it exists
+                let existing_dir = dump::dump_dir(&output, &version_str, target);
+                if existing_dir.exists() {
+                    println!("Removing existing dump at {}...", existing_dir.display());
+                    std::fs::remove_dir_all(&existing_dir)?;
+                }
+            }
 
             println!("Building VFS from game directory...");
             let pb = dump::create_progress_bar(&game_dir);

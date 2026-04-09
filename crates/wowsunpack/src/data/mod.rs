@@ -59,18 +59,39 @@ impl Version {
     ///
     /// The file contains a node like `<curVersion_15_1_0_11965230></curVersion_15_1_0_11965230>`
     /// whose tag name encodes the version as `curVersion_{major}_{minor}_{patch}_{build}`.
+    ///
+    /// Older versions use different formats:
+    /// - `curVersion_release_{major}_{minor}_{patch}_{build}` (~v11-v12)
+    /// - `curVersion_Release_{major}_{minor}_{patch}_{subpatch}_{build}` (v0.x era)
     pub fn from_account_def(xml: &str) -> Option<Version> {
         let doc = roxmltree::Document::parse(xml).ok()?;
         for node in doc.descendants() {
             if let Some(rest) = node.tag_name().name().strip_prefix("curVersion_") {
-                let parts: Vec<&str> = rest.splitn(4, '_').collect();
-                if parts.len() == 4 {
-                    return Some(Version {
-                        major: parts[0].parse().ok()?,
-                        minor: parts[1].parse().ok()?,
-                        patch: parts[2].parse().ok()?,
-                        build: parts[3].parse().ok()?,
-                    });
+                // Strip optional "Release_" or "release_" prefix (used in older versions)
+                let rest = rest.strip_prefix("Release_")
+                    .or_else(|| rest.strip_prefix("release_"))
+                    .unwrap_or(rest);
+                let parts: Vec<&str> = rest.split('_').collect();
+                match parts.len() {
+                    // Modern: major_minor_patch_build
+                    4 => {
+                        return Some(Version {
+                            major: parts[0].parse().ok()?,
+                            minor: parts[1].parse().ok()?,
+                            patch: parts[2].parse().ok()?,
+                            build: parts[3].parse().ok()?,
+                        });
+                    }
+                    // Legacy: major_minor_patch_subpatch_build (subpatch folded into patch)
+                    5 => {
+                        return Some(Version {
+                            major: parts[0].parse().ok()?,
+                            minor: parts[1].parse().ok()?,
+                            patch: parts[2].parse().ok()?,
+                            build: parts[4].parse().ok()?,
+                        });
+                    }
+                    _ => {}
                 }
             }
         }
@@ -161,6 +182,26 @@ mod test {
         assert_eq!(v.minor, 1);
         assert_eq!(v.patch, 0);
         assert_eq!(v.build, 11965230);
+    }
+
+    #[test]
+    fn from_account_def_with_release_prefix() {
+        let xml = r#"<root><Properties><curVersion_release_11_4_0_5624555></curVersion_release_11_4_0_5624555></Properties></root>"#;
+        let v = Version::from_account_def(xml).unwrap();
+        assert_eq!(v.major, 11);
+        assert_eq!(v.minor, 4);
+        assert_eq!(v.patch, 0);
+        assert_eq!(v.build, 5624555);
+    }
+
+    #[test]
+    fn from_account_def_legacy_5part_version() {
+        let xml = r#"<root><Properties><curVersion_Release_0_6_13_0_296659></curVersion_Release_0_6_13_0_296659></Properties></root>"#;
+        let v = Version::from_account_def(xml).unwrap();
+        assert_eq!(v.major, 0);
+        assert_eq!(v.minor, 6);
+        assert_eq!(v.patch, 13);
+        assert_eq!(v.build, 296659);
     }
 
     #[test]

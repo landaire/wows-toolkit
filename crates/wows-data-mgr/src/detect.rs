@@ -14,15 +14,15 @@ pub fn detect_version_for_build(data_dir: &Path, build: u32) -> Result<String, R
 
 /// Detect the game version for a specific build at an arbitrary path.
 /// The path should be a valid WoWs game root (containing `bin/<build>/idx/` and `res_packages/`).
+///
+/// Only builds the VFS and reads Account.def — does NOT parse entity specs,
+/// which makes this work on old game versions with incompatible entity formats.
 pub fn detect_version_at_path(game_dir: &Path, build: u32) -> Result<String, Report> {
-    let version = Version { major: 0, minor: 0, patch: 0, build };
-
-    let resources = game_data::load_game_resources(game_dir, &version)
-        .attach_with(|| format!("Failed to load game resources for build {build} at {}", game_dir.display()))?;
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build)
+        .attach_with(|| format!("Failed to build VFS for build {build} at {}", game_dir.display()))?;
 
     let account_def_path = "scripts/entity_defs/Account.def";
-    let file = resources
-        .vfs
+    let file = vfs
         .join(account_def_path)
         .and_then(|p| p.open_file())
         .map_err(|e| rootcause::report!("Failed to open {account_def_path} in VFS for build {build}: {e}"))?;

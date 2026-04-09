@@ -112,22 +112,39 @@ pub fn translations_path(game_dir: &Path, build: u32) -> PathBuf {
 pub fn build_game_vfs(game_dir: &Path) -> Result<VfsPath, Report> {
     let builds = list_available_builds(game_dir).attach_with(|| format!("game_dir: {}", game_dir.display()))?;
     let latest_build =
-        builds.last().ok_or_else(|| rootcause::report!("No builds found in {}/bin", game_dir.display()))?;
+        *builds.last().ok_or_else(|| rootcause::report!("No builds found in {}/bin", game_dir.display()))?;
+    build_game_vfs_for_build(game_dir, latest_build)
+}
 
-    let idx_dir = game_dir.join("bin").join(latest_build.to_string()).join("idx");
+/// Build a VFS from a specific build number's idx files.
+pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, Report> {
+    let idx_dir = game_dir.join("bin").join(build.to_string()).join("idx");
     if !idx_dir.exists() {
         bail!("idx directory not found: {}", idx_dir.display());
     }
 
     let mut idx_files = Vec::new();
+    let mut idx_errors = Vec::new();
     for entry in read_dir(&idx_dir).context_with(|| format!("Failed to read idx dir: {}", idx_dir.display()))? {
         let entry = entry?;
         if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             let path = entry.path();
             let data = std::fs::read(&path).attach_with(|| format!("path: {}", path.display()))?;
-            let parsed = idx::parse(&data).attach_with(|| format!("path: {}", path.display()))?;
-            idx_files.push(parsed);
+            match idx::parse(&data) {
+                Ok(parsed) => idx_files.push(parsed),
+                Err(e) => {
+                    let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    // Log the first 16 bytes as hex for debugging unknown formats
+                    let header_hex: String = data.iter().take(16).map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+                    eprintln!("WARN: Failed to parse idx file {filename}: {e} (header: {header_hex})");
+                    idx_errors.push((filename, e));
+                }
+            }
         }
+    }
+    if idx_files.is_empty() && !idx_errors.is_empty() {
+        let names: Vec<_> = idx_errors.iter().map(|(n, e)| format!("{n}: {e}")).collect();
+        bail!("All idx files failed to parse for build {build}:\n  {}", names.join("\n  "));
     }
 
     let pkgs_dir = game_dir.join("res_packages");
@@ -138,6 +155,46 @@ pub fn build_game_vfs(game_dir: &Path) -> Result<VfsPath, Report> {
     let pkg_source = MmapPkgSource::new(&pkgs_dir);
     let idx_vfs = IdxVfs::new(pkg_source, &idx_files);
     let pkg_vfs = VfsPath::new(idx_vfs);
+
+    // Report VFS stats for debugging empty dumps
+    if let Ok(root) = pkg_vfs.read_dir() {
+        let count = root.count();
+        if count == 0 && !idx_files.is_empty() {
+            eprintln!("WARN: VFS is empty despite {} idx files parsing successfully for build {build}", idx_files.len());
+            // List available pkg files on disk
+            let mut on_disk = Vec::new();
+            if let Ok(entries) = read_dir(&pkgs_dir) {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name.ends_with(".pkg") {
+                            on_disk.push(name.to_string());
+                        }
+                    }
+                }
+            }
+            on_disk.sort();
+            eprintln!("  pkg files on disk ({}):", on_disk.len());
+            for pkg in &on_disk {
+                eprintln!("    {pkg}");
+            }
+            for (i, idx) in idx_files.iter().enumerate() {
+                let fname = idx_errors.iter().find(|(_, _)| false).map(|(n, _)| n.as_str()).unwrap_or("?");
+                eprintln!("  idx[{i}]: {} resources, {} file_infos, {} volumes",
+                    idx.resources.len(), idx.file_infos.len(), idx.volumes.len());
+                for vol in &idx.volumes {
+                    let exists = on_disk.iter().any(|p| p == &vol.filename);
+                    eprintln!("    volume {}: {} (exists: {})", vol.volume_id, vol.filename, exists);
+                }
+            }
+        }
+    }
+    if !idx_errors.is_empty() {
+        eprintln!("WARN: {}/{} idx files failed to parse for build {build}:",
+            idx_errors.len(), idx_errors.len() + idx_files.len());
+        for (name, e) in &idx_errors {
+            eprintln!("  {name}: {e}");
+        }
+    }
 
     // Overlay assets.bin on top of the package VFS.
     let mut assets_bin_data = Vec::new();

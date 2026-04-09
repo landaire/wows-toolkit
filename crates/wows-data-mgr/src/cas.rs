@@ -51,7 +51,8 @@ pub fn store(cas_root: &Path, data: &[u8]) -> Result<String, rootcause::Report> 
 
 /// Create a symlink from `link_path` pointing to the CAS object.
 ///
-/// Uses `symlink_file` on Windows (requires Developer Mode) and `symlink` on Unix.
+/// Uses a relative symlink so that the archive is relocatable and works
+/// when created from WSL but consumed on Windows (or vice versa).
 /// Returns an error if the symlink cannot be created.
 pub fn link_file(cas_root: &Path, hash: &str, link_path: &Path) -> Result<(), rootcause::Report> {
     let target = cas_path(cas_root, hash);
@@ -60,9 +61,41 @@ pub fn link_file(cas_root: &Path, hash: &str, link_path: &Path) -> Result<(), ro
             .attach_with(|| format!("Failed to create parent directory {}", parent.display()))?;
     }
 
-    try_symlink(&target, link_path)
-        .attach_with(|| format!("Failed to create symlink {} -> {}", link_path.display(), target.display()))?;
+    // Compute a relative path from the link's parent directory to the CAS object.
+    // Both paths share the same archive root, so we walk up from the link and back
+    // down to the target.
+    let link_parent = link_path.parent().unwrap_or(Path::new("."));
+    let rel_target = relative_path(link_parent, &target);
+
+    try_symlink(&rel_target, link_path)
+        .attach_with(|| format!("Failed to create symlink {} -> {}", link_path.display(), rel_target.display()))?;
     Ok(())
+}
+
+/// Compute a relative path from `from_dir` to `to_path`.
+fn relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
+    // Canonicalize-lite: just use the paths as-is since they share a common root.
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_path.components().collect();
+
+    // Find the common prefix length
+    let common = from_components
+        .iter()
+        .zip(to_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Walk up from `from_dir` for each remaining component
+    let ups = from_components.len() - common;
+    let mut rel = PathBuf::new();
+    for _ in 0..ups {
+        rel.push("..");
+    }
+    // Walk down to `to_path`
+    for comp in &to_components[common..] {
+        rel.push(comp);
+    }
+    rel
 }
 
 /// Try to create a symlink. Returns Ok on success, Err on failure.
