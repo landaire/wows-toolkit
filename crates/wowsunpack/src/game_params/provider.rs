@@ -24,7 +24,8 @@ impl ValueDictExt for Value {
         match self {
             Value::Dict(d) => Some(d.clone()),
             Value::Object(o) => {
-                let dict_obj = o.as_any().downcast_ref::<DictObject>()?;
+                let inner = o.inner();
+                let dict_obj = inner.as_any().downcast_ref::<DictObject>()?;
                 Some(Shared::new(dict_obj.state().clone()))
             }
             _ => None,
@@ -374,9 +375,24 @@ fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewP
         .cost_elite_xp(game_param_to_type!(personality, "costELXP", usize))
         .cost_gold(game_param_to_type!(personality, "costGold", usize))
         .cost_xp(game_param_to_type!(personality, "costXP", usize))
-        .has_custom_background(game_param_to_type!(personality, "hasCustomBackground", bool))
-        .has_overlay(game_param_to_type!(personality, "hasOverlay", bool))
-        .has_rank(game_param_to_type!(personality, "hasRank", bool))
+        .has_custom_background(
+            personality
+                .get(&HashableValue::String("hasCustomBackground".to_string().into()))
+                .and_then(|v| v.bool_ref().copied())
+                .unwrap_or(false),
+        )
+        .has_overlay(
+            personality
+                .get(&HashableValue::String("hasOverlay".to_string().into()))
+                .and_then(|v| v.bool_ref().copied())
+                .unwrap_or(false),
+        )
+        .has_rank(
+            personality
+                .get(&HashableValue::String("hasRank".to_string().into()))
+                .and_then(|v| v.bool_ref().copied())
+                .unwrap_or(false),
+        )
         .has_sample_voiceover(
             personality
                 .get(&HashableValue::String("hasSampleVO".to_string().into()))

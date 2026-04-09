@@ -6200,9 +6200,9 @@ dependencies = [
 
 [[package]]
 name = "pickled"
-version = "2.0.0-alpha5"
+version = "2.0.0-alpha6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77f4adb0ff123445f4cf44319f5f97cc6660e4ec0212c42177eae4bb6e542e40"
+checksum = "6f616c580f595a0988d9f6bae1b382707a78dbcd5a1ca082de4d5abbd4ca07e7"
 dependencies = [
  "byteorder",
  "iter-read",
@@ -10754,7 +10754,7 @@ dependencies = [
 
 [[package]]
 name = "wows_toolkit"
-version = "0.1.67"
+version = "0.1.68"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -10906,7 +10906,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-egui"
-version = "0.1.67"
+version = "0.1.68"
 dependencies = [
  "egui",
  "egui-phosphor",
@@ -10919,7 +10919,7 @@ dependencies = [
 
 [[package]]
 name = "wt-collab-protocol"
-version = "0.1.67"
+version = "0.1.68"
 dependencies = [
  "data-encoding",
  "egui",
@@ -10940,7 +10940,7 @@ dependencies = [
 
 [[package]]
 name = "wt-web"
-version = "0.1.67"
+version = "0.1.68"
 dependencies = [
  "eframe",
  "egui",

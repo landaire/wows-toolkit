@@ -1099,7 +1099,8 @@ fn value_to_dict(value: pickled::Value) -> Option<std::collections::BTreeMap<pic
     match value {
         pickled::Value::Dict(d) => Some(d.into_raw_or_cloned()),
         pickled::Value::Object(o) => {
-            let dict_obj = o.as_any().downcast_ref::<pickled::object::DictObject>()?;
+            let inner = o.inner();
+            let dict_obj = inner.as_any().downcast_ref::<pickled::object::DictObject>()?;
             Some(dict_obj.state().clone())
         }
         _ => None,

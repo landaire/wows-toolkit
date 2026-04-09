@@ -70,7 +70,7 @@ pub fn pickle_to_cbor(pickled: pickled::Value) -> serde_cbor::Value {
 
             serde_cbor::Value::Map(map)
         }
-        pickled::Value::Object(ref o) => pickle_to_cbor(o.__reduce__().state_or_none()),
+        pickled::Value::Object(ref o) => pickle_to_cbor(o.inner().__reduce__().state_or_none()),
     }
 }
 

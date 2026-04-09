@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.67"
+version = "0.1.68"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -49,7 +49,7 @@ gettext = "0.4"
 image = { version = "0.25", default-features = false }
 image_dds = { version = "0.7", default-features = false }
 itertools = "0.14"
-pickled = { version = "2.0.0-alpha5" }
+pickled = { version = "2.0.0-alpha6" }
 iroh = { version = "0.97", default-features = false }
 rkyv = "0.8.15"
 rootcause = "0.12"
