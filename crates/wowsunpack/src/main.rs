@@ -603,7 +603,7 @@ fn run() -> Result<(), Report> {
                             let file_name = path.rsplit('/').next().unwrap_or(path);
                             out_dir.join(file_name)
                         } else {
-                            out_dir.join(path.replace('/', std::path::MAIN_SEPARATOR_STR))
+                            out_dir.join(path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR))
                         };
 
                         if let Some(parent) = out_path.parent() {
@@ -638,7 +638,7 @@ fn run() -> Result<(), Report> {
                                 child_path.as_str()
                             };
 
-                            let out_path = out_dir.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+                            let out_path = out_dir.join(relative.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR));
                             if let Some(parent) = out_path.parent() {
                                 fs::create_dir_all(parent)?;
                             }
