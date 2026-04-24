@@ -202,6 +202,8 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
                 is_draw: game.is_draw,
                 is_div: game.is_div,
                 achievements: serde_json::to_string(&game.achievements).unwrap_or_else(|_| "[]".to_string()),
+                team_members: serde_json::to_string(&game.team_members).unwrap_or_else(|_| "[]".to_string()),
+                player_name: game.player_name.clone(),
             })
             .collect()
     };
@@ -212,8 +214,9 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
     for row in &rows {
         sqlx::query(
             "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group, \
-             damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements, \
+             team_members, player_name) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         )
         .bind(&row.sort_key)
         .bind(&row.ship_name)
@@ -231,6 +234,8 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
         .bind(row.is_draw)
         .bind(row.is_div)
         .bind(&row.achievements)
+        .bind(&row.team_members)
+        .bind(&row.player_name)
         .execute(&mut *tx)
         .await?;
     }

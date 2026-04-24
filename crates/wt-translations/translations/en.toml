@@ -412,6 +412,7 @@ score_excess = "Score limit exceeded"
 
 [ui.stats]
 overview = "Overview"
+team_title = "Div Performance"
 limit = "Limit"
 division = "Div:"
 div_all = "All"
@@ -440,6 +441,11 @@ ships = "Ships"
 all_ships = "All"
 no_ships = "None"
 copy_as_image = "Copy as Image"
+
+[ui.stats.team]
+no_team_data = "No div data yet. Division member stats are captured from replays going forward."
+players = "Players:"
+self_label = "You"
 
 [ui.stats.table]
 min = "Min"

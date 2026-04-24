@@ -194,6 +194,7 @@ pub type SharedPersistedState = Arc<TrackedPersistedState>;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatsSubTab {
     Overview,
+    Team,
     Charts(u64),
 }
 
@@ -316,14 +317,38 @@ pub struct SessionStatsChartConfig {
     pub reset_plot: bool,
 }
 
-/// Default stats dock: Overview on the left, Charts(0) on the right, 50/50 split.
+/// Transient configuration for the Div Performance chart.
+/// Not persisted — resets to defaults when the app restarts.
+#[derive(Clone)]
+pub struct TeamChartConfig {
+    pub selected_stat: ChartableStat,
+    pub rolling_average: bool,
+    /// Players explicitly deselected by the user. Empty = all players shown.
+    pub deselected_players: std::collections::BTreeSet<String>,
+    pub show_labels: bool,
+    pub reset_plot: bool,
+}
+
+impl Default for TeamChartConfig {
+    fn default() -> Self {
+        Self {
+            selected_stat: ChartableStat::Damage,
+            rolling_average: false,
+            deselected_players: Default::default(),
+            show_labels: false,
+            reset_plot: false,
+        }
+    }
+}
+
+/// Default stats dock: Overview alone on the left, Div Performance + Charts(0) on the right, 50/50 split.
 pub(crate) fn default_stats_dock_state() -> egui_dock::DockState<StatsSubTab> {
     let mut dock = egui_dock::DockState::new(vec![StatsSubTab::Overview]);
     dock.split(
         egui_dock::NodePath::MAIN_ROOT,
         egui_dock::Split::Right,
         0.5,
-        egui_dock::Node::leaf(StatsSubTab::Charts(0)),
+        egui_dock::Node::leaf_with(vec![StatsSubTab::Team, StatsSubTab::Charts(0)]),
     );
     dock
 }
@@ -456,6 +481,8 @@ pub struct TabState {
     pub show_replay_controls: bool,
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
     pub replay_controls_cache: Option<Vec<crate::util::controls::CommandGroup>>,
+    /// Transient config for the Div Performance chart tab (not persisted).
+    pub team_chart_config: TeamChartConfig,
 
     // ─── Collaborative session ─────────────────────────────────────────────
     /// Session token text input for joining.
@@ -551,6 +578,7 @@ impl Default for TabState {
             armor_viewer: Default::default(),
             show_replay_controls: false,
             replay_controls_cache: None,
+            team_chart_config: Default::default(),
             tokio_runtime: None,
             join_session_token: String::new(),
             show_ip_warning: false,

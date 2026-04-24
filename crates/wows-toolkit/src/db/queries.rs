@@ -68,6 +68,8 @@ pub struct SessionStatRow {
     pub is_draw: bool,
     pub is_div: bool,
     pub achievements: String,
+    pub team_members: String,
+    pub player_name: String,
 }
 
 /// Load all session stats ordered by sort_key.

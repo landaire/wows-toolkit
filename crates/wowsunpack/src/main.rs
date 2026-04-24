@@ -638,7 +638,8 @@ fn run() -> Result<(), Report> {
                                 child_path.as_str()
                             };
 
-                            let out_path = out_dir.join(relative.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR));
+                            let out_path = out_dir
+                                .join(relative.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR));
                             if let Some(parent) = out_path.parent() {
                                 fs::create_dir_all(parent)?;
                             }
