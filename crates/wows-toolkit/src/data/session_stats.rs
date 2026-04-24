@@ -89,6 +89,19 @@ fn sortable_game_time(game_time: &str) -> String {
     game_time.to_string()
 }
 
+/// Stats for a single allied (non-bot) player in one game.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TeamMemberGameStat {
+    pub username: String,
+    pub ship_name: String,
+    pub ship_id: GameParamId,
+    pub damage: Option<u64>,
+    pub spotting_damage: Option<u64>,
+    pub frags: Option<i64>,
+    pub raw_xp: Option<i64>,
+    pub base_xp: Option<i64>,
+}
+
 /// Per-game statistics extracted from a single replay
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PerGameStat {
@@ -113,6 +126,12 @@ pub struct PerGameStat {
     pub match_group: String,
     #[serde(default)]
     pub achievements: Vec<SerializableAchievement>,
+    /// Stats for all non-bot allied players in this game.
+    #[serde(default)]
+    pub team_members: Vec<TeamMemberGameStat>,
+    /// Username of the local player (empty on data loaded before this field was added).
+    #[serde(default)]
+    pub player_name: String,
 }
 
 impl PerGameStat {
@@ -145,6 +164,23 @@ impl PerGameStat {
             })
             .collect();
 
+        let player_name = self_report.player().initial_state().username().to_string();
+        let team_members: Vec<TeamMemberGameStat> = ui_report
+            .player_reports()
+            .iter()
+            .filter(|r| r.relation().is_ally() && !r.player().is_bot())
+            .map(|r| TeamMemberGameStat {
+                username: r.player().initial_state().username().to_string(),
+                ship_name: r.ship_name().to_string(),
+                ship_id: r.player().vehicle().id(),
+                damage: r.actual_damage(),
+                spotting_damage: r.spotting_damage(),
+                frags: r.kills(),
+                raw_xp: r.raw_xp(),
+                base_xp: r.base_xp(),
+            })
+            .collect();
+
         Some(PerGameStat {
             ship_name,
             ship_id,
@@ -162,6 +198,8 @@ impl PerGameStat {
             is_div,
             match_group,
             achievements,
+            team_members,
+            player_name,
         })
     }
 
@@ -741,6 +779,8 @@ mod tests {
             is_div,
             match_group: match_group.to_string(),
             achievements: Vec::new(),
+            team_members: Vec::new(),
+            player_name: String::new(),
         }
     }
 
@@ -1135,6 +1175,8 @@ mod tests {
             is_div: false,
             match_group: "pvp".to_string(),
             achievements: Vec::new(),
+            team_members: Vec::new(),
+            player_name: String::new(),
         });
         ss.sort_games();
         assert_eq!(ss.games[0].sort_key, "2026-02-13 14:00:00");

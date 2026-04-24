@@ -14,6 +14,7 @@ use tracing::warn;
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SerializableAchievement;
 use crate::data::session_stats::SessionStats;
+use crate::data::session_stats::TeamMemberGameStat;
 use crate::tab_state::TabState;
 use crate::tab_state::WindowKind;
 use crate::tab_state::WindowSettings;
@@ -162,6 +163,7 @@ async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), 
 
     for row in rows {
         let achievements: Vec<SerializableAchievement> = serde_json::from_str(&row.achievements).unwrap_or_default();
+        let team_members: Vec<TeamMemberGameStat> = serde_json::from_str(&row.team_members).unwrap_or_default();
 
         games.push(PerGameStat {
             ship_name: row.ship_name,
@@ -180,6 +182,8 @@ async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), 
             is_div: row.is_div,
             match_group: row.match_group,
             achievements,
+            team_members,
+            player_name: row.player_name,
         });
     }
 
