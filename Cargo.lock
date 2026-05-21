@@ -10793,6 +10793,7 @@ dependencies = [
  "variantly",
  "vfs",
  "winnow 1.0.1",
+ "wows-data-mgr",
 ]
 
 [[package]]
