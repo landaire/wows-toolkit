@@ -14,7 +14,9 @@ flate2 = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true }
-rust-crypto = { version = "0.2.36", optional = true }
+blowfish = { version = "0.9", optional = true }
+cipher = { version = "0.4", optional = true }
+byteorder = { version = "1", optional = true }
 roxmltree = { workspace = true, optional = true }
 pickled = { workspace = true, optional = true }
 kinded = "0.5"
@@ -35,9 +37,13 @@ wows-data-mgr = { workspace = true }
 
 [features]
 default = ["arc", "parsing"]
+# Sans-io parsing: decrypt, decompress, and walk packets entirely in memory.
+# Compiles for wasm32. Does not pull in the filesystem-backed VFS.
 parsing = [
     "dep:winnow",
-    "dep:rust-crypto",
+    "dep:blowfish",
+    "dep:cipher",
+    "dep:byteorder",
     "dep:pickled",
     "dep:modular-bitfield",
     "dep:bon",
@@ -45,7 +51,9 @@ parsing = [
     "dep:serde_json",
     "dep:rootcause",
     "wowsunpack/json",
-    "wowsunpack/vfs",
     "wowsunpack/parsing",
 ]
+# Adds the filesystem-backed VFS loaders (GameConstants::from_vfs etc.).
+# Not wasm-compatible (pulls in memmap2).
+vfs = ["parsing", "wowsunpack/vfs"]
 arc = ["wowsunpack/arc"]

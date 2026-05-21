@@ -35,8 +35,9 @@ rendering = [
     "dep:tiny-skia",
     "dep:rootcause",
     "wows_replays/parsing",
+    "wows_replays/vfs",
     "wowsunpack/json",
-    "wowsunpack/vfs",
+    "wowsunpack/vfs-mmap",
     "wowsunpack/parsing",
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]

@@ -31,7 +31,7 @@ egui-notify = "0.22.0"
 wgpu = { workspace = true }
 
 tracing = { workspace = true }
-wows_replays = { workspace = true, features = ["arc", "parsing"] }
+wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 serde = { workspace = true }
 wowsunpack = { workspace = true, features = [
     "arc",
@@ -39,7 +39,7 @@ wowsunpack = { workspace = true, features = [
     "json",
     "models",
     "rkyv",
-    "vfs",
+    "vfs-mmap",
 ] }
 bytemuck = { workspace = true }
 wows_minimap_renderer = { workspace = true, features = ["vulkan", "videotoolbox", "cpu", "arc", "rkyv"] }

@@ -4,6 +4,7 @@ use thiserror::Error;
 pub enum GameDataError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[cfg(feature = "vfs")]
     #[error(transparent)]
     Vfs(#[from] vfs::VfsError),
     #[error("Unexpected GameParams data type")]

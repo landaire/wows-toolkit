@@ -16,7 +16,7 @@ pub mod export;
 #[cfg(feature = "parsing")]
 pub mod game_constants;
 /// Utilities for loading game resources from a WoWS installation directory.
-#[cfg(feature = "parsing")]
+#[cfg(feature = "vfs-mmap")]
 pub mod game_data;
 /// Utilities for interacting with the `content/GameParams.data` file
 #[cfg(feature = "parsing")]

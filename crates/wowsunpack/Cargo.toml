@@ -64,18 +64,17 @@ toml = { workspace = true }
 insta = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-#wows-data-mgr = { workspace = true }
+wows-data-mgr = { workspace = true }
 
 [features]
 arc = []
 serde = ["dep:serde"]
 rkyv = ["dep:rkyv"]
 json = ["dep:serde_json", "serde"]
-# Core parsing/processing: gates heavy deps (memmap2, pickled, winnow, etc.) and
-# modules that use them (data, game_data, game_params, models, rpc, export, game_constants).
+# Core parsing/processing: sans-io. Gates pickled, winnow, roxmltree, etc. and
+# the modules that use them. Compiles for wasm32 (no memmap2, no filesystem VFS).
 # Without this feature, only lightweight type modules are available (game_types, recognized, error).
 parsing = [
-    "dep:memmap2",
     "dep:pickled",
     "dep:winnow",
     "dep:variantly",
@@ -85,7 +84,11 @@ parsing = [
     "dep:convert_case",
     "dep:itertools",
 ]
+# VFS abstraction over IDX/PKG archives. Pure Rust, wasm-compatible. Bring your
+# own `Prime` source: BytesPkgSource (in-memory) always, MmapPkgSource via vfs-mmap.
 vfs = ["arc", "dep:vfs", "dep:oval", "parsing"]
+# Memory-mapped PKG file source (MmapPkgSource, pkg.rs). Native only; uses memmap2.
+vfs-mmap = ["vfs", "dep:memmap2"]
 async_vfs = ["vfs/async-vfs", "arc", "vfs", "dep:futures", "dep:async-std", "dep:async-trait"]
 models = [
     "dep:gltf-json",
@@ -108,7 +111,7 @@ bin = [
     "models",
     "arc",
     "json",
-    "vfs",
+    "vfs-mmap",
 ]
 default = ["bin"]
 cbor = ["dep:serde_cbor", "serde"]

@@ -5,6 +5,9 @@
 //! chain: replay parsing → packet decoding → state accumulation → battle report.
 //!
 //! Tests are ignored when the required game data build is not available.
+//!
+//! Requires the `vfs` feature (loads game data from a WoWS install).
+#![cfg(feature = "vfs")]
 
 use std::path::PathBuf;
 

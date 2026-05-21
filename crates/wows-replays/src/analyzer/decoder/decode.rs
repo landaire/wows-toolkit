@@ -1322,7 +1322,7 @@ where
         version: &Version,
         audit: bool,
         payload: &'rawpacket crate::packet2::PacketType<'replay, 'argtype>,
-        _packet_type: u32,
+        _packet_type: crate::packet2::PacketTypeId,
         battle_constants: &wowsunpack::game_constants::BattleConstants,
         common_constants: &wowsunpack::game_constants::CommonConstants,
         ships_constants: &wowsunpack::game_constants::ShipsConstants,
@@ -2410,7 +2410,7 @@ where
 
 #[derive(Debug, Serialize)]
 pub struct DecodedPacket<'replay, 'argtype, 'rawpacket> {
-    pub packet_type: u32,
+    pub packet_type: crate::packet2::PacketTypeId,
     pub clock: crate::types::GameClock,
     pub payload: DecodedPacketPayload<'replay, 'argtype, 'rawpacket>,
     /// Bytes remaining after parsing. Non-empty means the parser didn't consume

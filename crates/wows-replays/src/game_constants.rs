@@ -7,6 +7,7 @@ pub use wowsunpack::game_constants::ChannelConstants;
 pub use wowsunpack::game_constants::CommonConstants;
 pub use wowsunpack::game_constants::ShipsConstants;
 pub use wowsunpack::game_constants::WeaponsConstants;
+#[cfg(feature = "vfs")]
 use wowsunpack::vfs::VfsPath;
 
 pub static DEFAULT_GAME_CONSTANTS: LazyLock<GameConstants> = LazyLock::new(GameConstants::defaults);
@@ -23,6 +24,7 @@ pub struct GameConstants {
 
 impl GameConstants {
     /// Load all constants from game files via VFS.
+    #[cfg(feature = "vfs")]
     pub fn from_vfs(vfs: &VfsPath) -> Self {
         Self {
             battle: BattleConstants::load(vfs),

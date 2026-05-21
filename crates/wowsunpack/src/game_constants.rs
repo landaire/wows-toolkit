@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+#[cfg(feature = "vfs")]
 use std::io::Read;
 use std::sync::LazyLock;
 
@@ -16,6 +17,7 @@ use crate::game_types::InteractiveZoneType;
 use crate::game_types::ShellHitType;
 use crate::game_types::WeaponType;
 
+#[cfg(feature = "vfs")]
 fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Result<Vec<u8>, vfs::VfsError> {
     let mut buf = Vec::new();
     vfs.join(path)?.open_file()?.read_to_end(&mut buf).map_err(vfs::VfsError::from)?;
@@ -59,6 +61,7 @@ pub struct BattleConstants {
 
 impl BattleConstants {
     /// Load from game files, falling back to defaults if the file can't be read.
+    #[cfg(feature = "vfs")]
     pub fn load(vfs: &vfs::VfsPath) -> Self {
         if let Ok(buf) = read_vfs_file(vfs, BATTLE_CONSTANTS_PATH) { Self::from_xml(&buf) } else { Self::defaults() }
     }
@@ -777,6 +780,7 @@ pub struct ShipsConstants {
 
 impl ShipsConstants {
     /// Load from game files, falling back to defaults if the file can't be read.
+    #[cfg(feature = "vfs")]
     pub fn load(vfs: &vfs::VfsPath) -> Self {
         if let Ok(buf) = read_vfs_file(vfs, SHIPS_CONSTANTS_PATH) { Self::from_xml(&buf) } else { Self::defaults() }
     }
@@ -914,6 +918,7 @@ pub struct WeaponsConstants {
 
 impl WeaponsConstants {
     /// Load from game files, falling back to defaults if the file can't be read.
+    #[cfg(feature = "vfs")]
     pub fn load(vfs: &vfs::VfsPath) -> Self {
         if let Ok(buf) = read_vfs_file(vfs, WEAPONS_CONSTANTS_PATH) { Self::from_xml(&buf) } else { Self::defaults() }
     }
@@ -972,6 +977,7 @@ pub struct CommonConstants {
 
 impl CommonConstants {
     /// Load from game files, falling back to defaults if the file can't be read.
+    #[cfg(feature = "vfs")]
     pub fn load(vfs: &vfs::VfsPath) -> Self {
         if let Ok(buf) = read_vfs_file(vfs, COMMON_CONSTANTS_PATH) { Self::from_xml(&buf) } else { Self::defaults() }
     }
@@ -1142,6 +1148,7 @@ pub struct ChannelConstants {
 
 impl ChannelConstants {
     /// Load from game files, falling back to defaults if the file can't be read.
+    #[cfg(feature = "vfs")]
     pub fn load(vfs: &vfs::VfsPath) -> Self {
         if let Ok(buf) = read_vfs_file(vfs, CHANNEL_CONSTANTS_PATH) { Self::from_xml(&buf) } else { Self::defaults() }
     }

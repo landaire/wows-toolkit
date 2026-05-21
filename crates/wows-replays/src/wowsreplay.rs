@@ -1,7 +1,11 @@
 use crate::error::*;
 use crate::types::AccountId;
 use crate::types::GameParamId;
-use crypto::symmetriccipher::BlockDecryptor;
+use blowfish::Blowfish;
+use byteorder::BE;
+use cipher::BlockDecrypt;
+use cipher::KeyInit;
+use cipher::generic_array::GenericArray;
 use rootcause::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
@@ -111,6 +115,40 @@ impl ReplayFile {
         Ok(ReplayFile { meta: parsed_meta, raw_meta, packet_data })
     }
 
+    /// Parse a replay entirely from an in-memory byte slice (sans-io).
+    ///
+    /// Parses the file header, then Blowfish-CBC decrypts and zlib-decompresses
+    /// the trailing packet stream. Use this in environments without filesystem
+    /// access (wasm, embedded); [`ReplayFile::from_file`] is a thin wrapper.
+    pub fn from_bytes(bytes: &[u8]) -> rootcause::Result<ReplayFile, ParseError> {
+        let mut input = bytes;
+        let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
+        let encrypted = input;
+
+        let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
+        let cipher = <Blowfish<BE>>::new_from_slice(&key).expect("16-byte key is valid for Blowfish");
+
+        // CBC decrypt: each plaintext block is xored with the previous ciphertext
+        // block (the WoWs replay format uses an all-zero IV).
+        let mut decrypted = vec![0u8; encrypted.len()];
+        let mut previous = [0u8; 8];
+        for chunk_idx in 0..(encrypted.len() / 8) {
+            let off = chunk_idx * 8;
+            let mut block = GenericArray::clone_from_slice(&encrypted[off..off + 8]);
+            cipher.decrypt_block(&mut block);
+            for j in 0..8 {
+                decrypted[off + j] = block[j] ^ previous[j];
+            }
+            previous.copy_from_slice(&decrypted[off..off + 8]);
+        }
+
+        let mut deflater = flate2::read::ZlibDecoder::new(decrypted.as_slice());
+        let mut packet_data = vec![];
+        deflater.read_to_end(&mut packet_data).map_err(|e| report!(ParseError::from(e)))?;
+
+        Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
+    }
+
     pub fn from_file(replay: &std::path::Path) -> rootcause::Result<ReplayFile, ParseError> {
         let path_context = || format!("path: {}", replay.display());
 
@@ -122,34 +160,6 @@ impl ReplayFile {
         let mut contents = vec![];
         f.read_to_end(&mut contents).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
 
-        let mut input = &contents[..];
-        let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
-        let remaining = input;
-
-        // Decrypt
-        let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
-        let blowfish = crypto::blowfish::Blowfish::new(&key);
-        assert!(blowfish.block_size() == 8);
-        let encrypted = remaining;
-        let mut decrypted = vec![0; encrypted.len()];
-        let num_blocks = encrypted.len() / blowfish.block_size();
-        let mut previous = [0; 8]; // 8 == block size
-        for i in 0..num_blocks {
-            let offset = i * blowfish.block_size();
-            blowfish.decrypt_block(
-                &encrypted[offset..offset + blowfish.block_size()],
-                &mut decrypted[offset..offset + blowfish.block_size()],
-            );
-            for j in 0..8 {
-                decrypted[offset + j] ^= previous[j];
-            }
-            previous.copy_from_slice(&decrypted[offset..offset + 8]);
-        }
-
-        let mut deflater = flate2::read::ZlibDecoder::new(decrypted.as_slice());
-        let mut contents = vec![];
-        deflater.read_to_end(&mut contents).unwrap();
-
-        Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data: contents })
+        Self::from_bytes(&contents).attach_with(path_context)
     }
 }

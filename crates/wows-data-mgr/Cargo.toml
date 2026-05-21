@@ -8,7 +8,7 @@ repository = "https://github.com/landaire/wows-toolkit"
 description = "Download and manage World of Warships game data for offline replay analysis"
 
 [dependencies]
-wowsunpack = { workspace = true, features = ["vfs", "rkyv"] }
+wowsunpack = { workspace = true, features = ["vfs-mmap", "rkyv"] }
 clap = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }

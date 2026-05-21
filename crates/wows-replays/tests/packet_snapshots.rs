@@ -6,6 +6,9 @@
 //!
 //! Tests are ignored when the required game data build is not available.
 //! When no game data is discovered at all, every test in this file is skipped.
+//!
+//! Requires the `vfs` feature (loads game data from a WoWS install).
+#![cfg(feature = "vfs")]
 
 use serde_json::Value;
 use std::path::PathBuf;

@@ -1,3 +1,4 @@
+#[cfg(feature = "vfs")]
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -12,6 +13,7 @@ use pickled::HashableValue;
 use pickled::Value;
 use pickled::object::DictObject;
 use pickled::value::Shared;
+#[cfg(feature = "vfs")]
 use tracing::debug;
 
 /// Extension trait that provides dict extraction for both `Value::Dict` and `Value::Object`.
@@ -34,12 +36,15 @@ impl ValueDictExt for Value {
 }
 
 use crate::Rc;
+#[cfg(feature = "vfs")]
 use crate::data::DataFileWithCallback;
 use crate::data::ResourceLoader;
 use crate::error::GameDataError;
+#[cfg(feature = "vfs")]
 use crate::game_params::convert::game_params_to_pickle;
 use crate::game_types::GameParamId;
 use crate::rpc::entitydefs::EntitySpec;
+#[cfg(feature = "vfs")]
 use crate::rpc::entitydefs::parse_scripts;
 
 use super::keys;
@@ -990,6 +995,7 @@ impl GameMetadataProvider {
     /// representation.
     ///
     /// See [`GameMetadataProvider::from_params`] if you wish to use caching.
+    #[cfg(feature = "vfs")]
     pub fn from_vfs(vfs: &vfs::VfsPath) -> Result<GameMetadataProvider, GameDataError> {
         debug!("deserializing gameparams");
 
@@ -1317,6 +1323,7 @@ impl GameMetadataProvider {
     }
 
     /// Constructs a GameMetadataProvider from a pre-built list of GameParams and a VFS.
+    #[cfg(feature = "vfs")]
     pub fn from_params_with_vfs(params: Vec<Param>, vfs: &vfs::VfsPath) -> Result<GameMetadataProvider, GameDataError> {
         let param_id_to_translation_id =
             HashMap::from_iter(params.iter().map(|param| (param.id(), format!("IDS_{}", param.index()))));

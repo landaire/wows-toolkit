@@ -240,6 +240,16 @@ pub struct PlayerNetStatsPacket {
     pub is_lagging: bool,
 }
 
+impl PlayerNetStatsPacket {
+    /// Decode a PlayerNetStats (0x1d) payload: a single packed u32. Spec-free,
+    /// so it works on a [`RawPacket`] without a full [`Parser`].
+    pub fn from_payload(payload: &[u8]) -> Option<Self> {
+        let bytes: [u8; 4] = payload.get(..4)?.try_into().ok()?;
+        let stats = RawPlayerNetStats::from_bytes(bytes);
+        Some(Self { fps: stats.fps(), ping: stats.ping(), is_lagging: stats.is_lagging() })
+    }
+}
+
 /// Packet 0x0f: Server timestamp. Single f64 at clock=0.
 #[derive(Debug, Serialize)]
 pub struct ServerTimestampPacket {
@@ -370,7 +380,7 @@ pub enum PacketType<'replay, 'argtype> {
 #[derive(Debug, Serialize)]
 pub struct Packet<'replay, 'argtype> {
     pub packet_size: u32,
-    pub packet_type: u32,
+    pub packet_type: PacketTypeId,
     pub clock: GameClock,
     pub payload: PacketType<'replay, 'argtype>,
     pub raw: &'replay [u8],
@@ -378,6 +388,220 @@ pub struct Packet<'replay, 'argtype> {
     /// Non-empty means the parser didn't consume the full packet.
     #[serde(skip_serializing_if = "<[u8]>::is_empty")]
     pub leftover: &'replay [u8],
+}
+
+/// Packet type identifier from the BigWorld replay protocol.
+///
+/// Fail-open: any unrecognised wire value becomes [`PacketTypeId::Unknown`]
+/// carrying the raw `u32`, so a new game version never breaks the walker. The
+/// `Debug` impl prints the hex wire identifier (e.g. `EntityMethod(0x08)`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PacketTypeId {
+    BasePlayerCreate,
+    BasePlayerCreateStub,
+    CellPlayerCreate,
+    EntityControl,
+    EntityEnter,
+    EntityLeave,
+    EntityCreate,
+    EntityProperty,
+    EntityMethod,
+    Position,
+    ServerTick,
+    ServerTimestamp,
+    InitFlag,
+    InitMarker,
+    Version,
+    GunMarker,
+    PlayerNetStats,
+    OwnShip,
+    BattleResults,
+    NestedPropertyUpdate,
+    Camera,
+    CameraMode,
+    Map,
+    NonVolatilePosition,
+    PlayerOrientation,
+    CameraFreeLook,
+    SetWeaponLock,
+    SubController,
+    CruiseState,
+    ShotTracking,
+    Unknown(u32),
+}
+
+impl PacketTypeId {
+    /// Map a raw wire identifier to a `PacketTypeId`. Unrecognised values
+    /// become `Unknown(raw)`.
+    pub fn from_raw(raw: u32) -> Self {
+        match raw {
+            0x00 => Self::BasePlayerCreate,
+            0x26 => Self::BasePlayerCreateStub,
+            0x01 => Self::CellPlayerCreate,
+            0x02 => Self::EntityControl,
+            0x03 => Self::EntityEnter,
+            0x04 => Self::EntityLeave,
+            0x05 => Self::EntityCreate,
+            0x07 => Self::EntityProperty,
+            0x08 => Self::EntityMethod,
+            0x0a => Self::Position,
+            0x0e => Self::ServerTick,
+            0x0f => Self::ServerTimestamp,
+            0x10 => Self::InitFlag,
+            0x13 => Self::InitMarker,
+            0x16 => Self::Version,
+            0x18 => Self::GunMarker,
+            0x1d => Self::PlayerNetStats,
+            0x20 => Self::OwnShip,
+            0x22 => Self::BattleResults,
+            0x23 => Self::NestedPropertyUpdate,
+            0x25 => Self::Camera,
+            0x27 => Self::CameraMode,
+            0x28 => Self::Map,
+            0x2a => Self::NonVolatilePosition,
+            0x2c => Self::PlayerOrientation,
+            0x2f => Self::CameraFreeLook,
+            0x30 => Self::SetWeaponLock,
+            0x31 => Self::SubController,
+            0x32 => Self::CruiseState,
+            0x33 => Self::ShotTracking,
+            other => Self::Unknown(other),
+        }
+    }
+
+    /// The raw wire identifier.
+    pub fn raw(self) -> u32 {
+        match self {
+            Self::BasePlayerCreate => 0x00,
+            Self::BasePlayerCreateStub => 0x26,
+            Self::CellPlayerCreate => 0x01,
+            Self::EntityControl => 0x02,
+            Self::EntityEnter => 0x03,
+            Self::EntityLeave => 0x04,
+            Self::EntityCreate => 0x05,
+            Self::EntityProperty => 0x07,
+            Self::EntityMethod => 0x08,
+            Self::Position => 0x0a,
+            Self::ServerTick => 0x0e,
+            Self::ServerTimestamp => 0x0f,
+            Self::InitFlag => 0x10,
+            Self::InitMarker => 0x13,
+            Self::Version => 0x16,
+            Self::GunMarker => 0x18,
+            Self::PlayerNetStats => 0x1d,
+            Self::OwnShip => 0x20,
+            Self::BattleResults => 0x22,
+            Self::NestedPropertyUpdate => 0x23,
+            Self::Camera => 0x25,
+            Self::CameraMode => 0x27,
+            Self::Map => 0x28,
+            Self::NonVolatilePosition => 0x2a,
+            Self::PlayerOrientation => 0x2c,
+            Self::CameraFreeLook => 0x2f,
+            Self::SetWeaponLock => 0x30,
+            Self::SubController => 0x31,
+            Self::CruiseState => 0x32,
+            Self::ShotTracking => 0x33,
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::BasePlayerCreate => "BasePlayerCreate",
+            Self::BasePlayerCreateStub => "BasePlayerCreateStub",
+            Self::CellPlayerCreate => "CellPlayerCreate",
+            Self::EntityControl => "EntityControl",
+            Self::EntityEnter => "EntityEnter",
+            Self::EntityLeave => "EntityLeave",
+            Self::EntityCreate => "EntityCreate",
+            Self::EntityProperty => "EntityProperty",
+            Self::EntityMethod => "EntityMethod",
+            Self::Position => "Position",
+            Self::ServerTick => "ServerTick",
+            Self::ServerTimestamp => "ServerTimestamp",
+            Self::InitFlag => "InitFlag",
+            Self::InitMarker => "InitMarker",
+            Self::Version => "Version",
+            Self::GunMarker => "GunMarker",
+            Self::PlayerNetStats => "PlayerNetStats",
+            Self::OwnShip => "OwnShip",
+            Self::BattleResults => "BattleResults",
+            Self::NestedPropertyUpdate => "NestedPropertyUpdate",
+            Self::Camera => "Camera",
+            Self::CameraMode => "CameraMode",
+            Self::Map => "Map",
+            Self::NonVolatilePosition => "NonVolatilePosition",
+            Self::PlayerOrientation => "PlayerOrientation",
+            Self::CameraFreeLook => "CameraFreeLook",
+            Self::SetWeaponLock => "SetWeaponLock",
+            Self::SubController => "SubController",
+            Self::CruiseState => "CruiseState",
+            Self::ShotTracking => "ShotTracking",
+            Self::Unknown(_) => "Unknown",
+        }
+    }
+}
+
+impl std::fmt::Debug for PacketTypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}(0x{:02x})", self.name(), self.raw())
+    }
+}
+
+impl serde::Serialize for PacketTypeId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(self.raw())
+    }
+}
+
+/// A packet with its 12-byte header parsed but the payload left raw.
+///
+/// Produced by [`RawPacketIterator`]. Lets callers walk a decrypted replay
+/// stream without entity definitions: the header is always available, and
+/// spec-independent payloads can be decoded on demand (e.g.
+/// [`PlayerNetStatsPacket::from_payload`]).
+#[derive(Debug, Clone, Copy)]
+pub struct RawPacket<'a> {
+    pub packet_size: u32,
+    pub packet_type: PacketTypeId,
+    pub clock: GameClock,
+    pub payload: &'a [u8],
+}
+
+/// Sans-io iterator over a decrypted packet stream. Parses only packet headers,
+/// never the entity-spec-dependent payloads, so it needs no entity definitions
+/// and is safe in any environment (wasm, embedded). On a malformed/truncated
+/// stream it yields one `Err` and then stops.
+pub struct RawPacketIterator<'a> {
+    remaining: &'a [u8],
+}
+
+impl<'a> RawPacketIterator<'a> {
+    pub fn new(packet_data: &'a [u8]) -> Self {
+        Self { remaining: packet_data }
+    }
+}
+
+impl<'a> Iterator for RawPacketIterator<'a> {
+    type Item = PResult<RawPacket<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining.is_empty() {
+            return None;
+        }
+        let result = (|| {
+            let packet_size = le_u32.parse_next(&mut self.remaining)?;
+            let packet_type = PacketTypeId::from_raw(le_u32.parse_next(&mut self.remaining)?);
+            let raw_clock = le_f32.parse_next(&mut self.remaining)?;
+            let payload = take(packet_size as usize).parse_next(&mut self.remaining)?;
+            Ok(RawPacket { packet_size, packet_type, clock: GameClock(raw_clock), payload })
+        })();
+        if result.is_err() {
+            self.remaining = &[];
+        }
+        Some(result)
+    }
 }
 
 #[derive(Debug)]
@@ -402,10 +626,29 @@ impl<'argtype> Parser<'argtype> {
         let payload_length = le_u32.parse_next(i)?;
         let payload: &'a [u8] = take(payload_length as usize).parse_next(i)?;
 
-        let entity_type = self.entities.get(&entity_id).unwrap().entity_type;
-        let spec = &self.specs[entity_type as usize - 1].properties[prop_id as usize];
+        // Return structured errors rather than panicking. The caller's
+        // parse_packet wraps any Err into an Invalid packet, but the error
+        // itself stays introspectable for direct callers.
+        let entity =
+            self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
+        let entity_type = entity.entity_type;
+        let spec_entity = (entity_type as usize)
+            .checked_sub(1)
+            .and_then(|idx| self.specs.get(idx))
+            .ok_or_else(|| failure(ParseError::EntityTypeOutOfBounds { entity_type, spec_count: self.specs.len() }))?;
+        let spec = spec_entity
+            .properties
+            .get(prop_id as usize)
+            .ok_or_else(|| failure(ParseError::PropertyIdOutOfBounds { prop_id, entity_type }))?;
 
-        let pval = spec.prop_type.parse_value(&mut &*payload).unwrap();
+        let pval = spec.prop_type.parse_value(&mut &*payload).map_err(|e| {
+            failure(ParseError::RpcValueParseFailed {
+                method: format!("EntityProperty::{}", spec.name),
+                argnum: prop_id as usize,
+                argtype: format!("{:?}", spec.prop_type),
+                error: format!("{e:?}"),
+            })
+        })?;
 
         Ok(PacketType::EntityProperty(EntityPropertyPacket {
             entity_id: entity_id.into(),
@@ -421,21 +664,20 @@ impl<'argtype> Parser<'argtype> {
         let payload: &'a [u8] = take(payload_length as usize).parse_next(i)?;
         assert!(i.is_empty());
 
-        let entity_type = self.entities.get(&entity_id).unwrap().entity_type;
+        // Return structured errors rather than panicking on a stream that
+        // references an entity before its creation packet.
+        let entity =
+            self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
+        let entity_type = entity.entity_type;
 
-        let methods = &self.specs[entity_type as usize - 1].client_methods;
-        if method_id as usize >= methods.len() {
-            return Ok(PacketType::Invalid(InvalidPacket {
-                message: format!(
-                    "method_id {} out of bounds for entity type {} (has {} methods)",
-                    method_id,
-                    entity_type,
-                    methods.len()
-                ),
-                raw: payload,
-            }));
-        }
-        let spec = &methods[method_id as usize];
+        let spec_entity = (entity_type as usize)
+            .checked_sub(1)
+            .and_then(|idx| self.specs.get(idx))
+            .ok_or_else(|| failure(ParseError::EntityTypeOutOfBounds { entity_type, spec_count: self.specs.len() }))?;
+        let methods = &spec_entity.client_methods;
+        let spec = methods
+            .get(method_id as usize)
+            .ok_or_else(|| failure(ParseError::MethodIdOutOfBounds { method_id, entity_type }))?;
 
         let mut sub = payload;
         let mut args = vec![];
@@ -913,7 +1155,11 @@ impl<'argtype> Parser<'argtype> {
         Ok(PacketType::Map(packet))
     }
 
-    fn parse_naked_packet<'a, 'b>(&'b mut self, packet_type: u32, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_naked_packet<'a, 'b>(
+        &'b mut self,
+        packet_type: PacketTypeId,
+        i: &mut &'a [u8],
+    ) -> PResult<PacketType<'a, 'b>> {
         /*
         PACKETS_MAPPING = {
             0x0: BasePlayerCreate,
@@ -931,52 +1177,51 @@ impl<'argtype> Parser<'argtype> {
         }
         */
         let payload = match packet_type {
-            //0x7 | 0x8 => self.parse_entity_packet(version, packet_type, i)?,
-            0x0 => self.parse_base_player_create(i)?,
-            0x1 => self.parse_cell_player_create(i)?,
-            0x2 => self.parse_entity_control_packet(i)?,
-            0x3 => self.parse_entity_enter(i)?,
-            0x4 => self.parse_entity_leave(i)?,
-            0x5 => self.parse_entity_create(i)?,
-            0x7 => self.parse_entity_property_packet(i)?,
-            0x8 => self.parse_entity_method_packet(i)?,
-            0xA => self.parse_position_packet(i)?,
-            0x0e => self.parse_server_tick_packet(i)?,
-            0x0f => self.parse_server_timestamp_packet(i)?,
-            0x16 => self.parse_version_packet(i)?,
-            0x1d => self.parse_player_net_stats_packet(i)?,
-            0x20 => self.parse_own_ship_packet(i)?,
-            0x22 => self.parse_battle_results(i)?,
-            0x23 => self.parse_nested_property_update(i)?,
-            0x25 => self.parse_camera_packet(i)?,
-            0x27 => self.parse_camera_mode_packet(i)?,
-            0x28 => self.parse_map_packet(i)?,
-            0x2a => self.parse_non_volatile_position_packet(i)?,
-            0x2c => self.parse_player_orientation_packet(i)?,
-            0x2f => self.parse_camera_freelook_packet(i)?,
-            0x30 => self.parse_set_weapon_lock_packet(i)?,
-            0x31 => self.parse_sub_controller_packet(i)?,
-            0x32 => self.parse_cruise_state(i)?,
-            0x33 => self.parse_shot_tracking_packet(i)?,
-            0x18 => self.parse_gun_marker_packet(i)?,
-            0x10 => {
+            PacketTypeId::BasePlayerCreate => self.parse_base_player_create(i)?,
+            PacketTypeId::BasePlayerCreateStub => self.parse_base_player_create_stub(i)?,
+            PacketTypeId::CellPlayerCreate => self.parse_cell_player_create(i)?,
+            PacketTypeId::EntityControl => self.parse_entity_control_packet(i)?,
+            PacketTypeId::EntityEnter => self.parse_entity_enter(i)?,
+            PacketTypeId::EntityLeave => self.parse_entity_leave(i)?,
+            PacketTypeId::EntityCreate => self.parse_entity_create(i)?,
+            PacketTypeId::EntityProperty => self.parse_entity_property_packet(i)?,
+            PacketTypeId::EntityMethod => self.parse_entity_method_packet(i)?,
+            PacketTypeId::Position => self.parse_position_packet(i)?,
+            PacketTypeId::ServerTick => self.parse_server_tick_packet(i)?,
+            PacketTypeId::ServerTimestamp => self.parse_server_timestamp_packet(i)?,
+            PacketTypeId::Version => self.parse_version_packet(i)?,
+            PacketTypeId::PlayerNetStats => self.parse_player_net_stats_packet(i)?,
+            PacketTypeId::OwnShip => self.parse_own_ship_packet(i)?,
+            PacketTypeId::BattleResults => self.parse_battle_results(i)?,
+            PacketTypeId::NestedPropertyUpdate => self.parse_nested_property_update(i)?,
+            PacketTypeId::Camera => self.parse_camera_packet(i)?,
+            PacketTypeId::CameraMode => self.parse_camera_mode_packet(i)?,
+            PacketTypeId::Map => self.parse_map_packet(i)?,
+            PacketTypeId::NonVolatilePosition => self.parse_non_volatile_position_packet(i)?,
+            PacketTypeId::PlayerOrientation => self.parse_player_orientation_packet(i)?,
+            PacketTypeId::CameraFreeLook => self.parse_camera_freelook_packet(i)?,
+            PacketTypeId::SetWeaponLock => self.parse_set_weapon_lock_packet(i)?,
+            PacketTypeId::SubController => self.parse_sub_controller_packet(i)?,
+            PacketTypeId::CruiseState => self.parse_cruise_state(i)?,
+            PacketTypeId::ShotTracking => self.parse_shot_tracking_packet(i)?,
+            PacketTypeId::GunMarker => self.parse_gun_marker_packet(i)?,
+            PacketTypeId::InitFlag => {
                 let flag = le_u8.parse_next(i)?;
                 PacketType::InitFlag(flag)
             }
-            0x13 => {
+            PacketTypeId::InitMarker => {
                 // Consume all remaining input (empty init marker)
                 *i = &[];
                 PacketType::InitMarker
             }
-            0x26 => self.parse_base_player_create_stub(i)?,
-            _ => self.parse_unknown_packet(i, (*i).len().try_into().unwrap())?,
+            PacketTypeId::Unknown(_) => self.parse_unknown_packet(i, (*i).len().try_into().unwrap())?,
         };
         Ok(payload)
     }
 
     pub fn parse_packet<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<Packet<'a, 'b>> {
         let packet_size = le_u32.parse_next(i)?;
-        let packet_type = le_u32.parse_next(i)?;
+        let packet_type = PacketTypeId::from_raw(le_u32.parse_next(i)?);
         let raw_clock = le_f32.parse_next(i)?;
         let clock = GameClock(raw_clock);
         let packet_data: &'a [u8] = take(packet_size as usize).parse_next(i)?;

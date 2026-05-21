@@ -164,7 +164,7 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
         }
 
         if let Some(n) = self.filter_packet
-            && n != decoded.packet_type
+            && n != decoded.packet_type.raw()
         {
             return;
         }
@@ -647,7 +647,7 @@ fn main() {
         }
         Commands::Spec { version } => {
             let target_version = Version::from_client_exe(&version);
-            let specs = load_game_data(None, extracted, &target_version).expect("failed to load game data");
+            let specs = load_game_data(game_dir, extracted, &target_version).expect("failed to load game data");
             printspecs(&specs);
         }
         Commands::Decrypt { meta_output, packets_output, replay } => {

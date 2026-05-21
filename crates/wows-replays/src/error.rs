@@ -25,6 +25,18 @@ pub enum ParseError {
     #[error("internal property set on unsupported entity {entity_type} (id={entity_id})")]
     UnsupportedInternalPropSet { entity_id: u32, entity_type: String },
 
+    #[error("packet references entity {entity_id} that has not been created")]
+    UnknownEntity { entity_id: u32 },
+
+    #[error("entity type {entity_type} is out of bounds for {spec_count} loaded entity specs")]
+    EntityTypeOutOfBounds { entity_type: u16, spec_count: usize },
+
+    #[error("property id {prop_id} is out of bounds for entity type {entity_type}")]
+    PropertyIdOutOfBounds { prop_id: u32, entity_type: u16 },
+
+    #[error("method id {method_id} is out of bounds for entity type {entity_type}")]
+    MethodIdOutOfBounds { method_id: u32, entity_type: u16 },
+
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 }
