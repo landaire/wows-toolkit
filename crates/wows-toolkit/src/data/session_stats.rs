@@ -708,6 +708,7 @@ mod tests {
     use std::path::PathBuf;
 
     /// Helper: create a PerGameStat with the given parameters.
+    #[allow(clippy::too_many_arguments)]
     fn make_game(
         ship_name: &str,
         ship_id: u64,

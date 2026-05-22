@@ -150,6 +150,7 @@ mod tests {
 
     /// Build a ship config blob with the given parameters.
     /// If `include_v13_2_field` is true, inserts the extra u32 after unit slots.
+    #[allow(clippy::too_many_arguments)]
     fn build_blob(
         ship_params_id: u32,
         units: &[u32],

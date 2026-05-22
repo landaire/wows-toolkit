@@ -1031,12 +1031,10 @@ impl GameMetadataProvider {
                 // Wrap each param in catch_unwind so missing fields in old game
                 // versions skip the individual param rather than aborting everything.
                 let param = param.clone();
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     Self::parse_single_param(&param, &params_dict)
-                })) {
-                    Ok(result) => result,
-                    Err(_) => None, // silently skip params that panic
-                }
+                }))
+                .unwrap_or_default()
             })
             .collect::<Vec<Param>>();
 

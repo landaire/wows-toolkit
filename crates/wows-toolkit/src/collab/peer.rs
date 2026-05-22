@@ -2699,8 +2699,7 @@ mod tests {
     #[test]
     fn render_options_accepted_from_authority() {
         let h = MessageTestHarness::as_client();
-        let mut opts = CollabRenderOptions::default();
-        opts.show_chat = true;
+        let opts = CollabRenderOptions { show_chat: true, ..Default::default() };
         h.dispatch(0, PeerMessage::RenderOptions(opts));
         assert_eq!(h.ui().render_options_version, 1);
         assert!(h.ui().current_render_options.as_ref().unwrap().show_chat);
@@ -2709,8 +2708,7 @@ mod tests {
     #[test]
     fn render_options_dropped_from_non_authority() {
         let h = MessageTestHarness::as_client();
-        let mut opts = CollabRenderOptions::default();
-        opts.show_chat = true;
+        let opts = CollabRenderOptions { show_chat: true, ..Default::default() };
         h.dispatch(99, PeerMessage::RenderOptions(opts));
         assert_eq!(h.ui().render_options_version, 0);
     }
@@ -3101,8 +3099,7 @@ mod tests {
     #[test]
     fn cohost_can_send_render_options() {
         let h = MessageTestHarness::new(1, PeerRole::Peer, vec![(0, PeerRole::Host), (2, PeerRole::CoHost)], 0);
-        let mut opts = CollabRenderOptions::default();
-        opts.show_advantage = true;
+        let opts = CollabRenderOptions { show_advantage: true, ..Default::default() };
         h.dispatch(2, PeerMessage::RenderOptions(opts));
         assert_eq!(h.ui().render_options_version, 1);
         assert!(h.ui().current_render_options.as_ref().unwrap().show_advantage);

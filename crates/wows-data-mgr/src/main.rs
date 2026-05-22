@@ -76,6 +76,11 @@ enum Commands {
         /// Overwrite existing dump for this build
         #[arg(long)]
         force: bool,
+
+        /// Dump directly from this game install directory, skipping the
+        /// version manifest and registry. Use together with --build.
+        #[arg(long, conflicts_with_all = &["latest", "version"])]
+        game_dir: Option<PathBuf>,
     },
 
     /// Remove a previously dumped build, cleaning up deduplicated storage
@@ -160,9 +165,8 @@ fn main() -> Result<(), Report> {
     let repo_root = find_repo_root()?;
     let data_dir = resolve_data_dir(&args.data_dir)?;
 
-    // These commands work purely from a dump directory; they need neither the
-    // version manifest nor the registry, so handle them before loading either
-    // (a malformed game_versions.toml must not block them).
+    // These commands don't need the version manifest, so handle them before
+    // loading it (a malformed game_versions.toml must not block them).
     match &args.command {
         Commands::RefreshDerived { output, build } => {
             println!("Refreshing derived data...");
@@ -171,6 +175,22 @@ fn main() -> Result<(), Report> {
         Commands::Gc { output } => {
             println!("Garbage-collecting orphaned CAS objects...");
             return dump::gc_cas(output);
+        }
+        // An explicit build + game directory dumps without manifest or registry.
+        Commands::DumpRendererData { build: Some(b), game_dir: Some(gd), output, force, .. } => {
+            let build = *b;
+            let version_str = detect::detect_version_at_path(gd, build)
+                .attach_with(|| format!("Could not detect version for build {build} at {}", gd.display()))?;
+            let dir = dump::dump_dir(output, &version_str, build);
+            if *force && dir.exists() {
+                println!("Removing existing dump at {}...", dir.display());
+                std::fs::remove_dir_all(&dir)?;
+            }
+            println!("Dumping build {build} ({version_str}) from {}", gd.display());
+            let pb = dump::create_progress_bar(gd);
+            dump::dump_renderer_data(gd, build, &version_str, output, pb.as_ref(), false)?;
+            println!("Dumped to {}", dir.display());
+            return Ok(());
         }
         _ => {}
     }
@@ -276,7 +296,7 @@ fn main() -> Result<(), Report> {
             }
         }
 
-        Commands::DumpRendererData { latest, build, version, output, force } => {
+        Commands::DumpRendererData { latest, build, version, output, force, game_dir: _ } => {
             let target = if latest {
                 let builds = reg.available_builds();
                 *builds.last().ok_or_else(|| rootcause::report!("No builds available"))?

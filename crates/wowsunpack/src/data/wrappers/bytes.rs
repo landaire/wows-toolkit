@@ -58,10 +58,7 @@ impl AsRef<[u8]> for BytesSlice {
 
 impl Prime for BytesPkgSource {
     fn prime_volume(&self, volume: &str, range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError> {
-        let data = self
-            .volumes
-            .get(volume)
-            .ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))?;
+        let data = self.volumes.get(volume).ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))?;
         if range.end > data.len() {
             return Err(VfsError::from(VfsErrorKind::Other(format!(
                 "range {}..{} exceeds volume {volume} length {}",

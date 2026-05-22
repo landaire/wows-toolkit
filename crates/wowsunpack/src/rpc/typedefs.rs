@@ -704,6 +704,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::useless_vec)]
     fn test_unpacker_macro() {
         let args = vec![
             ArgValue::Uint8(5),

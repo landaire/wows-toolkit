@@ -218,7 +218,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("metadata.toml");
 
-        let mut meta = BuildMetadata { version: "15.2.0".into(), build: 12100000, files: BTreeMap::new() };
+        let mut meta = BuildMetadata {
+            version: "15.2.0".into(),
+            build: 12100000,
+            files: BTreeMap::new(),
+            derived: BTreeMap::new(),
+        };
         meta.files.insert("gui/test.png".into(), "abcdef1234567890abcd".into());
 
         meta.save(&path).unwrap();

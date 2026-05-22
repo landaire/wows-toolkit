@@ -199,8 +199,7 @@ mod tests {
     #[test]
     fn diff_single_change() {
         let a = CollabRenderOptions::default();
-        let mut b = CollabRenderOptions::default();
-        b.show_tracers = true;
+        let b = CollabRenderOptions { show_tracers: true, ..Default::default() };
         let diff = a.diff(&b);
         assert_eq!(diff.len(), 1);
         assert_eq!(diff[0], (DisplayOptionField::ShowTracers, true));
@@ -209,10 +208,12 @@ mod tests {
     #[test]
     fn diff_multiple_changes() {
         let a = CollabRenderOptions::default();
-        let mut b = CollabRenderOptions::default();
-        b.show_tracers = true;
-        b.show_chat = true;
-        b.show_self_hydro_range = true;
+        let b = CollabRenderOptions {
+            show_tracers: true,
+            show_chat: true,
+            show_self_hydro_range: true,
+            ..Default::default()
+        };
         let diff = a.diff(&b);
         assert_eq!(diff.len(), 3);
         let fields: Vec<_> = diff.iter().map(|(f, _)| *f).collect();
@@ -223,8 +224,7 @@ mod tests {
 
     #[test]
     fn diff_detects_false_to_true_and_true_to_false() {
-        let mut a = CollabRenderOptions::default();
-        a.show_hp_bars = true;
+        let a = CollabRenderOptions { show_hp_bars: true, ..Default::default() };
         let b = CollabRenderOptions::default();
         // a has show_hp_bars=true, b has false
         let diff = a.diff(&b);
@@ -315,6 +315,7 @@ mod tests {
     // ─── Constants sanity ────────────────────────────────────────────────
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn constants_are_reasonable() {
         assert!(MAX_MESSAGE_SIZE > MAX_FRAME_SIZE);
         assert!(MAX_DECOMPRESSED_FRAME_SIZE > MAX_FRAME_SIZE);

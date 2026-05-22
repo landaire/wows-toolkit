@@ -117,31 +117,6 @@ pub fn dump_renderer_data(
     std::fs::create_dir_all(&output_dir)
         .attach_with(|| format!("Failed to create output directory {}", output_dir.display()))?;
 
-    // Serialize GameParams via rkyv (stored directly, not in CAS).
-    // Wrap in catch_unwind because old game data may have missing fields that cause panics.
-    let vfs_clone = vfs.clone();
-    let game_params_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-        let gmp = GameMetadataProvider::from_vfs(&vfs_clone)?;
-        let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
-        Ok::<_, rootcause::Report>(bytes)
-    }));
-    match game_params_result {
-        Ok(Ok(bytes)) => {
-            // Written as a plain file; refresh_build_derived (below) moves it
-            // into the CAS and produces the compressed copy.
-            std::fs::write(output_dir.join("game_params.rkyv"), &bytes)
-                .attach_with(|| "Failed to write game_params.rkyv")?;
-        }
-        Ok(Err(e)) => {
-            eprintln!("WARN: GameParams conversion failed for build {build}: {e:?}");
-        }
-        Err(_) => {
-            eprintln!("WARN: GameParams conversion panicked for build {build} (incompatible format)");
-        }
-    }
-
-    // Copy all language translations (stored directly)
     dump_all_translations(game_dir, build, &output_dir)?;
 
     // Fetch and store versioned constants (non-fatal)
@@ -165,12 +140,8 @@ pub fn dump_renderer_data(
     // Write enhanced metadata with file hashes. The derived artifacts (rkyv
     // blob, compressed copies) are generated and content-addressed by the same
     // step the refresh-derived command uses, so dumps and refreshes agree.
-    let mut metadata = BuildMetadata {
-        version: version_str.to_string(),
-        build,
-        files: file_hashes,
-        derived: BTreeMap::new(),
-    };
+    let mut metadata =
+        BuildMetadata { version: version_str.to_string(), build, files: file_hashes, derived: BTreeMap::new() };
     refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
     metadata.save(&output_dir.join("metadata.toml"))?;
 
@@ -304,6 +275,34 @@ fn store_and_link(
 
 // -- Derived artifact generation (shared by dump and refresh-derived) --
 
+/// Convert `vfs_dir/content/GameParams.data` into a rkyv-encoded `Vec<Param>`
+/// using the current `wowsunpack` schema. Returns `None` when the source file
+/// is missing or the conversion fails (panic from a layout-incompatible older
+/// pickle, or serialization error). Diagnostics are logged via stderr.
+fn derive_game_params_rkyv(vfs_dir: &Path) -> Option<Vec<u8>> {
+    if !vfs_dir.join("content/GameParams.data").exists() {
+        return None;
+    }
+    let vfs = VfsPath::new(wowsunpack::vfs::PhysicalFS::new(vfs_dir));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let gmp = GameMetadataProvider::from_vfs(&vfs)?;
+        let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
+        Ok::<Vec<u8>, Report>(bytes.to_vec())
+    }));
+    match result {
+        Ok(Ok(bytes)) => Some(bytes),
+        Ok(Err(e)) => {
+            eprintln!("WARN: GameParams re-derivation failed for {}: {e:?}", vfs_dir.display());
+            None
+        }
+        Err(_) => {
+            eprintln!("WARN: GameParams re-derivation panicked for {} (incompatible pickle format)", vfs_dir.display(),);
+            None
+        }
+    }
+}
+
 /// Store `data` in the CAS and point `link_path` at it, replacing any file or
 /// symlink already there. Returns the content hash.
 fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<String, Report> {
@@ -315,29 +314,29 @@ fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<St
 
 /// Generate and content-address a build's derived artifacts: the rkyv game
 /// params blob, its zstd copy, and the English translation catalog's zstd copy.
-/// Uncompressed inputs are read from `build_dir`; each artifact is stored in
-/// the CAS, linked back into `build_dir`, and recorded in `metadata.derived`.
-///
-/// Shared by the initial dump and the `refresh-derived` command so both
-/// produce identical, deduplicated output. Idempotent and safe to re-run.
-pub fn refresh_build_derived(
-    build_dir: &Path,
-    cas_root: &Path,
-    metadata: &mut BuildMetadata,
-) -> Result<(), Report> {
+/// The rkyv blob is derived from `vfs/content/GameParams.data` against the
+/// current `wowsunpack::game_params::types` schema; the on-disk rkyv is only
+/// consulted as a fallback when the extracted vfs is missing or conversion
+/// fails. Each artifact is stored in the CAS, linked back into `build_dir`,
+/// and recorded in `metadata.derived`. Idempotent.
+pub fn refresh_build_derived(build_dir: &Path, cas_root: &Path, metadata: &mut BuildMetadata) -> Result<(), Report> {
     metadata.derived.clear();
 
     let rkyv_path = build_dir.join("game_params.rkyv");
-    if rkyv_path.exists() {
-        let rkyv_bytes =
-            std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+    let rkyv_bytes = derive_game_params_rkyv(&build_dir.join("vfs"));
+    let rkyv_bytes = match rkyv_bytes {
+        Some(b) => Some(b),
+        None if rkyv_path.exists() => {
+            Some(std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?)
+        }
+        None => None,
+    };
+    if let Some(rkyv_bytes) = rkyv_bytes {
         let hash = store_and_relink(&rkyv_bytes, &rkyv_path, cas_root)?;
         metadata.derived.insert("game_params.rkyv".to_string(), hash);
 
-        let compressed = ruzstd::encoding::compress_to_vec(
-            rkyv_bytes.as_slice(),
-            ruzstd::encoding::CompressionLevel::Fastest,
-        );
+        let compressed =
+            ruzstd::encoding::compress_to_vec(rkyv_bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
         let zst_path = build_dir.join("game_params.rkyv.zst");
         let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
         metadata.derived.insert("game_params.rkyv.zst".to_string(), hash);
@@ -347,12 +346,9 @@ pub fn refresh_build_derived(
     let mo_rel = "translations/en/LC_MESSAGES/global.mo";
     let mo_path = build_dir.join(mo_rel);
     if mo_path.exists() {
-        let mo_bytes =
-            std::fs::read(&mo_path).attach_with(|| format!("Failed to read {}", mo_path.display()))?;
-        let compressed = ruzstd::encoding::compress_to_vec(
-            mo_bytes.as_slice(),
-            ruzstd::encoding::CompressionLevel::Fastest,
-        );
+        let mo_bytes = std::fs::read(&mo_path).attach_with(|| format!("Failed to read {}", mo_path.display()))?;
+        let compressed =
+            ruzstd::encoding::compress_to_vec(mo_bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
         let zst_path = build_dir.join(format!("{mo_rel}.zst"));
         let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
         metadata.derived.insert(format!("{mo_rel}.zst"), hash);

@@ -472,22 +472,22 @@ mod tests {
         // Attempt to load the real on-disk cache, save it, and verify roundtrip.
         // The on-disk file may be an old version that gets discarded — in that
         // case we just verify load returns None gracefully (no panic).
-        if let Some(path) = cache_path() {
-            if path.exists() {
-                match CapLayoutDb::load(&path) {
-                    Some(db) => {
-                        eprintln!("loaded {} cap layouts from {}", db.len(), path.display());
+        if let Some(path) = cache_path()
+            && path.exists()
+        {
+            match CapLayoutDb::load(&path) {
+                Some(db) => {
+                    eprintln!("loaded {} cap layouts from {}", db.len(), path.display());
 
-                        // Roundtrip: save and reload
-                        let dir = tempfile::tempdir().unwrap();
-                        let tmp_path = dir.path().join("cap_layouts.bin");
-                        db.save(&tmp_path).expect("save failed");
-                        let reloaded = CapLayoutDb::load(&tmp_path).expect("roundtrip load failed");
-                        assert_eq!(reloaded.len(), db.len());
-                    }
-                    None => {
-                        eprintln!("on-disk cache at {} is outdated or corrupt, skipping", path.display());
-                    }
+                    // Roundtrip: save and reload
+                    let dir = tempfile::tempdir().unwrap();
+                    let tmp_path = dir.path().join("cap_layouts.bin");
+                    db.save(&tmp_path).expect("save failed");
+                    let reloaded = CapLayoutDb::load(&tmp_path).expect("roundtrip load failed");
+                    assert_eq!(reloaded.len(), db.len());
+                }
+                None => {
+                    eprintln!("on-disk cache at {} is outdated or corrupt, skipping", path.display());
                 }
             }
         }

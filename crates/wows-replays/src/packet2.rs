@@ -629,8 +629,7 @@ impl<'argtype> Parser<'argtype> {
         // Return structured errors rather than panicking. The caller's
         // parse_packet wraps any Err into an Invalid packet, but the error
         // itself stays introspectable for direct callers.
-        let entity =
-            self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
+        let entity = self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
         let entity_type = entity.entity_type;
         let spec_entity = (entity_type as usize)
             .checked_sub(1)
@@ -666,8 +665,7 @@ impl<'argtype> Parser<'argtype> {
 
         // Return structured errors rather than panicking on a stream that
         // references an entity before its creation packet.
-        let entity =
-            self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
+        let entity = self.entities.get(&entity_id).ok_or_else(|| failure(ParseError::UnknownEntity { entity_id }))?;
         let entity_type = entity.entity_type;
 
         let spec_entity = (entity_type as usize)
