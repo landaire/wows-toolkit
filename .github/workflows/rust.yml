@@ -80,9 +80,11 @@ jobs:
       - uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - uses: cachix/cachix-action@v15
         with:
-          use-flakehub: false
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
       - name: Check wt-web for wasm32
         run: nix develop --command cargo check -p wt-web --target wasm32-unknown-unknown
         env:
