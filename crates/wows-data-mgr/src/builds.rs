@@ -113,6 +113,11 @@ pub struct BuildMetadata {
     /// VFS file path -> CAS hash. Only present in new-format dumps.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+    /// Build-relative path -> CAS hash for derived artifacts (the rkyv game
+    /// params blob and the compressed copies fetched by web clients). Kept
+    /// separate from `files`, which tracks the extracted `vfs/` tree.
+    #[serde(default)]
+    pub derived: BTreeMap<String, String>,
 }
 
 impl BuildMetadata {
@@ -135,9 +140,10 @@ impl BuildMetadata {
         !self.files.is_empty()
     }
 
-    /// Collect all unique hashes referenced by this build.
+    /// Collect all unique CAS hashes referenced by this build, across both the
+    /// extracted `vfs/` tree and the derived artifacts.
     pub fn referenced_hashes(&self) -> std::collections::HashSet<String> {
-        self.files.values().cloned().collect()
+        self.files.values().chain(self.derived.values()).cloned().collect()
     }
 }
 

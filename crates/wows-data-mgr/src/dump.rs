@@ -128,6 +128,8 @@ pub fn dump_renderer_data(
     }));
     match game_params_result {
         Ok(Ok(bytes)) => {
+            // Written as a plain file; refresh_build_derived (below) moves it
+            // into the CAS and produces the compressed copy.
             std::fs::write(output_dir.join("game_params.rkyv"), &bytes)
                 .attach_with(|| "Failed to write game_params.rkyv")?;
         }
@@ -160,8 +162,16 @@ pub fn dump_renderer_data(
         }
     }
 
-    // Write enhanced metadata with file hashes
-    let metadata = BuildMetadata { version: version_str.to_string(), build, files: file_hashes };
+    // Write enhanced metadata with file hashes. The derived artifacts (rkyv
+    // blob, compressed copies) are generated and content-addressed by the same
+    // step the refresh-derived command uses, so dumps and refreshes agree.
+    let mut metadata = BuildMetadata {
+        version: version_str.to_string(),
+        build,
+        files: file_hashes,
+        derived: BTreeMap::new(),
+    };
+    refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
     metadata.save(&output_dir.join("metadata.toml"))?;
 
     // Update master builds index
@@ -212,23 +222,23 @@ pub fn remove_build(output_base: &Path, target_build: u32) -> Result<(), Report>
     let target_dir = output_base.join(&entry.dir);
     let target_meta = BuildMetadata::load(&target_dir.join("metadata.toml"));
 
-    // Collect hashes still in use by other builds
+    // Collect hashes still in use by other builds (vfs tree + derived data)
     let mut live_hashes = std::collections::HashSet::new();
     for other in &index.builds {
         if other.build == target_build {
             continue;
         }
         if let Some(meta) = BuildMetadata::load(&output_base.join(&other.dir).join("metadata.toml")) {
-            live_hashes.extend(meta.files.values().cloned());
+            live_hashes.extend(meta.referenced_hashes());
         }
     }
 
     // Delete orphaned CAS objects
     if let Some(meta) = target_meta {
         let cas_root = output_base.join("vfs_common");
-        for hash in meta.files.values() {
-            if !live_hashes.contains(hash) {
-                let path = cas::cas_path(&cas_root, hash);
+        for hash in meta.referenced_hashes() {
+            if !live_hashes.contains(&hash) {
+                let path = cas::cas_path(&cas_root, &hash);
                 let _ = std::fs::remove_file(&path);
             }
         }
@@ -289,6 +299,126 @@ fn store_and_link(
     let link_path = vfs_dir.join(rel_path.trim_start_matches('/'));
     cas::link_file(cas_root, &hash, &link_path)?;
     file_hashes.insert(rel_path.trim_start_matches('/').to_string(), hash);
+    Ok(())
+}
+
+// -- Derived artifact generation (shared by dump and refresh-derived) --
+
+/// Store `data` in the CAS and point `link_path` at it, replacing any file or
+/// symlink already there. Returns the content hash.
+fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<String, Report> {
+    let hash = cas::store(cas_root, data)?;
+    let _ = std::fs::remove_file(link_path);
+    cas::link_file(cas_root, &hash, link_path)?;
+    Ok(hash)
+}
+
+/// Generate and content-address a build's derived artifacts: the rkyv game
+/// params blob, its zstd copy, and the English translation catalog's zstd copy.
+/// Uncompressed inputs are read from `build_dir`; each artifact is stored in
+/// the CAS, linked back into `build_dir`, and recorded in `metadata.derived`.
+///
+/// Shared by the initial dump and the `refresh-derived` command so both
+/// produce identical, deduplicated output. Idempotent and safe to re-run.
+pub fn refresh_build_derived(
+    build_dir: &Path,
+    cas_root: &Path,
+    metadata: &mut BuildMetadata,
+) -> Result<(), Report> {
+    metadata.derived.clear();
+
+    let rkyv_path = build_dir.join("game_params.rkyv");
+    if rkyv_path.exists() {
+        let rkyv_bytes =
+            std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
+        let hash = store_and_relink(&rkyv_bytes, &rkyv_path, cas_root)?;
+        metadata.derived.insert("game_params.rkyv".to_string(), hash);
+
+        let compressed = ruzstd::encoding::compress_to_vec(
+            rkyv_bytes.as_slice(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        let zst_path = build_dir.join("game_params.rkyv.zst");
+        let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
+        metadata.derived.insert("game_params.rkyv.zst".to_string(), hash);
+    }
+
+    // The web client fetches only the English catalog, zstd-compressed.
+    let mo_rel = "translations/en/LC_MESSAGES/global.mo";
+    let mo_path = build_dir.join(mo_rel);
+    if mo_path.exists() {
+        let mo_bytes =
+            std::fs::read(&mo_path).attach_with(|| format!("Failed to read {}", mo_path.display()))?;
+        let compressed = ruzstd::encoding::compress_to_vec(
+            mo_bytes.as_slice(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        let zst_path = build_dir.join(format!("{mo_rel}.zst"));
+        let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
+        metadata.derived.insert(format!("{mo_rel}.zst"), hash);
+    }
+
+    Ok(())
+}
+
+/// Regenerate derived artifacts for every dumped build (or one build when
+/// `only_build` is given), then garbage-collect CAS objects no longer
+/// referenced by any build.
+pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<(), Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let cas_root = output_base.join("vfs_common");
+
+    let targets: Vec<&BuildEntry> = match only_build {
+        Some(b) => index.builds.iter().filter(|e| e.build == b).collect(),
+        None => index.builds.iter().collect(),
+    };
+    if targets.is_empty() {
+        bail!("No matching builds found in {}", output_base.join("builds.toml").display());
+    }
+
+    for entry in &targets {
+        let build_dir = output_base.join(&entry.dir);
+        let meta_path = build_dir.join("metadata.toml");
+        let mut metadata = BuildMetadata::load(&meta_path).unwrap_or(BuildMetadata {
+            version: entry.version.clone(),
+            build: entry.build,
+            ..Default::default()
+        });
+        match refresh_build_derived(&build_dir, &cas_root, &mut metadata) {
+            Ok(()) => {
+                metadata.save(&meta_path)?;
+                println!("  {} - {} derived artifact(s)", entry.dir, metadata.derived.len());
+            }
+            Err(e) => eprintln!("WARN: {} - failed to refresh derived data: {e:?}", entry.dir),
+        }
+    }
+
+    println!(
+        "Refreshed {} build(s). Replacing artifacts can leave orphaned CAS objects; \
+         run `wows-data-mgr gc` to reclaim them.",
+        targets.len()
+    );
+    Ok(())
+}
+
+/// Remove content-addressed objects no longer referenced by any build. An
+/// object is live if it appears in some build's metadata (the extracted vfs
+/// tree or the derived artifacts). Aborts without deleting anything if any
+/// build's metadata cannot be read, so in-use objects are never removed.
+pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let cas_root = output_base.join("vfs_common");
+
+    let mut live = std::collections::HashSet::new();
+    for entry in &index.builds {
+        let meta_path = output_base.join(&entry.dir).join("metadata.toml");
+        let meta = BuildMetadata::load(&meta_path)
+            .ok_or_else(|| report!("{} has no readable metadata.toml; aborting GC", entry.dir))?;
+        live.extend(meta.referenced_hashes());
+    }
+
+    let removed = cas::gc(&cas_root, &live)?;
+    println!("GC removed {removed} orphaned CAS object(s); {} still referenced.", live.len());
     Ok(())
 }
 

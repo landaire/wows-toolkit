@@ -93,6 +93,27 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Regenerate derived artifacts (rkyv blob, compressed copies) for dumped
+    /// builds and deduplicate them into content-addressed storage.
+    /// Never deletes anything; run `gc` separately to reclaim orphans.
+    RefreshDerived {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Refresh only this build number (default: all builds)
+        #[arg(long)]
+        build: Option<u32>,
+    },
+
+    /// Delete content-addressed objects no longer referenced by any dumped
+    /// build. This is the only command that removes shared storage.
+    Gc {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Register an existing WoWs installation without downloading
     Register {
         /// Register as the "latest" path — always use whatever builds exist here
@@ -138,6 +159,22 @@ fn main() -> Result<(), Report> {
     let args = Args::parse();
     let repo_root = find_repo_root()?;
     let data_dir = resolve_data_dir(&args.data_dir)?;
+
+    // These commands work purely from a dump directory; they need neither the
+    // version manifest nor the registry, so handle them before loading either
+    // (a malformed game_versions.toml must not block them).
+    match &args.command {
+        Commands::RefreshDerived { output, build } => {
+            println!("Refreshing derived data...");
+            return dump::refresh_derived(output, *build);
+        }
+        Commands::Gc { output } => {
+            println!("Garbage-collecting orphaned CAS objects...");
+            return dump::gc_cas(output);
+        }
+        _ => {}
+    }
+
     let manifest = manifest::load_manifest(&repo_root.join("game_versions.toml"))?;
     let mut reg = registry::load_registry(&data_dir.join("versions.toml"));
 
@@ -315,6 +352,10 @@ fn main() -> Result<(), Report> {
             } else {
                 bail!("Specify either --build or --version");
             }
+        }
+
+        Commands::RefreshDerived { .. } | Commands::Gc { .. } => {
+            unreachable!("handled before manifest load")
         }
 
         Commands::Register { latest, version, build, path } => {
