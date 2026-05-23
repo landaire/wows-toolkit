@@ -556,7 +556,7 @@ fn parse_replay_data_in_background(
             Ok(replay_file) => {
                 debug!("replay parsed successfully");
                 // We only send back random battles
-                let game_type = replay_file.meta.gameType.clone();
+                let game_type = replay_file.meta.gameType.clone().unwrap_or_default();
 
                 // Resolve version-matched data for this replay's build
                 let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);

@@ -312,6 +312,30 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
             return Ok(matched.0.clone());
         }
 
+        // Cross-region fallback via BuildsIndex: same major.minor.patch, different build.
+        let builds_path = path.join("builds.toml");
+        if builds_path.exists() {
+            let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
+            let index = wows_data_mgr::builds::BuildsIndex::load(&builds_path);
+            if let Some((entry, _exact)) = index.resolve_build(replay_version.build, Some(&version_str)) {
+                eprintln!(
+                    "No exact data for build {}; using {} (build {})",
+                    replay_version.build, entry.version, entry.build
+                );
+                return Ok(path.join(&entry.dir));
+            }
+        }
+
+        // Last-ditch: same version string in candidates.
+        let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
+        if let Some(matched) = candidates.iter().find(|(_, m)| m.version == version_str) {
+            eprintln!(
+                "No exact data for build {}; using {} (build {})",
+                replay_version.build, matched.1.version, matched.1.build
+            );
+            return Ok(matched.0.clone());
+        }
+
         if candidates.len() == 1 {
             let (_, ref meta) = candidates[0];
             return Err(anyhow!(

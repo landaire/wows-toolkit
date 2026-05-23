@@ -809,7 +809,7 @@ where
     }
 
     pub fn game_type(&self) -> Recognized<BattleType> {
-        BattleType::from_value(&self.game_meta.gameType, self.version)
+        BattleType::from_value(self.game_meta.gameType.as_deref().unwrap_or(""), self.version)
     }
 
     fn constants(&self) -> &GameConstants {
@@ -2584,7 +2584,7 @@ where
     }
 
     fn battle_type(&self) -> Recognized<BattleType> {
-        BattleType::from_value(&self.game_meta.gameType, self.version)
+        BattleType::from_value(self.game_meta.gameType.as_deref().unwrap_or(""), self.version)
     }
 
     fn scoring_rules(&self) -> Option<&ScoringRules> {

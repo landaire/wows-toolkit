@@ -2695,7 +2695,7 @@ impl Replay {
 
     pub fn game_mode(&self, metadata_provider: &GameMetadataProvider) -> String {
         wowsunpack::game_params::translations::translate_game_mode(
-            &self.replay_file.meta.gameType.to_string(),
+            self.replay_file.meta.gameType.as_deref().unwrap_or(""),
             metadata_provider,
         )
     }

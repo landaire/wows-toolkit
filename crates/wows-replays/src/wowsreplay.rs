@@ -30,7 +30,8 @@ pub struct VehicleInfoMeta {
 pub struct ReplayMeta {
     pub matchGroup: String,
     pub gameMode: u32,
-    pub gameType: String,
+    #[serde(default)]
+    pub gameType: Option<String>,
     pub clientVersionFromExe: String,
     pub scenarioUiCategoryId: u32,
     pub mapDisplayName: String,
@@ -52,7 +53,8 @@ pub struct ReplayMeta {
     pub teamsCount: u32,
     pub logic: Option<String>,
     pub playerVehicle: String,
-    pub battleDuration: u32,
+    #[serde(default)]
+    pub battleDuration: Option<u32>,
 }
 
 #[derive(Debug)]
