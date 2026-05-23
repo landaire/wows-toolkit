@@ -191,7 +191,7 @@ pub(super) fn playback_thread(
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
     controller.set_track_shots(false); // No shot data needed for frame building
-    let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
     renderer.set_fonts(game_fonts.clone());
     if let Some(ref sil) = self_silhouette {
@@ -373,7 +373,7 @@ pub(super) fn playback_thread(
     // Persistent parser + incremental parse tracking.
     // These allow forward playback to continue parsing from where we left off
     // instead of rebuilding from scratch every frame.
-    let mut live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+    let mut live_parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
     let mut live_offset: usize = 0;
     let mut live_clock = GameClock(0.0);
 
@@ -646,7 +646,7 @@ pub(super) fn playback_thread(
                 live_renderer.set_self_silhouette(sil.clone());
             }
             // Reset parser and tracking state for full re-parse
-            live_parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+            live_parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
             hit_cursor = 0;
             // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();

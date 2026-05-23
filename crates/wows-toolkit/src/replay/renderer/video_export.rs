@@ -449,7 +449,7 @@ pub(super) fn render_video_blocking(
 
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
-    let mut parser = wows_replays::packet2::Parser::new(game_metadata.entity_specs());
+    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
     // Load self player's ship silhouette for the stats panel
     let self_silhouette = replay_file.meta.vehicles.iter().find(|v| v.relation == 0).and_then(|v| {
         use wowsunpack::game_params::types::GameParamProvider;

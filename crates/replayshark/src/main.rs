@@ -415,16 +415,12 @@ where
 {
     let replay_file = ReplayFile::from_file(replay)?;
 
-    let specs = load_game_data(
-        game_dir,
-        extracted_dir,
-        &Version::from_client_exe(replay_file.meta.clientVersionFromExe.as_str()),
-    )
-    .expect("failed to load game specs");
+    let replay_version = Version::from_client_exe(replay_file.meta.clientVersionFromExe.as_str());
+    let specs = load_game_data(game_dir, extracted_dir, &replay_version).expect("failed to load game specs");
 
     let mut analyzer = build(&replay_file.meta);
 
-    let mut parser = wows_replays::packet2::Parser::new(&specs);
+    let mut parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
     let mut remaining = &replay_file.packet_data[..];
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).map_err(|e| rootcause::report!(ParseError::from(e)))?;

@@ -355,7 +355,7 @@ fn main() -> Result<(), Report> {
 
     // Pre-scan packets to find the last clock for accurate progress reporting.
     {
-        let mut scan_parser = wows_replays::packet2::Parser::new(&specs);
+        let mut scan_parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
         let mut scan_remaining = &replay_file.packet_data[..];
         let mut last_clock = wows_replays::types::GameClock(0.0);
         while !scan_remaining.is_empty() {
@@ -373,7 +373,7 @@ fn main() -> Result<(), Report> {
 
     let mut controller = BattleController::new(&replay_file.meta, &controller_game_params, Some(&game_constants));
 
-    let mut parser = wows_replays::packet2::Parser::new(&specs);
+    let mut parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
     let mut remaining = &replay_file.packet_data[..];
     let mut prev_clock = wows_replays::types::GameClock(0.0);
 

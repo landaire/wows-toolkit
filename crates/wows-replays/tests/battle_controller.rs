@@ -60,7 +60,7 @@ fn run_replay(filename: &str) -> (ReplayFile, BattleController<'static, 'static,
 
     let mut controller = BattleController::new(&replay.meta, game_params, Some(game_constants));
 
-    let mut parser = Parser::new(&resources.specs);
+    let mut parser = Parser::with_build(&resources.specs, version.build);
     let mut remaining = &replay.packet_data[..];
 
     while !remaining.is_empty() {
@@ -383,7 +383,7 @@ fn run_replay_report(filename: &str) -> (ReplayFile, BattleReport) {
 
     let mut controller = BattleController::new(&replay_leaked.meta, game_params, Some(game_constants));
 
-    let mut parser = Parser::new(&resources.specs);
+    let mut parser = Parser::with_build(&resources.specs, version.build);
     let mut remaining = &replay_leaked.packet_data[..];
 
     while !remaining.is_empty() {
@@ -518,7 +518,7 @@ fn collect_damage_stat_packets(filename: &str) -> Vec<Vec<wows_replays::analyzer
         .unwrap_or_else(|| panic!("game data for build {} not available", version.build));
     let resources = game_data::load_game_resources(&game_dir, &version).expect("should load game resources");
 
-    let mut parser = Parser::new(&resources.specs);
+    let mut parser = Parser::with_build(&resources.specs, version.build);
     let decoder = PacketDecoder::builder().version(version).build();
 
     let mut remaining = &replay.packet_data[..];

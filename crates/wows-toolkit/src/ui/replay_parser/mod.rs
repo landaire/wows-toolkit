@@ -2756,7 +2756,8 @@ impl Replay {
             self.resource_loader.as_ref(),
             self.game_constants.as_deref(),
         );
-        let mut p = wows_replays::packet2::Parser::new(self.resource_loader.entity_specs());
+        let replay_build = wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe).build;
+        let mut p = wows_replays::packet2::Parser::with_build(self.resource_loader.entity_specs(), replay_build);
 
         let mut remaining = &packet_data[..];
         while !remaining.is_empty() {

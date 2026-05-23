@@ -430,10 +430,34 @@ pub enum PacketTypeId {
     Unknown(u32),
 }
 
+/// First build using the modern BigWorld packet-ID layout where `BattleResults`
+/// occupies `0x22` and every packet at `0x23` and beyond shifted up by one slot
+/// from the legacy layout.
+///
+/// Determined empirically from per-version packet-ID histograms: build 6965290
+/// (12.3.1) is the latest known to use the legacy layout; build 7499736 (12.8.0)
+/// is the earliest known to use the modern layout. Picking 12.4.0 as the cutoff
+/// is the cleanest convention; revise if a replay between 12.3.1 and 12.4.0
+/// turns out to use the modern layout.
+pub const MODERN_PACKET_MAPPING_MIN_BUILD: u32 = 7062104;
+
 impl PacketTypeId {
-    /// Map a raw wire identifier to a `PacketTypeId`. Unrecognised values
+    /// Map a raw wire identifier to a `PacketTypeId` using the modern layout
+    /// (build >= [`MODERN_PACKET_MAPPING_MIN_BUILD`]). Unrecognised values
     /// become `Unknown(raw)`.
     pub fn from_raw(raw: u32) -> Self {
+        Self::from_raw_for_build(raw, u32::MAX)
+    }
+
+    /// Build-aware variant of [`Self::from_raw`]. Before
+    /// [`MODERN_PACKET_MAPPING_MIN_BUILD`] the wire layout had no `BattleResults`
+    /// packet and ran each subsequent ID one slot lower (0x22 was
+    /// NestedPropertyUpdate, 0x24 Camera, 0x27 Map, 0x2c PlayerOrientation, etc.).
+    pub fn from_raw_for_build(raw: u32, build: u32) -> Self {
+        if build >= MODERN_PACKET_MAPPING_MIN_BUILD { Self::from_raw_modern(raw) } else { Self::from_raw_legacy(raw) }
+    }
+
+    fn from_raw_modern(raw: u32) -> Self {
         match raw {
             0x00 => Self::BasePlayerCreate,
             0x26 => Self::BasePlayerCreateStub,
@@ -465,6 +489,40 @@ impl PacketTypeId {
             0x31 => Self::SubController,
             0x32 => Self::CruiseState,
             0x33 => Self::ShotTracking,
+            other => Self::Unknown(other),
+        }
+    }
+
+    fn from_raw_legacy(raw: u32) -> Self {
+        match raw {
+            0x00 => Self::BasePlayerCreate,
+            0x26 => Self::BasePlayerCreateStub,
+            0x01 => Self::CellPlayerCreate,
+            0x02 => Self::EntityControl,
+            0x03 => Self::EntityEnter,
+            0x04 => Self::EntityLeave,
+            0x05 => Self::EntityCreate,
+            0x07 => Self::EntityProperty,
+            0x08 => Self::EntityMethod,
+            0x0a => Self::Position,
+            0x0e => Self::ServerTick,
+            0x0f => Self::ServerTimestamp,
+            0x10 => Self::InitFlag,
+            0x13 => Self::InitMarker,
+            0x16 => Self::Version,
+            0x18 => Self::GunMarker,
+            0x1d => Self::PlayerNetStats,
+            0x20 => Self::OwnShip,
+            0x22 => Self::NestedPropertyUpdate,
+            0x24 => Self::Camera,
+            0x27 => Self::Map,
+            0x29 => Self::NonVolatilePosition,
+            0x2b => Self::PlayerOrientation,
+            0x2e => Self::CameraFreeLook,
+            0x2f => Self::SetWeaponLock,
+            0x30 => Self::SubController,
+            0x31 => Self::CruiseState,
+            0x32 => Self::ShotTracking,
             other => Self::Unknown(other),
         }
     }
@@ -575,11 +633,21 @@ pub struct RawPacket<'a> {
 /// stream it yields one `Err` and then stops.
 pub struct RawPacketIterator<'a> {
     remaining: &'a [u8],
+    build: u32,
 }
 
 impl<'a> RawPacketIterator<'a> {
+    /// Walk a packet stream assuming the modern packet-ID layout. For replays
+    /// from older builds, use [`Self::with_build`] so packet IDs dispatch
+    /// correctly across the protocol shift documented at
+    /// [`MODERN_PACKET_MAPPING_MIN_BUILD`].
     pub fn new(packet_data: &'a [u8]) -> Self {
-        Self { remaining: packet_data }
+        Self { remaining: packet_data, build: u32::MAX }
+    }
+
+    /// Walk a packet stream using the packet-ID layout that matches `build`.
+    pub fn with_build(packet_data: &'a [u8], build: u32) -> Self {
+        Self { remaining: packet_data, build }
     }
 }
 
@@ -590,9 +658,10 @@ impl<'a> Iterator for RawPacketIterator<'a> {
         if self.remaining.is_empty() {
             return None;
         }
+        let build = self.build;
         let result = (|| {
             let packet_size = le_u32.parse_next(&mut self.remaining)?;
-            let packet_type = PacketTypeId::from_raw(le_u32.parse_next(&mut self.remaining)?);
+            let packet_type = PacketTypeId::from_raw_for_build(le_u32.parse_next(&mut self.remaining)?, build);
             let raw_clock = le_f32.parse_next(&mut self.remaining)?;
             let payload = take(packet_size as usize).parse_next(&mut self.remaining)?;
             Ok(RawPacket { packet_size, packet_type, clock: GameClock(raw_clock), payload })
@@ -613,11 +682,21 @@ pub struct Entity<'argtype> {
 pub struct Parser<'argtype> {
     specs: &'argtype [EntitySpec],
     entities: HashMap<u32, Entity<'argtype>>,
+    build: u32,
 }
 
 impl<'argtype> Parser<'argtype> {
+    /// Build a parser assuming the modern packet-ID layout. Equivalent to
+    /// [`Self::with_build`] with `u32::MAX`; prefer that variant when the
+    /// replay's build is known so old replays dispatch correctly across the
+    /// protocol shift at [`MODERN_PACKET_MAPPING_MIN_BUILD`].
     pub fn new(entities: &'argtype [EntitySpec]) -> Parser<'argtype> {
-        Parser { specs: entities, entities: HashMap::new() }
+        Self::with_build(entities, u32::MAX)
+    }
+
+    /// Build a parser that dispatches packet IDs for the given build number.
+    pub fn with_build(entities: &'argtype [EntitySpec], build: u32) -> Parser<'argtype> {
+        Parser { specs: entities, entities: HashMap::new(), build }
     }
 
     fn parse_entity_property_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'argtype>> {
@@ -1219,7 +1298,7 @@ impl<'argtype> Parser<'argtype> {
 
     pub fn parse_packet<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<Packet<'a, 'b>> {
         let packet_size = le_u32.parse_next(i)?;
-        let packet_type = PacketTypeId::from_raw(le_u32.parse_next(i)?);
+        let packet_type = PacketTypeId::from_raw_for_build(le_u32.parse_next(i)?, self.build);
         let raw_clock = le_f32.parse_next(i)?;
         let clock = GameClock(raw_clock);
         let packet_data: &'a [u8] = take(packet_size as usize).parse_next(i)?;
