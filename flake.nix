@@ -23,7 +23,10 @@
       rustToolchainToml = fromTOML (builtins.readFile ./rust-toolchain.toml);
       inherit (rustToolchainToml.toolchain) channel components targets;
 
-      rustToolchain = pkgs.rust-bin.stable.${channel}.default.override {
+      # minimal (rustc + cargo + rust-std) keeps CI lean — the default profile
+      # pulls rust-docs (~140 MiB) on every fresh runner. The `components` list
+      # from rust-toolchain.toml (rustfmt, clippy) is added as extensions.
+      rustToolchain = pkgs.rust-bin.stable.${channel}.minimal.override {
         extensions = components;
         inherit targets;
       };
