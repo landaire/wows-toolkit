@@ -151,6 +151,8 @@ pub struct SavedRenderOptions {
     pub show_score_timer: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_stats_panel: bool,
+    #[serde(default = "default_bool::<true>")]
+    pub show_team_rosters: bool,
     /// Prefer CPU (software) encoder for video export instead of GPU hardware encoder.
     #[serde(default)]
     pub prefer_cpu_encoder: bool,
@@ -192,6 +194,7 @@ impl Default for SavedRenderOptions {
             show_advantage: true,
             show_score_timer: true,
             show_stats_panel: true,
+            show_team_rosters: true,
             prefer_cpu_encoder: false,
         }
     }

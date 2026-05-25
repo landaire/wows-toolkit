@@ -258,6 +258,7 @@ pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
         show_advantage: saved.show_advantage,
         show_score_timer: saved.show_score_timer,
         show_stats_panel: saved.show_stats_panel,
+        show_team_rosters: saved.show_team_rosters,
         // UI does its own per-ship filtering in the draw loop, so emit all circles
         ship_config_visibility: ShipConfigVisibility::Filtered(Arc::new(|_| Some(ShipConfigFilter::all_enabled()))),
     }
@@ -320,6 +321,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_advantage: opts.show_advantage,
         show_score_timer: opts.show_score_timer,
         show_stats_panel: opts.show_stats_panel,
+        show_team_rosters: opts.show_team_rosters,
         prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
     }
 }
@@ -1140,7 +1142,11 @@ impl ReplayRendererViewer {
                     });
                 }
 
-                let show_stats_panel = !status_is_loading && shared_state.lock().options.show_stats_panel;
+                let (show_stats_panel, show_team_rosters) = {
+                    let opts = &shared_state.lock().options;
+                    let loading = status_is_loading;
+                    (!loading && opts.show_stats_panel, !loading && opts.show_team_rosters)
+                };
 
                 egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
                     if status_is_loading {
@@ -1337,8 +1343,9 @@ impl ReplayRendererViewer {
                                 }
                             }
 
-                            // ── Stats panel (unzoomed, aligned to canvas) ──
-                            if show_stats_panel {
+                            // Stats panel + team rosters: both ride on `is_stats()` commands,
+                            // dispatched in a single unzoomed pass aligned to the canvas.
+                            if show_stats_panel || show_team_rosters {
                                 let stats_transform = MapTransform {
                                     origin: layout.origin,
                                     window_scale,
@@ -2593,6 +2600,7 @@ impl ReplayRendererViewer {
                                                     ui.checkbox(&mut opts.show_advantage, t!("ui.renderer.settings.team_advantage")).changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, t!("ui.renderer.settings.timer")).changed();
                                                 changed |= ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed();
+                                                changed |= ui.checkbox(&mut opts.show_team_rosters, "Team Rosters").changed();
                                             });
 
                                             // ── Export Settings ──

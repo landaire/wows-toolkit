@@ -129,6 +129,45 @@ pub struct ActiveConsumable {
     pub usage_params: Option<ConsumableUsageParams>,
 }
 
+/// Tracked state for one consumable slot on a ship.
+///
+/// Seeded externally (e.g. via `wows_replay_insights::build::seed_consumable_inventories`)
+/// after the controller is set up. The controller updates `charges_used` on
+/// each observed activation and stamps `active_until` for active timing.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConsumableInventory {
+    pub slot_index: u8,
+    /// Raw GameParams `consumableType` string. Used to match activation events
+    /// to the right slot.
+    pub consumable_type_raw: String,
+    pub consumable: Recognized<Consumable>,
+    /// Param index of the chosen Ability variant (e.g. `"PCY009_CrashCrewPremium"`).
+    /// Doubles as the icon-map key.
+    pub icon_key: String,
+    /// Maximum number of charges this slot can hold.
+    pub total_charges: wowsunpack::game_types::ChargeCount,
+    /// Activations the controller has observed since seeding.
+    pub charges_used: u32,
+    /// One activation's work duration, in seconds.
+    pub work_time: f32,
+    /// Cooldown between activations, in seconds.
+    pub reload_time: f32,
+    /// `Some(clock)` while a consumable is active. Cleared by renderers when
+    /// the current clock passes the activation expiry.
+    pub active_until: Option<GameClock>,
+    // Reload-remaining is deliberately not tracked here. Server-authoritative
+    // cooldown isn't broadcast, and several ships (Valparaiso, San Martin)
+    // refund consumables early via special abilities, which would silently
+    // desync any local cooldown estimate. Consumers display charges remaining
+    // instead and rely on the next activation packet to confirm readiness.
+}
+
+impl ConsumableInventory {
+    pub fn charges_remaining(&self) -> wowsunpack::game_types::ChargeCount {
+        self.total_charges.saturating_sub(self.charges_used)
+    }
+}
+
 /// A building/structure entity in the game.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct BuildingEntity {

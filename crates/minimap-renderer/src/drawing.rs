@@ -2462,6 +2462,21 @@ impl RenderTarget for ImageTarget {
                     }
                 }
             }
+            DrawCommand::TeamRoster { x, y, width, height, .. } => {
+                // CLI image rendering for team rosters is a stub: just draw the
+                // panel background so video export shows the layout placeholder.
+                // Full row contents (HP bars, consumables) land in a follow-up
+                // because they need text + icon support not present here yet.
+                draw_filled_rect(
+                    &mut self.canvas,
+                    *x as f32,
+                    *y as f32,
+                    *width as f32,
+                    *height as f32,
+                    [24, 28, 36],
+                    0.5,
+                );
+            }
         }
     }
 

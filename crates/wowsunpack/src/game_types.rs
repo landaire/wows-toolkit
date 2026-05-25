@@ -939,6 +939,56 @@ pub enum ConsumableUsageParams {
     Entity { target_type: i8, target_id: u64 },
 }
 
+/// Total available charges for a consumable slot.
+///
+/// `AbilityCategory::num_consumables` uses `-1` to mean "unlimited" (base
+/// Damage Control, for instance). [`from_game_params`] converts at the
+/// boundary so the sentinel never leaks past this type.
+///
+/// [`from_game_params`]: ChargeCount::from_game_params
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ChargeCount {
+    Unlimited,
+    Finite(u32),
+}
+
+impl ChargeCount {
+    pub fn from_game_params(num_consumables: isize) -> Self {
+        if num_consumables < 0 {
+            ChargeCount::Unlimited
+        } else {
+            ChargeCount::Finite(num_consumables as u32)
+        }
+    }
+
+    pub fn saturating_sub(self, used: u32) -> Self {
+        match self {
+            ChargeCount::Unlimited => ChargeCount::Unlimited,
+            ChargeCount::Finite(n) => ChargeCount::Finite(n.saturating_sub(used)),
+        }
+    }
+
+    pub fn saturating_add(self, extra: u32) -> Self {
+        match self {
+            ChargeCount::Unlimited => ChargeCount::Unlimited,
+            ChargeCount::Finite(n) => ChargeCount::Finite(n.saturating_add(extra)),
+        }
+    }
+
+    pub fn is_unlimited(self) -> bool {
+        matches!(self, ChargeCount::Unlimited)
+    }
+
+    pub fn finite(self) -> Option<u32> {
+        match self {
+            ChargeCount::Finite(n) => Some(n),
+            ChargeCount::Unlimited => None,
+        }
+    }
+}
+
 /// Consumable ability type, mapped from `consumableType` in GameParams.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

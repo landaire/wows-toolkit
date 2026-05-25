@@ -2025,7 +2025,132 @@ impl<'a> MinimapRenderer<'a> {
             });
         }
 
+        if self.options.show_team_rosters {
+            self.emit_team_rosters(controller, &mut commands);
+        }
+
         commands
+    }
+
+    fn emit_team_rosters(
+        &self,
+        controller: &dyn BattleControllerState,
+        commands: &mut Vec<DrawCommand>,
+    ) {
+        use crate::draw_command::ChargeCount as CmdChargeCount;
+        use crate::draw_command::RosterConsumable;
+        use crate::draw_command::RosterRow;
+        use crate::draw_command::RosterSide;
+
+        let dead = controller.dead_ships();
+        let active = controller.active_consumables();
+        let inventories = controller.consumable_inventories();
+        let clock = controller.clock();
+
+        let mut friendly: Vec<RosterRow> = Vec::new();
+        let mut enemy: Vec<RosterRow> = Vec::new();
+
+        for (entity_id, relation) in &self.player_relations {
+            let entity = match controller.entities_by_id().get(entity_id) {
+                Some(e) => e,
+                None => continue,
+            };
+            let v_ref = match entity.vehicle_ref() {
+                Some(v) => v,
+                None => continue,
+            };
+            let v = v_ref.borrow();
+
+            let hp_max = v.props().max_health();
+            let hp_current = v.props().health();
+            let is_dead = dead.get(entity_id).is_some() || (hp_max > 0.0 && hp_current <= 0.0);
+
+            let player_name = self.player_names.get(entity_id).cloned().unwrap_or_default();
+            let clan_tag = self.player_clan_tags.get(entity_id).cloned();
+            let clan_color = self.player_clan_colors.get(entity_id).copied().flatten();
+            let ship_name = self.ship_display_names.get(entity_id).cloned().unwrap_or_default();
+            let ship_param_id = self.ship_param_ids.get(entity_id).copied();
+            let is_self = relation.is_self();
+
+            let consumables: Vec<RosterConsumable> = inventories
+                .get(entity_id)
+                .map(|slots| {
+                    slots
+                        .iter()
+                        .map(|slot| {
+                            let active_remaining_secs = active
+                                .get(entity_id)
+                                .and_then(|list| {
+                                    list.iter()
+                                        .filter(|a| a.consumable.known() == slot.consumable.known())
+                                        .map(|a| a.activated_at.0 + a.duration - clock.0)
+                                        .find(|remaining| *remaining > 0.0)
+                                });
+                            RosterConsumable {
+                                icon_key: slot.icon_key.clone(),
+                                tooltip_name: format!("{:?}", slot.consumable.known()),
+                                total_charges: CmdChargeCount::from(slot.total_charges),
+                                charges_used: slot.charges_used,
+                                active_remaining_secs,
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let row = RosterRow {
+                player_name,
+                clan_tag,
+                clan_color,
+                ship_name,
+                ship_param_id,
+                hp_current,
+                hp_max,
+                is_dead,
+                is_self,
+                consumables,
+            };
+
+            if relation.is_enemy() {
+                enemy.push(row);
+            } else {
+                friendly.push(row);
+            }
+        }
+
+        let sort_key = |row: &RosterRow| {
+            (
+                row.is_dead,
+                row.ship_param_id.map(|id| id.raw()).unwrap_or(0),
+                row.player_name.clone(),
+            )
+        };
+        friendly.sort_by_key(sort_key);
+        enemy.sort_by_key(sort_key);
+
+        let roster_w = crate::TEAM_ROSTER_WIDTH as i32;
+        let roster_h = MINIMAP_SIZE as i32 - 16;
+        let roster_y = HUD_HEIGHT as i32 + 8;
+        if !friendly.is_empty() {
+            commands.push(DrawCommand::TeamRoster {
+                side: RosterSide::Friendly,
+                x: 8,
+                y: roster_y,
+                width: roster_w,
+                height: roster_h,
+                rows: friendly,
+            });
+        }
+        if !enemy.is_empty() {
+            commands.push(DrawCommand::TeamRoster {
+                side: RosterSide::Enemy,
+                x: MINIMAP_SIZE as i32 - roster_w - 8,
+                y: roster_y,
+                width: roster_w,
+                height: roster_h,
+                rows: enemy,
+            });
+        }
     }
 }
 

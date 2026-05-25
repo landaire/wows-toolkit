@@ -58,6 +58,7 @@ use crate::types::WorldPos;
 
 use super::listener::BattleControllerState;
 use super::state::ActiveConsumable;
+use super::state::ConsumableInventory;
 use super::state::ActivePlane;
 use super::state::ActiveShot;
 use super::state::ActiveTorpedo;
@@ -606,6 +607,10 @@ pub struct BattleController<'res, 'replay, G> {
     captured_buffs: Vec<CapturedBuff>,
     team_scores: Vec<TeamScore>,
     active_consumables: HashMap<EntityId, Vec<ActiveConsumable>>,
+    /// Per-entity tracked consumable slots. Seeded externally
+    /// (see `wows_replay_insights::build::seed_consumable_inventories`)
+    /// once the entity's ship_config is known. Empty until then.
+    consumable_inventories: HashMap<EntityId, Vec<ConsumableInventory>>,
     active_shots: Vec<ActiveShot>,
     active_torpedoes: Vec<ActiveTorpedo>,
     /// Resolved projectile hits matched to their originating salvos.
@@ -722,6 +727,7 @@ where
             captured_buffs: Vec::new(),
             team_scores: Vec::new(),
             active_consumables: HashMap::default(),
+            consumable_inventories: HashMap::default(),
             active_shots: Vec::new(),
             active_torpedoes: Vec::new(),
             shot_hits: Vec::new(),
@@ -768,6 +774,11 @@ where
         self.captured_buffs.clear();
         self.team_scores.clear();
         self.active_consumables.clear();
+        // Inventories are seeded externally; reset_inventories() handles
+        // re-seeding so we deliberately don't clear here on every reset.
+        // Callers that need a clean slate (e.g. switching replays) must call
+        // clear_consumable_inventories explicitly.
+        self.reset_consumable_inventory_state();
         self.active_shots.clear();
         self.active_torpedoes.clear();
         self.shot_hits.clear();
@@ -791,6 +802,34 @@ where
     /// Saves memory and CPU during passes that don't need shot data.
     pub fn set_track_shots(&mut self, enabled: bool) {
         self.track_shots = enabled;
+    }
+
+    /// Replace the consumable inventory for one entity. Existing entry (if any)
+    /// is overwritten. Pass an empty Vec to remove tracking for that entity.
+    pub fn set_consumable_inventory(&mut self, entity: EntityId, inventory: Vec<ConsumableInventory>) {
+        if inventory.is_empty() {
+            self.consumable_inventories.remove(&entity);
+        } else {
+            self.consumable_inventories.insert(entity, inventory);
+        }
+    }
+
+    /// Drop all inventories (e.g. when loading a new replay).
+    pub fn clear_consumable_inventories(&mut self) {
+        self.consumable_inventories.clear();
+    }
+
+    /// Zero per-inventory counters without dropping the inventories themselves.
+    /// Called from `reset()` since a seek replays packets from the start; the
+    /// shape of each ship's slots doesn't change but the per-activation state
+    /// must be rebuilt.
+    fn reset_consumable_inventory_state(&mut self) {
+        for slots in self.consumable_inventories.values_mut() {
+            for slot in slots.iter_mut() {
+                slot.charges_used = 0;
+                slot.active_until = None;
+            }
+        }
     }
 
     pub fn players(&self) -> &[SharedPlayer] {
@@ -2559,6 +2598,10 @@ where
         &self.active_consumables
     }
 
+    fn consumable_inventories(&self) -> &HashMap<EntityId, Vec<ConsumableInventory>> {
+        &self.consumable_inventories
+    }
+
     fn active_shots(&self) -> &[ActiveShot] {
         &self.active_shots
     }
@@ -3087,11 +3130,18 @@ where
                 usage_params,
             } => {
                 self.active_consumables.entry(entity).or_default().push(ActiveConsumable {
-                    consumable,
+                    consumable: consumable.clone(),
                     activated_at: packet.clock,
                     duration,
                     usage_params,
                 });
+
+                if let Some(inv) = self.consumable_inventories.get_mut(&entity)
+                    && let Some(slot) = pick_inventory_slot(inv, &consumable)
+                {
+                    slot.charges_used = slot.charges_used.saturating_add(1);
+                    slot.active_until = Some(GameClock(packet.clock.0 + duration));
+                }
             }
             crate::analyzer::decoder::DecodedPacketPayload::ArtilleryShots { avatar_id, salvos } => {
                 if self.track_shots {
@@ -3387,4 +3437,22 @@ where
     }
 
     fn finish(&mut self) {}
+}
+
+/// Pick the inventory slot to charge for a `Consumable` activation event.
+///
+/// Matches on the typed `Consumable` enum and falls back to the first slot
+/// with charges remaining when several slots carry the same type (rare:
+/// only certain CV setups have duplicate consumable types).
+fn pick_inventory_slot<'a>(
+    inv: &'a mut [ConsumableInventory],
+    consumable: &wowsunpack::recognized::Recognized<wowsunpack::game_types::Consumable>,
+) -> Option<&'a mut ConsumableInventory> {
+    inv.iter_mut().find(|slot| {
+        slot.consumable.known() == consumable.known()
+            && match slot.charges_remaining() {
+                wowsunpack::game_types::ChargeCount::Unlimited => true,
+                wowsunpack::game_types::ChargeCount::Finite(n) => n > 0,
+            }
+    })
 }

@@ -435,6 +435,11 @@ pub(super) fn playback_thread(
         live_clock = outcome.final_clock;
         populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
+        wows_replay_insights::build::seed_consumable_inventories(
+            live_session.controller_mut(),
+            &*game_metadata,
+            version,
+        );
     }
 
     /// Per-bridge staging area used during `parse_to_clock` to collect shot hits
@@ -740,6 +745,11 @@ pub(super) fn playback_thread(
             if !outcome.cancelled {
                 populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
                 finalize_bridge_staging(&armor_bridges, staging, true);
+                wows_replay_insights::build::seed_consumable_inventories(
+                    live_session.controller_mut(),
+                    &*game_metadata,
+                    version,
+                );
             }
             !outcome.cancelled
         }};

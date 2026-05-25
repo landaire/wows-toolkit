@@ -5,54 +5,7 @@ use wowsunpack::game_params::types::Param;
 use wowsunpack::game_types::Consumable;
 use wowsunpack::recognized::Recognized;
 
-/// Total available charges for a consumable slot.
-///
-/// `AbilityCategory::num_consumables` uses `-1` to mean "unlimited" (e.g. base
-/// Damage Control). [`from_game_params`] converts at the boundary so the
-/// sentinel never leaks past this type.
-///
-/// [`from_game_params`]: ChargeCount::from_game_params
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ChargeCount {
-    Unlimited,
-    Finite(u32),
-}
-
-impl ChargeCount {
-    pub fn from_game_params(num_consumables: isize) -> Self {
-        if num_consumables < 0 {
-            ChargeCount::Unlimited
-        } else {
-            ChargeCount::Finite(num_consumables as u32)
-        }
-    }
-
-    pub fn saturating_sub(self, used: u32) -> Self {
-        match self {
-            ChargeCount::Unlimited => ChargeCount::Unlimited,
-            ChargeCount::Finite(n) => ChargeCount::Finite(n.saturating_sub(used)),
-        }
-    }
-
-    pub fn saturating_add(self, extra: u32) -> Self {
-        match self {
-            ChargeCount::Unlimited => ChargeCount::Unlimited,
-            ChargeCount::Finite(n) => ChargeCount::Finite(n.saturating_add(extra)),
-        }
-    }
-
-    pub fn is_unlimited(self) -> bool {
-        matches!(self, ChargeCount::Unlimited)
-    }
-
-    pub fn finite(self) -> Option<u32> {
-        match self {
-            ChargeCount::Finite(n) => Some(n),
-            ChargeCount::Unlimited => None,
-        }
-    }
-}
+pub use wowsunpack::game_types::ChargeCount;
 
 #[derive(Debug, Clone)]
 pub struct ConsumableSlot {
@@ -62,6 +15,9 @@ pub struct ConsumableSlot {
     /// which `AbilityCategory` is in effect for this slot.
     pub variant_name: String,
     pub consumable_type: Recognized<Consumable>,
+    /// Raw GameParams `consumableType` string (e.g. `"crashCrew"`). Used as a
+    /// stable key for matching activation events to slots.
+    pub consumable_type_raw: String,
     pub base_charges: ChargeCount,
     /// Additive bonus from build modifiers (currently only `additionalConsumables`).
     pub bonus_charges: u32,

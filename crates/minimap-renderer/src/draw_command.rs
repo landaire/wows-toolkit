@@ -582,6 +582,85 @@ pub enum DrawCommand {
     StatsRibbons { x: i32, y: i32, width: i32, ribbons: Vec<RibbonCount> },
     /// Merged kill feed + chat activity log in the stats panel
     StatsActivityFeed { x: i32, y: i32, width: i32, height: i32, entries: Vec<ActivityFeedEntry> },
+    /// Per-team roster panel: list of ships with HP, name, and consumable slots.
+    /// Positioned in a gutter beside the map (left or right depending on `side`).
+    TeamRoster {
+        side: RosterSide,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        rows: Vec<RosterRow>,
+    },
+}
+
+/// Which gutter a [`DrawCommand::TeamRoster`] sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum RosterSide {
+    /// Player's own team (rendered left of the map in the default layout).
+    Friendly,
+    /// Opposing team (rendered right of the map).
+    Enemy,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RosterRow {
+    pub player_name: String,
+    pub clan_tag: Option<String>,
+    pub clan_color: Option<[u8; 3]>,
+    pub ship_name: String,
+    pub ship_param_id: Option<GameParamId>,
+    pub hp_current: f32,
+    pub hp_max: f32,
+    pub is_dead: bool,
+    /// Highlight this row (player's own ship, or own division-mate).
+    pub is_self: bool,
+    pub consumables: Vec<RosterConsumable>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct RosterConsumable {
+    /// Lookup key in the consumable icon map (Ability param index, e.g.
+    /// `"PCY009_CrashCrewPremium"`).
+    pub icon_key: String,
+    /// Display name for tooltips.
+    pub tooltip_name: String,
+    pub total_charges: ChargeCount,
+    pub charges_used: u32,
+    /// Seconds of activation remaining, or `None` when not active.
+    pub active_remaining_secs: Option<f32>,
+}
+
+/// Mirror of `wowsunpack::game_types::ChargeCount` for the draw command
+/// layer. Kept local so this crate avoids a full wowsunpack dep when
+/// built with `rendering` off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum ChargeCount {
+    Unlimited,
+    Finite(u32),
+}
+
+impl ChargeCount {
+    pub fn remaining(self, used: u32) -> Self {
+        match self {
+            Self::Unlimited => Self::Unlimited,
+            Self::Finite(n) => Self::Finite(n.saturating_sub(used)),
+        }
+    }
+}
+
+#[cfg(feature = "rendering")]
+impl From<wowsunpack::game_types::ChargeCount> for ChargeCount {
+    fn from(value: wowsunpack::game_types::ChargeCount) -> Self {
+        match value {
+            wowsunpack::game_types::ChargeCount::Unlimited => Self::Unlimited,
+            wowsunpack::game_types::ChargeCount::Finite(n) => Self::Finite(n),
+        }
+    }
 }
 
 impl DrawCommand {
@@ -603,6 +682,7 @@ impl DrawCommand {
                 | Self::StatsDamage { .. }
                 | Self::StatsRibbons { .. }
                 | Self::StatsActivityFeed { .. }
+                | Self::TeamRoster { .. }
         )
     }
 
@@ -616,6 +696,7 @@ impl DrawCommand {
                 | Self::StatsDamage { .. }
                 | Self::StatsRibbons { .. }
                 | Self::StatsActivityFeed { .. }
+                | Self::TeamRoster { .. }
         )
     }
 }

@@ -171,6 +171,7 @@ fn resolve_slots<P: GameParamProvider>(
             ability: Rc::clone(&ability_param),
             variant_name,
             consumable_type: category.consumable_type(version),
+            consumable_type_raw: consumable_type_raw.to_owned(),
             base_charges,
             bonus_charges: bonus_for_slot,
             total_charges,

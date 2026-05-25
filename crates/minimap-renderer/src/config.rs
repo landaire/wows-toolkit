@@ -33,6 +33,7 @@ pub struct RenderOptions {
     pub show_advantage: bool,
     pub show_score_timer: bool,
     pub show_stats_panel: bool,
+    pub show_team_rosters: bool,
     /// Controls which ships have their config circles rendered when show_ship_config is true.
     /// Defaults to SelfOnly (only the replay owner's circles).
     pub ship_config_visibility: ShipConfigVisibility,
@@ -68,6 +69,7 @@ impl Default for RenderOptions {
             show_advantage: true,
             show_score_timer: true,
             show_stats_panel: true,
+            show_team_rosters: true,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }
@@ -197,6 +199,7 @@ impl RendererConfig {
             show_advantage: true,
             show_score_timer: true,
             show_stats_panel: self.show_stats_panel,
+            show_team_rosters: true,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }

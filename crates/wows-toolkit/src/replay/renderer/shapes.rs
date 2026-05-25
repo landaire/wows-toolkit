@@ -73,6 +73,7 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         | DrawCommand::StatsDamage { .. }
         | DrawCommand::StatsRibbons { .. }
         | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
+        DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
     }
 }
 

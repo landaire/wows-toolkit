@@ -21,6 +21,7 @@ use super::controller::GameMessage;
 use super::controller::Player;
 use super::controller::SharedPlayer;
 use super::state::ActiveConsumable;
+use super::state::ConsumableInventory;
 use super::state::ActivePlane;
 use super::state::ActiveShot;
 use super::state::ActiveTorpedo;
@@ -80,6 +81,11 @@ pub trait BattleControllerState {
 
     /// Active consumables per entity
     fn active_consumables(&self) -> &HashMap<EntityId, Vec<ActiveConsumable>>;
+
+    /// Per-entity consumable slot inventories. Empty for entities whose
+    /// inventory hasn't been seeded yet (see
+    /// `wows_replay_insights::build::seed_consumable_inventories`).
+    fn consumable_inventories(&self) -> &HashMap<EntityId, Vec<ConsumableInventory>>;
 
     /// Active artillery salvos in flight
     fn active_shots(&self) -> &[ActiveShot];

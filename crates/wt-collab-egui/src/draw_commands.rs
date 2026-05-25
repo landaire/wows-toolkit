@@ -1817,6 +1817,251 @@ pub fn draw_command_to_shapes(
             // Add feed content to output shapes
             shapes.extend(feed_shapes);
         }
+
+        DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
+            use wows_minimap_renderer::draw_command::ChargeCount as RosterCharge;
+            use wows_minimap_renderer::draw_command::RosterSide;
+
+            let origin = transform.hud_pos(*x as f32, *y as f32);
+            let panel_size = Vec2::new(*width as f32 * ws, *height as f32 * ws);
+            let panel_rect = Rect::from_min_size(origin, panel_size);
+
+            shapes.push(Shape::rect_filled(
+                panel_rect,
+                CornerRadius::same(2),
+                Color32::from_rgba_unmultiplied(20, 24, 32, 200),
+            ));
+            let accent = match side {
+                RosterSide::Friendly => Color32::from_rgb(80, 200, 120),
+                RosterSide::Enemy => Color32::from_rgb(220, 90, 90),
+            };
+            shapes.push(Shape::LineSegment {
+                points: [
+                    Pos2::new(origin.x, origin.y),
+                    Pos2::new(origin.x + panel_size.x, origin.y),
+                ],
+                stroke: Stroke::new(ws * 1.5, accent),
+            });
+
+            let row_height = 56.0 * ws;
+            let row_padding = 6.0 * ws;
+            let inner_x = origin.x + row_padding;
+            let inner_w = panel_size.x - row_padding * 2.0;
+            let name_font = game_font(13.0 * ws);
+            let ship_font = game_font(11.0 * ws);
+            let hp_font = game_font(10.0 * ws);
+            let charges_font = game_font(9.0 * ws);
+
+            for (idx, row) in rows.iter().enumerate() {
+                let row_top = origin.y + idx as f32 * row_height + row_padding;
+                if row_top + row_height > origin.y + panel_size.y {
+                    break;
+                }
+                let row_rect = Rect::from_min_size(
+                    Pos2::new(inner_x, row_top),
+                    Vec2::new(inner_w, row_height - row_padding),
+                );
+
+                if row.is_self {
+                    shapes.push(Shape::rect_filled(
+                        row_rect,
+                        CornerRadius::same(1),
+                        Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+                    ));
+                }
+                if row.is_dead {
+                    shapes.push(Shape::rect_filled(
+                        row_rect,
+                        CornerRadius::same(1),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+                    ));
+                }
+
+                let header_text = match (&row.clan_tag, row.is_self) {
+                    (Some(tag), true) => format!("[{tag}] {} (you)", row.player_name),
+                    (Some(tag), false) => format!("[{tag}] {}", row.player_name),
+                    (None, true) => format!("{} (you)", row.player_name),
+                    (None, false) => row.player_name.clone(),
+                };
+                let header_color = if row.is_dead {
+                    Color32::from_rgba_unmultiplied(180, 180, 180, 180)
+                } else {
+                    Color32::WHITE
+                };
+                let header_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &header_text,
+                        0.0,
+                        egui::TextFormat { font_id: name_font.clone(), color: header_color, ..Default::default() },
+                    );
+                    f.layout_job(job)
+                });
+                shapes.push(Shape::galley(
+                    Pos2::new(inner_x, row_top),
+                    header_galley,
+                    Color32::TRANSPARENT,
+                ));
+
+                let ship_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &row.ship_name,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: ship_font.clone(),
+                            color: Color32::from_rgba_unmultiplied(200, 200, 200, 220),
+                            ..Default::default()
+                        },
+                    );
+                    f.layout_job(job)
+                });
+                shapes.push(Shape::galley(
+                    Pos2::new(inner_x, row_top + 14.0 * ws),
+                    ship_galley,
+                    Color32::TRANSPARENT,
+                ));
+
+                let hp_bar_y = row_top + 28.0 * ws;
+                let hp_bar_h = 6.0 * ws;
+                let hp_bar_rect = Rect::from_min_size(
+                    Pos2::new(inner_x, hp_bar_y),
+                    Vec2::new(inner_w, hp_bar_h),
+                );
+                shapes.push(Shape::rect_filled(
+                    hp_bar_rect,
+                    CornerRadius::same(1),
+                    Color32::from_rgba_unmultiplied(50, 50, 50, 200),
+                ));
+                if row.hp_max > 0.0 && !row.is_dead {
+                    let fill_ratio = (row.hp_current / row.hp_max).clamp(0.0, 1.0);
+                    let fill_rect = Rect::from_min_size(
+                        Pos2::new(inner_x, hp_bar_y),
+                        Vec2::new(inner_w * fill_ratio, hp_bar_h),
+                    );
+                    let fill_color = if fill_ratio > 0.66 {
+                        Color32::from_rgb(80, 180, 90)
+                    } else if fill_ratio > 0.33 {
+                        Color32::from_rgb(220, 180, 70)
+                    } else {
+                        Color32::from_rgb(220, 90, 90)
+                    };
+                    shapes.push(Shape::rect_filled(fill_rect, CornerRadius::same(1), fill_color));
+                }
+
+                let hp_text = if row.is_dead {
+                    String::from("dead")
+                } else {
+                    format!("{:.0}/{:.0}", row.hp_current.max(0.0), row.hp_max)
+                };
+                let hp_galley = ctx.fonts_mut(|f| {
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        &hp_text,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: hp_font.clone(),
+                            color: Color32::from_rgba_unmultiplied(220, 220, 220, 220),
+                            ..Default::default()
+                        },
+                    );
+                    f.layout_job(job)
+                });
+                let hp_galley_size = hp_galley.size();
+                shapes.push(Shape::galley(
+                    Pos2::new(inner_x + inner_w - hp_galley_size.x, row_top + 12.0 * ws),
+                    hp_galley,
+                    Color32::TRANSPARENT,
+                ));
+
+                if !row.consumables.is_empty()
+                    && let Some(icons) = textures.consumable_icons
+                {
+                    let icon_size = 18.0 * ws;
+                    let gap = 3.0 * ws;
+                    let total_w = row.consumables.len() as f32 * icon_size + (row.consumables.len() as f32 - 1.0).max(0.0) * gap;
+                    let strip_x = inner_x;
+                    let strip_y = row_top + 38.0 * ws;
+                    let _ = total_w;
+                    for (i, cons) in row.consumables.iter().enumerate() {
+                        let icon_x = strip_x + i as f32 * (icon_size + gap);
+                        let icon_rect = Rect::from_min_size(
+                            Pos2::new(icon_x, strip_y),
+                            Vec2::new(icon_size, icon_size),
+                        );
+                        let charges_remaining = cons.total_charges.remaining(cons.charges_used);
+                        let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
+                        let is_active = cons.active_remaining_secs.is_some();
+
+                        if let Some(tex) = icons.get(&cons.icon_key) {
+                            let tint = if row.is_dead || is_exhausted {
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 90)
+                            } else if is_active {
+                                Color32::WHITE
+                            } else {
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 220)
+                            };
+                            let mut mesh = egui::Mesh::with_texture(tex.id());
+                            mesh.add_rect_with_uv(
+                                icon_rect,
+                                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                                tint,
+                            );
+                            shapes.push(Shape::mesh(std::sync::Arc::new(mesh)));
+                        } else {
+                            shapes.push(Shape::rect_filled(
+                                icon_rect,
+                                CornerRadius::same(1),
+                                Color32::from_rgba_unmultiplied(60, 60, 60, 180),
+                            ));
+                        }
+
+                        if is_active {
+                            shapes.push(Shape::rect_stroke(
+                                icon_rect,
+                                CornerRadius::same(1),
+                                Stroke::new(ws * 1.5, Color32::from_rgb(255, 220, 80)),
+                                egui::StrokeKind::Outside,
+                            ));
+                        }
+
+                        let label_text = if let Some(sec) = cons.active_remaining_secs {
+                            format!("{:.0}s", sec.max(0.0))
+                        } else {
+                            match charges_remaining {
+                                RosterCharge::Unlimited => String::from("inf"),
+                                RosterCharge::Finite(n) => match cons.total_charges {
+                                    RosterCharge::Unlimited => String::from("inf"),
+                                    RosterCharge::Finite(t) => format!("{n}/{t}"),
+                                },
+                            }
+                        };
+                        let label_color = if is_exhausted {
+                            Color32::from_rgb(220, 90, 90)
+                        } else if is_active {
+                            Color32::from_rgb(255, 220, 80)
+                        } else {
+                            Color32::from_rgba_unmultiplied(220, 220, 220, 220)
+                        };
+                        let label_galley = ctx.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                &label_text,
+                                0.0,
+                                egui::TextFormat { font_id: charges_font.clone(), color: label_color, ..Default::default() },
+                            );
+                            f.layout_job(job)
+                        });
+                        let label_size = label_galley.size();
+                        shapes.push(Shape::galley(
+                            Pos2::new(icon_x + (icon_size - label_size.x) * 0.5, strip_y + icon_size + 1.0 * ws),
+                            label_galley,
+                            Color32::TRANSPARENT,
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     shapes

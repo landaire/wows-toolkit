@@ -24,6 +24,8 @@ pub const HUD_HEIGHT: u32 = 32;
 pub const CANVAS_HEIGHT: u32 = MINIMAP_SIZE + HUD_HEIGHT;
 /// Width of the stats side panel when enabled.
 pub const STATS_PANEL_WIDTH: u32 = 280;
+/// Width of each team roster panel (left/right of the minimap) when enabled.
+pub const TEAM_ROSTER_WIDTH: u32 = 240;
 
 #[cfg(feature = "rendering")]
 pub use assets::GameFonts;
