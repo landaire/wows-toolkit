@@ -585,6 +585,13 @@ pub(super) fn playback_thread(
         hit_cursor: &mut usize,
         cancel: &AtomicBool,
     ) -> GameClock {
+        // Discard any stale cancel signal from before this call. The UI sets
+        // `cancel = true` preemptively when it sends a Seek so an in-progress
+        // step bails; if no step is running, that signal sits around and
+        // would cause the *next* step to bail on its first iteration without
+        // doing any work.
+        cancel.store(false, Ordering::Relaxed);
+
         loop {
             if cancel.swap(false, Ordering::Relaxed) {
                 return prev_clock;

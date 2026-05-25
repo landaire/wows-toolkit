@@ -2772,6 +2772,11 @@ impl Replay {
 
         let replay_version = wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
 
+        tracing::info!(
+            primary = %self.replay_file.meta.playerName,
+            alt_count = self.alt_replays.len(),
+            "Replay::parse"
+        );
         if self.alt_replays.is_empty() {
             // Single-replay fast path — no merger involved.
             let mut controller = BattleController::new(
@@ -2929,7 +2934,13 @@ impl ToolkitTabViewer<'_> {
         table.show(ui, ui_report);
     }
 
-    fn build_replay_view(&self, replay_file: &mut Replay, ui: &mut egui::Ui, metadata_provider: &GameMetadataProvider) {
+    fn build_replay_view(
+        &self,
+        replay_file: &mut Replay,
+        replay_weak: &Weak<RwLock<Replay>>,
+        ui: &mut egui::Ui,
+        metadata_provider: &GameMetadataProvider,
+    ) {
         // little hack because of borrowing issues
         let mut hide_my_stats = false;
         let mut hide_my_stats_changed = false;
@@ -3223,7 +3234,7 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                self.render_load_alt_perspective_button(ui, &*replay_file);
+                self.render_load_alt_perspective_button(ui, &*replay_file, replay_weak);
 
                 if self.tab_state.wows_data_map.is_some()
                     && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
@@ -3626,7 +3637,12 @@ impl ToolkitTabViewer<'_> {
     /// current Replay are stashed in egui's transient store for
     /// [`handle_replay_open_actions`] to pick up — that handler takes the
     /// write lock, appends to `alt_replays`, and dispatches the re-parse.
-    fn render_load_alt_perspective_button(&self, ui: &mut egui::Ui, replay_file: &Replay) {
+    fn render_load_alt_perspective_button(
+        &self,
+        ui: &mut egui::Ui,
+        replay_file: &Replay,
+        replay_weak: &Weak<RwLock<Replay>>,
+    ) {
         let merge_count = replay_file.alt_replays.len();
         let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
         if merge_count > 0 {
@@ -3682,13 +3698,14 @@ impl ToolkitTabViewer<'_> {
         // we can't push to alt_replays or call `deps.load_replay` without
         // first releasing the calling write guard. The outer scope retrieves
         // the alt + Weak, upgrades, takes its own write lock, and re-parses.
-        if let Some(focused) = self.tab_state.focused_replay() {
-            let weak = Arc::downgrade(&focused);
-            let alt_arc = std::sync::Arc::new(alt);
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(egui::Id::new("alt_perspective_pending"), PendingAltReparse(Some((weak, alt_arc))));
-            });
-        }
+        tracing::info!(player = %alt.meta.playerName, "alt-perspective validated; staging for re-parse");
+        let alt_arc = std::sync::Arc::new(alt);
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("alt_perspective_pending"),
+                PendingAltReparse(Some((replay_weak.clone(), alt_arc))),
+            );
+        });
     }
 
     /// Check for "Open in New Tab" from context menu, then open replays in the appropriate tab.
@@ -3722,12 +3739,19 @@ impl ToolkitTabViewer<'_> {
             // reference, clone the inner instead. Either way, the alt
             // lands in `alt_replays` as an owned ReplayFile.
             let alt = std::sync::Arc::try_unwrap(alt_arc).unwrap_or_else(|a| (*a).clone());
-            arc.write().alt_replays.push(alt);
+            let player = alt.meta.playerName.clone();
+            let mut guard = arc.write();
+            guard.alt_replays.push(alt);
+            let count = guard.alt_replays.len();
+            drop(guard);
+            tracing::info!(player = %player, alt_count = count, "pushed alt-perspective; triggering re-parse");
             if let Some(deps) = self.tab_state.replay_dependencies() {
                 update_background_task!(
                     self.tab_state.background_tasks,
                     deps.load_replay(arc, ReplaySource::ManualOpen)
                 );
+            } else {
+                tracing::warn!("alt-perspective re-parse: no replay dependencies available");
             }
         }
 
@@ -4840,8 +4864,9 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         let viewer = ToolkitTabViewer { tab_state: self.tab_state };
         let metadata_provider = viewer.metadata_provider().expect("no metadata provider?");
+        let replay_weak = Arc::downgrade(&tab.replay);
         let mut replay = tab.replay.write();
-        viewer.build_replay_view(&mut replay, ui, metadata_provider.as_ref());
+        viewer.build_replay_view(&mut replay, &replay_weak, ui, metadata_provider.as_ref());
     }
 
     fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
