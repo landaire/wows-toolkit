@@ -422,7 +422,7 @@ pub(super) fn playback_thread(
     if !frame_snapshots.is_empty() {
         let armor_bridges = shared_state.lock().armor_bridges.clone();
         let mut staging = init_bridge_staging(&armor_bridges);
-        live_clock = step_session_to_clock(
+        let outcome = step_session_to_clock(
             &mut live_session,
             &mut live_renderer,
             live_clock,
@@ -432,6 +432,7 @@ pub(super) fn playback_thread(
             &mut hit_cursor,
             &cancel_step,
         );
+        live_clock = outcome.final_clock;
         populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
     }
@@ -567,14 +568,25 @@ pub(super) fn playback_thread(
         }
     }
 
+    /// Outcome of a [`step_session_to_clock`] call.
+    struct StepOutcome {
+        final_clock: GameClock,
+        /// `true` if the loop bailed because `cancel` was set, meaning the
+        /// session is parked at an intermediate clock. Callers should NOT
+        /// publish this state to the viewport — render output reflects a
+        /// stale seek the user has already moved past.
+        cancelled: bool,
+    }
+
     /// Drive `session` forward via [`MergedReplays::step`] until its safe
     /// clock reaches `target_clock`. Feeds the rendered state into
     /// `renderer` at each clock boundary and harvests new shot hits into
-    /// the per-bridge staging vecs. Returns the last observed clock value.
+    /// the per-bridge staging vecs.
     ///
     /// Checks `cancel` on every step and returns early if it's been set.
     /// The flag is reset to `false` before returning so subsequent calls
-    /// start with a clean slate.
+    /// start with a clean slate. The returned [`StepOutcome::cancelled`]
+    /// flag lets the caller decide whether to publish a frame.
     fn step_session_to_clock(
         session: &mut MergedReplays<'_, '_, '_, GameMetadataProvider>,
         renderer: &mut MinimapRenderer<'_>,
@@ -584,7 +596,7 @@ pub(super) fn playback_thread(
         staging: &mut [BridgeStaging],
         hit_cursor: &mut usize,
         cancel: &AtomicBool,
-    ) -> GameClock {
+    ) -> StepOutcome {
         // Discard any stale cancel signal from before this call. The UI sets
         // `cancel = true` preemptively when it sends a Seek so an in-progress
         // step bails; if no step is running, that signal sits around and
@@ -592,9 +604,11 @@ pub(super) fn playback_thread(
         // doing any work.
         cancel.store(false, Ordering::Relaxed);
 
+        let mut cancelled = false;
         loop {
             if cancel.swap(false, Ordering::Relaxed) {
-                return prev_clock;
+                cancelled = true;
+                break;
             }
             let step = match session.step() {
                 Ok(Some(c)) => c,
@@ -635,12 +649,14 @@ pub(super) fn playback_thread(
         // between the last check and now doesn't cancel the next step.
         cancel.store(false, Ordering::Relaxed);
 
-        let controller = session.controller();
-        renderer.populate_players(controller);
-        renderer.update_squadron_info(controller);
-        renderer.update_ship_abilities(controller);
+        if !cancelled {
+            let controller = session.controller();
+            renderer.populate_players(controller);
+            renderer.update_squadron_info(controller);
+            renderer.update_ship_abilities(controller);
+        }
 
-        prev_clock
+        StepOutcome { final_clock: prev_clock, cancelled }
     }
 
     // Request a repaint of the viewport from the background thread.
@@ -678,6 +694,11 @@ pub(super) fn playback_thread(
     /// `$target_clock`. Only needed for backward seeks; forward playback
     /// reuses the existing session and advances it incrementally.
     ///
+    /// Evaluates to `true` if the step ran to completion, `false` if it
+    /// was cancelled (caller should skip publishing a frame in that case).
+    /// When cancelled, bridge staging is discarded so the previous bridge
+    /// state stays visible instead of flashing to a partial rebuild.
+    ///
     /// The macro form sidesteps the borrow checker around dropping and
     /// rebuilding `live_session` (which borrows from `live_replay` /
     /// `live_alt_files`).
@@ -705,7 +726,7 @@ pub(super) fn playback_thread(
             // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
             let mut staging = init_bridge_staging(&armor_bridges);
-            live_clock = step_session_to_clock(
+            let outcome = step_session_to_clock(
                 &mut live_session,
                 &mut live_renderer,
                 live_clock,
@@ -715,8 +736,12 @@ pub(super) fn playback_thread(
                 &mut hit_cursor,
                 &cancel_step,
             );
-            populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
-            finalize_bridge_staging(&armor_bridges, staging, true);
+            live_clock = outcome.final_clock;
+            if !outcome.cancelled {
+                populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                finalize_bridge_staging(&armor_bridges, staging, true);
+            }
+            !outcome.cancelled
         }};
     }
 
@@ -739,23 +764,37 @@ pub(super) fn playback_thread(
                 last_bridge_count = current_bridge_count;
                 let target_clock =
                     frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
-                rebuild_live_state!(target_clock);
-                live_renderer.options = shared_state.lock().options.clone();
-                let commands = live_renderer.draw_frame(live_session.controller());
-                set_frame(
-                    &shared_state,
-                    commands,
-                    target_clock,
-                    current_frame,
-                    actual_total_frames,
-                    actual_game_duration,
-                );
-                request_repaint(&shared_state);
+                let completed = rebuild_live_state!(target_clock);
+                if completed {
+                    live_renderer.options = shared_state.lock().options.clone();
+                    let commands = live_renderer.draw_frame(live_session.controller());
+                    set_frame(
+                        &shared_state,
+                        commands,
+                        target_clock,
+                        current_frame,
+                        actual_total_frames,
+                        actual_game_duration,
+                    );
+                    request_repaint(&shared_state);
+                }
             }
         }
 
-        // Process all pending commands
+        // Drain pending commands and coalesce Seeks: when the user is dragging
+        // the slider, the UI fires many Seeks in rapid succession. The
+        // intermediate targets are not interesting — only the final position
+        // is — so we collapse them into a single seek to the most recent
+        // requested clock. Other command kinds are processed in order.
+        let mut pending: Vec<PlaybackCommand> = Vec::new();
         while let Ok(cmd) = command_rx.try_recv() {
+            pending.push(cmd);
+        }
+        let last_seek_idx = pending.iter().rposition(|c| matches!(c, PlaybackCommand::Seek(_)));
+        for (i, cmd) in pending.into_iter().enumerate() {
+            if matches!(cmd, PlaybackCommand::Seek(_)) && Some(i) != last_seek_idx {
+                continue;
+            }
             match cmd {
                 PlaybackCommand::Play => {
                     playing = true;
@@ -774,14 +813,14 @@ pub(super) fn playback_thread(
                     let target_clock =
                         frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
 
-                    if target_clock < live_clock {
+                    let completed = if target_clock < live_clock {
                         // Seeking backward — must rebuild from scratch
-                        rebuild_live_state!(target_clock);
+                        rebuild_live_state!(target_clock)
                     } else {
                         // Seeking forward — keep stepping the session
                         let armor_bridges = shared_state.lock().armor_bridges.clone();
                         let mut staging = init_bridge_staging(&armor_bridges);
-                        live_clock = step_session_to_clock(
+                        let outcome = step_session_to_clock(
                             &mut live_session,
                             &mut live_renderer,
                             live_clock,
@@ -791,21 +830,30 @@ pub(super) fn playback_thread(
                             &mut hit_cursor,
                             &cancel_step,
                         );
-                        populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
-                        finalize_bridge_staging(&armor_bridges, staging, false);
-                    }
+                        live_clock = outcome.final_clock;
+                        if !outcome.cancelled {
+                            populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                            finalize_bridge_staging(&armor_bridges, staging, false);
+                        }
+                        !outcome.cancelled
+                    };
 
-                    live_renderer.options = shared_state.lock().options.clone();
-                    let commands = live_renderer.draw_frame(live_session.controller());
-                    set_frame(
-                        &shared_state,
-                        commands,
-                        target_clock,
-                        current_frame,
-                        actual_total_frames,
-                        actual_game_duration,
-                    );
-                    request_repaint(&shared_state);
+                    // Skip publishing a frame if the step was cancelled: the
+                    // session is parked at an intermediate clock the user has
+                    // already moved past, and a fresher Seek is on its way.
+                    if completed {
+                        live_renderer.options = shared_state.lock().options.clone();
+                        let commands = live_renderer.draw_frame(live_session.controller());
+                        set_frame(
+                            &shared_state,
+                            commands,
+                            target_clock,
+                            current_frame,
+                            actual_total_frames,
+                            actual_game_duration,
+                        );
+                        request_repaint(&shared_state);
+                    }
                 }
                 PlaybackCommand::SetSpeed(s) => {
                     speed = s;
@@ -840,7 +888,7 @@ pub(super) fn playback_thread(
                 // Forward playback — always incremental, never rebuild
                 let armor_bridges = shared_state.lock().armor_bridges.clone();
                 let mut staging = init_bridge_staging(&armor_bridges);
-                live_clock = step_session_to_clock(
+                let outcome = step_session_to_clock(
                     &mut live_session,
                     &mut live_renderer,
                     live_clock,
@@ -850,20 +898,23 @@ pub(super) fn playback_thread(
                     &mut hit_cursor,
                     &cancel_step,
                 );
-                populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
-                finalize_bridge_staging(&armor_bridges, staging, false);
+                live_clock = outcome.final_clock;
+                if !outcome.cancelled {
+                    populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
+                    finalize_bridge_staging(&armor_bridges, staging, false);
 
-                live_renderer.options = shared_state.lock().options.clone();
-                let commands = live_renderer.draw_frame(live_session.controller());
-                set_frame(
-                    &shared_state,
-                    commands,
-                    target_clock,
-                    current_frame,
-                    actual_total_frames,
-                    actual_game_duration,
-                );
-                request_repaint(&shared_state);
+                    live_renderer.options = shared_state.lock().options.clone();
+                    let commands = live_renderer.draw_frame(live_session.controller());
+                    set_frame(
+                        &shared_state,
+                        commands,
+                        target_clock,
+                        current_frame,
+                        actual_total_frames,
+                        actual_game_duration,
+                    );
+                    request_repaint(&shared_state);
+                }
             }
         }
 
