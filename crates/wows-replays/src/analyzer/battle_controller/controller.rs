@@ -46,6 +46,7 @@ use crate::nested_property_path::UpdateAction;
 use crate::packet2::EntityCreatePacket;
 use crate::packet2::Packet;
 use crate::types::AccountId;
+use crate::types::ArenaId;
 use crate::types::ElapsedClock;
 use crate::types::EntityId;
 use crate::types::GameClock;
@@ -420,7 +421,7 @@ pub enum BattleResult {
 
 #[derive(Serialize)]
 pub struct BattleReport {
-    arena_id: i64,
+    arena_id: ArenaId,
     self_player: Rc<Player>,
     version: Version,
     map_name: String,
@@ -486,7 +487,7 @@ impl BattleReport {
         &self.players
     }
 
-    pub fn arena_id(&self) -> i64 {
+    pub fn arena_id(&self) -> ArenaId {
         self.arena_id
     }
 
@@ -585,7 +586,7 @@ pub struct BattleController<'res, 'replay, G> {
     battle_result_clock: Option<GameClock>,
     winning_team: Option<i8>,
     finish_type: Option<Recognized<FinishType>>,
-    arena_id: i64,
+    arena_id: Option<ArenaId>,
     current_clock: GameClock,
 
     // World state
@@ -700,7 +701,7 @@ where
             battle_result_clock: None,
             winning_team: None,
             finish_type: None,
-            arena_id: 0,
+            arena_id: None,
             current_clock: GameClock::default(),
             ship_positions: HashMap::default(),
             minimap_positions: HashMap::default(),
@@ -746,7 +747,7 @@ where
         self.battle_end_clock = None;
         self.winning_team = None;
         self.finish_type = None;
-        self.arena_id = 0;
+        self.arena_id = None;
         self.current_clock = GameClock::default();
         self.ship_positions.clear();
         self.minimap_positions.clear();
@@ -802,6 +803,13 @@ where
 
     pub fn match_group(&self) -> &str {
         self.game_meta.matchGroup.as_ref()
+    }
+
+    /// Arena ID assigned to this match by the server. `None` until the
+    /// `onArenaStateReceived` packet has been processed; identical across
+    /// replays recorded by different players in the same match.
+    pub fn arena_id(&self) -> Option<ArenaId> {
+        self.arena_id
     }
 
     pub fn game_version(&self) -> &str {
@@ -1013,7 +1021,7 @@ where
         };
 
         BattleReport {
-            arena_id: self.arena_id,
+            arena_id: self.arena_id.unwrap_or_else(|| ArenaId::from(0)),
             match_result: if self.match_finished {
                 self.winning_team.map(|team| {
                     if team == self_player.initial_state.team_id as i8 {
@@ -1571,7 +1579,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatChannel {
     Division,
     Global,
@@ -2825,7 +2833,7 @@ where
                 bot_states: bots,
             } => {
                 debug!("OnArenaStateReceived");
-                self.arena_id = arg0;
+                self.arena_id = Some(ArenaId::from(arg0));
                 for player in players.iter().chain(bots.iter()) {
                     let Some(metadata_player) =
                         self.metadata_players.iter().find(|meta_player| meta_player.id == player.meta_ship_id())

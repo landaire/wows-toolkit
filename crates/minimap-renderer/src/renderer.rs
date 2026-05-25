@@ -1152,11 +1152,13 @@ impl<'a> MinimapRenderer<'a> {
             let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians());
             let world_yaw = world.map(|sp| sp.yaw);
 
-            // A ship is "spotted" when its visibility_flags are non-zero (game mechanic)
+            // A ship is "spotted" when its visibility_flags are non-zero (game
+            // mechanic: detected by radar, hydro, etc.). Outline both teams: for
+            // friendlies it means "spotted by the enemy", for enemies "spotted
+            // by us". The self ship is excluded because it would always trigger
+            // and adds nothing.
             let is_spotted = vis_flags != 0;
-
-            // Detected teammate = spotted ally (not self)
-            let is_detected_teammate = is_spotted && !relation.is_enemy();
+            let is_detected_teammate = is_spotted && !relation.is_self();
 
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);

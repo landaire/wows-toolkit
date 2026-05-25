@@ -22,6 +22,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::ReplayMeta;
 use wows_replays::types::AccountId;
+use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
 use crate::ui::replay_parser::Replay;
@@ -132,7 +133,7 @@ pub struct TrackedPlayer {
     clan_id: i64,
     clan: String,
     timestamps: BTreeSet<Timestamp>,
-    arena_ids: BTreeSet<i64>,
+    arena_ids: BTreeSet<ArenaId>,
     #[serde(default)]
     notes: String,
 }

@@ -99,6 +99,11 @@ enum Commands {
         #[arg(required = true)]
         replays: Vec<PathBuf>,
     },
+    /// Extract specific fields from a replay or batch of replays
+    Query {
+        #[command(subcommand)]
+        command: QueryCommands,
+    },
     /// Tools designed for reverse-engineering packets
     Investigate {
         /// Output the metadata as first line
@@ -123,6 +128,19 @@ enum Commands {
 
         /// The replay file to use
         replay: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueryCommands {
+    /// Print the arena id of each replay (one line per file). Useful for
+    /// pairing up replays from the same match: every player recording the
+    /// same battle observes the same arena id. Files that fail to parse or
+    /// never reach the arena-state packet print `-`.
+    ArenaId {
+        /// Replay files or directories to walk
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
     },
 }
 
@@ -215,6 +233,7 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
         }
     }
 }
+
 
 fn build_investigative_printer(
     meta: &wows_replays::ReplayMeta,
@@ -754,5 +773,23 @@ fn main() {
                 );
             }
         }
+        Commands::Query { command } => match command {
+            QueryCommands::ArenaId { replays } => {
+                for replay_path in &replays {
+                    for entry in walkdir::WalkDir::new(replay_path) {
+                        let entry = entry.expect("Error walking replays");
+                        if !entry.path().is_file() {
+                            continue;
+                        }
+                        let path = entry.path();
+                        let id_str = match ReplayFile::from_file(path).ok().and_then(|r| r.arena_id()) {
+                            Some(id) => id.to_string(),
+                            None => "-".to_string(),
+                        };
+                        println!("{}\t{}", id_str, path.display());
+                    }
+                }
+            }
+        },
     }
 }

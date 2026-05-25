@@ -110,6 +110,39 @@ impl From<i64> for AvatarId {
     }
 }
 
+/// Server-assigned identifier for a single match instance ("arena").
+///
+/// Every client recording the same match observes the same arena id; comparing
+/// across replays is the cheapest reliable way to confirm two replays come from
+/// the same battle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct ArenaId(i64);
+
+impl ArenaId {
+    pub fn new(v: i64) -> Self {
+        ArenaId(v)
+    }
+
+    pub fn raw(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for ArenaId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for ArenaId {
+    fn from(v: i64) -> Self {
+        ArenaId(v)
+    }
+}
+
 /// A persistent player account identifier (db_id, avatar_id).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

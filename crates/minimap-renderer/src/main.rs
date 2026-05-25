@@ -17,6 +17,8 @@ use wowsunpack::vfs::VfsPath;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
+use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
+use wows_replays::analyzer::battle_controller::merged::MergedBattleController;
 use wows_replays::game_constants::GameConstants;
 
 use wows_minimap_renderer::assets::load_building_icons;
@@ -139,9 +141,15 @@ struct Args {
     #[arg(long)]
     recreate_game_params: bool,
 
-    /// The replay file to process
+    /// The replay file to process (primary perspective)
     #[arg(required_unless_present_any = ["generate_config", "check_encoder"])]
     replay: Option<PathBuf>,
+
+    /// Additional replay files from other players in the same match. Their
+    /// state is merged into the primary perspective to remove fog of war.
+    /// Arena IDs must match across all replays.
+    #[arg(long = "merge")]
+    merge: Vec<PathBuf>,
 }
 
 fn main() -> Result<(), Report> {
@@ -184,6 +192,48 @@ fn main() -> Result<(), Report> {
     info!("Parsing replay");
     let replay_file = ReplayFile::from_file(replay_path)?;
     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+
+    // Optional merge replays from other players in the same match. Loaded eagerly
+    // so a bad file fails before we touch game data, and validated upfront against
+    // the primary's arena id so we never start a render of mismatched replays.
+    let merge_replays: Vec<ReplayFile> = args
+        .merge
+        .iter()
+        .map(|p| {
+            ReplayFile::from_file(p)
+                .attach_with(|| format!("loading merge replay: {}", p.display()))
+        })
+        .collect::<Result<_, _>>()?;
+    if !merge_replays.is_empty() {
+        let Some(primary_arena) = replay_file.arena_id() else {
+            bail!("Primary replay has no arena id (no Map packet found); cannot merge");
+        };
+        for (i, r) in merge_replays.iter().enumerate() {
+            if r.meta.clientVersionFromExe != replay_file.meta.clientVersionFromExe {
+                bail!(
+                    "Merge replay version mismatch (primary={}, merge #{}={}, player={})",
+                    replay_file.meta.clientVersionFromExe,
+                    i + 1,
+                    r.meta.clientVersionFromExe,
+                    r.meta.playerName
+                );
+            }
+            let Some(merge_arena) = r.arena_id() else {
+                bail!("Merge replay #{} ({}) has no arena id; cannot validate", i + 1, r.meta.playerName);
+            };
+            if merge_arena != primary_arena {
+                bail!(
+                    "Arena ID mismatch: replays are not from the same match (primary={}, merge #{}={}, player={})",
+                    primary_arena,
+                    i + 1,
+                    merge_arena,
+                    r.meta.playerName
+                );
+            }
+            info!(player = %r.meta.playerName, arena = %merge_arena, "Loaded merge replay");
+        }
+        info!(arena_id = %primary_arena, replays = merge_replays.len() + 1, "Arena IDs match");
+    }
 
     // Load game data from either a full game install or pre-extracted directory
     let resolved_extracted: Option<PathBuf> =
@@ -371,40 +421,97 @@ fn main() -> Result<(), Report> {
         }
     }
 
-    let mut controller = BattleController::new(&replay_file.meta, &controller_game_params, Some(&game_constants));
+    // Build one BattleController + Parser + packet cursor per replay; primary is index 0.
+    let mut controllers: Vec<BattleController<'_, '_, _>> =
+        vec![BattleController::new(&replay_file.meta, &controller_game_params, Some(&game_constants))];
+    for r in &merge_replays {
+        controllers.push(BattleController::new(&r.meta, &controller_game_params, Some(&game_constants)));
+    }
+    let mut parsers: Vec<wows_replays::packet2::Parser<'_>> = (0..controllers.len())
+        .map(|_| wows_replays::packet2::Parser::with_build(&specs, replay_version.build))
+        .collect();
+    let mut remainings: Vec<&[u8]> = std::iter::once(replay_file.packet_data.as_slice())
+        .chain(merge_replays.iter().map(|r| r.packet_data.as_slice()))
+        .collect();
+    let mut last_clocks: Vec<wows_replays::types::GameClock> =
+        vec![wows_replays::types::GameClock(0.0); controllers.len()];
+    let mut finished: Vec<bool> = vec![false; controllers.len()];
+    let mut prev_render_clock = wows_replays::types::GameClock(0.0);
 
-    let mut parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
-    let mut remaining = &replay_file.packet_data[..];
-    let mut prev_clock = wows_replays::types::GameClock(0.0);
+    loop {
+        // Find lagging (smallest last_clock) replay that still has packets.
+        let lag = (0..controllers.len())
+            .filter(|i| !finished[*i])
+            .min_by(|a, b| last_clocks[*a].0.partial_cmp(&last_clocks[*b].0).unwrap_or(std::cmp::Ordering::Equal));
+        let Some(idx) = lag else { break };
 
-    while !remaining.is_empty() {
-        let packet = parser.parse_packet(&mut remaining).map_err(|e| report!("Packet parse error: {e:?}"))?;
-
-        // Render when clock changes (all prev_clock packets have been processed)
-        if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
-            renderer.populate_players(&controller);
-            renderer.update_squadron_info(&controller);
-            renderer.update_ship_abilities(&controller);
-            encoder.advance_clock(prev_clock, &controller, &mut renderer, &mut target);
-            prev_clock = packet.clock;
-        } else if prev_clock.seconds() == 0.0 {
-            prev_clock = packet.clock;
+        if remainings[idx].is_empty() {
+            finished[idx] = true;
+            continue;
         }
 
-        // Process the packet to update state
-        controller.process(&packet);
+        // Parse one packet from the lagging replay and process it into its controller.
+        // The packet borrows from parsers[idx]; scope it so the borrow is released
+        // before we create the merged view below.
+        let packet_clock = {
+            let packet = parsers[idx]
+                .parse_packet(&mut remainings[idx])
+                .map_err(|e| report!("Packet parse error in replay #{idx}: {e:?}"))?;
+            let clock = packet.clock;
+            controllers[idx].process(&packet);
+            clock
+        };
+        last_clocks[idx] = packet_clock;
+
+        // Render frames up to the most recent clock value that every active replay
+        // has reached. This is the latest point at which all per-perspective state
+        // is consistent.
+        let safe_clock = (0..controllers.len())
+            .filter(|i| !finished[*i])
+            .map(|i| last_clocks[i].0)
+            .fold(f32::INFINITY, f32::min);
+        if safe_clock.is_finite() && safe_clock > prev_render_clock.0 {
+            let safe = wows_replays::types::GameClock(safe_clock);
+            let (primary, secondaries) = controllers.split_at(1);
+            let secondary_refs: Vec<&dyn BattleControllerState> =
+                secondaries.iter().map(|c| c as &dyn BattleControllerState).collect();
+            let mut merged = MergedBattleController::new(&primary[0], secondary_refs);
+            merged.refresh();
+            renderer.populate_players(&merged);
+            renderer.update_squadron_info(&merged);
+            renderer.update_ship_abilities(&merged);
+            encoder.advance_clock(prev_render_clock, &merged, &mut renderer, &mut target);
+            prev_render_clock = safe;
+        }
     }
 
-    // Render final tick
-    if prev_clock.seconds() > 0.0 {
-        renderer.populate_players(&controller);
-        renderer.update_squadron_info(&controller);
-        renderer.update_ship_abilities(&controller);
-        encoder.advance_clock(prev_clock, &controller, &mut renderer, &mut target);
+    // Render the final tick at the latest clock any replay reached.
+    let final_clock =
+        last_clocks.iter().map(|c| c.0).fold(0.0_f32, f32::max);
+    if final_clock > prev_render_clock.0 {
+        let (primary, secondaries) = controllers.split_at(1);
+        let secondary_refs: Vec<&dyn BattleControllerState> =
+            secondaries.iter().map(|c| c as &dyn BattleControllerState).collect();
+        let mut merged = MergedBattleController::new(&primary[0], secondary_refs);
+        merged.refresh();
+        renderer.populate_players(&merged);
+        renderer.update_squadron_info(&merged);
+        renderer.update_ship_abilities(&merged);
+        encoder.advance_clock(wows_replays::types::GameClock(final_clock), &merged, &mut renderer, &mut target);
     }
 
-    controller.finish();
-    encoder.finish(&controller, &mut renderer, &mut target)?;
+    for c in &mut controllers {
+        c.finish();
+    }
+
+    {
+        let (primary, secondaries) = controllers.split_at(1);
+        let secondary_refs: Vec<&dyn BattleControllerState> =
+            secondaries.iter().map(|c| c as &dyn BattleControllerState).collect();
+        let mut merged = MergedBattleController::new(&primary[0], secondary_refs);
+        merged.refresh();
+        encoder.finish(&merged, &mut renderer, &mut target)?;
+    }
 
     if let Some(pb) = progress_bar {
         pb.finish_and_clear();

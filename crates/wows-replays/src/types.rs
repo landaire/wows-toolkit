@@ -1,4 +1,5 @@
 pub use wowsunpack::game_types::AccountId;
+pub use wowsunpack::game_types::ArenaId;
 pub use wowsunpack::game_types::AvatarId;
 pub use wowsunpack::game_types::ElapsedClock;
 pub use wowsunpack::game_types::EntityId;

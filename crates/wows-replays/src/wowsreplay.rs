@@ -1,5 +1,7 @@
 use crate::error::*;
+use crate::packet2::MODERN_PACKET_MAPPING_MIN_BUILD;
 use crate::types::AccountId;
+use crate::types::ArenaId;
 use crate::types::GameParamId;
 use blowfish::Blowfish;
 use byteorder::BE;
@@ -163,5 +165,32 @@ impl ReplayFile {
         f.read_to_end(&mut contents).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
 
         Self::from_bytes(&contents).attach_with(path_context)
+    }
+
+    /// Extract the server-assigned arena id by walking the packet stream for the
+    /// first Map packet. Reads its `arena_id` field directly without needing
+    /// entity-spec lookups, so this works against replays whose game build is
+    /// not installed locally. Returns `None` if no Map packet is found.
+    pub fn arena_id(&self) -> Option<ArenaId> {
+        let build = wowsunpack::data::Version::from_client_exe(&self.meta.clientVersionFromExe).build;
+        let map_raw_type: u32 = if build >= MODERN_PACKET_MAPPING_MIN_BUILD { 0x28 } else { 0x27 };
+
+        let data = &self.packet_data[..];
+        let mut offset = 0usize;
+        while offset + 12 <= data.len() {
+            let size = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let raw_type = u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap());
+            let payload_off = offset + 12;
+            let payload_end = payload_off.checked_add(size)?;
+            if payload_end > data.len() {
+                break;
+            }
+            if raw_type == map_raw_type && size >= 12 {
+                let arena = i64::from_le_bytes(data[payload_off + 4..payload_off + 12].try_into().unwrap());
+                return Some(ArenaId::from(arena));
+            }
+            offset = payload_end;
+        }
+        None
     }
 }
