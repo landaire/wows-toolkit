@@ -521,10 +521,9 @@ impl<'a> MinimapRenderer<'a> {
         speed_raw: u16,
     ) {
         let history = self.position_history.entry(entity_id).or_default();
-        // Deduplicate: skip if same pixel as last recorded position
         if let Some(last) = history.last()
-            && last.0.x == pos.x
-            && last.0.y == pos.y
+            && (last.0.x - pos.x).abs() < 0.25
+            && (last.0.y - pos.y).abs() < 0.25
         {
             return;
         }
@@ -1162,9 +1161,16 @@ impl<'a> MinimapRenderer<'a> {
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
                 if let Some(mm) = minimap {
-                    // Use minimap position — it's authoritative for the minimap view
-                    // and avoids stale world positions from previous detections.
-                    let px = map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE);
+                    // Prefer the full-precision world position when we have it.
+                    // The minimap position is quantized to 11 bits (~1.5px steps on a
+                    // 3km map) and only updates when the value crosses a quantum, so
+                    // using it directly makes slow ships visibly jerky. Fall back to
+                    // the minimap position when there's no world position (e.g. ships
+                    // outside AOI that are only visible via minimap vision packets).
+                    let px = match world {
+                        Some(w) => map_info.world_to_minimap(w.position, MINIMAP_SIZE),
+                        None => map_info.normalized_to_minimap(&mm.position, MINIMAP_SIZE),
+                    };
                     let speed_raw = controller
                         .entities_by_id()
                         .get(entity_id)

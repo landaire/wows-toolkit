@@ -177,7 +177,7 @@ pub fn draw_range_circle(
 
 /// Helper to convert a minimap `Vec2` position to screen `Pos2` via [`MapTransform`].
 pub fn minimap_vec2_to_screen(pos: Vec2, transform: &MapTransform) -> Pos2 {
-    transform.minimap_to_screen(&MinimapPos { x: pos.x as i32, y: pos.y as i32 })
+    transform.minimap_to_screen(&MinimapPos { x: pos.x, y: pos.y })
 }
 
 // ─── Grid Overlay ───────────────────────────────────────────────────────────
@@ -188,13 +188,13 @@ pub fn draw_grid(painter: &egui::Painter, transform: &MapTransform, style: &Grid
     let stroke_w = transform.scale_stroke(style.line_width);
 
     for i in 1..10 {
-        let offset = (i as f32 * cell) as i32;
-        let top = transform.minimap_to_screen(&MinimapPos { x: offset, y: 0 });
-        let bottom = transform.minimap_to_screen(&MinimapPos { x: offset, y: MINIMAP_SIZE as i32 });
+        let offset = i as f32 * cell;
+        let top = transform.minimap_to_screen(&MinimapPos { x: offset, y: 0.0 });
+        let bottom = transform.minimap_to_screen(&MinimapPos { x: offset, y: MINIMAP_SIZE as f32 });
         painter.line_segment([top, bottom], Stroke::new(stroke_w, style.grid_color));
 
-        let left = transform.minimap_to_screen(&MinimapPos { x: 0, y: offset });
-        let right = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: offset });
+        let left = transform.minimap_to_screen(&MinimapPos { x: 0.0, y: offset });
+        let right = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as f32, y: offset });
         painter.line_segment([left, right], Stroke::new(stroke_w, style.grid_color));
     }
 
@@ -203,13 +203,13 @@ pub fn draw_grid(painter: &egui::Painter, transform: &MapTransform, style: &Grid
 
     for i in 0..10 {
         let x = (i as f32 + 0.5) * cell;
-        let pos = transform.minimap_to_screen(&MinimapPos { x: x as i32, y: (cell * 0.15) as i32 });
+        let pos = transform.minimap_to_screen(&MinimapPos { x, y: cell * 0.15 });
         painter.text(pos, egui::Align2::CENTER_CENTER, format!("{}", i + 1), font.clone(), style.label_color);
     }
 
     for i in 0..10 {
         let y = (i as f32 + 0.5) * cell;
-        let pos = transform.minimap_to_screen(&MinimapPos { x: (cell * 0.15) as i32, y: y as i32 });
+        let pos = transform.minimap_to_screen(&MinimapPos { x: cell * 0.15, y });
         let label = (b'A' + i as u8) as char;
         painter.text(pos, egui::Align2::CENTER_CENTER, label.to_string(), font.clone(), style.label_color);
     }
@@ -223,16 +223,16 @@ pub fn draw_grid(painter: &egui::Painter, transform: &MapTransform, style: &Grid
 /// the full [0..MINIMAP_SIZE] × [0..MINIMAP_SIZE] minimap space.
 pub fn draw_map_background(painter: &egui::Painter, transform: &MapTransform, texture_id: Option<egui::TextureId>) {
     if let Some(tex_id) = texture_id {
-        let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0, y: 0 });
-        let map_br = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: MINIMAP_SIZE as i32 });
+        let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0.0, y: 0.0 });
+        let map_br = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as f32, y: MINIMAP_SIZE as f32 });
         let map_rect = Rect::from_min_max(map_tl, map_br);
         let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         let mut mesh = egui::Mesh::with_texture(tex_id);
         mesh.add_rect_with_uv(map_rect, uv, Color32::WHITE);
         painter.add(Shape::Mesh(mesh.into()));
     } else {
-        let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0, y: 0 });
-        let map_br = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as i32, y: MINIMAP_SIZE as i32 });
+        let map_tl = transform.minimap_to_screen(&MinimapPos { x: 0.0, y: 0.0 });
+        let map_br = transform.minimap_to_screen(&MinimapPos { x: MINIMAP_SIZE as f32, y: MINIMAP_SIZE as f32 });
         painter.rect_filled(Rect::from_min_max(map_tl, map_br), 0.0, Color32::from_rgb(30, 40, 60));
     }
 }
@@ -314,7 +314,7 @@ pub fn draw_pings(pings: &[MapPing], painter: &egui::Painter, transform: &MapTra
         let alpha = ((1.0 - age / PING_DURATION) * 200.0) as u8;
         let [pr, pg, pb] = ping.color;
         let ping_color = Color32::from_rgba_unmultiplied(pr, pg, pb, alpha);
-        let screen_pos = transform.minimap_to_screen(&MinimapPos { x: ping.pos[0] as i32, y: ping.pos[1] as i32 });
+        let screen_pos = transform.minimap_to_screen(&MinimapPos { x: ping.pos[0], y: ping.pos[1] });
         painter.add(Shape::circle_stroke(screen_pos, r, Stroke::new(2.0, ping_color)));
         painter.add(Shape::circle_stroke(screen_pos, r * 0.6, Stroke::new(1.5, ping_color)));
     }
@@ -339,7 +339,7 @@ pub fn draw_remote_cursors(cursors: &[UserCursor], my_user_id: u64, painter: &eg
         let [r, g, b] = cursor.color;
         let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
 
-        let screen_pos = transform.minimap_to_screen(&MinimapPos { x: pos[0] as i32, y: pos[1] as i32 });
+        let screen_pos = transform.minimap_to_screen(&MinimapPos { x: pos[0], y: pos[1] });
 
         let size = 10.0;
         let points =

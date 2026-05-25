@@ -43,8 +43,8 @@ impl MapTransform {
     /// Convert a MinimapPos (in [0..768] space) to screen Pos2.
     /// Applies zoom and pan, then window scale. Used for all map elements.
     pub fn minimap_to_screen(&self, pos: &MinimapPos) -> Pos2 {
-        let zoomed_x = pos.x as f32 * self.zoom - self.pan.x;
-        let zoomed_y = pos.y as f32 * self.zoom - self.pan.y;
+        let zoomed_x = pos.x * self.zoom - self.pan.x;
+        let zoomed_y = pos.y * self.zoom - self.pan.y;
         Pos2::new(
             self.origin.x + zoomed_x * self.window_scale,
             self.origin.y + (self.hud_height + zoomed_y) * self.window_scale,

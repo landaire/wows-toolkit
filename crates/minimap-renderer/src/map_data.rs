@@ -11,14 +11,13 @@ pub struct MapInfo {
     pub space_size: i32,
 }
 
-/// Pixel position on the minimap image.
-/// (0,0) is top-left, positive X = right, positive Y = down.
-/// Does NOT include HUD offset — that's applied at draw time.
+/// Sub-pixel position on the minimap image. (0,0) is top-left.
+/// Does NOT include the HUD offset, which is applied at draw time.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct MinimapPos {
-    pub x: i32,
-    pub y: i32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl MapInfo {
@@ -32,8 +31,8 @@ impl MapInfo {
         let half = native / 2.0;
         let rescale = output_size as f64 / native;
         MinimapPos {
-            x: ((pos.x as f64 * scale + half) * rescale) as i32,
-            y: ((-pos.z as f64 * scale + half) * rescale) as i32,
+            x: ((pos.x as f64 * scale + half) * rescale) as f32,
+            y: ((-pos.z as f64 * scale + half) * rescale) as f32,
         }
     }
 
