@@ -110,6 +110,57 @@ impl From<i64> for AvatarId {
     }
 }
 
+/// Team identifier within a battle. Always 0 or 1 in two-team modes; a few
+/// match types use higher values for neutral / observer teams. The newtype
+/// exists so functions like "the recording player's team" don't accidentally
+/// get confused with other ints (entity ids, account ids, raw building
+/// team_ids that survived as i8 elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct TeamId(i64);
+
+impl TeamId {
+    pub fn new(v: i64) -> Self {
+        TeamId(v)
+    }
+
+    pub fn raw(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for TeamId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for TeamId {
+    fn from(v: i64) -> Self {
+        TeamId(v)
+    }
+}
+
+impl From<i32> for TeamId {
+    fn from(v: i32) -> Self {
+        TeamId(v as i64)
+    }
+}
+
+impl From<i8> for TeamId {
+    fn from(v: i8) -> Self {
+        TeamId(v as i64)
+    }
+}
+
+impl From<u32> for TeamId {
+    fn from(v: u32) -> Self {
+        TeamId(v as i64)
+    }
+}
+
 /// Server-assigned identifier for a single match instance ("arena").
 ///
 /// Every client recording the same match observes the same arena id; comparing

@@ -53,6 +53,7 @@ use crate::types::GameClock;
 use crate::types::GameParamId;
 use crate::types::PlaneId;
 use crate::types::Relation;
+use crate::types::TeamId;
 use crate::types::WorldPos;
 
 use super::listener::BattleControllerState;
@@ -656,6 +657,14 @@ pub struct BattleController<'res, 'replay, G> {
     /// Ribbon counts for the self player, from `onRibbon` Avatar RPC.
     /// All ribbon packets in a replay are for the recording player.
     self_ribbons: HashMap<Ribbon, usize>,
+
+    /// When set, the controller treats incoming packets as coming from a
+    /// recording client on the given team and uses that to filter per-entity
+    /// state updates (specifically MinimapUpdate) so that only the
+    /// "owner-team" perspective writes to each vehicle's state. Used when
+    /// merging multiple replays into one controller; left `None` for normal
+    /// single-replay processing, in which case no filtering applies.
+    current_source_team: Option<TeamId>,
 }
 
 impl<'res, 'replay, G> BattleController<'res, 'replay, G>
@@ -703,6 +712,7 @@ where
             finish_type: None,
             arena_id: None,
             current_clock: GameClock::default(),
+            current_source_team: None,
             ship_positions: HashMap::default(),
             minimap_positions: HashMap::default(),
             capture_points: Vec::new(),
@@ -810,6 +820,16 @@ where
     /// replays recorded by different players in the same match.
     pub fn arena_id(&self) -> Option<ArenaId> {
         self.arena_id
+    }
+
+    /// Tag subsequent packets as coming from a recording client on the given
+    /// team. The controller uses this to filter per-entity updates whose
+    /// authoritative source is the owner-team perspective (specifically
+    /// MinimapUpdate). Leave at `None` (default) for single-replay
+    /// processing; passing `None` from a merger means "primary perspective,
+    /// no filtering".
+    pub fn set_source_team(&mut self, team: Option<TeamId>) {
+        self.current_source_team = team;
     }
 
     pub fn game_version(&self) -> &str {
@@ -2915,6 +2935,24 @@ where
             }
             crate::analyzer::decoder::DecodedPacketPayload::MinimapUpdate { ref updates, arg1: _ } => {
                 for update in updates {
+                    // In merge mode (current_source_team is Some), only accept
+                    // updates from the recording client whose team matches the
+                    // updated entity's team. The opposing-team perspective
+                    // would constantly toggle visible=false on entities it
+                    // can't see, clobbering the owner-team's authoritative
+                    // visible=true. Entities of unknown team (not yet created
+                    // in the controller) fall through to the unrestricted
+                    // path so the first time a ship is seen still registers.
+                    if let Some(source_team) = self.current_source_team
+                        && let Some(entity) = self.entities_by_id.get(&update.entity_id)
+                        && let Some(vehicle) = entity.vehicle_ref()
+                    {
+                        let entity_team = TeamId::from(vehicle.borrow().props().team_id() as i64);
+                        if entity_team != source_team {
+                            continue;
+                        }
+                    }
+
                     // Minimap pings (hydrophone etc.) are one-shot position
                     // flashes that should not be treated as sustained detection.
                     let visible = !update.is_sentinel && !update.is_minimap_ping();

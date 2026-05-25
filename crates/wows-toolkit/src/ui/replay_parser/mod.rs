@@ -452,6 +452,10 @@ pub struct UiReport {
     background_task_sender: Option<Sender<BackgroundTask>>,
     selected_row: Option<(u64, bool)>,
     debug_mode: bool,
+    /// `true` when this UiReport was built from a Replay with merged alt
+    /// perspectives. Unmasks columns like enemy builds that are otherwise
+    /// hidden out-of-NDA.
+    merge_active: bool,
     battle_result: Option<BattleResult>,
     resolved_results: Option<serde_json::Value>,
 }
@@ -462,6 +466,7 @@ impl UiReport {
         report: &BattleReport,
         wows_data: &SharedWoWsData,
         deps: &crate::data::wows_data::ReplayDependencies,
+        merge_active: bool,
     ) -> Self {
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
@@ -1245,6 +1250,7 @@ impl UiReport {
             background_task_sender: Some(deps.background_task_sender.clone()),
             selected_row: None,
             debug_mode: deps.is_debug_mode,
+            merge_active,
             resolved_results,
         }
     }
@@ -2093,7 +2099,7 @@ impl UiReport {
                         }
                     }
                     ReplayColumn::Skills => {
-                        if !report.relation().is_enemy() || self.debug_mode {
+                        if !report.relation().is_enemy() || self.debug_mode || self.merge_active {
                             ui.vertical(|ui| {
                                 if let Some(hover_text) = &report.skill_info.hover_text {
                                     ui.label(hover_text);
@@ -2634,6 +2640,13 @@ const ROW_HEIGHT: f32 = 28.0;
 pub struct Replay {
     pub replay_file: ReplayFile,
 
+    /// Optional additional replays from other players in the same match. When
+    /// non-empty, the parser feeds all of them into a single merged
+    /// [`wows_replays::analyzer::battle_controller::merged::MergedReplays`]
+    /// so that enemy positions / HP / consumables / etc. that the primary's
+    /// client never saw become visible in the resulting BattleReport.
+    pub alt_replays: Vec<ReplayFile>,
+
     pub resource_loader: Arc<GameMetadataProvider>,
 
     pub battle_report: Option<BattleReport>,
@@ -2664,6 +2677,7 @@ impl Replay {
     pub fn new(replay_file: ReplayFile, resource_loader: Arc<GameMetadataProvider>) -> Self {
         Replay {
             replay_file,
+            alt_replays: Vec::new(),
             resource_loader,
             battle_report: None,
             ui_report: None,
@@ -2749,30 +2763,50 @@ impl Replay {
             .into());
         }
 
-        // Parse packets one at a time
-        let packet_data = &self.replay_file.packet_data;
-        let mut controller = BattleController::new(
-            &self.replay_file.meta,
-            self.resource_loader.as_ref(),
-            self.game_constants.as_deref(),
-        );
-        let replay_build = wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe).build;
-        let mut p = wows_replays::packet2::Parser::with_build(self.resource_loader.entity_specs(), replay_build);
+        let replay_version = wowsunpack::data::Version::from_client_exe(&self.replay_file.meta.clientVersionFromExe);
 
-        let mut remaining = &packet_data[..];
-        while !remaining.is_empty() {
-            match p.parse_packet(&mut remaining) {
-                Ok(packet) => {
-                    controller.process(&packet);
-                }
-                Err(e) => {
-                    debug!("Packet parse error: {:?}", e);
-                    break;
+        if self.alt_replays.is_empty() {
+            // Single-replay fast path — no merger involved.
+            let mut controller = BattleController::new(
+                &self.replay_file.meta,
+                self.resource_loader.as_ref(),
+                self.game_constants.as_deref(),
+            );
+            let mut p =
+                wows_replays::packet2::Parser::with_build(self.resource_loader.entity_specs(), replay_version.build);
+            let mut remaining = self.replay_file.packet_data.as_slice();
+            while !remaining.is_empty() {
+                match p.parse_packet(&mut remaining) {
+                    Ok(packet) => controller.process(&packet),
+                    Err(e) => {
+                        debug!("Packet parse error: {:?}", e);
+                        break;
+                    }
                 }
             }
+            controller.finish();
+            return Ok(controller.build_report());
         }
-        controller.finish();
 
+        // Merge path — fold alt perspectives into a single controller via
+        // MergedReplays so the report sees through fog of war.
+        let game_constants = self
+            .game_constants
+            .as_deref()
+            .ok_or_else(|| rootcause::report!("game constants required to merge alt-perspective replays"))?;
+        let mut session = wows_replays::analyzer::battle_controller::merged::MergedReplays::new(
+            self.resource_loader.entity_specs(),
+            self.resource_loader.as_ref(),
+            game_constants,
+            replay_version,
+            &self.replay_file,
+            &self.alt_replays,
+        )
+        .map_err(|e| rootcause::report!("{e}"))?;
+        while session.step().map_err(|e| rootcause::report!("{e}"))?.is_some() {}
+        session.finish();
+        let mut controller = session.into_controller();
+        controller.finish();
         Ok(controller.build_report())
     }
 
@@ -2787,7 +2821,8 @@ impl Replay {
                 return;
             };
 
-            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps));
+            let merge_active = !self.alt_replays.is_empty();
+            self.ui_report = Some(UiReport::new(&self.replay_file, battle_report, &wows_data, deps, merge_active));
         }
     }
 
@@ -3566,6 +3601,71 @@ impl ToolkitTabViewer<'_> {
         self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
     }
 
+    /// Render the "Load Other Team Perspective" button. Enabled only when a
+    /// replay is currently focused; on click, opens a file picker for another
+    /// `.wowsreplay` recording of the same match, validates that its client
+    /// version matches the focused replay's, appends it to the focused
+    /// replay's `alt_replays`, and kicks off a re-parse so the resulting
+    /// BattleReport reflects the merged view.
+    fn build_load_alt_perspective_button(&mut self, ui: &mut egui::Ui) {
+        let focused = self.tab_state.focused_replay();
+        let merge_count = focused.as_ref().map(|r| r.read().alt_replays.len()).unwrap_or(0);
+        let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
+        if merge_count > 0 {
+            label.push_str(&format!(" ({})", t!("ui.replay.load_alt_perspective_count", count = merge_count)));
+        }
+
+        let response = ui.add_enabled(focused.is_some(), egui::Button::new(label));
+        let response = if focused.is_some() {
+            response.on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
+        } else {
+            response.on_disabled_hover_text(t!("ui.replay.load_alt_perspective_disabled_tooltip"))
+        };
+
+        if !response.clicked() {
+            return;
+        }
+        let Some(focused) = focused else { return };
+        let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
+            return;
+        };
+
+        let alt = match ReplayFile::from_file(&file) {
+            Ok(r) => r,
+            Err(e) => {
+                self.tab_state
+                    .toasts
+                    .lock()
+                    .error(t!("ui.replay.load_alt_perspective_failed", error = format!("{e:?}")));
+                return;
+            }
+        };
+
+        // Versions must match between merged replays.
+        {
+            let primary_guard = focused.read();
+            if alt.meta.clientVersionFromExe != primary_guard.replay_file.meta.clientVersionFromExe {
+                self.tab_state.toasts.lock().error(t!(
+                    "ui.replay.load_alt_perspective_failed",
+                    error = format!(
+                        "version mismatch (primary={}, merge={})",
+                        primary_guard.replay_file.meta.clientVersionFromExe, alt.meta.clientVersionFromExe
+                    )
+                ));
+                return;
+            }
+        }
+
+        focused.write().alt_replays.push(alt);
+
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                deps.load_replay(focused, ReplaySource::ManualOpen)
+            );
+        }
+    }
+
     /// Check for "Open in New Tab" from context menu, then open replays in the appropriate tab.
     fn handle_replay_open_actions(
         &mut self,
@@ -3614,6 +3714,8 @@ impl ToolkitTabViewer<'_> {
                     );
                 }
             }
+
+            self.build_load_alt_perspective_button(ui);
 
             {
                 let mut val = self.tab_state.persisted.read().auto_load_latest_replay;

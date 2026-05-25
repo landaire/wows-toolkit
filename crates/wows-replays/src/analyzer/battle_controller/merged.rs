@@ -1,464 +1,347 @@
-//! Cross-replay state merging.
+//! Multi-replay merge driver.
 //!
-//! [`MergedBattleController`] presents a unified [`BattleControllerState`] view
-//! that combines several underlying controllers, each driven by a different
-//! player's replay of the same match. The primary controller defines the
-//! perspective (relation tags, self-stats); secondary controllers fill in
-//! whatever the primary's client could not see.
+//! [`MergedReplays`] bundles a primary replay and any number of "alt"
+//! perspectives of the same match into a single [`BattleController`]. The
+//! primary owns broadcast-flavoured state (chat, kills, scores, battle stage,
+//! etc.); the alt replays only contribute updates to other players'
+//! vehicles, so the merged view sees through fog of war without altering
+//! match-wide outputs.
+//!
+//! Callers drive the merge with [`MergedReplays::step`]: process one packet
+//! from whichever underlying replay is most behind in clock time, returning
+//! the new "safe clock" (the latest moment that every active replay has
+//! reached) so renderers know when it's safe to draw a frame.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use wowsunpack::data::ResourceLoader;
 
-use wowsunpack::game_types::BattleStage;
-use wowsunpack::game_types::BattleType;
-use wowsunpack::game_types::DamageStatCategory;
-use wowsunpack::game_types::DamageStatWeapon;
-use wowsunpack::game_types::Ribbon;
-use wowsunpack::recognized::Recognized;
-
-use crate::Rc;
-use crate::analyzer::decoder::DamageStatEntry;
-use crate::analyzer::decoder::FinishType;
-use crate::types::AvatarId;
-use crate::types::ElapsedClock;
+use crate::ReplayFile;
+use crate::analyzer::Analyzer;
+use crate::analyzer::decoder::DecodedPacketPayload;
+use crate::analyzer::decoder::PacketDecoder;
+use crate::game_constants::GameConstants;
+use crate::packet2::Packet;
+use crate::packet2::PacketType;
+use crate::packet2::Parser;
+use crate::types::ArenaId;
 use crate::types::EntityId;
 use crate::types::GameClock;
-use crate::types::GameParamId;
-use crate::types::PlaneId;
-use crate::types::ShotId;
+use crate::types::TeamId;
 
-use super::controller::Entity;
-use super::controller::GameMessage;
-use super::controller::Player;
-use super::controller::SharedPlayer;
+use super::controller::BattleController;
 use super::listener::BattleControllerState;
-use super::state::ActiveConsumable;
-use super::state::ActivePlane;
-use super::state::ActiveShot;
-use super::state::ActiveTorpedo;
-use super::state::ActiveWard;
-use super::state::BuffZoneState;
-use super::state::CapturePointState;
-use super::state::CapturedBuff;
-use super::state::DeadShip;
-use super::state::KillRecord;
-use super::state::LocalWeatherZone;
-use super::state::MinimapPosition;
-use super::state::ResolvedShotHit;
-use super::state::ScoringRules;
-use super::state::ShipPosition;
-use super::state::TeamScore;
+use wowsunpack::data::Version;
+use wowsunpack::rpc::entitydefs::EntitySpec;
 
-/// Equality between two events that may have arrived through different
-/// perspectives. Implementations deliberately ignore fields that the recording
-/// client itself fills in (timestamps, the receiving entity, etc.) and compare
-/// only the parts that uniquely identify the underlying server event.
-pub trait PerspectiveEq {
-    fn perspective_eq(&self, other: &Self) -> bool;
+/// Errors raised while building or driving a [`MergedReplays`] session.
+#[derive(Debug, thiserror::Error)]
+pub enum MergeError {
+    #[error("merge replay version mismatch (primary={primary}, merge #{index}={merge}, player={player})")]
+    VersionMismatch { primary: String, merge: String, index: usize, player: String },
+
+    #[error("arena ID mismatch: replays are not from the same match (primary={primary}, merge #{index}={merge})")]
+    ArenaIdMismatch { primary: ArenaId, merge: ArenaId, index: usize },
+
+    #[error("packet parse error in replay #{index}: {message}")]
+    PacketParse { index: usize, message: String },
 }
 
-impl PerspectiveEq for KillRecord {
-    fn perspective_eq(&self, other: &Self) -> bool {
-        self.killer == other.killer && self.victim == other.victim && self.cause == other.cause
-    }
+/// Driver for a primary replay plus zero or more "alt" perspectives of the
+/// same match. All underlying state is exposed through a single
+/// [`BattleController`] whose [`BattleControllerState`] view the caller reads.
+pub struct MergedReplays<'specs, 'res, 'data, G: ResourceLoader> {
+    controller: BattleController<'res, 'data, G>,
+    parsers: Vec<Parser<'specs>>,
+    remainings: Vec<&'data [u8]>,
+    replays: Vec<&'data ReplayFile>,
+    self_teams: Vec<Option<TeamId>>,
+    last_clocks: Vec<GameClock>,
+    finished: Vec<bool>,
+    arena_ids: Vec<Option<ArenaId>>,
+    arena_validated: bool,
+    total_duration: GameClock,
 }
 
-impl PerspectiveEq for GameMessage {
-    fn perspective_eq(&self, other: &Self) -> bool {
-        self.entity_id == other.entity_id && self.channel == other.channel && self.message == other.message
-    }
-}
-
-impl PerspectiveEq for CapturedBuff {
-    fn perspective_eq(&self, other: &Self) -> bool {
-        self.params_id == other.params_id && self.team_id == other.team_id
-    }
-}
-
-impl PerspectiveEq for ResolvedShotHit {
-    fn perspective_eq(&self, other: &Self) -> bool {
-        // A shell impact is uniquely identified by the originating salvo plus
-        // the victim. `fired_at` may differ slightly between perspectives so
-        // we exclude it here.
-        self.victim_entity_id == other.victim_entity_id
-            && self.salvo.as_ref().map(|s| s.params_id) == other.salvo.as_ref().map(|s| s.params_id)
-            && self.salvo.as_ref().map(|s| s.shots.len()) == other.salvo.as_ref().map(|s| s.shots.len())
-    }
-}
-
-fn union_events<T: Clone + PerspectiveEq>(out: &mut Vec<T>, sources: &[&dyn BattleControllerState], extract: impl Fn(&dyn BattleControllerState) -> &[T]) {
-    out.clear();
-    for src in sources {
-        for ev in extract(*src) {
-            if out.iter().any(|existing| existing.perspective_eq(ev)) {
-                continue;
+impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, G> {
+    /// Build a session for `primary` plus `merges`. Validates that every
+    /// merge has the same client version as the primary, pre-scans each
+    /// replay for its recording player's team id (used to tag packets going
+    /// into the controller), and computes [`total_duration`] as the longest
+    /// last-packet clock across all replays.
+    ///
+    /// [`total_duration`]: Self::total_duration
+    pub fn new(
+        specs: &'specs [EntitySpec],
+        game_params: &'res G,
+        game_constants: &'res GameConstants,
+        version: Version,
+        primary: &'data ReplayFile,
+        merges: &'data [ReplayFile],
+    ) -> Result<Self, MergeError> {
+        for (i, m) in merges.iter().enumerate() {
+            if m.meta.clientVersionFromExe != primary.meta.clientVersionFromExe {
+                return Err(MergeError::VersionMismatch {
+                    primary: primary.meta.clientVersionFromExe.clone(),
+                    merge: m.meta.clientVersionFromExe.clone(),
+                    index: i + 1,
+                    player: m.meta.playerName.clone(),
+                });
             }
-            out.push(ev.clone());
         }
-    }
-}
 
-fn clone_entity(entity: &Entity) -> Entity {
-    match entity {
-        Entity::Vehicle(v) => Entity::Vehicle(Rc::clone(v)),
-        Entity::Building(b) => Entity::Building(Rc::clone(b)),
-        Entity::SmokeScreen(s) => Entity::SmokeScreen(Rc::clone(s)),
-    }
-}
+        let replay_count = 1 + merges.len();
+        let mut replays: Vec<&ReplayFile> = Vec::with_capacity(replay_count);
+        replays.push(primary);
+        replays.extend(merges.iter());
 
-/// A read-only [`BattleControllerState`] that merges several underlying sources.
-///
-/// Call [`refresh`](Self::refresh) once per render tick after every source
-/// controller has consumed all its packets up to the target clock. After that,
-/// trait methods read from the precomputed merged snapshot.
-pub struct MergedBattleController<'a> {
-    sources: Vec<&'a dyn BattleControllerState>,
+        let parsers: Vec<Parser<'specs>> =
+            (0..replay_count).map(|_| Parser::with_build(specs, version.build)).collect();
+        let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data.as_slice()).collect();
 
-    clock: GameClock,
-    ship_positions: HashMap<EntityId, ShipPosition>,
-    minimap_positions: HashMap<EntityId, MinimapPosition>,
-    entities_by_id: HashMap<EntityId, Entity>,
-    capture_points: Vec<CapturePointState>,
-    buff_zones: HashMap<EntityId, BuffZoneState>,
-    local_weather_zones: Vec<LocalWeatherZone>,
-    captured_buffs: Vec<CapturedBuff>,
-    team_scores: Vec<TeamScore>,
-    active_consumables: HashMap<EntityId, Vec<ActiveConsumable>>,
-    active_shots: Vec<ActiveShot>,
-    active_torpedoes: Vec<ActiveTorpedo>,
-    shot_hits: Vec<ResolvedShotHit>,
-    active_planes: HashMap<PlaneId, ActivePlane>,
-    active_wards: HashMap<PlaneId, ActiveWard>,
-    kills: Vec<KillRecord>,
-    dead_ships: HashMap<EntityId, DeadShip>,
-    turret_yaws: HashMap<EntityId, Vec<f32>>,
-    target_yaws: HashMap<EntityId, f32>,
-    selected_ammo: HashMap<EntityId, GameParamId>,
-    game_chat: Vec<GameMessage>,
-
-    empty_player_entities: HashMap<EntityId, Rc<Player>>,
-    empty_metadata_players: Vec<SharedPlayer>,
-}
-
-impl<'a> MergedBattleController<'a> {
-    /// Build a merger. The first source is the primary perspective; everything
-    /// else is treated as a secondary perspective used to fill in fog-of-war
-    /// gaps. `refresh()` must be called before any trait method is read.
-    pub fn new(primary: &'a dyn BattleControllerState, secondaries: Vec<&'a dyn BattleControllerState>) -> Self {
-        let mut sources = Vec::with_capacity(1 + secondaries.len());
-        sources.push(primary);
-        sources.extend(secondaries);
-        Self {
-            sources,
-            clock: GameClock(0.0),
-            ship_positions: HashMap::new(),
-            minimap_positions: HashMap::new(),
-            entities_by_id: HashMap::new(),
-            capture_points: Vec::new(),
-            buff_zones: HashMap::new(),
-            local_weather_zones: Vec::new(),
-            captured_buffs: Vec::new(),
-            team_scores: Vec::new(),
-            active_consumables: HashMap::new(),
-            active_shots: Vec::new(),
-            active_torpedoes: Vec::new(),
-            shot_hits: Vec::new(),
-            active_planes: HashMap::new(),
-            active_wards: HashMap::new(),
-            kills: Vec::new(),
-            dead_ships: HashMap::new(),
-            turret_yaws: HashMap::new(),
-            target_yaws: HashMap::new(),
-            selected_ammo: HashMap::new(),
-            game_chat: Vec::new(),
-            empty_player_entities: HashMap::new(),
-            empty_metadata_players: Vec::new(),
+        let mut self_teams = Vec::with_capacity(replay_count);
+        let mut total_duration = GameClock(0.0);
+        for r in &replays {
+            self_teams.push(scan_self_team(specs, game_constants, version, r));
+            total_duration = GameClock(total_duration.0.max(scan_last_clock(specs, version, r).0));
         }
+
+        let controller = BattleController::new(&primary.meta, game_params, Some(game_constants));
+
+        Ok(Self {
+            controller,
+            parsers,
+            remainings,
+            replays,
+            self_teams,
+            last_clocks: vec![GameClock(0.0); replay_count],
+            finished: vec![false; replay_count],
+            arena_ids: vec![None; replay_count],
+            arena_validated: replay_count <= 1,
+            total_duration,
+        })
     }
 
-    /// Primary perspective. All "self"-flavoured methods (ribbons, damage
-    /// stats, relation tagging, scoring config) read from this source.
-    fn primary(&self) -> &dyn BattleControllerState {
-        self.sources[0]
+    /// All replays, primary first.
+    pub fn replays(&self) -> &[&'data ReplayFile] {
+        &self.replays
     }
 
-    /// Recompute the merged snapshot. Cheap relative to packet processing but
-    /// linear in the total number of tracked entities across all sources, so
-    /// callers should call it at most once per render tick.
-    pub fn refresh(&mut self) {
-        self.clock = self.primary().clock();
+    /// Self-team for each replay (same index order as [`replays`]).
+    ///
+    /// [`replays`]: Self::replays
+    pub fn self_teams(&self) -> &[Option<TeamId>] {
+        &self.self_teams
+    }
 
-        merge_freshest_map(&mut self.ship_positions, &self.sources, |s| s.ship_positions(), |p| p.last_updated);
-        merge_freshest_map(&mut self.minimap_positions, &self.sources, |s| s.minimap_positions(), |p| p.last_updated);
+    /// Total replay duration, i.e. the latest last-packet clock across all
+    /// merged replays. Useful for sizing the output video / progress bar.
+    pub fn total_duration(&self) -> GameClock {
+        self.total_duration
+    }
 
-        self.entities_by_id.clear();
-        for src in &self.sources {
-            for (id, entity) in src.entities_by_id() {
-                self.entities_by_id.entry(*id).or_insert_with(|| clone_entity(entity));
-            }
+    /// `true` once every replay's stream has been exhausted.
+    pub fn is_done(&self) -> bool {
+        self.finished.iter().all(|f| *f)
+    }
+
+    /// Read-only access to the merged controller state. Renderers call this
+    /// between [`step`](Self::step) calls to inspect the current merged view.
+    pub fn controller(&self) -> &BattleController<'res, 'data, G> {
+        &self.controller
+    }
+
+    /// Latest clock for which every active replay has finished processing
+    /// its stream. Renderers should only draw frames at clocks up to this
+    /// value to ensure all perspectives are consistent.
+    pub fn safe_clock(&self) -> Option<GameClock> {
+        (0..self.replays.len())
+            .filter(|i| !self.finished[*i])
+            .map(|i| self.last_clocks[i].0)
+            .fold(None, |acc, c| Some(acc.map(|a: f32| a.min(c)).unwrap_or(c)))
+            .map(GameClock)
+    }
+
+    /// Drive one packet from the most-behind replay into the controller.
+    /// Returns:
+    /// - `Ok(Some(safe_clock))` after a packet was processed.
+    /// - `Ok(None)` once every replay is exhausted ([`is_done`] returns true).
+    /// - `Err` on parse failure or arena-id mismatch.
+    ///
+    /// [`is_done`]: Self::is_done
+    pub fn step(&mut self) -> Result<Option<GameClock>, MergeError> {
+        let lag = (0..self.replays.len()).filter(|i| !self.finished[*i]).min_by(|a, b| {
+            self.last_clocks[*a].0.partial_cmp(&self.last_clocks[*b].0).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let Some(idx) = lag else { return Ok(None) };
+
+        if self.remainings[idx].is_empty() {
+            self.finished[idx] = true;
+            return self.step();
         }
 
-        // Globally-consistent state: trust the primary.
-        self.capture_points = self.primary().capture_points().to_vec();
-        self.team_scores = self.primary().team_scores().to_vec();
-        self.local_weather_zones = self.primary().local_weather_zones().to_vec();
+        let packet = self.parsers[idx]
+            .parse_packet(&mut self.remainings[idx])
+            .map_err(|e| MergeError::PacketParse { index: idx, message: format!("{e:?}") })?;
+        let packet_clock = packet.clock;
 
-        // Per-perspective AOI state: union, primary wins on collision.
-        self.buff_zones.clear();
-        for src in &self.sources {
-            for (id, zone) in src.buff_zones() {
-                self.buff_zones.entry(*id).or_insert_with(|| zone.clone());
-            }
+        let is_primary = idx == 0;
+
+        // Only tag the controller with a source team when we're actually
+        // merging multiple replays; single-replay processing should behave
+        // exactly as it does without any merger involved.
+        if self.replays.len() > 1 {
+            self.controller.set_source_team(self.self_teams[idx]);
+        }
+        if is_primary || forward_secondary_packet(&self.controller, &packet) {
+            self.controller.process(&packet);
         }
 
-        merge_freshest_map(&mut self.active_planes, &self.sources, |s| s.active_planes(), |p| p.last_updated);
-
-        self.active_wards.clear();
-        for src in &self.sources {
-            for (id, w) in src.active_wards() {
-                self.active_wards.entry(*id).or_insert_with(|| w.clone());
-            }
+        // Cheap second pass to harvest the arena id without re-routing
+        // through the controller; the routing filter would drop the
+        // secondaries' onArenaStateReceived calls.
+        if self.arena_ids[idx].is_none()
+            && let PacketType::EntityMethod(em) = &packet.payload
+            && em.method == "onArenaStateReceived"
+            && let Some(wowsunpack::rpc::typedefs::ArgValue::Int64(v)) = em.args.first()
+        {
+            self.arena_ids[idx] = Some(ArenaId::from(*v));
         }
 
-        self.dead_ships.clear();
-        for src in &self.sources {
-            for (id, ship) in src.dead_ships() {
-                self.dead_ships
-                    .entry(*id)
-                    .and_modify(|existing| {
-                        if ship.clock.0 < existing.clock.0 {
-                            *existing = ship.clone();
-                        }
-                    })
-                    .or_insert_with(|| ship.clone());
-            }
-        }
+        drop(packet);
+        self.last_clocks[idx] = packet_clock;
 
-        self.turret_yaws.clear();
-        for src in &self.sources {
-            for (id, yaws) in src.turret_yaws() {
-                self.turret_yaws.entry(*id).or_insert_with(|| yaws.clone());
-            }
-        }
-
-        self.target_yaws.clear();
-        for src in &self.sources {
-            for (id, yaw) in src.target_yaws() {
-                self.target_yaws.entry(*id).or_insert(*yaw);
-            }
-        }
-
-        self.selected_ammo.clear();
-        for src in &self.sources {
-            for (id, ammo) in src.selected_ammo() {
-                self.selected_ammo.entry(*id).or_insert(*ammo);
-            }
-        }
-
-        self.active_consumables.clear();
-        for src in &self.sources {
-            for (id, list) in src.active_consumables() {
-                self.active_consumables.entry(*id).or_insert_with(|| list.clone());
-            }
-        }
-
-        // Active shots: union, dedupe by (avatar, fired_at bits).
-        self.active_shots.clear();
-        let mut shot_keys: HashSet<(AvatarId, u32)> = HashSet::new();
-        for src in &self.sources {
-            for shot in src.active_shots() {
-                let key = (shot.avatar_id, shot.fired_at.0.to_bits());
-                if shot_keys.insert(key) {
-                    self.active_shots.push(shot.clone());
+        if !self.arena_validated
+            && let Some(primary_arena) = self.arena_ids[0]
+        {
+            let mut all_set = true;
+            for (i, id) in self.arena_ids.iter().enumerate().skip(1) {
+                let Some(merge_arena) = id else {
+                    all_set = false;
+                    continue;
+                };
+                if *merge_arena != primary_arena {
+                    return Err(MergeError::ArenaIdMismatch { primary: primary_arena, merge: *merge_arena, index: i });
                 }
             }
-        }
-
-        // Active torpedoes: union, dedupe by (avatar, torpedo shot_id).
-        self.active_torpedoes.clear();
-        let mut torp_keys: HashSet<(AvatarId, ShotId)> = HashSet::new();
-        for src in &self.sources {
-            for t in src.active_torpedoes() {
-                let key = (t.avatar_id, t.torpedo.shot_id);
-                if torp_keys.insert(key) {
-                    self.active_torpedoes.push(t.clone());
-                }
+            if all_set {
+                self.arena_validated = true;
             }
         }
 
-        union_events(&mut self.kills, &self.sources, |s| s.kills());
-        union_events(&mut self.captured_buffs, &self.sources, |s| s.captured_buffs());
-        union_events(&mut self.shot_hits, &self.sources, |s| s.shot_hits());
-        union_events(&mut self.game_chat, &self.sources, |s| s.game_chat());
+        Ok(self.safe_clock())
+    }
+
+    /// Finalize the merged controller (forwards to
+    /// [`Analyzer::finish`](crate::analyzer::Analyzer::finish)).
+    pub fn finish(&mut self) {
+        self.controller.finish();
+    }
+
+    /// Mutable access to the merged controller, for `encoder.finish` and the
+    /// like that need `&mut`.
+    pub fn controller_mut(&mut self) -> &mut BattleController<'res, 'data, G> {
+        &mut self.controller
+    }
+
+    /// Consume the session and return the underlying merged controller.
+    /// Callers that want a [`crate::analyzer::battle_controller::BattleReport`]
+    /// should call this then [`BattleController::build_report`].
+    pub fn into_controller(self) -> BattleController<'res, 'data, G> {
+        self.controller
+    }
+
+    /// First-validated arena id, available once every replay has emitted its
+    /// `onArenaStateReceived` packet.
+    pub fn arena_id(&self) -> Option<ArenaId> {
+        self.arena_ids[0]
     }
 }
 
-fn merge_freshest_map<K: Eq + std::hash::Hash + Copy, V: Clone>(
-    out: &mut HashMap<K, V>,
-    sources: &[&dyn BattleControllerState],
-    extract: impl Fn(&dyn BattleControllerState) -> &HashMap<K, V>,
-    last_updated: impl Fn(&V) -> GameClock,
-) {
-    out.clear();
-    for src in sources {
-        for (id, value) in extract(*src) {
-            let take = match out.get(id) {
-                Some(existing) => last_updated(value).0 > last_updated(existing).0,
-                None => true,
-            };
-            if take {
-                out.insert(*id, value.clone());
-            }
+/// Walk a replay's stream to find the first `onArenaStateReceived` and
+/// return the team id whose username matches the replay meta's
+/// `playerName`. Returns `None` if no match is found.
+fn scan_self_team(
+    specs: &[EntitySpec],
+    game_constants: &GameConstants,
+    version: Version,
+    replay: &ReplayFile,
+) -> Option<TeamId> {
+    let mut parser = Parser::with_build(specs, version.build);
+    let decoder = PacketDecoder::builder()
+        .version(version)
+        .battle_constants(game_constants.battle())
+        .common_constants(game_constants.common())
+        .ships_constants(game_constants.ships())
+        .build();
+    let mut remaining = &replay.packet_data[..];
+    let player_name = replay.meta.playerName.as_str();
+    while !remaining.is_empty() {
+        let packet = parser.parse_packet(&mut remaining).ok()?;
+        let decoded = decoder.decode(&packet);
+        if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } = decoded.payload {
+            return player_states
+                .iter()
+                .chain(bot_states.iter())
+                .find(|p| p.username() == player_name)
+                .map(|p| TeamId::from(p.team_id()));
         }
     }
+    None
 }
 
-impl<'a> BattleControllerState for MergedBattleController<'a> {
-    fn clock(&self) -> GameClock {
-        self.clock
+/// Walk a replay's stream and return the largest packet clock observed.
+fn scan_last_clock(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> GameClock {
+    let mut parser = Parser::with_build(specs, version.build);
+    let mut remaining = &replay.packet_data[..];
+    let mut last = GameClock(0.0);
+    while !remaining.is_empty() {
+        match parser.parse_packet(&mut remaining) {
+            Ok(p) => last = GameClock(p.clock.0.max(last.0)),
+            Err(_) => break,
+        }
     }
+    last
+}
 
-    fn ship_positions(&self) -> &HashMap<EntityId, ShipPosition> {
-        &self.ship_positions
+/// Decide whether a packet from a non-primary replay should be fed to the
+/// shared controller. Forward iff the packet updates state on a Vehicle
+/// entity that the controller already tracks, plus a short allow-list of
+/// Avatar-method calls that carry cross-perspective info about *other* ships
+/// (artillery in flight, plane spawns, minimap vision, etc.).
+fn forward_secondary_packet<G: ResourceLoader>(
+    controller: &BattleController<'_, '_, G>,
+    packet: &Packet<'_, '_>,
+) -> bool {
+    match &packet.payload {
+        PacketType::Position(p) => is_known_vehicle(controller, p.pid),
+        PacketType::EntityProperty(ep) => is_known_vehicle(controller, ep.entity_id),
+        PacketType::PropertyUpdate(pu) => is_known_vehicle(controller, pu.entity_id),
+        PacketType::EntityMethod(em) => is_cross_perspective_method(em.method),
+        // Everything else (lifecycle, recording-player setup, primary's view,
+        // match-wide one-shots, server timing) is owned by primary.
+        _ => false,
     }
+}
 
-    fn minimap_positions(&self) -> &HashMap<EntityId, MinimapPosition> {
-        &self.minimap_positions
-    }
+fn is_known_vehicle<G: ResourceLoader>(controller: &BattleController<'_, '_, G>, id: EntityId) -> bool {
+    controller.entities_by_id().get(&id).and_then(|e| e.vehicle_ref().map(|_| ())).is_some()
+}
 
-    fn player_entities(&self) -> &HashMap<EntityId, Rc<Player>> {
-        // Player relations are recorded relative to each replay's recording
-        // player; only the primary's tagging is meaningful for the merged view.
-        // If the primary somehow has no players (parse error), fall back to
-        // an empty map rather than mixing perspectives.
-        let primary = self.primary().player_entities();
-        if primary.is_empty() { &self.empty_player_entities } else { primary }
-    }
-
-    fn metadata_players(&self) -> &[SharedPlayer] {
-        let primary = self.primary().metadata_players();
-        if primary.is_empty() { &self.empty_metadata_players } else { primary }
-    }
-
-    fn entities_by_id(&self) -> &HashMap<EntityId, Entity> {
-        &self.entities_by_id
-    }
-
-    fn capture_points(&self) -> &[CapturePointState] {
-        &self.capture_points
-    }
-
-    fn buff_zones(&self) -> &HashMap<EntityId, BuffZoneState> {
-        &self.buff_zones
-    }
-
-    fn local_weather_zones(&self) -> &[LocalWeatherZone] {
-        &self.local_weather_zones
-    }
-
-    fn captured_buffs(&self) -> &[CapturedBuff] {
-        &self.captured_buffs
-    }
-
-    fn team_scores(&self) -> &[TeamScore] {
-        &self.team_scores
-    }
-
-    fn game_chat(&self) -> &[GameMessage] {
-        &self.game_chat
-    }
-
-    fn active_consumables(&self) -> &HashMap<EntityId, Vec<ActiveConsumable>> {
-        &self.active_consumables
-    }
-
-    fn active_shots(&self) -> &[ActiveShot] {
-        &self.active_shots
-    }
-
-    fn active_torpedoes(&self) -> &[ActiveTorpedo] {
-        &self.active_torpedoes
-    }
-
-    fn shot_hits(&self) -> &[ResolvedShotHit] {
-        &self.shot_hits
-    }
-
-    fn active_planes(&self) -> &HashMap<PlaneId, ActivePlane> {
-        &self.active_planes
-    }
-
-    fn active_wards(&self) -> &HashMap<PlaneId, ActiveWard> {
-        &self.active_wards
-    }
-
-    fn kills(&self) -> &[KillRecord] {
-        &self.kills
-    }
-
-    fn dead_ships(&self) -> &HashMap<EntityId, DeadShip> {
-        &self.dead_ships
-    }
-
-    fn battle_end_clock(&self) -> Option<GameClock> {
-        self.primary().battle_end_clock()
-    }
-
-    fn winning_team(&self) -> Option<i8> {
-        self.primary().winning_team()
-    }
-
-    fn finish_type(&self) -> Option<&Recognized<FinishType>> {
-        self.primary().finish_type()
-    }
-
-    fn turret_yaws(&self) -> &HashMap<EntityId, Vec<f32>> {
-        &self.turret_yaws
-    }
-
-    fn target_yaws(&self) -> &HashMap<EntityId, f32> {
-        &self.target_yaws
-    }
-
-    fn selected_ammo(&self) -> &HashMap<EntityId, GameParamId> {
-        &self.selected_ammo
-    }
-
-    fn battle_type(&self) -> Recognized<BattleType> {
-        self.primary().battle_type()
-    }
-
-    fn scoring_rules(&self) -> Option<&ScoringRules> {
-        self.primary().scoring_rules()
-    }
-
-    fn time_left(&self) -> Option<i64> {
-        self.primary().time_left()
-    }
-
-    fn battle_stage(&self) -> Option<BattleStage> {
-        self.primary().battle_stage()
-    }
-
-    fn battle_start_clock(&self) -> Option<GameClock> {
-        self.primary().battle_start_clock()
-    }
-
-    fn game_clock_to_elapsed(&self, clock: GameClock) -> ElapsedClock {
-        self.primary().game_clock_to_elapsed(clock)
-    }
-
-    fn elapsed_to_game_clock(&self, elapsed: ElapsedClock) -> GameClock {
-        self.primary().elapsed_to_game_clock(elapsed)
-    }
-
-    fn self_ribbons(&self) -> &HashMap<Ribbon, usize> {
-        self.primary().self_ribbons()
-    }
-
-    fn self_damage_stats(
-        &self,
-    ) -> &HashMap<(Recognized<DamageStatWeapon>, Recognized<DamageStatCategory>), DamageStatEntry> {
-        self.primary().self_damage_stats()
-    }
+fn is_cross_perspective_method(method: &str) -> bool {
+    matches!(
+        method,
+        "receiveArtilleryShots"
+            | "receiveTorpedoes"
+            | "receiveTorpedoDirection"
+            | "receive_addMinimapSquadron"
+            | "receive_removeMinimapSquadron"
+            | "receive_updateMinimapSquadron"
+            | "receive_wardAdded"
+            | "receive_wardRemoved"
+            | "updateMinimapVisionInfo"
+            | "consumableUsed"
+            | "onConsumableUsed"
+            | "syncGun"
+            | "setAmmoForWeapon"
+            | "syncShipCracks"
+    )
 }

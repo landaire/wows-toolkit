@@ -9,5 +9,6 @@ pub use wowsunpack::game_types::NormalizedPos;
 pub use wowsunpack::game_types::PlaneId;
 pub use wowsunpack::game_types::Relation;
 pub use wowsunpack::game_types::ShotId;
+pub use wowsunpack::game_types::TeamId;
 pub use wowsunpack::game_types::WorldPos;
 pub use wowsunpack::game_types::WorldPos2D;

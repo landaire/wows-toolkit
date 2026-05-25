@@ -498,7 +498,7 @@ fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alph
     };
 
     let t_i = t as i32;
-    let t_sq = (t_i * t_i) as i32;
+    let t_sq = t_i * t_i;
     for y in 0..oh as i32 {
         for x in 0..ow as i32 {
             if alpha_at(x, y) > 128 {
@@ -1471,9 +1471,7 @@ impl ImageTarget {
 
         let ship_icon_outlines = ship_icons
             .iter()
-            .map(|(k, icon)| {
-                (k.clone(), make_ship_icon_outline(icon, SHIP_ICON_OUTLINE_THICKNESS, [255, 215, 0], 230))
-            })
+            .map(|(k, icon)| (k.clone(), make_ship_icon_outline(icon, SHIP_ICON_OUTLINE_THICKNESS, [255, 215, 0], 230)))
             .collect();
 
         Self {
@@ -1519,29 +1517,13 @@ impl RenderTarget for ImageTarget {
         let y_off = HUD_HEIGHT as f32;
         match cmd {
             DrawCommand::ShotTracer { from, to, color } => {
-                draw_line(
-                    &mut self.canvas,
-                    from.x,
-                    from.y + y_off,
-                    to.x,
-                    to.y + y_off,
-                    *color,
-                    1.0,
-                    1.5,
-                );
+                draw_line(&mut self.canvas, from.x, from.y + y_off, to.x, to.y + y_off, *color, 1.0, 1.5);
             }
             DrawCommand::Torpedo { pos, color } => {
                 draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, 2.5, *color, 1.0);
             }
             DrawCommand::Smoke { pos, radius, color, alpha } => {
-                draw_filled_circle(
-                    &mut self.canvas,
-                    pos.x,
-                    pos.y + y_off,
-                    *radius as f32,
-                    *color,
-                    *alpha,
-                );
+                draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, *radius as f32, *color, *alpha);
             }
             DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
                 let cx = pos.x;
@@ -1592,14 +1574,7 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::WeatherZone { pos, radius } => {
                 // Semi-transparent light gray circle for weather zones (squalls/storms)
-                draw_filled_circle(
-                    &mut self.canvas,
-                    pos.x,
-                    pos.y + y_off,
-                    *radius as f32,
-                    [255, 255, 255],
-                    0.25,
-                );
+                draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, *radius as f32, [255, 255, 255], 0.25);
             }
             DrawCommand::Ship {
                 pos,
@@ -1641,9 +1616,7 @@ impl RenderTarget for ImageTarget {
                     return;
                 };
 
-                if *is_detected_teammate
-                    && let Some(outline) = self.ship_icon_outlines.get(icon_key)
-                {
+                if *is_detected_teammate && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
                     draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, None, 1.0);
                 }
 
@@ -1799,7 +1772,12 @@ impl RenderTarget for ImageTarget {
                             icon_size as u32,
                             image::imageops::FilterType::Nearest,
                         );
-                        draw_icon(&mut self.canvas, &resized, (x + icon_size / 2) as f32, (buff_y + icon_size / 2) as f32);
+                        draw_icon(
+                            &mut self.canvas,
+                            &resized,
+                            (x + icon_size / 2) as f32,
+                            (buff_y + icon_size / 2) as f32,
+                        );
                         if *count > 1 {
                             let label = format!("{}", count);
                             draw_text_shadow(
@@ -1847,7 +1825,12 @@ impl RenderTarget for ImageTarget {
                         } else {
                             x -= icon_size;
                         }
-                        draw_icon(&mut self.canvas, &resized, (x + icon_size / 2) as f32, (buff_y + icon_size / 2) as f32);
+                        draw_icon(
+                            &mut self.canvas,
+                            &resized,
+                            (x + icon_size / 2) as f32,
+                            (buff_y + icon_size / 2) as f32,
+                        );
                         x -= gap;
                     }
                 }
@@ -2355,7 +2338,12 @@ impl RenderTarget for ImageTarget {
                             let cause_key = death_cause_icon_key(&kill.cause);
                             if let Some(cause_icon) = self.death_cause_icons.get(cause_key) {
                                 let cause_center_y = icon_y + icon_size / 2;
-                                draw_icon(&mut self.canvas, cause_icon, (cx + icon_size / 2) as f32, cause_center_y as f32);
+                                draw_icon(
+                                    &mut self.canvas,
+                                    cause_icon,
+                                    (cx + icon_size / 2) as f32,
+                                    cause_center_y as f32,
+                                );
                                 cx += icon_size + gap;
                             }
 
