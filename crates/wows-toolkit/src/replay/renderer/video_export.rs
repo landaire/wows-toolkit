@@ -11,7 +11,6 @@ use wows_minimap_renderer::renderer::RenderOptions;
 
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -38,6 +37,7 @@ pub(super) fn execute_video_export(
                 output_path,
                 video_export_data.raw_meta.clone(),
                 video_export_data.packet_data.clone(),
+                video_export_data.alt_replays.clone(),
                 video_export_data.map_name.clone(),
                 video_export_data.game_duration,
                 options,
@@ -73,6 +73,7 @@ pub(super) fn save_as_video(
     output_path: String,
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
+    alt_replays: Vec<super::AltReplayBytes>,
     map_name: String,
     game_duration: f32,
     options: RenderOptions,
@@ -91,6 +92,7 @@ pub(super) fn save_as_video(
             &output_path,
             &raw_meta,
             &packet_data,
+            &alt_replays,
             &map_name,
             game_duration,
             options,
@@ -146,6 +148,7 @@ pub(super) fn render_video_to_clipboard(
             &output_str,
             &export_data.raw_meta,
             &export_data.packet_data,
+            &export_data.alt_replays,
             &export_data.map_name,
             export_data.game_duration,
             options,
@@ -234,6 +237,7 @@ fn render_batch(
             &output_str,
             &replay.raw_meta,
             &replay.packet_data,
+            &[], // batch rendering doesn't propagate per-replay merge state
             &replay.map_name,
             replay.game_duration,
             options.clone(),
@@ -367,6 +371,7 @@ pub(super) fn render_video_blocking(
     output_path: &str,
     raw_meta: &[u8],
     packet_data: &[u8],
+    alt_replays: &[super::AltReplayBytes],
     map_name: &str,
     game_duration: f32,
     options: RenderOptions,
@@ -446,10 +451,13 @@ pub(super) fn render_video_blocking(
     // Build replay parser components
     let replay_file = ReplayFile::from_decrypted_parts(raw_meta.to_vec(), packet_data.to_vec())
         .map_err(|e| report!("Failed to parse replay: {:?}", e))?;
+    let alt_replay_files: Vec<ReplayFile> = alt_replays
+        .iter()
+        .map(|a| ReplayFile::from_decrypted_parts(a.raw_meta.clone(), a.packet_data.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| report!("Failed to parse merge replay: {:?}", e))?;
 
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
-    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
     // Load self player's ship silhouette for the stats panel
     let self_silhouette = replay_file.meta.vehicles.iter().find(|v| v.relation == 0).and_then(|v| {
         use wowsunpack::game_params::types::GameParamProvider;
@@ -496,26 +504,41 @@ pub(super) fn render_video_blocking(
         });
     }
 
-    // Parse all packets, advancing the encoder at each clock tick
-    let mut remaining = &replay_file.packet_data[..];
-    let mut prev_clock = GameClock(0.0);
+    // Drive the parse via MergedReplays so a single code path handles both the
+    // standalone case (zero alt replays, single primary) and the merged case
+    // (alt perspectives feed packets into the same controller through the
+    // routing filter).
+    let mut session = wows_replays::analyzer::battle_controller::merged::MergedReplays::new(
+        game_metadata.entity_specs(),
+        &*game_metadata,
+        &game_constants,
+        version,
+        &replay_file,
+        &alt_replay_files,
+    )
+    .map_err(|e| report!("{e}"))?;
 
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => {
-                if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
-                    renderer.populate_players(&controller);
-                    renderer.update_squadron_info(&controller);
-                    renderer.update_ship_abilities(&controller);
-                    encoder.advance_clock(prev_clock, &controller, &mut renderer, &mut target);
-                }
-                prev_clock = packet.clock;
-                controller.process(&packet);
-            }
-            Err(_) => break,
+    let mut prev_render_clock = GameClock(0.0);
+    while let Some(safe_clock) = session.step().map_err(|e| report!("{e}"))? {
+        if safe_clock.0 > prev_render_clock.0 {
+            renderer.populate_players(session.controller());
+            renderer.update_squadron_info(session.controller());
+            renderer.update_ship_abilities(session.controller());
+            encoder.advance_clock(prev_render_clock, session.controller(), &mut renderer, &mut target);
+            prev_render_clock = safe_clock;
         }
     }
 
+    let total = session.total_duration();
+    if total.0 > prev_render_clock.0 {
+        renderer.populate_players(session.controller());
+        renderer.update_squadron_info(session.controller());
+        renderer.update_ship_abilities(session.controller());
+        encoder.advance_clock(total, session.controller(), &mut renderer, &mut target);
+    }
+
+    session.finish();
+    let mut controller = session.into_controller();
     controller.finish();
     renderer.populate_players(&controller);
     renderer.update_squadron_info(&controller);

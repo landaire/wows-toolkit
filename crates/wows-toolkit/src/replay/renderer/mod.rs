@@ -493,6 +493,13 @@ pub struct SharedRendererState {
     pub map_space_size: Option<f32>,
     /// Raw self-player ship silhouette (set by playback thread, converted to TextureHandle on UI thread).
     pub self_silhouette_raw: Option<(u32, u32, Vec<u8>)>,
+
+    /// Cancellation signal for in-flight `step_session_to_clock` calls. Set
+    /// to `true` when the UI issues a new Seek so the still-running step
+    /// from a previous seek bails out immediately instead of finishing its
+    /// (potentially long) backward rebuild. The playback thread resets it
+    /// to `false` after acting on it.
+    pub cancel_step: Arc<AtomicBool>,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -549,10 +556,22 @@ pub struct ReplayRendererViewer {
     save_notify: Arc<tokio::sync::Notify>,
 }
 
+/// Decrypted bytes for one additional perspective replay merged into the
+/// primary. Carried alongside the primary's bytes through every renderer
+/// path so the playback thread, video export, and timeline extraction all
+/// produce a merged view via
+/// [`wows_replays::analyzer::battle_controller::merged::MergedReplays`].
+#[derive(Clone)]
+pub struct AltReplayBytes {
+    pub raw_meta: Vec<u8>,
+    pub packet_data: Vec<u8>,
+}
+
 /// Data retained for video export. Cloned once at launch time.
 struct VideoExportData {
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
+    alt_replays: Vec<AltReplayBytes>,
     map_name: String,
     replay_name: String,
     game_duration: f32,
@@ -569,6 +588,7 @@ struct VideoExportData {
 pub fn launch_replay_renderer(
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
+    alt_replays: Vec<AltReplayBytes>,
     map_name: String,
     replay_name: String,
     game_duration: f32,
@@ -617,6 +637,7 @@ pub fn launch_replay_renderer(
         collab_map_name: Some(map_name.clone()),
         map_space_size: None,
         self_silhouette_raw: None,
+        cancel_step: Arc::new(AtomicBool::new(false)),
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -624,6 +645,7 @@ pub fn launch_replay_renderer(
     let video_export_data = Arc::new(VideoExportData {
         raw_meta: raw_meta.clone(),
         packet_data: packet_data.clone(),
+        alt_replays: alt_replays.clone(),
         map_name: map_name.clone(),
         replay_name,
         game_duration,
@@ -666,6 +688,7 @@ pub fn launch_replay_renderer(
         playback_thread(
             raw_meta,
             packet_data,
+            alt_replays,
             map_name,
             game_duration,
             wows_data,
@@ -774,6 +797,7 @@ pub fn launch_client_renderer(
         collab_map_name: None,
         map_space_size: None,
         self_silhouette_raw: None,
+        cancel_step: Arc::new(AtomicBool::new(false)),
     }));
 
     let title = Arc::new(format!("Collab Viewer - {replay_name}"));
@@ -1735,10 +1759,12 @@ impl ReplayRendererViewer {
                             let shift = ctx.input(|i| i.modifiers.shift);
                             if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
                                 let target = (clock_secs - 10.0).max(GameClock(0.0));
+                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                 let _ = command_tx.send(PlaybackCommand::Seek(target));
                             }
                             if !shift && ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
                                 let target = (clock_secs + 10.0).min(GameClock(game_dur));
+                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                 let _ = command_tx.send(PlaybackCommand::Seek(target));
                             }
 
@@ -1751,6 +1777,7 @@ impl ReplayRendererViewer {
                                         let seek_clock = event.clock.to_absolute(battle_start);
                                         let desc = format_timeline_event(event);
                                         drop(state);
+                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                         toasts.lock().info(desc);
                                     }
@@ -1762,6 +1789,7 @@ impl ReplayRendererViewer {
                                         let seek_clock = event.clock.to_absolute(battle_start);
                                         let desc = format_timeline_event(event);
                                         drop(state);
+                                        shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                         let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                         toasts.lock().info(desc);
                                     }
@@ -1970,6 +1998,7 @@ impl ReplayRendererViewer {
                                                     .map(|f| f.clock)
                                                     .unwrap_or(GameClock(0.0));
                                                 drop(state);
+                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                 let _ = command_tx.send(PlaybackCommand::Seek(current_clock));
                                                 ann.show_context_menu = false;
                                                 repaint = true;
@@ -2151,6 +2180,7 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_BACK));
                                                 if btn.on_hover_text(t!("ui.renderer.controls.jump_to_start")).clicked() {
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                     let _ = command_tx.send(PlaybackCommand::Seek(GameClock(0.0)));
                                                 }
                                             }
@@ -2171,6 +2201,7 @@ impl ReplayRendererViewer {
                                                             let seek_clock = event.clock.to_absolute(battle_start);
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
+                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                                             toasts.lock().info(desc);
                                                         }
@@ -2185,6 +2216,7 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(icons::CLOCK_COUNTER_CLOCKWISE));
                                                 if btn.on_hover_text(t!("ui.renderer.controls.back_10s")).clicked() {
                                                     let target = (clock_secs - 10.0).max(GameClock(0.0));
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
                                             }
@@ -2220,6 +2252,7 @@ impl ReplayRendererViewer {
                                                     .ui_add(egui::Button::new(icons::CLOCK_CLOCKWISE));
                                                 if btn.on_hover_text(t!("ui.renderer.controls.forward_10s")).clicked() {
                                                     let target = (clock_secs + 10.0).min(GameClock(game_dur));
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                     let _ = command_tx.send(PlaybackCommand::Seek(target));
                                                 }
                                             }
@@ -2240,6 +2273,7 @@ impl ReplayRendererViewer {
                                                             let seek_clock = event.clock.to_absolute(battle_start);
                                                             let desc = format_timeline_event(event);
                                                             drop(state);
+                                                            shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                             let _ = command_tx.send(PlaybackCommand::Seek(seek_clock));
                                                             toasts.lock().info(desc);
                                                         }
@@ -2253,6 +2287,7 @@ impl ReplayRendererViewer {
                                                     .style(fixed_style.clone())
                                                     .ui_add(egui::Button::new(icons::SKIP_FORWARD));
                                                 if btn.on_hover_text(t!("ui.renderer.controls.jump_to_end")).clicked() {
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                     let _ = command_tx.send(PlaybackCommand::Seek(GameClock(game_dur)));
                                                 }
                                             }
@@ -2269,6 +2304,7 @@ impl ReplayRendererViewer {
                                                     seek_changed = ui.add(slider).changed();
                                                 });
                                                 if seek_changed {
+                                                    shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                     let _ = command_tx.send(PlaybackCommand::Seek(GameClock(seek_time)));
                                                 }
 
@@ -2735,6 +2771,7 @@ impl ReplayRendererViewer {
                                                                 clicked
                                                             });
                                                             if row.inner {
+                                                                shared_state.lock().cancel_step.store(true, Ordering::Relaxed);
                                                                 let _ =
                                                                     command_tx.send(PlaybackCommand::Seek(event.clock.to_absolute(battle_start)));
                                                             }

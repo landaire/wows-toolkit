@@ -3243,9 +3243,18 @@ impl ToolkitTabViewer<'_> {
                         return;
                     };
                     let asset_cache = self.tab_state.renderer_asset_cache.clone();
+                    let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = replay_file
+                        .alt_replays
+                        .iter()
+                        .map(|r| crate::replay::renderer::AltReplayBytes {
+                            raw_meta: r.raw_meta.clone().into_bytes(),
+                            packet_data: r.packet_data.clone(),
+                        })
+                        .collect();
                     let viewer = crate::replay::renderer::launch_replay_renderer(
                         raw_meta,
                         pkt_data,
+                        alt_replays,
                         map_name,
                         replay_name,
                         game_duration,
@@ -4532,6 +4541,14 @@ impl ToolkitTabViewer<'_> {
             let guard = arc.read();
             let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
             let pkt_data = guard.replay_file.packet_data.clone();
+            let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = guard
+                .alt_replays
+                .iter()
+                .map(|r| crate::replay::renderer::AltReplayBytes {
+                    raw_meta: r.raw_meta.clone().into_bytes(),
+                    packet_data: r.packet_data.clone(),
+                })
+                .collect();
             let map_name = guard.replay_file.meta.mapName.clone();
             let translated_map = guard.map_name(&guard.resource_loader);
             let base = format!("{} - {}", guard.replay_file.meta.playerName, translated_map);
@@ -4558,6 +4575,7 @@ impl ToolkitTabViewer<'_> {
             let viewer = crate::replay::renderer::launch_replay_renderer(
                 raw_meta,
                 pkt_data,
+                alt_replays,
                 map_name,
                 replay_name,
                 game_duration,

@@ -11,9 +11,9 @@ use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_minimap_renderer::renderer::RenderOptions;
 
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
+use wows_replays::analyzer::battle_controller::merged::MergedReplays;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
@@ -43,6 +43,7 @@ use crate::util::controls::parse_commands_scheme;
 pub(super) fn playback_thread(
     raw_meta: Vec<u8>,
     packet_data: Vec<u8>,
+    alt_replays: Vec<crate::replay::renderer::AltReplayBytes>,
     map_name: String,
     game_duration: f32,
     wows_data: SharedWoWsData,
@@ -178,7 +179,7 @@ pub(super) fn playback_thread(
     // Drop VFS early — no longer needed
     drop(vfs);
 
-    // 3. Parse replay file
+    // 3. Parse replay files (primary + alt perspectives)
     let replay_file = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
         Ok(rf) => rf,
         Err(e) => {
@@ -186,12 +187,22 @@ pub(super) fn playback_thread(
             return;
         }
     };
+    let alt_replay_files: Vec<ReplayFile> = match alt_replays
+        .iter()
+        .map(|a| ReplayFile::from_decrypted_parts(a.raw_meta.clone(), a.packet_data.clone()))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(v) => v,
+        Err(e) => {
+            shared_state.lock().status = RendererStatus::Error(format!("Failed to parse merge replay: {:?}", e));
+            return;
+        }
+    };
 
-    // 4. Create controller and renderer
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let mut controller = BattleController::new(&replay_file.meta, &*game_metadata, Some(&game_constants));
-    controller.set_track_shots(false); // No shot data needed for frame building
-    let mut parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
+
+    // 4. Build the initial merged session (drives the frame-snapshot pass)
+    // and the renderer.
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
     renderer.set_fonts(game_fonts.clone());
     if let Some(ref sil) = self_silhouette {
@@ -200,86 +211,97 @@ pub(super) fn playback_thread(
         shared_state.lock().self_silhouette_raw = Some((sil.width(), sil.height(), sil.as_raw().clone()));
     }
 
+    let mut session = match MergedReplays::new(
+        game_metadata.entity_specs(),
+        &*game_metadata,
+        &game_constants,
+        version,
+        &replay_file,
+        &alt_replay_files,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            shared_state.lock().status = RendererStatus::Error(format!("{e}"));
+            return;
+        }
+    };
+    session.controller_mut().set_track_shots(false); // No shot data needed for frame building
+
     // Parse all packets, tracking frame boundaries
     let frame_duration = 1.0 / SNAPSHOTS_PER_SECOND;
     let estimated_frames = (game_duration * SNAPSHOTS_PER_SECOND) as usize + 1;
 
-    // Pre-parse: build a mapping of packet offsets to clock times
-    // so we can efficiently seek by re-parsing
+    // Frame snapshots: clock per rendered frame. Unlike single-replay's
+    // (packet_offset, clock) seek hints, merged sessions seek by rebuilding
+    // from scratch and stepping to the target clock, so we only need the
+    // clock value here.
     let mut frame_snapshots: Vec<FrameSnapshot> = Vec::with_capacity(estimated_frames);
     let mut last_rendered_frame: i64 = -1;
     let mut prev_clock = GameClock(0.0);
 
-    let full_packet_data = &replay_file.packet_data;
-    let mut remaining = &full_packet_data[..];
-
-    while !remaining.is_empty() {
-        let offset_before = full_packet_data.len() - remaining.len();
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => {
-                if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
-                    renderer.populate_players(&controller);
-                    renderer.update_squadron_info(&controller);
-                    renderer.update_ship_abilities(&controller);
-
-                    let target_frame = (prev_clock.seconds() / frame_duration) as i64;
-                    while last_rendered_frame < target_frame {
-                        last_rendered_frame += 1;
-                        let commands = renderer.draw_frame(&controller);
-                        frame_snapshots.push(FrameSnapshot { packet_offset: offset_before, clock: prev_clock });
-
-                        // Store the first frame immediately (and broadcast if session is active).
-                        if frame_snapshots.len() == 1 {
-                            let mut s = shared_state.lock();
-                            if let Some(ref tx) = s.session_frame_tx {
-                                let replay_id = s.collab_replay_id.unwrap_or(0);
-                                tracing::debug!(
-                                    "First frame: broadcasting via session_frame_tx (replay_id={replay_id})"
-                                );
-                                let _ = tx.try_send(FrameBroadcast {
-                                    replay_id,
-                                    clock: prev_clock.0,
-                                    frame_index: 0,
-                                    total_frames: estimated_frames as u32,
-                                    game_duration,
-                                    commands: commands.clone(),
-                                });
-                            } else {
-                                tracing::debug!("First frame: session_frame_tx not wired yet, stored locally only");
-                            }
-                            s.frame = Some(PlaybackFrame {
-                                replay_id: 0,
-                                commands,
-                                clock: prev_clock,
-                                frame_index: 0,
-                                total_frames: estimated_frames,
-                                game_duration,
-                            });
-                        }
-                    }
-                    prev_clock = packet.clock;
-                } else if prev_clock.seconds() == 0.0 {
-                    prev_clock = packet.clock;
-                }
-
-                controller.process(&packet);
+    loop {
+        let step = match session.step() {
+            Ok(Some(c)) => c,
+            Ok(None) => break,
+            Err(e) => {
+                tracing::error!("merge step failed during initial parse: {e}");
+                break;
             }
-            Err(_) => break,
+        };
+        if step.0 > prev_clock.0 {
+            renderer.populate_players(session.controller());
+            renderer.update_squadron_info(session.controller());
+            renderer.update_ship_abilities(session.controller());
+
+            let target_frame = (prev_clock.seconds() / frame_duration) as i64;
+            while last_rendered_frame < target_frame {
+                last_rendered_frame += 1;
+                let commands = renderer.draw_frame(session.controller());
+                frame_snapshots.push(FrameSnapshot { clock: prev_clock });
+
+                // Store the first frame immediately (and broadcast if session is active).
+                if frame_snapshots.len() == 1 {
+                    let mut s = shared_state.lock();
+                    if let Some(ref tx) = s.session_frame_tx {
+                        let replay_id = s.collab_replay_id.unwrap_or(0);
+                        tracing::debug!("First frame: broadcasting via session_frame_tx (replay_id={replay_id})");
+                        let _ = tx.try_send(FrameBroadcast {
+                            replay_id,
+                            clock: prev_clock.0,
+                            frame_index: 0,
+                            total_frames: estimated_frames as u32,
+                            game_duration,
+                            commands: commands.clone(),
+                        });
+                    } else {
+                        tracing::debug!("First frame: session_frame_tx not wired yet, stored locally only");
+                    }
+                    s.frame = Some(PlaybackFrame {
+                        replay_id: 0,
+                        commands,
+                        clock: prev_clock,
+                        frame_index: 0,
+                        total_frames: estimated_frames,
+                        game_duration,
+                    });
+                }
+            }
+            prev_clock = step;
         }
     }
 
     // Final tick
     if prev_clock.seconds() > 0.0 {
-        renderer.populate_players(&controller);
-        renderer.update_squadron_info(&controller);
-        renderer.update_ship_abilities(&controller);
+        renderer.populate_players(session.controller());
+        renderer.update_squadron_info(session.controller());
+        renderer.update_ship_abilities(session.controller());
         let target_frame = (prev_clock.seconds() / frame_duration) as i64;
         while last_rendered_frame < target_frame {
             last_rendered_frame += 1;
-            frame_snapshots.push(FrameSnapshot { packet_offset: full_packet_data.len(), clock: prev_clock });
+            frame_snapshots.push(FrameSnapshot { clock: prev_clock });
         }
     }
-    controller.finish();
+    session.finish();
 
     let actual_total_frames = frame_snapshots.len();
     let actual_game_duration = frame_snapshots.last().map(|s| s.clock.seconds()).unwrap_or(game_duration);
@@ -349,16 +371,25 @@ pub(super) fn playback_thread(
     let mut last_advance = std::time::Instant::now();
 
     // Rebuild live state at frame 0 — drop the initial-parse objects first
-    drop(controller);
+    drop(session);
     drop(renderer);
     drop(replay_file);
-    // `replay_file` from the initial parse is no longer needed — create a fresh one
-    // that the live controller will borrow from for the duration of the playback loop.
-    let mut live_replay = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
+    drop(alt_replay_files);
+    // Recreate primary + alt ReplayFiles for the live session. These are
+    // long-lived for the duration of the playback loop; the live MergedReplays
+    // borrows from them.
+    let live_replay = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
         Ok(rf) => rf,
         Err(_) => return,
     };
-    let mut live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
+    let live_alt_files: Vec<ReplayFile> = match alt_replays
+        .iter()
+        .map(|a| ReplayFile::from_decrypted_parts(a.raw_meta.clone(), a.packet_data.clone()))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(v) => v,
+        Err(_) => return,
+    };
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
@@ -367,33 +398,41 @@ pub(super) fn playback_thread(
     }
 
     // Tracks how many entries in `controller.shot_hits()` we've already pushed
-    // to bridges. Reset to 0 whenever the controller is rebuilt.
+    // to bridges. Reset to 0 whenever the live session is rebuilt.
     let mut hit_cursor: usize = 0;
-
-    // Persistent parser + incremental parse tracking.
-    // These allow forward playback to continue parsing from where we left off
-    // instead of rebuilding from scratch every frame.
-    let mut live_parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
-    let mut live_offset: usize = 0;
     let mut live_clock = GameClock(0.0);
+
+    let mut live_session = match MergedReplays::new(
+        game_metadata.entity_specs(),
+        &*game_metadata,
+        &game_constants,
+        version,
+        &live_replay,
+        &live_alt_files,
+    ) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    // Pull out the cancellation flag once so step callers below don't have to
+    // re-lock shared_state every time.
+    let cancel_step = Arc::clone(&shared_state.lock().cancel_step);
 
     // Parse live state up to frame 0 so it matches the initially displayed frame
     if !frame_snapshots.is_empty() {
         let armor_bridges = shared_state.lock().armor_bridges.clone();
         let mut staging = init_bridge_staging(&armor_bridges);
-        (live_offset, live_clock) = parse_to_clock(
-            &mut live_parser,
-            &packet_data,
-            live_offset,
-            live_clock,
-            &mut live_controller,
+        live_clock = step_session_to_clock(
+            &mut live_session,
             &mut live_renderer,
+            live_clock,
             frame_snapshots[0].clock,
             frame_duration,
             &mut staging,
             &mut hit_cursor,
+            &cancel_step,
         );
-        populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+        populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
     }
 
@@ -528,68 +567,73 @@ pub(super) fn playback_thread(
         }
     }
 
-    /// Helper: parse replay packets up to `target_clock`, feeding them into
-    /// the given controller and renderer.
+    /// Drive `session` forward via [`MergedReplays::step`] until its safe
+    /// clock reaches `target_clock`. Feeds the rendered state into
+    /// `renderer` at each clock boundary and harvests new shot hits into
+    /// the per-bridge staging vecs. Returns the last observed clock value.
     ///
-    /// Supports incremental parsing: starts from `start_offset` into
-    /// `packet_data` and uses the provided `prev_clock` as the initial
-    /// clock value.  Returns `(new_offset, last_clock)` so the caller can
-    /// resume from where we left off on the next frame.
-    fn parse_to_clock(
-        parser: &mut wows_replays::packet2::Parser<'_>,
-        packet_data: &[u8],
-        start_offset: usize,
-        mut prev_clock: GameClock,
-        controller: &mut BattleController<'_, '_, GameMetadataProvider>,
+    /// Checks `cancel` on every step and returns early if it's been set.
+    /// The flag is reset to `false` before returning so subsequent calls
+    /// start with a clean slate.
+    fn step_session_to_clock(
+        session: &mut MergedReplays<'_, '_, '_, GameMetadataProvider>,
         renderer: &mut MinimapRenderer<'_>,
+        mut prev_clock: GameClock,
         target_clock: GameClock,
         frame_duration: f32,
         staging: &mut [BridgeStaging],
         hit_cursor: &mut usize,
-    ) -> (usize, GameClock) {
-        let mut remaining = &packet_data[start_offset..];
-
-        while !remaining.is_empty() {
-            match parser.parse_packet(&mut remaining) {
-                Ok(packet) => {
-                    if packet.clock > target_clock + frame_duration {
-                        break;
-                    }
-                    // Stop if clock resets to 0 after game started — those are post-game packets
-                    if prev_clock.seconds() > 0.0 && packet.clock.seconds() == 0.0 {
-                        break;
-                    }
-                    if packet.clock != prev_clock && prev_clock.seconds() > 0.0 {
-                        renderer.populate_players(controller);
-                        renderer.update_squadron_info(controller);
-                        renderer.update_ship_abilities(controller);
-                        let dead_ships = controller.dead_ships();
-                        let minimap_positions = controller.minimap_positions();
-                        renderer.record_positions(controller, prev_clock, |eid| {
-                            // Skip dead ships
-                            if let Some(dead) = dead_ships.get(eid)
-                                && prev_clock >= dead.clock
-                            {
-                                return false;
-                            }
-                            // Only record detected ships (visible on minimap)
-                            minimap_positions.get(eid).map(|mm| mm.visible).unwrap_or(false)
-                        });
-                    }
-                    prev_clock = packet.clock;
-                    controller.process(&packet);
-                    push_shot_hits_to_staging(controller, staging, hit_cursor);
-                }
-                Err(_) => break,
+        cancel: &AtomicBool,
+    ) -> GameClock {
+        loop {
+            if cancel.swap(false, Ordering::Relaxed) {
+                return prev_clock;
             }
+            let step = match session.step() {
+                Ok(Some(c)) => c,
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::error!("merge step failed: {e}");
+                    break;
+                }
+            };
+            if step.0 > target_clock.0 + frame_duration {
+                break;
+            }
+            // Stop if clock resets to 0 after game started — those are post-game packets
+            if prev_clock.seconds() > 0.0 && step.seconds() == 0.0 {
+                break;
+            }
+            if step.0 > prev_clock.0 && prev_clock.seconds() > 0.0 {
+                let controller = session.controller();
+                renderer.populate_players(controller);
+                renderer.update_squadron_info(controller);
+                renderer.update_ship_abilities(controller);
+                let dead_ships = controller.dead_ships();
+                let minimap_positions = controller.minimap_positions();
+                renderer.record_positions(controller, prev_clock, |eid| {
+                    if let Some(dead) = dead_ships.get(eid)
+                        && prev_clock >= dead.clock
+                    {
+                        return false;
+                    }
+                    minimap_positions.get(eid).map(|mm| mm.visible).unwrap_or(false)
+                });
+            }
+            prev_clock = step;
+            push_shot_hits_to_staging(session.controller(), staging, hit_cursor);
         }
 
+        // Always leave the flag cleared on exit so a stale "true" set
+        // between the last check and now doesn't cancel the next step.
+        cancel.store(false, Ordering::Relaxed);
+
+        let controller = session.controller();
         renderer.populate_players(controller);
         renderer.update_squadron_info(controller);
         renderer.update_ship_abilities(controller);
 
-        let new_offset = packet_data.len() - remaining.len();
-        (new_offset, prev_clock)
+        prev_clock
     }
 
     // Request a repaint of the viewport from the background thread.
@@ -623,47 +667,48 @@ pub(super) fn playback_thread(
         s.frame = Some(PlaybackFrame { replay_id: 0, commands, clock, frame_index, total_frames, game_duration });
     };
 
-    /// Rebuild live_replay/live_controller/live_renderer/live_parser from
-    /// scratch, parsing up to `$target_clock`.  Only needed for backward
-    /// seeks — forward playback uses incremental parsing instead.
+    /// Rebuild the live session from scratch and step it forward to
+    /// `$target_clock`. Only needed for backward seeks; forward playback
+    /// reuses the existing session and advances it incrementally.
     ///
-    /// The macro is needed because Rust's borrow checker won't allow passing
-    /// `&mut live_replay` and `&mut live_controller` (which borrows from
-    /// `live_replay`) to the same function.
+    /// The macro form sidesteps the borrow checker around dropping and
+    /// rebuilding `live_session` (which borrows from `live_replay` /
+    /// `live_alt_files`).
     macro_rules! rebuild_live_state {
         ($target_clock:expr) => {{
-            let mut new_replay = match ReplayFile::from_decrypted_parts(raw_meta.clone(), packet_data.clone()) {
-                Ok(rf) => rf,
-                Err(_) => continue,
-            };
-            std::mem::swap(&mut live_replay, &mut new_replay);
-            // old replay is now in new_replay and will be dropped at end of block
-            live_controller = BattleController::new(&live_replay.meta, &*game_metadata, Some(&game_constants));
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
             if let Some(ref sil) = self_silhouette {
                 live_renderer.set_self_silhouette(sil.clone());
             }
-            // Reset parser and tracking state for full re-parse
-            live_parser = wows_replays::packet2::Parser::with_build(game_metadata.entity_specs(), version.build);
             hit_cursor = 0;
+            live_clock = GameClock(0.0);
+            live_session = match MergedReplays::new(
+                game_metadata.entity_specs(),
+                &*game_metadata,
+                &game_constants,
+                version,
+                &live_replay,
+                &live_alt_files,
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
             // Rebuild bridge shot hits via staging (no intermediate empty state)
             let armor_bridges = shared_state.lock().armor_bridges.clone();
             let mut staging = init_bridge_staging(&armor_bridges);
-            (live_offset, live_clock) = parse_to_clock(
-                &mut live_parser,
-                &packet_data,
-                0,
-                GameClock(0.0),
-                &mut live_controller,
+            live_clock = step_session_to_clock(
+                &mut live_session,
                 &mut live_renderer,
+                live_clock,
                 $target_clock,
                 frame_duration,
                 &mut staging,
                 &mut hit_cursor,
+                &cancel_step,
             );
-            populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+            populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
             finalize_bridge_staging(&armor_bridges, staging, true);
         }};
     }
@@ -689,7 +734,7 @@ pub(super) fn playback_thread(
                     frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
                 rebuild_live_state!(target_clock);
                 live_renderer.options = shared_state.lock().options.clone();
-                let commands = live_renderer.draw_frame(&live_controller);
+                let commands = live_renderer.draw_frame(live_session.controller());
                 set_frame(
                     &shared_state,
                     commands,
@@ -726,27 +771,25 @@ pub(super) fn playback_thread(
                         // Seeking backward — must rebuild from scratch
                         rebuild_live_state!(target_clock);
                     } else {
-                        // Seeking forward — continue parsing incrementally
+                        // Seeking forward — keep stepping the session
                         let armor_bridges = shared_state.lock().armor_bridges.clone();
                         let mut staging = init_bridge_staging(&armor_bridges);
-                        (live_offset, live_clock) = parse_to_clock(
-                            &mut live_parser,
-                            &packet_data,
-                            live_offset,
-                            live_clock,
-                            &mut live_controller,
+                        live_clock = step_session_to_clock(
+                            &mut live_session,
                             &mut live_renderer,
+                            live_clock,
                             target_clock,
                             frame_duration,
                             &mut staging,
                             &mut hit_cursor,
+                            &cancel_step,
                         );
-                        populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+                        populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
                         finalize_bridge_staging(&armor_bridges, staging, false);
                     }
 
                     live_renderer.options = shared_state.lock().options.clone();
-                    let commands = live_renderer.draw_frame(&live_controller);
+                    let commands = live_renderer.draw_frame(live_session.controller());
                     set_frame(
                         &shared_state,
                         commands,
@@ -790,23 +833,21 @@ pub(super) fn playback_thread(
                 // Forward playback — always incremental, never rebuild
                 let armor_bridges = shared_state.lock().armor_bridges.clone();
                 let mut staging = init_bridge_staging(&armor_bridges);
-                (live_offset, live_clock) = parse_to_clock(
-                    &mut live_parser,
-                    &packet_data,
-                    live_offset,
-                    live_clock,
-                    &mut live_controller,
+                live_clock = step_session_to_clock(
+                    &mut live_session,
                     &mut live_renderer,
+                    live_clock,
                     target_clock,
                     frame_duration,
                     &mut staging,
                     &mut hit_cursor,
+                    &cancel_step,
                 );
-                populate_bridge_players(&live_controller, &game_metadata, &armor_bridges);
+                populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
                 finalize_bridge_staging(&armor_bridges, staging, false);
 
                 live_renderer.options = shared_state.lock().options.clone();
-                let commands = live_renderer.draw_frame(&live_controller);
+                let commands = live_renderer.draw_frame(live_session.controller());
                 set_frame(
                     &shared_state,
                     commands,
@@ -825,7 +866,7 @@ pub(super) fn playback_thread(
             let new_opts = shared_state.lock().options.clone();
             if live_renderer.options != new_opts {
                 live_renderer.options = new_opts;
-                let commands = live_renderer.draw_frame(&live_controller);
+                let commands = live_renderer.draw_frame(live_session.controller());
                 let clock =
                     frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
                 set_frame(&shared_state, commands, clock, current_frame, actual_total_frames, actual_game_duration);
@@ -839,7 +880,5 @@ pub(super) fn playback_thread(
 }
 
 struct FrameSnapshot {
-    #[allow(dead_code)]
-    packet_offset: usize,
     clock: GameClock,
 }
