@@ -1056,6 +1056,10 @@ pub struct Exterior {
     /// Translation key for display name, e.g. "IDS_PJES360_Yamato_Golden".
     #[cfg_attr(feature = "serde", serde(default))]
     title: Option<String>,
+    /// Signal-flag modifiers (e.g. `speedCoef` on `PCEF005_SM_SignalFlag`).
+    /// Empty for camos with no gameplay effect.
+    #[cfg_attr(feature = "serde", serde(default))]
+    modifiers: Vec<CrewSkillModifier>,
 }
 
 impl Exterior {
@@ -1065,6 +1069,10 @@ impl Exterior {
 
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    pub fn modifiers(&self) -> &[CrewSkillModifier] {
+        &self.modifiers
     }
 }
 
@@ -1449,6 +1457,21 @@ impl AbilityCategory {
         self.work_time
     }
 
+    pub fn reload_time(&self) -> f32 {
+        self.reload_time
+    }
+
+    pub fn preparation_time(&self) -> f32 {
+        self.preparation_time
+    }
+
+    /// Raw `numConsumables` from GameParams. A value of `-1` means unlimited.
+    /// Callers that want a typed result should wrap this via
+    /// `wows_replay_insights::build::ChargeCount::from_game_params`.
+    pub fn num_consumables(&self) -> isize {
+        self.num_consumables
+    }
+
     /// Detection radius in meters.
     ///
     /// Returns hydrophone_wave_radius if present, otherwise converts dist_ship
@@ -1587,6 +1610,12 @@ pub struct CrewSkillModifier {
     cruiser: f32,
     destroyer: f32,
     submarine: f32,
+    /// Consumable type names (e.g. `"crashCrew"`, `"regenCrew"`) that this
+    /// modifier does NOT apply to. Sourced from the `excludedConsumables`
+    /// sibling key in the same modifier dict (e.g. the Survival Expert skill).
+    /// Empty when the modifier applies universally.
+    #[cfg_attr(feature = "serde", serde(default))]
+    excluded_consumables: Vec<String>,
 }
 
 impl CrewSkillModifier {
@@ -1604,6 +1633,16 @@ impl CrewSkillModifier {
             Species::Auxiliary => self.auxiliary,
             _ => 1.0,
         }
+    }
+
+    pub fn excluded_consumables(&self) -> &[String] {
+        &self.excluded_consumables
+    }
+
+    /// True when this modifier is suppressed for the given `consumable_type`
+    /// (matched as the raw GameParams string, e.g. `"crashCrew"`).
+    pub fn excludes(&self, consumable_type: &str) -> bool {
+        self.excluded_consumables.iter().any(|t| t == consumable_type)
     }
 }
 

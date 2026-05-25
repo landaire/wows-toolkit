@@ -1,24 +1,24 @@
 use crate::icons;
 use egui::Color32;
 use egui::RichText;
-use flate2::Compression;
-use flate2::write::DeflateEncoder;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use language_tags::LanguageTag;
-use serde_json::json;
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use thousands::Separable;
 use tracing::debug;
+use wows_replay_insights::ResolvedBuild;
+use wows_replay_insights::build::wowssb;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::types::Relation;
+use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::CrewSkill;
-use wowsunpack::game_params::types::GameParamProvider;
+
+const TOOLKIT_REFERRER: &str = "landaire";
 
 pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
     const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
@@ -58,113 +58,17 @@ pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
 }
 
 pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
-    let entity = player.vehicle_entity()?;
-    let config = entity.props().ship_config();
-    let ship = player.vehicle();
-    let species = *ship.species()?.known()?;
-
-    let json = json!({
-        "BuildName": format!("replay_{}", player.initial_state().username()),
-
-        "ShipIndex": ship.index(),
-
-        "Nation": ship.nation().replace('_', ""),
-
-        "Modules": config.units().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-        }).collect::<Vec<_>>(),
-
-        "Upgrades": config.modernization().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-        }).collect::<Vec<_>>(),
-
-        // If no captain is present, we use the default captain (wowssb does not allow for no captain to be used)
-        "Captain": entity.captain().map(|captain| captain.index()).unwrap_or("PCW001"),
-
-        "Skills": entity.commander_skills_raw(species),
-
-        "Consumables": config.abilities().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-        }).collect::<Vec<_>>(),
-
-        "Signals": config.exteriors().iter().filter_map(|id| {
-            Some(metadata_provider.game_param_by_id(*id)?.index().to_owned())
-        }).collect::<Vec<_>>(),
-
-        "BuildVersion": 2
-    });
-
-    let json_blob = serde_json::to_string(&json).expect("failed to serialize ship config");
-    let mut deflated_json = Vec::new();
-    {
-        let mut encoder = DeflateEncoder::new(&mut deflated_json, Compression::best());
-        encoder.write_all(json_blob.as_bytes()).expect("failed to deflate JSON blob");
-    }
-    let encoded_data = data_encoding::BASE64.encode(&deflated_json);
-    let encoded_data = encoded_data.replace('/', "%2F").replace('+', "%2B");
-    let url = format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), encoded_data);
-
+    let build = ResolvedBuild::from_player(player, metadata_provider, Version::default())?;
+    let build_name = format!("replay_{}", player.initial_state().username());
+    let url = wowssb::build_url(&build, &build_name, Some(TOOLKIT_REFERRER));
     Some(url)
 }
 
 pub fn build_short_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
-    let entity = player.vehicle_entity()?;
-    let config = entity.props().ship_config();
-    let ship = player.vehicle();
-    let species = *ship.species()?.known()?;
-    let mut parts: Vec<String> = vec![String::new(); 9];
-
-    // Ship
-    parts[0] = ship.index().to_string();
-
-    // Modules
-    parts[1] = config
-        .units()
-        .iter()
-        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    // Upgrades
-    parts[2] = config
-        .modernization()
-        .iter()
-        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
-        .collect::<Vec<_>>()
-        .join(",");
-    // Captain
-    parts[3] = entity.captain().map(|captain| captain.index()).unwrap_or("PCW001").to_string();
-
-    // Skills
-    parts[4] = entity.commander_skills_raw(species).iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
-
-    // Consumables
-    parts[5] = config
-        .abilities()
-        .iter()
-        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    // Signals
-    parts[6] = config
-        .exteriors()
-        .iter()
-        .filter_map(|id| Some(metadata_provider.game_param_by_id(*id)?.index().to_owned()))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    // Build Version
-    parts[7] = "2".to_string();
-
-    // Build Name
-    parts[8] = format!("replay_{}", player.initial_state().username());
-
-    debug!("{:?}", parts.join(";"));
-
-    let url =
-        format!("https://app.wowssb.com/ship?shipIndexes={}&build={}&ref=landaire", ship.index(), parts.join(";"));
-
+    let build = ResolvedBuild::from_player(player, metadata_provider, Version::default())?;
+    let build_name = format!("replay_{}", player.initial_state().username());
+    let url = wowssb::build_short_url(&build, &build_name, Some(TOOLKIT_REFERRER));
+    debug!("{}", url);
     Some(url)
 }
 

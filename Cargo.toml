@@ -11,6 +11,7 @@ members = [
     "crates/wt-collab-egui",
     "crates/wt-web",
     "crates/wt-translations",
+    "crates/wows-replay-insights",
 ]
 
 [workspace.package]
@@ -28,6 +29,7 @@ wowsunpack = { version = "0.33.0", path = "crates/wowsunpack", default-features 
 wows_replays = { version = "0.34.0", path = "crates/wows-replays", default-features = false }
 wows_minimap_renderer = { version = "0.27.0", path = "crates/minimap-renderer", default-features = false }
 wows-data-mgr = { version = "0.9.0", path = "crates/wows-data-mgr", default-features = false }
+wows-replay-insights = { version = "0.1.0", path = "crates/wows-replay-insights", default-features = false }
 wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { version = "0.4.0", path = "crates/wt-translations" }

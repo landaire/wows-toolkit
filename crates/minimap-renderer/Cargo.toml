@@ -34,6 +34,7 @@ rendering = [
     "dep:resvg",
     "dep:tiny-skia",
     "dep:rootcause",
+    "dep:wows-replay-insights",
     "wows_replays/parsing",
     "wows_replays/vfs",
     "wowsunpack/json",
@@ -48,11 +49,12 @@ vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
 videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
 # CPU encoder (fallback, all platforms)
 cpu = ["dep:openh264", "rendering"]
-arc = ["wows_replays/arc"]
+arc = ["wows_replays/arc", "wows-replay-insights?/arc"]
 
 [dependencies]
 wows_replays = { workspace = true, default-features = false }
 wowsunpack = { workspace = true, default-features = false }
+wows-replay-insights = { workspace = true, optional = true, features = ["build"] }
 wt-translations = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg"], optional = true }
 ab_glyph = { version = "0.2", optional = true }

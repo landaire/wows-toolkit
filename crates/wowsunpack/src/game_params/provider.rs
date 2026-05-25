@@ -199,42 +199,54 @@ macro_rules! game_param_to_type {
     };
 }
 
-/// TODO: Too many unpredictable schema differences >:(
-/// Need to just create structs for everything.
+/// Build modifier records from a GameParams `modifiers` dict.
+///
+/// The dict may contain a sibling `excludedConsumables` array (e.g. on the
+/// Survival Expert skill: `{"reloadFactor": 0.925, "excludedConsumables": ["crashCrew", "regenCrew"]}`).
+/// When present, that list scopes every other entry in the same dict.
 fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkillModifier> {
+    let excluded_consumables: Vec<String> = modifiers
+        .get(&HashableValue::String("excludedConsumables".to_owned().into()))
+        .and_then(|v| v.list_ref())
+        .map(|list| {
+            list.inner()
+                .iter()
+                .filter_map(|item| item.string_ref().map(|s| s.inner().to_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+
     modifiers
         .iter()
         .filter_map(|(modifier_name, modifier_data)| {
             let modifier_name = modifier_name.string_ref().expect("modifier name is not a string").to_owned();
-
             let modifier_name = modifier_name.inner();
 
-            let modifier = if let Some(common_value) = modifier_data.i64_ref().cloned() {
-                let common_value = common_value as f32;
+            // Sibling control key, consumed above and not a modifier itself.
+            if modifier_name == "excludedConsumables" {
+                return None;
+            }
+
+            let mk_uniform = |v: f32| {
                 CrewSkillModifier::builder()
-                    .aircraft_carrier(common_value)
-                    .auxiliary(common_value)
-                    .battleship(common_value)
-                    .cruiser(common_value)
-                    .destroyer(common_value)
-                    .submarine(common_value)
                     .name(modifier_name.to_owned())
+                    .aircraft_carrier(v)
+                    .auxiliary(v)
+                    .battleship(v)
+                    .cruiser(v)
+                    .destroyer(v)
+                    .submarine(v)
+                    .excluded_consumables(excluded_consumables.clone())
                     .build()
+            };
+
+            if let Some(common_value) = modifier_data.i64_ref().cloned() {
+                Some(mk_uniform(common_value as f32))
             } else if let Some(common_value) = modifier_data.f64_ref().cloned() {
-                let common_value = common_value as f32;
-                CrewSkillModifier::builder()
-                    .aircraft_carrier(common_value)
-                    .auxiliary(common_value)
-                    .battleship(common_value)
-                    .cruiser(common_value)
-                    .destroyer(common_value)
-                    .submarine(common_value)
-                    .name(modifier_name.to_owned())
-                    .build()
+                Some(mk_uniform(common_value as f32))
             } else if let Some(modifier_data) = modifier_data.dict_or_object_dict() {
                 let modifier_data = modifier_data.inner();
-
-                // Skip dicts that aren't per-species modifier dicts
+                // Skip dicts that aren't per-species modifier dicts.
                 modifier_data.get(&HashableValue::String("AirCarrier".to_owned().into()))?;
 
                 let read_species = |key: &str| -> f32 {
@@ -244,21 +256,22 @@ fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<Crew
                         .unwrap_or(1.0)
                 };
 
-                CrewSkillModifier::builder()
-                    .aircraft_carrier(read_species("AirCarrier"))
-                    .auxiliary(read_species("Auxiliary"))
-                    .battleship(read_species("Battleship"))
-                    .cruiser(read_species("Cruiser"))
-                    .destroyer(read_species("Destroyer"))
-                    .submarine(read_species("Submarine"))
-                    .name(modifier_name.to_owned())
-                    .build()
+                Some(
+                    CrewSkillModifier::builder()
+                        .name(modifier_name.to_owned())
+                        .aircraft_carrier(read_species("AirCarrier"))
+                        .auxiliary(read_species("Auxiliary"))
+                        .battleship(read_species("Battleship"))
+                        .cruiser(read_species("Cruiser"))
+                        .destroyer(read_species("Destroyer"))
+                        .submarine(read_species("Submarine"))
+                        .excluded_consumables(excluded_consumables.clone())
+                        .build(),
+                )
             } else {
-                // Skip non-numeric, non-dict modifiers (bools, arrays, etc.)
-                return None;
-            };
-
-            Some(modifier)
+                // Non-numeric, non-dict modifiers (bools, other lists, etc.).
+                None
+            }
         })
         .collect()
 }
@@ -1121,7 +1134,18 @@ impl GameMetadataProvider {
                     .and_then(|v| v.string_ref())
                     .map(|s| s.inner().to_string())
                     .filter(|s| !s.is_empty());
-                Some(ParamData::Exterior(Exterior::builder().maybe_camouflage(camouflage).maybe_title(title).build()))
+                let modifiers = param_data
+                    .get(&pk("modifiers"))
+                    .and_then(|v| v.dict_or_object_dict())
+                    .map(|d| build_skill_modifiers(&d.inner()))
+                    .unwrap_or_default();
+                Some(ParamData::Exterior(
+                    Exterior::builder()
+                        .maybe_camouflage(camouflage)
+                        .maybe_title(title)
+                        .modifiers(modifiers)
+                        .build(),
+                ))
             }
             ParamType::Modernization => {
                 let modifiers = param_data

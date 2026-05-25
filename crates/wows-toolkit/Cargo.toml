@@ -50,6 +50,7 @@ thiserror = { workspace = true }
 glob = { workspace = true }
 home = "0.5"
 wows-data-mgr = { workspace = true, features = ["constants"] }
+wows-replay-insights = { workspace = true, features = ["wowssb", "arc"] }
 itertools = { workspace = true }
 gettext = { workspace = true }
 language-tags = "0.3"

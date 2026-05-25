@@ -10623,6 +10623,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-replay-insights"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "flate2",
+ "serde",
+ "serde_json",
+ "tracing",
+ "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows_minimap_renderer"
 version = "0.27.0"
 dependencies = [
@@ -10654,6 +10667,7 @@ dependencies = [
  "vk-video",
  "wgpu",
  "wows-data-mgr",
+ "wows-replay-insights",
  "wows_replays",
  "wowsunpack",
  "wt-translations",
@@ -10758,6 +10772,7 @@ dependencies = [
  "wgpu",
  "winresource",
  "wows-data-mgr",
+ "wows-replay-insights",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",

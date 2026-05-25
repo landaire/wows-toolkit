@@ -19,6 +19,7 @@ use wowsunpack::game_types::BattleResult;
 use wowsunpack::game_types::DamageStatCategory;
 use wowsunpack::game_types::DamageStatWeapon;
 
+use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
@@ -1495,63 +1496,31 @@ impl<'a> MinimapRenderer<'a> {
                 // Use Vehicle::resolve_ranges to get all range data
                 let mut ranges = vehicle.resolve_ranges(Some(self.game_params), hull_name.as_deref(), self.version);
 
-                // Apply build modifiers (modernizations + captain skills)
-                if let Some(ref species) = species {
-                    let mut vis_coeff: f32 = 1.0;
-                    let mut gm_max_dist: f32 = 1.0;
-                    let mut gs_max_dist: f32 = 1.0;
-
-                    if let Some(v_ref) = &vehicle_entity {
-                        let v = v_ref.borrow();
-
-                        // Modernization modifiers
-                        for mod_id in v.props().ship_config().modernization() {
-                            let Some(mod_param) = GameParamProvider::game_param_by_id(self.game_params, *mod_id) else {
-                                continue;
-                            };
-                            let Some(modernization) = mod_param.modernization() else {
-                                continue;
-                            };
-                            for modifier in modernization.modifiers() {
-                                match modifier.name() {
-                                    "visibilityDistCoeff" => vis_coeff *= modifier.get_for_species(species),
-                                    "GMMaxDist" => gm_max_dist *= modifier.get_for_species(species),
-                                    "GSMaxDist" => gs_max_dist *= modifier.get_for_species(species),
-                                    _ => {}
-                                }
-                            }
-                        }
-
-                        // Captain skill modifiers
-                        let crew_params = v.props().crew_modifiers_compact_params();
-                        if let Some(crew_param) =
-                            GameParamProvider::game_param_by_id(self.game_params, crew_params.params_id())
-                            && let Some(crew) = crew_param.crew()
-                        {
-                            for &skill_id in crew_params.learned_skills().for_species(species) {
-                                let Some(skill) = crew.skill_by_type(skill_id as u32) else {
-                                    continue;
-                                };
-                                let Some(modifiers) = skill.modifiers() else {
-                                    continue;
-                                };
-                                for modifier in modifiers {
-                                    match modifier.name() {
-                                        "visibilityDistCoeff" => vis_coeff *= modifier.get_for_species(species),
-                                        "GMMaxDist" => gm_max_dist *= modifier.get_for_species(species),
-                                        "GSMaxDist" => gs_max_dist *= modifier.get_for_species(species),
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
+                if let (Some(species), Some(v_ref)) = (species, &vehicle_entity) {
+                    let v = v_ref.borrow();
+                    let cfg = v.props().ship_config();
+                    let crew = v.props().crew_modifiers_compact_params();
+                    let build = ResolvedBuild::from_ids(
+                        ship_param_id,
+                        cfg.units(),
+                        cfg.modernization(),
+                        Some(crew.params_id()),
+                        crew.learned_skills().for_species(&species),
+                        cfg.exteriors(),
+                        cfg.abilities(),
+                        species,
+                        self.version,
+                        self.game_params,
+                    );
+                    if let Some(build) = build {
+                        let vis = build.modifiers.coefficient("visibilityDistCoeff");
+                        let gm = build.modifiers.coefficient("GMMaxDist");
+                        let gs = build.modifiers.coefficient("GSMaxDist");
+                        ranges.detection_km = ranges.detection_km.map(|km| km * vis);
+                        ranges.air_detection_km = ranges.air_detection_km.map(|km| km * vis);
+                        ranges.main_battery_m = ranges.main_battery_m.map(|m| m * gm);
+                        ranges.secondary_battery_m = ranges.secondary_battery_m.map(|m| m * gs);
                     }
-
-                    // Apply coefficients
-                    ranges.detection_km = ranges.detection_km.map(|km| km * vis_coeff);
-                    ranges.air_detection_km = ranges.air_detection_km.map(|km| km * vis_coeff);
-                    ranges.main_battery_m = ranges.main_battery_m.map(|m| m * gm_max_dist);
-                    ranges.secondary_battery_m = ranges.secondary_battery_m.map(|m| m * gs_max_dist);
                 }
 
                 let space_size = map_info.space_size as f32;

@@ -121,19 +121,12 @@ pub fn dump_renderer_data(
 
     // Fetch and store versioned constants (non-fatal)
     #[cfg(feature = "constants")]
-    {
-        match crate::constants::fetch_versioned_constants_blocking(build) {
-            Ok((data, actual_build)) => {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&data) {
-                    let _ = std::fs::write(output_dir.join("constants.json"), &bytes);
-                    if actual_build != build {
-                        tracing::info!("Stored constants from build {actual_build} (fallback for {build})");
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Could not fetch constants for build {build}: {e}");
-            }
+    match crate::constants::ConstantsFetcher::new() {
+        Ok(fetcher) => {
+            write_constants_for_build(&output_dir, build, &fetcher);
+        }
+        Err(e) => {
+            tracing::warn!("Could not initialize constants fetcher for build {build}: {e:?}");
         }
     }
 
@@ -372,6 +365,18 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<()
         bail!("No matching builds found in {}", output_base.join("builds.toml").display());
     }
 
+    // Build a single fetcher up front so the GitHub listing only runs once
+    // even when backfilling constants for many builds. `None` here just skips
+    // the constants step rather than failing the whole refresh.
+    #[cfg(feature = "constants")]
+    let constants_fetcher = match crate::constants::ConstantsFetcher::new() {
+        Ok(f) => Some(f),
+        Err(e) => {
+            eprintln!("WARN: Could not initialize constants fetcher: {e:?}");
+            None
+        }
+    };
+
     for entry in &targets {
         let build_dir = output_base.join(&entry.dir);
         let meta_path = build_dir.join("metadata.toml");
@@ -380,21 +385,67 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<()
             build: entry.build,
             ..Default::default()
         });
+
+        #[cfg(feature = "constants")]
+        let constants_added = if let Some(fetcher) = constants_fetcher.as_ref() {
+            update_constants_if_missing(&build_dir, entry.build, fetcher)
+        } else {
+            false
+        };
+
         match refresh_build_derived(&build_dir, &cas_root, &mut metadata) {
             Ok(()) => {
                 metadata.save(&meta_path)?;
-                println!("  {} - {} derived artifact(s)", entry.dir, metadata.derived.len());
+                #[cfg(feature = "constants")]
+                let constants_note = if constants_added { " + constants" } else { "" };
+                #[cfg(not(feature = "constants"))]
+                let constants_note = "";
+                println!("  {} - {} derived artifact(s){}", entry.dir, metadata.derived.len(), constants_note);
             }
             Err(e) => eprintln!("WARN: {} - failed to refresh derived data: {e:?}", entry.dir),
         }
     }
 
-    println!(
-        "Refreshed {} build(s). Replacing artifacts can leave orphaned CAS objects; \
-         run `wows-data-mgr gc` to reclaim them.",
-        targets.len()
-    );
+    println!("Refreshed {} build(s).", targets.len());
     Ok(())
+}
+
+/// Write `constants.json` into `build_dir` if upstream has constants for this
+/// build. Logs a warning and leaves the build alone when nothing is published
+/// (e.g. very old builds the wows-constants repo doesn't cover).
+#[cfg(feature = "constants")]
+fn write_constants_for_build(build_dir: &Path, build: u32, fetcher: &crate::constants::ConstantsFetcher) -> bool {
+    let Some((data, actual_build)) = fetcher.fetch(build) else {
+        tracing::warn!("No upstream constants available for build {build}");
+        return false;
+    };
+    let bytes = match serde_json::to_vec_pretty(&data) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("Failed to serialize constants for build {build}: {e}");
+            return false;
+        }
+    };
+    if let Err(e) = std::fs::write(build_dir.join("constants.json"), &bytes) {
+        tracing::warn!("Failed to write constants.json for build {build}: {e}");
+        return false;
+    }
+    if actual_build != build {
+        tracing::info!("Stored constants from build {actual_build} (fallback for {build})");
+    }
+    true
+}
+
+/// Fetch and write `constants.json` only when the build doesn't already have
+/// one. Returns `true` if a new file was written. Constants for already-shipped
+/// builds don't change upstream, so leaving existing files alone keeps repeat
+/// refreshes idempotent and fast.
+#[cfg(feature = "constants")]
+fn update_constants_if_missing(build_dir: &Path, build: u32, fetcher: &crate::constants::ConstantsFetcher) -> bool {
+    if build_dir.join("constants.json").exists() {
+        return false;
+    }
+    write_constants_for_build(build_dir, build, fetcher)
 }
 
 /// Remove content-addressed objects no longer referenced by any build. An

@@ -1,0 +1,29 @@
+[package]
+name = "wows-replay-insights"
+version = "0.1.0"
+authors = ["landaire"]
+description = "Derived, post-parse projections over a WoWs replay: build resolution, timeline events, etc."
+repository = "https://github.com/landaire/wows-toolkit"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+wowsunpack = { workspace = true, default-features = false, features = ["parsing"] }
+wows_replays = { workspace = true, default-features = false, features = ["parsing"] }
+tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
+data-encoding = { workspace = true, optional = true }
+
+[features]
+default = ["build"]
+build = []
+serde = ["dep:serde"]
+# Forwards to wowsunpack/wows_replays so Arc-backed `Param` storage in the
+# provider matches the smart pointer this crate hands back. Consumers that
+# enable `arc` upstream must also enable it here.
+arc = ["wowsunpack/arc", "wows_replays/arc"]
+# wowssb URL helpers (long + short build URLs for app.wowssb.com).
+wowssb = ["build", "dep:serde_json", "dep:flate2", "dep:data-encoding"]

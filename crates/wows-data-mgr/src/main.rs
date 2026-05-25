@@ -99,8 +99,9 @@ enum Commands {
     },
 
     /// Regenerate derived artifacts (rkyv blob, compressed copies) for dumped
-    /// builds and deduplicate them into content-addressed storage.
-    /// Never deletes anything; run `gc` separately to reclaim orphans.
+    /// builds, deduplicate them into content-addressed storage, then garbage
+    /// collect CAS objects no longer referenced by any build. Pass `--no-gc`
+    /// to keep orphaned objects around (run `gc` later to reclaim them).
     RefreshDerived {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -109,6 +110,12 @@ enum Commands {
         /// Refresh only this build number (default: all builds)
         #[arg(long)]
         build: Option<u32>,
+
+        /// Skip the automatic post-refresh garbage collection. Orphaned CAS
+        /// objects (typically previous versions of replaced rkyv/zst blobs)
+        /// stay on disk until `wows-data-mgr gc` runs.
+        #[arg(long)]
+        no_gc: bool,
     },
 
     /// Delete content-addressed objects no longer referenced by any dumped
@@ -161,6 +168,12 @@ fn resolve_data_dir(args_data_dir: &Option<PathBuf>) -> Result<PathBuf, Report> 
 }
 
 fn main() -> Result<(), Report> {
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     let args = Args::parse();
     let repo_root = find_repo_root()?;
     let data_dir = resolve_data_dir(&args.data_dir)?;
@@ -168,9 +181,16 @@ fn main() -> Result<(), Report> {
     // These commands don't need the version manifest, so handle them before
     // loading it (a malformed game_versions.toml must not block them).
     match &args.command {
-        Commands::RefreshDerived { output, build } => {
+        Commands::RefreshDerived { output, build, no_gc } => {
             println!("Refreshing derived data...");
-            return dump::refresh_derived(output, *build);
+            dump::refresh_derived(output, *build)?;
+            if !*no_gc {
+                println!("Garbage-collecting orphaned CAS objects...");
+                dump::gc_cas(output)?;
+            } else {
+                println!("Skipping garbage collection (--no-gc).");
+            }
+            return Ok(());
         }
         Commands::Gc { output } => {
             println!("Garbage-collecting orphaned CAS objects...");
