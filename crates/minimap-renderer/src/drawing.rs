@@ -24,6 +24,10 @@ use std::sync::Arc;
 
 use crate::STATS_PANEL_WIDTH;
 use crate::assets::GameFonts;
+
+/// Halo width in pixels for the detected-teammate outline drawn around ship icons.
+const SHIP_ICON_OUTLINE_THICKNESS: u32 = 2;
+
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
@@ -471,33 +475,53 @@ fn draw_ship_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, yaw: f32, c
     pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
 }
 
-/// Draw an outline around a ship icon's shape.
-///
-/// Draws the icon at slightly larger scale with outline color, then the normal icon on top.
-fn draw_ship_icon_outline(
-    pm: &mut Pixmap,
-    icon: &RgbaImage,
-    x: f32,
-    y: f32,
-    yaw: f32,
-    outline_color: [u8; 3],
-    outline_opacity: f32,
-    thickness: f32,
-) {
-    // Draw outline by rendering the icon shifted in 8 directions
-    let offsets: &[(f32, f32)] = &[
-        (-thickness, 0.0),
-        (thickness, 0.0),
-        (0.0, -thickness),
-        (0.0, thickness),
-        (-thickness, -thickness),
-        (thickness, -thickness),
-        (-thickness, thickness),
-        (thickness, thickness),
-    ];
-    for (dx, dy) in offsets {
-        draw_ship_icon(pm, icon, x + dx, y + dy, yaw, Some(outline_color), outline_opacity);
+/// Build a padded outline image for a ship icon: the icon's silhouette dilated
+/// by `thickness` pixels, colored gold, on a canvas large enough to hold the
+/// extension beyond the original icon bounds. The original icon area itself is
+/// left transparent so it composites cleanly under the real icon.
+fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alpha: u8) -> RgbaImage {
+    let t = thickness;
+    let iw = icon.width();
+    let ih = icon.height();
+    let ow = iw + 2 * t;
+    let oh = ih + 2 * t;
+    let mut out = RgbaImage::from_pixel(ow, oh, image::Rgba([0, 0, 0, 0]));
+
+    let alpha_at = |x: i32, y: i32| -> u8 {
+        let ix = x - t as i32;
+        let iy = y - t as i32;
+        if ix < 0 || iy < 0 || ix >= iw as i32 || iy >= ih as i32 {
+            0
+        } else {
+            icon.get_pixel(ix as u32, iy as u32).0[3]
+        }
+    };
+
+    let t_i = t as i32;
+    let t_sq = (t_i * t_i) as i32;
+    for y in 0..oh as i32 {
+        for x in 0..ow as i32 {
+            if alpha_at(x, y) > 128 {
+                continue;
+            }
+            let mut hit = false;
+            'scan: for dy in -t_i..=t_i {
+                for dx in -t_i..=t_i {
+                    if dx * dx + dy * dy > t_sq {
+                        continue;
+                    }
+                    if alpha_at(x + dx, y + dy) > 128 {
+                        hit = true;
+                        break 'scan;
+                    }
+                }
+            }
+            if hit {
+                out.put_pixel(x as u32, y as u32, image::Rgba([color[0], color[1], color[2], alpha]));
+            }
+        }
     }
+    out
 }
 
 /// Draw a plane/consumable icon (pre-colored RGBA, no rotation).
@@ -1381,6 +1405,10 @@ pub struct ImageTarget {
     map_width: u32,
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
+    /// Pre-computed gold outline halos for ship icons. Same keys as `ship_icons`;
+    /// each image is `ship_icons[key]` padded by [`SHIP_ICON_OUTLINE_THICKNESS`]
+    /// pixels with a dilated silhouette painted gold.
+    ship_icon_outlines: HashMap<String, RgbaImage>,
     plane_icons: HashMap<String, RgbaImage>,
     building_icons: HashMap<String, RgbaImage>,
     consumable_icons: HashMap<String, RgbaImage>,
@@ -1441,12 +1469,20 @@ impl ImageTarget {
         let mut base = rgb_to_pixmap(&base_rgb);
         draw_grid(&mut base, MINIMAP_SIZE, HUD_HEIGHT, &fonts);
 
+        let ship_icon_outlines = ship_icons
+            .iter()
+            .map(|(k, icon)| {
+                (k.clone(), make_ship_icon_outline(icon, SHIP_ICON_OUTLINE_THICKNESS, [255, 215, 0], 230))
+            })
+            .collect();
+
         Self {
             canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
             base_canvas: base,
             map_width: MINIMAP_SIZE,
             fonts,
             ship_icons,
+            ship_icon_outlines,
             plane_icons,
             building_icons,
             consumable_icons,
@@ -1587,28 +1623,28 @@ impl RenderTarget for ImageTarget {
                     (ShipVisibility::Visible, false) => "Auxiliary",
                     (ShipVisibility::MinimapOnly | ShipVisibility::Undetected, _) => "Auxiliary_invisible",
                 };
-                let icon = if let Some(sp) = species.as_ref() {
+                let lookup_keys: Vec<String> = if let Some(sp) = species.as_ref() {
                     let variant_key = match (*visibility, *is_self) {
                         (ShipVisibility::Visible, true) => format!("{}_self", sp),
                         (ShipVisibility::Visible, false) => sp.clone(),
                         (ShipVisibility::MinimapOnly, _) => format!("{}_invisible", sp),
                         (ShipVisibility::Undetected, _) => format!("{}_invisible", sp),
                     };
-                    self.ship_icons
-                        .get(&variant_key)
-                        .or_else(|| self.ship_icons.get(sp))
-                        .or_else(|| self.ship_icons.get(fallback_key))
+                    vec![variant_key, sp.clone(), fallback_key.to_string()]
                 } else {
-                    self.ship_icons.get(fallback_key)
+                    vec![fallback_key.to_string()]
                 };
 
-                let Some(icon) = icon else {
+                let Some((icon_key, icon)) =
+                    lookup_keys.iter().find_map(|k| self.ship_icons.get(k).map(|i| (k.as_str(), i)))
+                else {
                     return;
                 };
 
-                // Draw outline for detected teammates
-                if *is_detected_teammate {
-                    draw_ship_icon_outline(&mut self.canvas, icon, x, y, *yaw, [255, 215, 0], 0.9, 2.0);
+                if *is_detected_teammate
+                    && let Some(outline) = self.ship_icon_outlines.get(icon_key)
+                {
+                    draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, None, 1.0);
                 }
 
                 draw_ship_icon(&mut self.canvas, icon, x, y, *yaw, color.map(|c| c), *opacity);
