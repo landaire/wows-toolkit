@@ -101,7 +101,7 @@ fn replay_format<'a>(i: &mut &'a [u8]) -> PResult<Replay<'a>> {
     Ok(Replay { meta, raw_meta, extra_data: blocks, decompressed_size, compressed_size })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReplayFile {
     pub meta: ReplayMeta,
     pub raw_meta: String,

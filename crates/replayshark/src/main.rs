@@ -16,10 +16,7 @@ use wowsunpack::rpc::entitydefs::parse_scripts;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
-use wows_replays::analyzer::decoder::DecodedPacketPayload;
-use wows_replays::analyzer::decoder::PacketDecoder;
 use wows_replays::game_constants::GameConstants;
-use wows_replays::types::ArenaId;
 use wows_replays::types::EntityId;
 
 /// Parses & processes World of Warships replay files
@@ -237,27 +234,6 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
     }
 }
 
-/// Minimal analyzer that decodes packets until it sees `OnArenaStateReceived`
-/// and stashes its arena id. Drives the `query arena-id` subcommand.
-struct ArenaIdProbe {
-    arena_id: std::rc::Rc<std::cell::Cell<Option<ArenaId>>>,
-    decoder: PacketDecoder<'static>,
-}
-
-impl Analyzer for ArenaIdProbe {
-    fn finish(&mut self) {}
-
-    fn process(&mut self, packet: &wows_replays::packet2::Packet<'_, '_>) {
-        if self.arena_id.get().is_some() {
-            return;
-        }
-        let decoded = self.decoder.decode(packet);
-        if let DecodedPacketPayload::OnArenaStateReceived { arena_id, .. } = decoded.payload {
-            self.arena_id.set(Some(ArenaId::from(arena_id)));
-        }
-    }
-}
-
 fn build_investigative_printer(
     meta: &wows_replays::ReplayMeta,
     no_meta: bool,
@@ -466,34 +442,6 @@ where
     let mut remaining = &replay_file.packet_data[..];
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).map_err(|e| rootcause::report!(ParseError::from(e)))?;
-        analyzer.process(&packet);
-    }
-    analyzer.finish();
-    Ok(())
-}
-
-/// Parse a replay with caller-supplied analyzer, returning the game-data load
-/// error rather than panicking. Used by the query subcommand which iterates
-/// over many replays and needs to skip builds it doesn't have data for.
-fn parse_replay_fallible<F>(
-    replay: &std::path::Path,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
-    build: F,
-) -> anyhow::Result<()>
-where
-    F: FnOnce(&wows_replays::ReplayMeta) -> Box<dyn Analyzer>,
-{
-    let replay_file = ReplayFile::from_file(replay).map_err(|e| anyhow!("replay parse: {e:?}"))?;
-    let replay_version = Version::from_client_exe(replay_file.meta.clientVersionFromExe.as_str());
-    let specs = load_game_data(game_dir, extracted_dir, &replay_version)
-        .with_context(|| format!("loading game data for build {}", replay_version.build))?;
-
-    let mut analyzer = build(&replay_file.meta);
-    let mut parser = wows_replays::packet2::Parser::with_build(&specs, replay_version.build);
-    let mut remaining = &replay_file.packet_data[..];
-    while !remaining.is_empty() {
-        let packet = parser.parse_packet(&mut remaining).map_err(|e| anyhow!("packet parse: {e:?}"))?;
         analyzer.process(&packet);
     }
     analyzer.finish();
@@ -826,7 +774,6 @@ fn main() {
         }
         Commands::Query { command } => match command {
             QueryCommands::ArenaId { replays } => {
-                let gc = load_game_constants(constants_path, 0);
                 for replay_path in &replays {
                     for entry in walkdir::WalkDir::new(replay_path) {
                         let entry = entry.expect("Error walking replays");
@@ -834,27 +781,25 @@ fn main() {
                             continue;
                         }
                         let path = entry.path();
-                        let arena_id = std::rc::Rc::new(std::cell::Cell::new(None));
-                        let arena_id_clone = arena_id.clone();
-                        let result = parse_replay_fallible(path, game_dir, extracted, |meta| {
-                            let version = Version::from_client_exe(&meta.clientVersionFromExe);
-                            Box::new(ArenaIdProbe {
-                                arena_id: arena_id_clone.clone(),
-                                decoder: PacketDecoder::builder()
-                                    .version(version)
-                                    .battle_constants(gc.battle())
-                                    .common_constants(gc.common())
-                                    .ships_constants(gc.ships())
-                                    .build(),
-                            })
-                        });
-                        let id_str = match arena_id.get() {
-                            Some(id) => id.to_string(),
-                            None => "-".to_string(),
+                        let arena_id = match ReplayFile::from_file(path) {
+                            Ok(rf) => {
+                                let version = Version::from_client_exe(&rf.meta.clientVersionFromExe);
+                                match load_game_data(game_dir, extracted, &version) {
+                                    Ok(specs) => {
+                                        wows_replays::analyzer::battle_controller::merged::scan_arena_id(&specs, version, &rf)
+                                    }
+                                    Err(e) => {
+                                        eprintln!("# {} (game data: {})", path.display(), e);
+                                        None
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("# {} (parse: {:?})", path.display(), e);
+                                None
+                            }
                         };
-                        if let Err(e) = result {
-                            eprintln!("# {} ({:#})", path.display(), e);
-                        }
+                        let id_str = arena_id.map(|id| id.to_string()).unwrap_or_else(|| "-".to_string());
                         println!("{}\t{}", id_str, path.display());
                     }
                 }

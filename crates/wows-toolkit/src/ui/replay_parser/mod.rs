@@ -2637,6 +2637,13 @@ impl egui_table::TableDelegate for UiReport {
 
 const ROW_HEIGHT: f32 = 28.0;
 
+/// Transient handoff between the in-tab "Load Other Team Perspective"
+/// button and the outer `handle_replay_open_actions` loop that triggers
+/// the re-parse. Wrapped because egui's `Memory::remove_temp` requires
+/// the stored type to be `Default`, and the inner tuple is not.
+#[derive(Default, Clone)]
+struct PendingAltReparse(Option<(Weak<RwLock<Replay>>, std::sync::Arc<ReplayFile>)>);
+
 pub struct Replay {
     pub replay_file: ReplayFile,
 
@@ -3216,6 +3223,8 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
+                self.render_load_alt_perspective_button(ui, &*replay_file);
+
                 if self.tab_state.wows_data_map.is_some()
                     && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
                 {
@@ -3610,35 +3619,27 @@ impl ToolkitTabViewer<'_> {
         self.handle_replay_open_actions(ui, &mut replay_to_open, &mut replay_to_open_new);
     }
 
-    /// Render the "Load Other Team Perspective" button. Enabled only when a
-    /// replay is currently focused; on click, opens a file picker for another
-    /// `.wowsreplay` recording of the same match, validates that its client
-    /// version matches the focused replay's, appends it to the focused
-    /// replay's `alt_replays`, and kicks off a re-parse so the resulting
-    /// BattleReport reflects the merged view.
-    fn build_load_alt_perspective_button(&mut self, ui: &mut egui::Ui) {
-        let focused = self.tab_state.focused_replay();
-        let merge_count = focused.as_ref().map(|r| r.read().alt_replays.len()).unwrap_or(0);
+    /// Render the "Load Other Team Perspective" button inside a specific
+    /// replay's action row. On click, opens a file picker for another
+    /// `.wowsreplay` recording of the same match and validates it. If
+    /// valid, the freshly-loaded `ReplayFile` plus a Weak pointer to the
+    /// current Replay are stashed in egui's transient store for
+    /// [`handle_replay_open_actions`] to pick up — that handler takes the
+    /// write lock, appends to `alt_replays`, and dispatches the re-parse.
+    fn render_load_alt_perspective_button(&self, ui: &mut egui::Ui, replay_file: &Replay) {
+        let merge_count = replay_file.alt_replays.len();
         let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
         if merge_count > 0 {
             label.push_str(&format!(" ({})", t!("ui.replay.load_alt_perspective_count", count = merge_count)));
         }
 
-        let response = ui.add_enabled(focused.is_some(), egui::Button::new(label));
-        let response = if focused.is_some() {
-            response.on_hover_text(t!("ui.replay.load_alt_perspective_tooltip"))
-        } else {
-            response.on_disabled_hover_text(t!("ui.replay.load_alt_perspective_disabled_tooltip"))
-        };
-
-        if !response.clicked() {
+        if !ui.button(label).on_hover_text(t!("ui.replay.load_alt_perspective_tooltip")).clicked() {
             return;
         }
-        let Some(focused) = focused else { return };
+
         let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
             return;
         };
-
         let alt = match ReplayFile::from_file(&file) {
             Ok(r) => r,
             Err(e) => {
@@ -3650,28 +3651,43 @@ impl ToolkitTabViewer<'_> {
             }
         };
 
-        // Versions must match between merged replays.
-        {
-            let primary_guard = focused.read();
-            if alt.meta.clientVersionFromExe != primary_guard.replay_file.meta.clientVersionFromExe {
-                self.tab_state.toasts.lock().error(t!(
-                    "ui.replay.load_alt_perspective_failed",
-                    error = format!(
-                        "version mismatch (primary={}, merge={})",
-                        primary_guard.replay_file.meta.clientVersionFromExe, alt.meta.clientVersionFromExe
-                    )
-                ));
-                return;
+        // Validate version + arena id up front so a bad pick never lands in
+        // alt_replays. Otherwise it would stick around and every subsequent
+        // attempt would re-fail on the same stale entry.
+        let validation = if alt.meta.clientVersionFromExe != replay_file.replay_file.meta.clientVersionFromExe {
+            Err(format!(
+                "version mismatch (primary={}, merge={})",
+                replay_file.replay_file.meta.clientVersionFromExe, alt.meta.clientVersionFromExe
+            ))
+        } else {
+            let primary_arena = replay_file.battle_report.as_ref().map(|r| r.arena_id());
+            let alt_arena = wows_replays::analyzer::battle_controller::merged::scan_arena_id(
+                replay_file.resource_loader.entity_specs(),
+                wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe),
+                &alt,
+            );
+            match (primary_arena, alt_arena) {
+                (Some(p), Some(a)) if p != a => Err(format!("arena id mismatch (primary={p}, merge={a})")),
+                (_, None) => Err("could not extract arena id from selected replay".to_string()),
+                _ => Ok(()),
             }
+        };
+
+        if let Err(msg) = validation {
+            self.tab_state.toasts.lock().error(t!("ui.replay.load_alt_perspective_failed", error = msg));
+            return;
         }
 
-        focused.write().alt_replays.push(alt);
-
-        if let Some(deps) = self.tab_state.replay_dependencies() {
-            update_background_task!(
-                self.tab_state.background_tasks,
-                deps.load_replay(focused, ReplaySource::ManualOpen)
-            );
+        // Hand the alt off to the outer loop: we only hold &Replay here, so
+        // we can't push to alt_replays or call `deps.load_replay` without
+        // first releasing the calling write guard. The outer scope retrieves
+        // the alt + Weak, upgrades, takes its own write lock, and re-parses.
+        if let Some(focused) = self.tab_state.focused_replay() {
+            let weak = Arc::downgrade(&focused);
+            let alt_arc = std::sync::Arc::new(alt);
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(egui::Id::new("alt_perspective_pending"), PendingAltReparse(Some((weak, alt_arc))));
+            });
         }
     }
 
@@ -3688,6 +3704,31 @@ impl ToolkitTabViewer<'_> {
             .and_then(|w| w.upgrade())
         {
             *replay_to_open_new = Some(replay);
+        }
+
+        // `render_load_alt_perspective_button` stashes a (Weak, ReplayFile)
+        // here after validating a candidate. The write guard inside
+        // `build_replay_view` is gone by the time we get here, so we can
+        // safely take a fresh write lock to push the alt and then kick off
+        // the background re-parse.
+        let pending = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<PendingAltReparse>(egui::Id::new("alt_perspective_pending")))
+            .and_then(|p| p.0);
+        if let Some((weak, alt_arc)) = pending
+            && let Some(arc) = weak.upgrade()
+        {
+            // Try to unwrap the Arc; if some other handler still holds a
+            // reference, clone the inner instead. Either way, the alt
+            // lands in `alt_replays` as an owned ReplayFile.
+            let alt = std::sync::Arc::try_unwrap(alt_arc).unwrap_or_else(|a| (*a).clone());
+            arc.write().alt_replays.push(alt);
+            if let Some(deps) = self.tab_state.replay_dependencies() {
+                update_background_task!(
+                    self.tab_state.background_tasks,
+                    deps.load_replay(arc, ReplaySource::ManualOpen)
+                );
+            }
         }
 
         if let Some(replay) = replay_to_open_new.take() {
@@ -3723,8 +3764,6 @@ impl ToolkitTabViewer<'_> {
                     );
                 }
             }
-
-            self.build_load_alt_perspective_button(ui);
 
             {
                 let mut val = self.tab_state.persisted.read().auto_load_latest_replay;

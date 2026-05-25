@@ -288,6 +288,24 @@ fn scan_self_team(
     None
 }
 
+/// Walk a replay's stream to find the first `onArenaStateReceived` and
+/// extract its arena id. Lets callers reject merge candidates that
+/// don't belong to the same match *before* a full re-parse is kicked off.
+pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
+    let mut parser = Parser::with_build(specs, version.build);
+    let mut remaining = &replay.packet_data[..];
+    while !remaining.is_empty() {
+        let packet = parser.parse_packet(&mut remaining).ok()?;
+        if let PacketType::EntityMethod(em) = &packet.payload
+            && em.method == "onArenaStateReceived"
+            && let Some(wowsunpack::rpc::typedefs::ArgValue::Int64(v)) = em.args.first()
+        {
+            return Some(ArenaId::from(*v));
+        }
+    }
+    None
+}
+
 /// Walk a replay's stream and return the largest packet clock observed.
 fn scan_last_clock(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> GameClock {
     let mut parser = Parser::with_build(specs, version.build);
