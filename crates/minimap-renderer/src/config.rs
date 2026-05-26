@@ -75,6 +75,19 @@ impl Default for RenderOptions {
     }
 }
 
+impl RenderOptions {
+    /// True when the self-perspective stats panel is actually rendered.
+    ///
+    /// Team rosters replace the stats panel when both flags are set, so the
+    /// raw `show_stats_panel` toggle alone isn't sufficient for deciding
+    /// whether overlays that overlap the panel area (kill feed, chat) should
+    /// hide themselves. Use this method for any "is the panel really showing"
+    /// decision.
+    pub fn stats_panel_visible(&self) -> bool {
+        self.show_stats_panel && !self.show_team_rosters
+    }
+}
+
 /// CLI override flags for renderer configuration.
 ///
 /// Fields mirror the `--no-*` / `--show-*` CLI flags. Pass this to
@@ -82,6 +95,7 @@ impl Default for RenderOptions {
 /// a config-file or default configuration.
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
+    pub show_player_names: bool,
     pub no_player_names: bool,
     pub no_ship_names: bool,
     pub no_capture_points: bool,
@@ -94,6 +108,10 @@ pub struct CliOverrides {
     pub no_dead_trails: bool,
     pub show_speed_trails: bool,
     pub show_ship_config: bool,
+    pub team_rosters: bool,
+    pub no_team_rosters: bool,
+    pub stats_panel: bool,
+    pub no_stats_panel: bool,
 }
 
 /// Renderer configuration, loadable from a TOML file.
@@ -127,12 +145,16 @@ pub struct RendererConfig {
     pub show_advantage: bool,
     pub show_score_timer: bool,
     pub show_stats_panel: bool,
+    pub show_team_rosters: bool,
 }
 
 impl Default for RendererConfig {
     fn default() -> Self {
         Self {
-            show_player_names: true,
+            // Mirrors `SavedRenderOptions::default()` on the desktop side
+            // (crates/wows-toolkit/src/data/settings.rs) so CLI and egui
+            // renders look the same out of the box.
+            show_player_names: false,
             show_ship_names: true,
             show_capture_points: true,
             show_buildings: true,
@@ -155,6 +177,7 @@ impl Default for RendererConfig {
             show_advantage: true,
             show_score_timer: true,
             show_stats_panel: true,
+            show_team_rosters: false,
         }
     }
 }
@@ -171,6 +194,10 @@ impl RendererConfig {
 
     /// Convert into RenderOptions for the renderer.
     pub fn into_render_options(self) -> RenderOptions {
+        // Stats panel and team rosters share the same gutter, so if a config
+        // file enables both the rosters win (matching the desktop behavior).
+        let show_team_rosters = self.show_team_rosters;
+        let show_stats_panel = self.show_stats_panel && !show_team_rosters;
         RenderOptions {
             show_player_names: self.show_player_names,
             show_ship_names: self.show_ship_names,
@@ -198,8 +225,8 @@ impl RendererConfig {
             show_weather: true,
             show_advantage: true,
             show_score_timer: true,
-            show_stats_panel: self.show_stats_panel,
-            show_team_rosters: true,
+            show_stats_panel,
+            show_team_rosters,
             ship_config_visibility: ShipConfigVisibility::default(),
         }
     }
@@ -213,7 +240,7 @@ impl RendererConfig {
 # Display toggles (true = show, false = hide)
 
 # Show player names above ship icons
-show_player_names = true
+show_player_names = false
 
 # Show ship type names above ship icons
 show_ship_names = true
@@ -272,12 +299,23 @@ show_speed_trails = false
 # Show ship config range circles (detection, main battery, secondary, etc.)
 show_ship_config = false
 
+# Show the self-perspective stats panel on the right side of the canvas. Hidden
+# automatically when team rosters are enabled.
+show_stats_panel = true
+
+# Show team roster panels on either side of the minimap (HP, frags, damage,
+# consumables). Mutually exclusive with the stats panel.
+show_team_rosters = false
+
 "#
         .to_string()
     }
 
     /// Apply CLI flag overrides from parsed arguments.
     pub fn apply_cli_overrides(&mut self, overrides: &CliOverrides) {
+        if overrides.show_player_names {
+            self.show_player_names = true;
+        }
         if overrides.no_player_names {
             self.show_player_names = false;
         }
@@ -313,6 +351,23 @@ show_ship_config = false
         }
         if overrides.no_chat {
             self.show_chat = false;
+        }
+        // Team rosters vs stats panel: enforcing exclusivity here keeps the
+        // CLI behavior aligned with the egui checkboxes. When both arrive
+        // enabled (e.g. team_rosters via CLI plus stats_panel from a config
+        // file), team rosters win.
+        if overrides.team_rosters {
+            self.show_team_rosters = true;
+            self.show_stats_panel = false;
+        }
+        if overrides.no_team_rosters {
+            self.show_team_rosters = false;
+        }
+        if overrides.stats_panel && !self.show_team_rosters {
+            self.show_stats_panel = true;
+        }
+        if overrides.no_stats_panel {
+            self.show_stats_panel = false;
         }
     }
 }

@@ -477,16 +477,23 @@ pub fn load_wows_data_from_dump(
         }
     }
 
-    // Load GameParams from rkyv cache
+    // Load GameParams: prefer the dump's rkyv cache when it carries a current
+    // header, otherwise fall back to re-parsing from the dump's VFS (this
+    // happens for caches generated before the current cache format version,
+    // including any pre-WUGP-magic dumps in wows-replay-data).
     let rkyv_path = dump_dir.join("game_params.rkyv");
-    debug!("Loading GameParams from rkyv: {}", rkyv_path.display());
-    let rkyv_data = std::fs::read(&rkyv_path).context_with(|| format!("Failed to read {}", rkyv_path.display()))?;
-    let params: Vec<wowsunpack::game_params::types::Param> =
-        rkyv::from_bytes::<Vec<wowsunpack::game_params::types::Param>, rkyv::rancor::Error>(&rkyv_data)
-            .map_err(|e| report!("Failed to deserialize GameParams from dump: {e}"))?;
-
-    let metadata_provider = GameMetadataProvider::from_params_no_specs(params)
-        .map_err(|e| report!("Failed to build GameMetadataProvider from dump: {e:?}"))?;
+    let metadata_provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+        Some(params) => {
+            debug!("Loaded GameParams from rkyv: {}", rkyv_path.display());
+            GameMetadataProvider::from_params_no_specs(params)
+                .map_err(|e| report!("Failed to build GameMetadataProvider from dump: {e:?}"))?
+        }
+        None => {
+            debug!("Falling back to GameParams.data in dump VFS (rkyv missing or stale)");
+            GameMetadataProvider::from_vfs(&vfs)
+                .map_err(|e| report!("Failed to load GameParams from dump VFS: {e:?}"))?
+        }
+    };
     if let Some(catalog) = found_catalog {
         metadata_provider.set_translations(catalog);
     }

@@ -60,6 +60,10 @@ struct Args {
     #[arg(long, conflicts_with = "dump_frame")]
     dump_frames: bool,
 
+    /// Show player names above ship icons (off by default; matches the desktop default)
+    #[arg(long, conflicts_with = "no_player_names")]
+    show_player_names: bool,
+
     /// Hide player names above ship icons
     #[arg(long)]
     no_player_names: bool,
@@ -107,6 +111,23 @@ struct Args {
     /// Show ship config range circles (detection, battery, etc.)
     #[arg(long)]
     show_ship_config: bool,
+
+    /// Force the team-roster side panels on (mutually exclusive with the stats panel).
+    /// Auto-enabled when one or more --merge replays are passed.
+    #[arg(long, conflicts_with = "no_team_rosters")]
+    team_rosters: bool,
+
+    /// Force the team-roster side panels off.
+    #[arg(long)]
+    no_team_rosters: bool,
+
+    /// Force the self-perspective stats panel on (mutually exclusive with team rosters).
+    #[arg(long, conflicts_with = "no_stats_panel")]
+    stats_panel: bool,
+
+    /// Force the self-perspective stats panel off.
+    #[arg(long)]
+    no_stats_panel: bool,
 
     /// Path to TOML config file
     #[arg(long)]
@@ -285,7 +306,12 @@ fn main() -> Result<(), Report> {
             _ => RendererConfig::default(),
         }
     };
+    // Merged replays automatically swap to the team-roster layout for this
+    // run (mirrors the desktop renderer). The user can still override either
+    // way with the explicit CLI flags below.
+    let merge_mode = !args.merge.is_empty();
     config.apply_cli_overrides(&wows_minimap_renderer::config::CliOverrides {
+        show_player_names: args.show_player_names,
         no_player_names: args.no_player_names,
         no_ship_names: args.no_ship_names,
         no_capture_points: args.no_capture_points,
@@ -298,11 +324,15 @@ fn main() -> Result<(), Report> {
         no_dead_trails: args.no_dead_trails,
         show_speed_trails: args.show_speed_trails,
         show_ship_config: args.show_ship_config,
+        team_rosters: args.team_rosters || (merge_mode && !args.no_team_rosters),
+        no_team_rosters: args.no_team_rosters,
+        stats_panel: args.stats_panel,
+        no_stats_panel: args.no_stats_panel,
     });
     let mut options = config.into_render_options();
     options.ship_config_visibility = wows_minimap_renderer::ShipConfigVisibility::SelfOnly;
 
-    let mut target = ImageTarget::with_stats_panel(
+    let mut target = ImageTarget::with_side_panel(
         map_image,
         game_fonts.clone(),
         ship_icons,
@@ -311,7 +341,7 @@ fn main() -> Result<(), Report> {
         consumable_icons,
         death_cause_icons,
         powerup_icons,
-        options.show_stats_panel,
+        wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),
     );
 
     // Load self player's ship silhouette for the stats panel
@@ -322,9 +352,32 @@ fn main() -> Result<(), Report> {
         Some(img.into_rgba8())
     });
 
+    // Pre-scan vehicle facts + damage events so roster HP, consumable
+    // inventories, and damage columns render from frame zero (the desktop
+    // renderer does the same in playback.rs). Without this, team-roster mode
+    // ships up with empty inventories and damage stuck at 0 until the live
+    // controller catches up.
+    let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
+    primary_with_alts.extend(merge_replays.iter());
+    let vehicle_facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
+        &game_constants,
+        replay_version,
+        &specs,
+        &primary_with_alts,
+    );
+    let damage_events = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+        &controller_game_params,
+        &game_constants,
+        replay_version,
+        &specs,
+        &primary_with_alts,
+    );
+
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_params, replay_version, options);
     renderer.set_fonts(game_fonts);
     renderer.set_flag_icons(flag_icons);
+    renderer.set_vehicle_facts(vehicle_facts.clone());
+    renderer.set_damage_events(damage_events);
     if let Some(sil) = self_silhouette {
         renderer.set_self_silhouette(sil);
     }
@@ -388,6 +441,12 @@ fn main() -> Result<(), Report> {
         &merge_replays,
     )
     .map_err(|e| report!("{e}"))?;
+    wows_replay_insights::build::seed_consumable_inventories_from_facts(
+        session.controller_mut(),
+        &vehicle_facts,
+        &controller_game_params,
+        replay_version,
+    );
 
     if session.replays().len() > 1 {
         for (i, r) in session.replays().iter().enumerate() {
@@ -588,32 +647,26 @@ fn load_from_extracted(
 
     // Load GameParams: try rkyv cache first, fall back to VFS if --recreate-game-params
     let rkyv_path = extracted_dir.join("game_params.rkyv");
-    let params: Vec<Param> = if rkyv_path.exists() {
-        info!("Loading game params from rkyv cache");
-        let rkyv_data = std::fs::read(&rkyv_path).attach_with(|| format!("Failed to read {}", rkyv_path.display()))?;
-        match rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&rkyv_data) {
-            Ok(params) => params,
-            Err(e) if recreate_game_params => {
-                warn!("Failed to deserialize game_params.rkyv ({e}), recreating from GameParams.data");
-
-                recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
-            }
-            Err(e) => {
-                bail!(
-                    "Failed to deserialize GameParams: {e}\n\
-                       Hint: the rkyv format may have changed. Pass --recreate-game-params to rebuild from GameParams.data"
-                );
-            }
+    let params: Vec<Param> = match wowsunpack::game_params::cache::load(&rkyv_path) {
+        Some(params) => {
+            info!("Loaded game params from rkyv cache");
+            params
         }
-    } else if recreate_game_params {
-        info!("game_params.rkyv not found, creating from GameParams.data");
-        recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
-    } else {
-        bail!(
-            "game_params.rkyv not found at {}\n\
-               Hint: pass --recreate-game-params to create it from GameParams.data",
-            rkyv_path.display()
-        );
+        None if recreate_game_params => {
+            if rkyv_path.exists() {
+                warn!("Existing game_params.rkyv is incompatible (missing magic or wrong version); recreating");
+            } else {
+                info!("game_params.rkyv not found, creating from GameParams.data");
+            }
+            recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
+        }
+        None => {
+            bail!(
+                "game_params.rkyv at {} is missing or incompatible.\n\
+                   Hint: pass --recreate-game-params to rebuild from GameParams.data",
+                rkyv_path.display()
+            );
+        }
     };
 
     let mut game_params = GameMetadataProvider::from_params_no_specs(params.clone())
@@ -635,10 +688,9 @@ fn recreate_rkyv_from_vfs(vfs: &VfsPath, rkyv_path: &std::path::Path) -> Result<
     let game_metadata =
         GameMetadataProvider::from_vfs(vfs).map_err(|e| report!("Failed to load GameParams from VFS: {e:?}"))?;
     let params: Vec<Param> = game_metadata.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-    let bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize GameParams: {e}"))?;
-    std::fs::write(rkyv_path, &bytes).attach_with(|| format!("Failed to write {}", rkyv_path.display()))?;
-    info!("Wrote {} ({} bytes)", rkyv_path.display(), bytes.len());
+    wowsunpack::game_params::cache::save(rkyv_path, &params)
+        .attach_with(|| format!("Failed to write {}", rkyv_path.display()))?;
+    info!("Wrote {}", rkyv_path.display());
     Ok(params)
 }
 

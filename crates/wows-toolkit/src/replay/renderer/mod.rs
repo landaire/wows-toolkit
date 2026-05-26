@@ -24,6 +24,7 @@ use wows_minimap_renderer::MINIMAP_SIZE;
 use wows_minimap_renderer::RenderProgress;
 use wows_minimap_renderer::RenderStage;
 use wows_minimap_renderer::STATS_PANEL_WIDTH;
+use wows_minimap_renderer::TEAM_ROSTER_WIDTH;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::draw_command::ShipConfigFilter;
@@ -94,6 +95,9 @@ pub struct RendererAssetCache {
     consumable_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     death_cause_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     powerup_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    crew_skill_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    modernization_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
+    signal_flag_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
     game_fonts: Option<GameFonts>,
     maps: HashMap<String, CachedMapData>,
 }
@@ -203,6 +207,57 @@ impl RendererAssetCache {
             .collect();
         let arc = Arc::new(converted);
         self.powerup_icons = Some(Arc::clone(&arc));
+        arc
+    }
+
+    pub fn get_or_load_crew_skill_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+        if let Some(ref cached) = self.crew_skill_icons {
+            return Arc::clone(cached);
+        }
+        let raw = assets::load_crew_skill_icons(vfs, 36);
+        let converted: HashMap<String, RgbaAsset> = raw
+            .into_iter()
+            .map(|(k, img)| {
+                let (w, h) = (img.width(), img.height());
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
+            })
+            .collect();
+        let arc = Arc::new(converted);
+        self.crew_skill_icons = Some(Arc::clone(&arc));
+        arc
+    }
+
+    pub fn get_or_load_modernization_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+        if let Some(ref cached) = self.modernization_icons {
+            return Arc::clone(cached);
+        }
+        let raw = assets::load_modernization_icons(vfs, 36);
+        let converted: HashMap<String, RgbaAsset> = raw
+            .into_iter()
+            .map(|(k, img)| {
+                let (w, h) = (img.width(), img.height());
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
+            })
+            .collect();
+        let arc = Arc::new(converted);
+        self.modernization_icons = Some(Arc::clone(&arc));
+        arc
+    }
+
+    pub fn get_or_load_signal_flag_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
+        if let Some(ref cached) = self.signal_flag_icons {
+            return Arc::clone(cached);
+        }
+        let raw = assets::load_signal_flag_icons(vfs, 36);
+        let converted: HashMap<String, RgbaAsset> = raw
+            .into_iter()
+            .map(|(k, img)| {
+                let (w, h) = (img.width(), img.height());
+                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
+            })
+            .collect();
+        let arc = Arc::new(converted);
+        self.signal_flag_icons = Some(Arc::clone(&arc));
         arc
     }
 
@@ -393,6 +448,44 @@ pub struct ArmorViewerRequest {
     pub command_tx: mpsc::Sender<PlaybackCommand>,
 }
 
+/// Pre-resolved per-player build data for the roster hover popover.
+/// Built once per published frame on the playback thread so the UI does no
+/// translation or GameParams lookup work; every field is owned and ready to
+/// render.
+pub struct PlayerBuildDisplay {
+    pub captain_name: Option<String>,
+    /// Captain skill catalog laid out by tier (row 0 = tier 1, row 1 = tier 2,
+    /// etc.). Each row contains every skill available to the captain for the
+    /// player's ship species; learned skills are flagged so the popover can
+    /// highlight them.
+    pub skill_rows: Vec<SkillRow>,
+    pub upgrades: Vec<EquipmentDisplay>,
+    pub signals: Vec<EquipmentDisplay>,
+}
+
+pub struct SkillRow {
+    pub tier: u8,
+    pub skills: Vec<SkillDisplay>,
+}
+
+pub struct SkillDisplay {
+    /// Snake_case slug matching the icon filename in `crew_skill_icons`.
+    pub icon_key: String,
+    pub name: String,
+    pub description: String,
+    pub tier: u8,
+    /// In-game ordering key within a tier row.
+    pub skill_type: u32,
+}
+
+pub struct EquipmentDisplay {
+    /// Full `Param::name()` matching the icon filename in
+    /// `modernization_icons` / `signal_flag_icons`.
+    pub icon_key: String,
+    pub name: String,
+    pub description: String,
+}
+
 /// Raw RGBA asset data loaded on the background thread.
 /// Uses Arc to share cached data across renderer instances.
 pub struct ReplayRendererAssets {
@@ -403,6 +496,9 @@ pub struct ReplayRendererAssets {
     pub consumable_icons: Arc<HashMap<String, RgbaAsset>>,
     pub death_cause_icons: Arc<HashMap<String, RgbaAsset>>,
     pub powerup_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub crew_skill_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub modernization_icons: Arc<HashMap<String, RgbaAsset>>,
+    pub signal_flag_icons: Arc<HashMap<String, RgbaAsset>>,
 }
 
 /// egui TextureHandles created on the UI thread.
@@ -416,6 +512,9 @@ struct RendererTextures {
     consumable_icons: HashMap<String, TextureHandle>,
     death_cause_icons: HashMap<String, TextureHandle>,
     powerup_icons: HashMap<String, TextureHandle>,
+    crew_skill_icons: HashMap<String, TextureHandle>,
+    modernization_icons: HashMap<String, TextureHandle>,
+    signal_flag_icons: HashMap<String, TextureHandle>,
     silhouette_texture: Option<TextureHandle>,
 }
 
@@ -502,6 +601,21 @@ pub struct SharedRendererState {
     /// (potentially long) backward rebuild. The playback thread resets it
     /// to `false` after acting on it.
     pub cancel_step: Arc<AtomicBool>,
+    /// Per-player display-ready build snapshots keyed by entity ID.
+    /// Refreshed by the playback thread alongside each published frame so the
+    /// roster hover popover can render skills, modernizations, and signals
+    /// without touching the live BattleController or doing translations on
+    /// the UI thread.
+    pub player_builds: HashMap<EntityId, Arc<PlayerBuildDisplay>>,
+    /// Teams whose builds the popover is allowed to surface. Always includes
+    /// the primary recording player's team; an enemy team is included only
+    /// when one of the merged replays' recording players is on that team
+    /// (mirrors and extends the replay inspector's enemy-build NDA gate).
+    pub teams_with_replays: HashSet<i64>,
+    /// Captured at launch from `ReplayDependencies::is_debug_mode`. When
+    /// true, the build popover unmasks enemy loadouts regardless of which
+    /// teams have replays — same override the replay inspector applies.
+    pub is_debug_mode: bool,
 }
 
 /// The cloneable viewport handle stored in TabState.
@@ -600,8 +714,17 @@ pub fn launch_replay_renderer(
     suppress_gpu_warning: Arc<AtomicBool>,
     window_settings: crate::tab_state::SharedWindowSettings,
     save_notify: Arc<tokio::sync::Notify>,
+    is_debug_mode: bool,
 ) -> ReplayRendererViewer {
-    let initial_options = render_options_from_saved(saved_options);
+    let mut initial_options = render_options_from_saved(saved_options);
+    // Merged replays automatically swap to the team-roster panel for the
+    // session — the rosters are the whole point of having alt perspectives —
+    // without overwriting the user's saved default. Single-replay sessions
+    // keep whatever the saved options dictate.
+    if !alt_replays.is_empty() {
+        initial_options.show_stats_panel = false;
+        initial_options.show_team_rosters = true;
+    }
     let (command_tx, command_rx) = mpsc::channel();
     let shared_state = Arc::new(Mutex::new(SharedRendererState {
         status: RendererStatus::Loading,
@@ -640,6 +763,9 @@ pub fn launch_replay_renderer(
         map_space_size: None,
         self_silhouette_raw: None,
         cancel_step: Arc::new(AtomicBool::new(false)),
+        player_builds: HashMap::new(),
+        teams_with_replays: HashSet::new(),
+        is_debug_mode,
     }));
 
     let title = Arc::new(format!("Replay Renderer - {replay_name}"));
@@ -720,6 +846,7 @@ pub fn launch_client_renderer(
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     window_settings: crate::tab_state::SharedWindowSettings,
     save_notify: Arc<tokio::sync::Notify>,
+    is_debug_mode: bool,
 ) -> ReplayRendererViewer {
     let initial_options = render_options_from_saved(saved_options);
     let (_command_tx, _command_rx) = mpsc::channel();
@@ -732,28 +859,44 @@ pub fn launch_client_renderer(
     });
 
     // Load icons and fonts from VFS via the shared asset cache.
-    let (ship_icons, plane_icons, building_icons, consumable_icons, death_cause_icons, powerup_icons, game_fonts) =
-        if let Some(vfs) = wows_data.map(|d| d.read().vfs.clone()) {
-            let mut cache = asset_cache.lock();
-            let si = cache.get_or_load_ship_icons(&vfs);
-            let pi = cache.get_or_load_plane_icons(&vfs);
-            let bi = cache.get_or_load_building_icons(&vfs);
-            let ci = cache.get_or_load_consumable_icons(&vfs);
-            let di = cache.get_or_load_death_cause_icons(&vfs);
-            let pwi = cache.get_or_load_powerup_icons(&vfs);
-            let gf = cache.get_or_load_game_fonts(&vfs);
-            (si, pi, bi, ci, di, pwi, Some(gf))
-        } else {
-            (
-                Arc::new(HashMap::new()),
-                Arc::new(HashMap::new()),
-                Arc::new(HashMap::new()),
-                Arc::new(HashMap::new()),
-                Arc::new(HashMap::new()),
-                Arc::new(HashMap::new()),
-                None,
-            )
-        };
+    let (
+        ship_icons,
+        plane_icons,
+        building_icons,
+        consumable_icons,
+        death_cause_icons,
+        powerup_icons,
+        crew_skill_icons,
+        modernization_icons,
+        signal_flag_icons,
+        game_fonts,
+    ) = if let Some(vfs) = wows_data.map(|d| d.read().vfs.clone()) {
+        let mut cache = asset_cache.lock();
+        let si = cache.get_or_load_ship_icons(&vfs);
+        let pi = cache.get_or_load_plane_icons(&vfs);
+        let bi = cache.get_or_load_building_icons(&vfs);
+        let ci = cache.get_or_load_consumable_icons(&vfs);
+        let di = cache.get_or_load_death_cause_icons(&vfs);
+        let pwi = cache.get_or_load_powerup_icons(&vfs);
+        let ski = cache.get_or_load_crew_skill_icons(&vfs);
+        let mi = cache.get_or_load_modernization_icons(&vfs);
+        let sfi = cache.get_or_load_signal_flag_icons(&vfs);
+        let gf = cache.get_or_load_game_fonts(&vfs);
+        (si, pi, bi, ci, di, pwi, ski, mi, sfi, Some(gf))
+    } else {
+        (
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            None,
+        )
+    };
 
     let shared_state = Arc::new(Mutex::new(SharedRendererState {
         status: RendererStatus::Loading,
@@ -766,6 +909,9 @@ pub fn launch_client_renderer(
             consumable_icons,
             death_cause_icons,
             powerup_icons,
+            crew_skill_icons,
+            modernization_icons,
+            signal_flag_icons,
         }),
         playing: false,
         speed: 1.0,
@@ -800,6 +946,9 @@ pub fn launch_client_renderer(
         map_space_size: None,
         self_silhouette_raw: None,
         cancel_step: Arc::new(AtomicBool::new(false)),
+        player_builds: HashMap::new(),
+        teams_with_replays: HashSet::new(),
+        is_debug_mode,
     }));
 
     let title = Arc::new(format!("Collab Viewer - {replay_name}"));
@@ -1145,7 +1294,11 @@ impl ReplayRendererViewer {
                 let (show_stats_panel, show_team_rosters) = {
                     let opts = &shared_state.lock().options;
                     let loading = status_is_loading;
-                    (!loading && opts.show_stats_panel, !loading && opts.show_team_rosters)
+                    // Stats panel and team rosters share the same gutter; if a
+                    // legacy settings file has both on, team rosters win.
+                    let team = !loading && opts.show_team_rosters;
+                    let stats = !loading && opts.show_stats_panel && !team;
+                    (stats, team)
                 };
 
                 egui::CentralPanel::default().show_inside(viewport_ui, |ui| {
@@ -1163,18 +1316,31 @@ impl ReplayRendererViewer {
                         return;
                     }
 
-                    // Canvas layout — include stats panel width so layout aligns them
-                    let canvas_w = if show_stats_panel {
-                        (MINIMAP_SIZE + STATS_PANEL_WIDTH) as f32
+                    // Canvas layout: team rosters reserve a left+right gutter and
+                    // replace the self-perspective stats panel. When rosters are
+                    // off, the stats panel takes its own right-side strip.
+                    let roster_gutter = if show_team_rosters { TEAM_ROSTER_WIDTH as f32 } else { 0.0 };
+                    let stats_strip = if show_stats_panel && !show_team_rosters {
+                        STATS_PANEL_WIDTH as f32
                     } else {
-                        MINIMAP_SIZE as f32
+                        0.0
                     };
+                    let map_x_offset = roster_gutter;
+                    let canvas_w = MINIMAP_SIZE as f32 + roster_gutter * 2.0 + stats_strip;
                     let logical_canvas = Vec2::new(canvas_w, CANVAS_HEIGHT as f32);
                     let available = ui.available_size();
-                    let current_zoom = zoom_pan_arc.lock().zoom;
                     let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
-                    let map_w = if show_stats_panel { Some(MINIMAP_SIZE as f32) } else { None };
-                    let layout = compute_canvas_layout(available, logical_canvas, current_zoom, response.rect.min, map_w);
+                    let map_w = if show_stats_panel || show_team_rosters {
+                        Some(MINIMAP_SIZE as f32)
+                    } else {
+                        None
+                    };
+                    // Pass zoom=1.0 so the canvas (and therefore HUD/panels)
+                    // stays fit-scaled regardless of the slider. Map content
+                    // still zooms via the MapTransform's zoom factor below;
+                    // HUD-text overlays (PreBattleCountdown, BattleResultOverlay)
+                    // scale themselves explicitly off transform.zoom.
+                    let layout = compute_canvas_layout(available, logical_canvas, 1.0, response.rect.min, map_w);
                     let window_scale = layout.window_scale;
 
                     // Zoom/pan input handling
@@ -1191,6 +1357,7 @@ impl ReplayRendererViewer {
                                 hud_height: HUD_HEIGHT as f32,
                                 handle_tool_yaw: true,
                                 map_width: map_w,
+                                map_x_offset,
                             },
                             Some(&mut annotation_arc.lock()),
                             false,
@@ -1199,15 +1366,21 @@ impl ReplayRendererViewer {
 
                     // Build transform for this frame
                     let zp = zoom_pan_arc.lock();
-                    let hud_w = MINIMAP_SIZE as f32;
+                    // HUD elements like the score bar are emitted in canvas-space
+                    // starting at x=0. When rosters are on, hud_width is the full
+                    // gutter+map+gutter area so the score bar spans across all of it.
+                    // The stats-panel strip (when also on) is excluded.
+                    let hud_w = MINIMAP_SIZE as f32 + roster_gutter * 2.0;
                     let transform = MapTransform {
                         origin: layout.origin,
                         window_scale,
                         zoom: zp.zoom,
                         pan: zp.pan,
                         hud_height: HUD_HEIGHT as f32,
+                        canvas_height: CANVAS_HEIGHT as f32,
                         canvas_width: canvas_w,
                         hud_width: hud_w,
+                        map_x_offset,
                     };
                     let current_zoom = zp.zoom;
                     drop(zp);
@@ -1267,9 +1440,14 @@ impl ReplayRendererViewer {
                     painter.rect_filled(response.rect, CornerRadius::ZERO, Color32::from_rgb(20, 25, 35));
 
                     // Clipped painter for map-region content (below HUD).
-                    // When stats panel is active, clip map to MINIMAP_SIZE to prevent bleed into stats area.
-                    let map_clip_width = if show_stats_panel { Some(MINIMAP_SIZE as f32) } else { None };
-                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_clip_width);
+                    // Clip to MINIMAP_SIZE when any side panel is on, so map content
+                    // doesn't bleed into the stats strip or roster gutters.
+                    let map_clip_width = if show_stats_panel || show_team_rosters {
+                        Some(MINIMAP_SIZE as f32)
+                    } else {
+                        None
+                    };
+                    let map_clip = compute_map_clip_rect(&layout, HUD_HEIGHT as f32, map_clip_width, map_x_offset);
                     let map_painter = painter.with_clip_rect(map_clip);
 
                     let tex_guard = textures_arc.lock();
@@ -1352,12 +1530,16 @@ impl ReplayRendererViewer {
                                     zoom: 1.0,
                                     pan: Vec2::ZERO,
                                     hud_height: HUD_HEIGHT as f32,
+                                    canvas_height: CANVAS_HEIGHT as f32,
                                     canvas_width: canvas_w,
                                     hud_width: hud_w,
+                                    map_x_offset,
                                 };
                                 let shared_tex = make_shared_textures(textures);
                                 let label_opts = make_label_opts(&options);
                                 let mut stats_placed = Vec::new();
+                                let mut hover_regions: Vec<wt_collab_egui::draw_commands::ConsumableHoverRegion> = Vec::new();
+                                let mut player_build_regions: Vec<wt_collab_egui::draw_commands::PlayerBuildHoverRegion> = Vec::new();
                                 for cmd in &frame.commands {
                                     if !cmd.is_stats() {
                                         continue;
@@ -1365,9 +1547,66 @@ impl ReplayRendererViewer {
                                     let cmd_shapes = wt_collab_egui::draw_commands::draw_command_to_shapes(
                                         cmd, &stats_transform, &shared_tex, &ctx, &label_opts,
                                         Some(&mut stats_placed), &LocalizedTextResolver,
+                                        Some(&mut hover_regions),
+                                        Some(&mut player_build_regions),
                                     );
                                     for shape in cmd_shapes {
                                         painter.add(shape);
+                                    }
+                                }
+                                for (idx, region) in hover_regions.iter().enumerate() {
+                                    let id = egui::Id::new(("roster_consumable_hover", idx));
+                                    let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
+                                    let tex = textures.consumable_icons.get(&region.icon_key);
+                                    hover_resp.on_hover_ui(|ui| {
+                                        roster_consumable_tooltip(ui, region, tex);
+                                    });
+                                }
+                                // Resolve build snapshots up front: the outer
+                                // `state` lock is still held across this block,
+                                // and parking_lot Mutex isn't reentrant, so we
+                                // can't relock it inside the hover closure.
+                                // Same reason we copy `teams_with_replays` here
+                                // instead of borrowing it inside the loop.
+                                let build_snapshots: Vec<Option<Arc<PlayerBuildDisplay>>> = player_build_regions
+                                    .iter()
+                                    .map(|r| state.player_builds.get(&r.entity_id).cloned())
+                                    .collect();
+                                let teams_with_replays = state.teams_with_replays.clone();
+                                let debug_mode = state.is_debug_mode;
+                                for (idx, region) in player_build_regions.iter().enumerate() {
+                                    // Only attach the build popover when the
+                                    // row's team is represented by one of our
+                                    // replays (always for own team, for the
+                                    // enemy team only when an alt-replay is
+                                    // from someone on that side) — unless
+                                    // debug mode is on, which unmasks
+                                    // everything just like the inspector.
+                                    if !debug_mode && !teams_with_replays.contains(&region.team_id) {
+                                        continue;
+                                    }
+                                    // Stable ID across frames so the pinned
+                                    // popup state survives layout reflows.
+                                    let id = egui::Id::new(("roster_player_build", region.entity_id));
+                                    let resp = ui.interact(region.rect, id, egui::Sense::click());
+                                    let snapshot = build_snapshots[idx].clone();
+                                    // Click toggles a pinned, interactive
+                                    // popup the user can hover inside; the
+                                    // popup closes when the user clicks
+                                    // outside it.
+                                    egui::Popup::from_toggle_button_response(&resp)
+                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                        .show(|ui| {
+                                            roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                                        });
+                                    // While not pinned, fall back to a transient
+                                    // hover tooltip so the build is still
+                                    // discoverable without committing a click.
+                                    if !egui::Popup::is_id_open(&ctx, id) {
+                                        let snapshot = snapshot.clone();
+                                        resp.on_hover_ui(|ui| {
+                                            roster_player_build_tooltip(ui, region, snapshot.as_ref(), textures);
+                                        });
                                     }
                                 }
                             }
@@ -2599,8 +2838,21 @@ impl ReplayRendererViewer {
                                                 changed |=
                                                     ui.checkbox(&mut opts.show_advantage, t!("ui.renderer.settings.team_advantage")).changed();
                                                 changed |= ui.checkbox(&mut opts.show_timer, t!("ui.renderer.settings.timer")).changed();
-                                                changed |= ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed();
-                                                changed |= ui.checkbox(&mut opts.show_team_rosters, "Team Rosters").changed();
+                                                // Stats panel and team rosters compete for the same gutter
+                                                // real estate, so they're mutually exclusive: toggling either
+                                                // on clears the other.
+                                                if ui.checkbox(&mut opts.show_stats_panel, "Stats Panel").changed() {
+                                                    if opts.show_stats_panel {
+                                                        opts.show_team_rosters = false;
+                                                    }
+                                                    changed = true;
+                                                }
+                                                if ui.checkbox(&mut opts.show_team_rosters, "Team Rosters").changed() {
+                                                    if opts.show_team_rosters {
+                                                        opts.show_stats_panel = false;
+                                                    }
+                                                    changed = true;
+                                                }
                                             });
 
                                             // ── Export Settings ──
@@ -2880,4 +3132,132 @@ impl ReplayRendererViewer {
             },
         );
     }
+}
+
+fn roster_consumable_tooltip(
+    ui: &mut egui::Ui,
+    region: &wt_collab_egui::draw_commands::ConsumableHoverRegion,
+    icon: Option<&TextureHandle>,
+) {
+    use wows_minimap_renderer::draw_command::ChargeCount;
+
+    ui.set_max_width(280.0);
+    ui.horizontal(|ui| {
+        if let Some(tex) = icon {
+            ui.image((tex.id(), Vec2::splat(48.0)));
+        }
+        ui.vertical(|ui| {
+            let name =
+                if region.display_name.is_empty() { region.icon_key.clone() } else { region.display_name.clone() };
+            ui.label(egui::RichText::new(name).strong());
+            let charges_line = match region.total_charges {
+                ChargeCount::Unlimited => "Charges: inf".to_string(),
+                ChargeCount::Finite(total) => {
+                    let remaining = total.saturating_sub(region.charges_used);
+                    format!("Charges: {} / {}", remaining, total)
+                }
+            };
+            ui.label(charges_line);
+        });
+    });
+    if region.work_time_secs > 0.0 || region.reload_time_secs > 0.0 {
+        ui.label(format!("Duration: {:.0}s   Cooldown: {:.0}s", region.work_time_secs, region.reload_time_secs));
+    }
+    if let Some(remaining) = region.active_remaining_secs {
+        ui.label(format!("Active: {:.0}s remaining", remaining));
+    }
+    if !region.description.is_empty() {
+        ui.separator();
+        ui.label(&region.description);
+    }
+}
+
+fn roster_player_build_tooltip(
+    ui: &mut egui::Ui,
+    region: &wt_collab_egui::draw_commands::PlayerBuildHoverRegion,
+    display: Option<&Arc<PlayerBuildDisplay>>,
+    textures: &RendererTextures,
+) {
+    ui.set_max_width(440.0);
+
+    let header = match &region.clan_tag {
+        Some(tag) => format!("[{tag}] {}    {}", region.player_name, region.ship_name),
+        None => format!("{}    {}", region.player_name, region.ship_name),
+    };
+    ui.label(egui::RichText::new(header).strong());
+
+    let Some(display) = display else {
+        ui.separator();
+        ui.weak("Build data not available for this player.");
+        return;
+    };
+
+    if let Some(name) = display.captain_name.as_deref() {
+        ui.label(egui::RichText::new(format!("Captain: {name}")).italics());
+    }
+
+    ui.separator();
+    draw_skill_grid(ui, &display.skill_rows, &textures.crew_skill_icons);
+    draw_build_section(ui, "Upgrades", &display.upgrades, &textures.modernization_icons);
+    draw_build_section(ui, "Signals", &display.signals, &textures.signal_flag_icons);
+}
+
+/// Render learned captain skills as a tier grid: one row per tier, point
+/// cost labels the row at the left. Each icon carries a hover tooltip
+/// with the skill's name, point cost, and description.
+fn draw_skill_grid(ui: &mut egui::Ui, rows: &[SkillRow], icons: &HashMap<String, TextureHandle>) {
+    if rows.is_empty() {
+        return;
+    }
+    ui.label(egui::RichText::new("Skills").strong().small());
+    const ICON_SIZE: f32 = 32.0;
+    for row in rows {
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [14.0, ICON_SIZE],
+                egui::Label::new(egui::RichText::new(format!("{}", row.tier)).weak().small()),
+            );
+            for skill in &row.skills {
+                let Some(tex) = icons.get(&skill.icon_key) else {
+                    tracing::warn!(icon_key = %skill.icon_key, "missing skill icon");
+                    continue;
+                };
+                let tooltip = if skill.description.is_empty() {
+                    format!("{} ({} pt)", skill.name, skill.tier)
+                } else {
+                    format!("{} ({} pt)\n\n{}", skill.name, skill.tier, skill.description)
+                };
+                ui.image((tex.id(), Vec2::splat(ICON_SIZE))).on_hover_text(tooltip);
+            }
+        });
+    }
+}
+
+/// Render a labeled wrapping row of equipment icons (upgrades or signals).
+/// Each icon carries a name/description hover tooltip; missing icons fall
+/// back to a text label so the section still reads correctly.
+fn draw_build_section(
+    ui: &mut egui::Ui,
+    title: &str,
+    items: &[EquipmentDisplay],
+    icons: &HashMap<String, TextureHandle>,
+) {
+    if items.is_empty() {
+        return;
+    }
+    ui.label(egui::RichText::new(title).strong().small());
+    ui.horizontal_wrapped(|ui| {
+        for item in items {
+            let Some(tex) = icons.get(&item.icon_key) else {
+                tracing::warn!(icon_key = %item.icon_key, section = %title, "missing equipment icon");
+                continue;
+            };
+            let tooltip = if item.description.is_empty() {
+                item.name.clone()
+            } else {
+                format!("{}\n\n{}", item.name, item.description)
+            };
+            ui.image((tex.id(), Vec2::splat(28.0))).on_hover_text(tooltip);
+        }
+    });
 }

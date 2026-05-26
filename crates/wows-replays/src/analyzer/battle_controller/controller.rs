@@ -58,7 +58,6 @@ use crate::types::WorldPos;
 
 use super::listener::BattleControllerState;
 use super::state::ActiveConsumable;
-use super::state::ConsumableInventory;
 use super::state::ActivePlane;
 use super::state::ActiveShot;
 use super::state::ActiveTorpedo;
@@ -67,6 +66,7 @@ use super::state::BuffZoneState;
 use super::state::BuildingEntity;
 use super::state::CapturePointState;
 use super::state::CapturedBuff;
+use super::state::ConsumableInventory;
 use super::state::ControlPointType;
 use super::state::DeadShip;
 use super::state::InteractiveZoneType;
@@ -564,11 +564,11 @@ impl BattleReport {
     }
 }
 
-#[allow(dead_code)]
-struct DamageEvent {
-    amount: f32,
-    victim: EntityId,
-    clock: GameClock,
+#[derive(Debug, Clone, Copy)]
+pub struct DamageEvent {
+    pub amount: f32,
+    pub victim: EntityId,
+    pub clock: GameClock,
 }
 
 pub struct BattleController<'res, 'replay, G> {
@@ -1121,6 +1121,26 @@ where
 
     pub fn battle_results(&self) -> Option<&String> {
         self.battle_results.as_ref()
+    }
+
+    /// Apply a player-create packet's props bundle to the existing
+    /// VehicleEntity, if any. EntityCreate handles initial entity construction
+    /// for every Vehicle; this fold-in lets `shipConfig`, `maxHealth`, and
+    /// other props arriving on the BasePlayer / CellPlayer channels (the
+    /// recording player's own ship) land on the same entity without needing
+    /// a second EntityCreate.
+    fn apply_player_create_props(
+        &mut self,
+        entity_id: EntityId,
+        props: &HashMap<&str, wowsunpack::rpc::typedefs::ArgValue<'_>>,
+    ) {
+        let Some(entity) = self.entities_by_id.get(&entity_id) else {
+            return;
+        };
+        let Some(vehicle) = entity.vehicle_ref() else {
+            return;
+        };
+        vehicle.borrow_mut().props.update_from_args(props, self.version, self.constants());
     }
 
     fn handle_property_update(&mut self, _clock: GameClock, update: &crate::packet2::PropertyUpdatePacket<'_>) {
@@ -1949,6 +1969,15 @@ impl Default for VehicleProps {
 }
 
 impl VehicleProps {
+    /// Build a `VehicleProps` from a raw EntityCreate `props` map. Public so
+    /// scanners (see `merged::scan_vehicle_facts`) can extract per-entity
+    /// initial-state facts without going through a full controller.
+    pub fn from_create_props(props: &HashMap<&str, ArgValue<'_>>, version: Version, constants: &GameConstants) -> Self {
+        let mut vp = VehicleProps::default();
+        vp.update_from_args(props, version, constants);
+        vp
+    }
+
     pub fn ignore_map_borders(&self) -> bool {
         self.ignore_map_borders
     }
@@ -2626,6 +2655,10 @@ where
         &self.kills
     }
 
+    fn damage_dealt(&self) -> &HashMap<EntityId, Vec<DamageEvent>> {
+        &self.damage_dealt
+    }
+
     fn dead_ships(&self) -> &HashMap<EntityId, DeadShip> {
         &self.dead_ships
     }
@@ -2864,11 +2897,18 @@ where
                     }
                 }
             }
-            crate::analyzer::decoder::DecodedPacketPayload::BasePlayerCreate(_base) => {
+            crate::analyzer::decoder::DecodedPacketPayload::BasePlayerCreate(base) => {
                 trace!("BASE PLAYER CREATE");
+                // Fold any vehicle props carried in the base-create bundle into
+                // the recording player's existing VehicleEntity. The actual
+                // entity is created by a separate EntityCreate; this catches
+                // any ALL_CLIENTS / OWN_CLIENT properties that travel here
+                // instead (notably `shipConfig` in some replay versions).
+                self.apply_player_create_props(base.entity_id, &base.props);
             }
-            crate::analyzer::decoder::DecodedPacketPayload::CellPlayerCreate(_cell) => {
+            crate::analyzer::decoder::DecodedPacketPayload::CellPlayerCreate(cell) => {
                 trace!("CELL PLAYER CREATE");
+                self.apply_player_create_props(cell.entity_id, &cell.props);
             }
             crate::analyzer::decoder::DecodedPacketPayload::EntityEnter(_e) => {
                 trace!("ENTITY ENTER")
@@ -3216,6 +3256,17 @@ where
                 );
             }
             crate::analyzer::decoder::DecodedPacketPayload::PlaneRemoved { entity_id: _, plane_id } => {
+                // In merge mode, a "remove" from a perspective on the opposite
+                // team only means "the plane left my view," not "the plane
+                // despawned." Honoring it would drop planes that the owning
+                // team's perspective is still tracking. Skip when the source
+                // perspective isn't on the plane's team.
+                let owner_team = self.active_planes.get(&plane_id).map(|p| TeamId::from(p.team_id as i64));
+                if let (Some(source_team), Some(owner_team)) = (self.current_source_team, owner_team)
+                    && source_team != owner_team
+                {
+                    return;
+                }
                 self.active_planes.remove(&plane_id);
             }
             crate::analyzer::decoder::DecodedPacketPayload::WardAdded {

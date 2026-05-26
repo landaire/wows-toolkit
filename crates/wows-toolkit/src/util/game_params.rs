@@ -5,9 +5,9 @@ use std::time::Instant;
 use tracing::debug;
 use tracing::info;
 use tracing::instrument;
+use wowsunpack::game_params::cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
-use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
 use crate::util::error::ToolkitError;
@@ -86,27 +86,20 @@ pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetada
     let cache_path = game_params_bin_path(game_version as u32);
 
     let start = Instant::now();
-    let params = cache_path
-        .exists()
-        .then(|| {
-            let cache_data = std::fs::read(&cache_path).ok()?;
-            let params: Vec<Param> = rkyv::from_bytes::<Vec<Param>, rkyv::rancor::Error>(&cache_data).ok()?;
-            debug!("Loaded params from disk");
-            Some(params)
-        })
-        .flatten();
+    let cached = cache::load(&cache_path);
+    if cached.is_some() {
+        debug!("Loaded params from disk");
+    }
 
-    let metadata_provider = if let Some(params) = params {
+    let metadata_provider = if let Some(params) = cached {
         GameMetadataProvider::from_params_with_vfs(params, vfs)?
     } else {
         info!("Loading gameparams from game files");
 
         let metadata_provider = GameMetadataProvider::from_vfs(vfs)?;
-        let params: Vec<Param> =
+        let params: Vec<_> =
             metadata_provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
-
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params).expect("failed to serialize cached game params");
-        std::fs::write(&cache_path, &bytes).expect("failed to write cached game params");
+        cache::save(&cache_path, &params).expect("failed to write cached game params");
 
         metadata_provider
     };

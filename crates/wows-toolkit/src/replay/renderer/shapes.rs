@@ -53,7 +53,7 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         DrawCommand::ScoreBar { .. } => opts.show_score,
         DrawCommand::Timer { .. } => opts.show_timer,
         DrawCommand::PreBattleCountdown { .. } => opts.show_timer,
-        DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.show_stats_panel,
+        DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.stats_panel_visible(),
         DrawCommand::CapturePoint { .. } => opts.show_capture_points,
         DrawCommand::Building { .. } => opts.show_buildings,
         DrawCommand::TurretDirection { .. } => opts.show_turret_direction,
@@ -65,7 +65,7 @@ pub(super) fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_
         DrawCommand::BuffZone { .. } => opts.show_capture_points,
         DrawCommand::TeamBuffs { .. } => opts.show_buffs,
         DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
-        DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.show_stats_panel,
+        DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.stats_panel_visible(),
         DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
         DrawCommand::WeatherZone { .. } => opts.show_weather,
         DrawCommand::StatsPanel { .. }
@@ -169,5 +169,7 @@ pub(super) fn draw_command_to_shapes(
         &label_opts,
         Some(placed_labels),
         text_resolver,
+        None,
+        None,
     )
 }

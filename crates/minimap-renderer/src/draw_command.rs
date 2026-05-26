@@ -584,14 +584,7 @@ pub enum DrawCommand {
     StatsActivityFeed { x: i32, y: i32, width: i32, height: i32, entries: Vec<ActivityFeedEntry> },
     /// Per-team roster panel: list of ships with HP, name, and consumable slots.
     /// Positioned in a gutter beside the map (left or right depending on `side`).
-    TeamRoster {
-        side: RosterSide,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        rows: Vec<RosterRow>,
-    },
+    TeamRoster { side: RosterSide, x: i32, y: i32, width: i32, height: i32, rows: Vec<RosterRow> },
 }
 
 /// Which gutter a [`DrawCommand::TeamRoster`] sits in.
@@ -607,16 +600,46 @@ pub enum RosterSide {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct RosterRow {
+    /// Per-session entity ID for this player's ship. Acts as a stable lookup
+    /// key for the desktop renderer's per-player build snapshot, so the build
+    /// popover can resolve hovered rows back to a `ResolvedBuild`.
+    pub entity_id: EntityId,
+    /// Raw arena-side team id for this player. The desktop renderer uses this
+    /// to decide whether the build popover may show enemy loadouts (only when
+    /// at least one merged replay's recording player is on the same team).
+    pub team_id: i64,
     pub player_name: String,
     pub clan_tag: Option<String>,
     pub clan_color: Option<[u8; 3]>,
     pub ship_name: String,
     pub ship_param_id: Option<GameParamId>,
+    /// Lookup key for the ship class icon (DD/CA/BB/CV/SS). Matches a key in
+    /// the renderer's `ship_icons` texture map (the species name).
+    pub class_icon_key: Option<String>,
+    /// Parsed ship species, used as the primary roster sort key so the order
+    /// follows the in-game class hierarchy (CV/BB/CA/DD/SS) rather than the
+    /// alphabetical fall-back of `class_icon_key`.
+    pub species: Option<wowsunpack::game_params::types::Species>,
     pub hp_current: f32,
     pub hp_max: f32,
+    /// Portion of missing HP that the ship can still restore via Repair Party
+    /// (regen-crew limit minus already-regenerated). Drawn as a darker segment
+    /// in the HP bar between current HP and permanent damage.
+    pub hp_healable: f32,
     pub is_dead: bool,
     /// Highlight this row (player's own ship, or own division-mate).
     pub is_self: bool,
+    /// True while the ship is currently visible to the opposing team. Drives
+    /// the yellow name highlight.
+    pub is_spotted: bool,
+    /// Number of kills the player has scored at the current clock.
+    pub kills: u32,
+    /// Total damage dealt by the player at the current clock.
+    pub damage_dealt: f32,
+    /// Seconds elapsed since this player's last observed damage event, or
+    /// `None` if they have never dealt damage. UI fades the recent-damage
+    /// indicator over this duration.
+    pub seconds_since_damage: Option<f32>,
     pub consumables: Vec<RosterConsumable>,
 }
 
@@ -626,10 +649,16 @@ pub struct RosterConsumable {
     /// Lookup key in the consumable icon map (Ability param index, e.g.
     /// `"PCY009_CrashCrewPremium"`).
     pub icon_key: String,
-    /// Display name for tooltips.
-    pub tooltip_name: String,
+    /// User-facing display name. Localized when game translations are
+    /// available, otherwise the raw consumable type.
+    pub display_name: String,
+    /// Localized description (the in-game tooltip text). Empty when no
+    /// translation is available.
+    pub description: String,
     pub total_charges: ChargeCount,
     pub charges_used: u32,
+    pub work_time_secs: f32,
+    pub reload_time_secs: f32,
     /// Seconds of activation remaining, or `None` when not active.
     pub active_remaining_secs: Option<f32>,
 }

@@ -198,6 +198,17 @@ pub struct MinimapRenderer<'a> {
     self_silhouette: Option<RgbaImage>,
     /// Cached self player entity ID (populated from controller state).
     self_entity_id: Option<EntityId>,
+
+    /// Static per-entity facts scanned from all merged replay streams at
+    /// session load. Lets the roster show max HP, ship config, and inventory
+    /// for ships that haven't surfaced via the primary perspective yet.
+    /// Empty for single-replay sessions until populated.
+    vehicle_facts: HashMap<EntityId, wows_replays::analyzer::battle_controller::merged::VehicleFacts>,
+
+    /// Per-entity merged damage events from all perspectives. Lets the
+    /// roster show damage dealt by teammates against enemies that the
+    /// primary perspective never spotted. Empty until populated.
+    damage_events: HashMap<EntityId, Vec<wows_replays::analyzer::battle_controller::DamageEvent>>,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -231,12 +242,37 @@ impl<'a> MinimapRenderer<'a> {
             flag_icons: HashMap::new(),
             self_silhouette: None,
             self_entity_id: None,
+            vehicle_facts: HashMap::new(),
+            damage_events: HashMap::new(),
         }
     }
 
     /// Set the ship silhouette image for the self player's stats panel.
     pub fn set_self_silhouette(&mut self, silhouette: RgbaImage) {
         self.self_silhouette = Some(silhouette);
+    }
+
+    /// Install a pre-scanned per-entity facts cache. Driven by
+    /// `wows_replays::analyzer::battle_controller::merged::scan_vehicle_facts`
+    /// once per session. Roster emission falls back to these values when the
+    /// live `VehicleEntity` for a ship hasn't surfaced yet (common in merged
+    /// replays for ships the primary perspective never spots).
+    pub fn set_vehicle_facts(
+        &mut self,
+        facts: HashMap<EntityId, wows_replays::analyzer::battle_controller::merged::VehicleFacts>,
+    ) {
+        self.vehicle_facts = facts;
+    }
+
+    /// Install a pre-merged per-entity damage event list. Driven by
+    /// `wows_replays::analyzer::battle_controller::merged::gather_damage_events`.
+    /// Used by the roster to surface damage that the primary perspective
+    /// alone couldn't observe (teammates vs unspotted enemies).
+    pub fn set_damage_events(
+        &mut self,
+        events: HashMap<EntityId, Vec<wows_replays::analyzer::battle_controller::DamageEvent>>,
+    ) {
+        self.damage_events = events;
     }
 
     /// Set the flag icons for base-type capture points.
@@ -1153,13 +1189,13 @@ impl<'a> MinimapRenderer<'a> {
             let minimap_yaw = minimap.map(|mm| std::f32::consts::FRAC_PI_2 - mm.heading.to_radians());
             let world_yaw = world.map(|sp| sp.yaw);
 
-            // A ship is "spotted" when its visibility_flags are non-zero (game
-            // mechanic: detected by radar, hydro, etc.). Outline both teams: for
-            // friendlies it means "spotted by the enemy", for enemies "spotted
-            // by us". The self ship is excluded because it would always trigger
-            // and adds nothing.
+            // A ship is "spotted" when its visibility_flags are non-zero
+            // (detected by radar, hydro, direct vision, etc.). Outline applies
+            // to every ship including the recording player's own, so the
+            // viewer can see exactly when they would have been visible to the
+            // enemy.
             let is_spotted = vis_flags != 0;
-            let is_detected_teammate = is_spotted && !relation.is_self();
+            let is_detected_teammate = is_spotted;
 
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
@@ -1644,8 +1680,8 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
-        // 9. Kill feed (disabled when stats panel is active — activity feed replaces it)
-        if self.options.show_kill_feed && !self.options.show_stats_panel {
+        // Kill feed (replaced by stats-panel activity feed when visible)
+        if self.options.show_kill_feed && !self.options.stats_panel_visible() {
             let kills = controller.kills();
             let mut recent_kills = Vec::new();
             for kill in kills.iter().rev() {
@@ -1684,8 +1720,8 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
-        // 9b. Chat overlay (disabled when stats panel is active — activity feed replaces it)
-        if self.options.show_chat && !self.options.show_stats_panel {
+        // Chat overlay (replaced by stats-panel activity feed when visible)
+        if self.options.show_chat && !self.options.stats_panel_visible() {
             let chat = controller.game_chat();
             let fade_duration = 5.0f32; // seconds to fade out
             let visible_duration = 30.0f32; // seconds before fading starts
@@ -1798,8 +1834,10 @@ impl<'a> MinimapRenderer<'a> {
             commands.push(DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above: false });
         }
 
-        // 12. Stats panel (right side panel with ship HP, damage, ribbons, activity)
-        if self.options.show_stats_panel {
+        // 12. Stats panel (right side panel with ship HP, damage, ribbons, activity).
+        // When team rosters are enabled they replace the self-perspective stats;
+        // this branch is skipped entirely so the panel doesn't double up.
+        if self.options.show_stats_panel && !self.options.show_team_rosters {
             let panel_x = MINIMAP_SIZE as i32;
             let panel_w = STATS_PANEL_WIDTH as i32;
 
@@ -2032,11 +2070,7 @@ impl<'a> MinimapRenderer<'a> {
         commands
     }
 
-    fn emit_team_rosters(
-        &self,
-        controller: &dyn BattleControllerState,
-        commands: &mut Vec<DrawCommand>,
-    ) {
+    fn emit_team_rosters(&self, controller: &dyn BattleControllerState, commands: &mut Vec<DrawCommand>) {
         use crate::draw_command::ChargeCount as CmdChargeCount;
         use crate::draw_command::RosterConsumable;
         use crate::draw_command::RosterRow;
@@ -2045,52 +2079,140 @@ impl<'a> MinimapRenderer<'a> {
         let dead = controller.dead_ships();
         let active = controller.active_consumables();
         let inventories = controller.consumable_inventories();
+        let entities = controller.entities_by_id();
         let clock = controller.clock();
 
         let mut friendly: Vec<RosterRow> = Vec::new();
         let mut enemy: Vec<RosterRow> = Vec::new();
 
-        for (entity_id, relation) in &self.player_relations {
-            let entity = match controller.entities_by_id().get(entity_id) {
-                Some(e) => e,
-                None => continue,
-            };
-            let v_ref = match entity.vehicle_ref() {
-                Some(v) => v,
-                None => continue,
-            };
-            let v = v_ref.borrow();
-
-            let hp_max = v.props().max_health();
-            let hp_current = v.props().health();
-            let is_dead = dead.get(entity_id).is_some() || (hp_max > 0.0 && hp_current <= 0.0);
-
-            let player_name = self.player_names.get(entity_id).cloned().unwrap_or_default();
-            let clan_tag = self.player_clan_tags.get(entity_id).cloned();
-            let clan_color = self.player_clan_colors.get(entity_id).copied().flatten();
-            let ship_name = self.ship_display_names.get(entity_id).cloned().unwrap_or_default();
-            let ship_param_id = self.ship_param_ids.get(entity_id).copied();
+        // Iterate player metadata directly (rather than self.player_relations) so
+        // every player surfaced by onArenaStateReceived appears in the roster
+        // immediately, even before the primary perspective has spotted them.
+        // Merged replays therefore display both teams' full lineup from the
+        // start. Live HP and consumable inventory fill in once we have a
+        // VehicleEntity for the player (either from the primary's view or from
+        // the alt-perspective stream forwarded by `MergedReplays`).
+        for player in controller.player_entities().values() {
+            let entity_id = player.initial_state().entity_id();
+            let relation = player.relation();
             let is_self = relation.is_self();
 
+            let vehicle_entity = entities.get(&entity_id).and_then(|e| e.vehicle_ref());
+            let cached = self.vehicle_facts.get(&entity_id);
+            // Prefer live entity HP. Fall back to the scanned EntityCreate
+            // value when the live entity isn't tracked yet (merged sessions
+            // before primary spotting) or hasn't received its first maxHealth
+            // broadcast (some ships only get it on first damage).
+            let (hp_current, hp_max, hp_healable) = if let Some(v_ref) = vehicle_entity.as_ref() {
+                let v = v_ref.borrow();
+                let live_max = v.props().max_health();
+                let live_cur = v.props().health();
+                let regen_limit = v.props().regen_crew_hp_limit();
+                let regenerated = v.props().regenerated_health();
+                let healable = (regen_limit - regenerated).max(0.0).min((live_max - live_cur).max(0.0));
+                if live_max > 0.0 {
+                    (live_cur, live_max, healable)
+                } else if let Some(f) = cached {
+                    (f.max_health, f.max_health, 0.0)
+                } else {
+                    (0.0, 0.0, 0.0)
+                }
+            } else if let Some(f) = cached {
+                (f.max_health, f.max_health, 0.0)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            let is_dead = dead.contains_key(&entity_id) || (hp_max > 0.0 && hp_current <= 0.0);
+            // Same source as the yellow ship-icon outline: visibilityFlags on
+            // the live VehicleEntity. Non-zero means the game has confirmed
+            // the ship is detected (radar, hydro, direct vision, etc.).
+            let is_spotted =
+                vehicle_entity.as_ref().map(|v_ref| v_ref.borrow().props().visibility_flags() != 0).unwrap_or(false);
+
+            // Kills at the current clock: filter the global kill list by
+            // killer and clock. Damage at the current clock: sum the merged
+            // damage events for this entity that have already happened.
+            let kills = controller.kills().iter().filter(|k| k.killer == entity_id && k.clock <= clock).count() as u32;
+            let (damage_dealt, last_damage_clock): (f32, Option<f32>) = self
+                .damage_events
+                .get(&entity_id)
+                .map(|events| {
+                    let mut sum = 0.0f32;
+                    let mut last = None;
+                    for e in events.iter().take_while(|e| e.clock <= clock) {
+                        sum += e.amount;
+                        last = Some(e.clock.0);
+                    }
+                    (sum, last)
+                })
+                .unwrap_or((0.0, None));
+            let seconds_since_damage = last_damage_clock.map(|c| (clock.0 - c).max(0.0));
+
+            let player_name = self.player_names.get(&entity_id).cloned().unwrap_or_else(|| {
+                let raw = player.initial_state().username();
+                if player.is_bot() && raw.starts_with("IDS_") {
+                    self.game_params.localized_name_from_id(raw).unwrap_or_else(|| raw.to_string())
+                } else {
+                    raw.to_string()
+                }
+            });
+            let clan_tag = self.player_clan_tags.get(&entity_id).cloned().or_else(|| {
+                let c = player.initial_state().clan().to_string();
+                (!c.is_empty()).then_some(c)
+            });
+            let clan_color = self.player_clan_colors.get(&entity_id).copied().flatten().or_else(|| {
+                let raw = player.initial_state().clan_color();
+                (raw != 0).then_some([((raw & 0xFF0000) >> 16) as u8, ((raw & 0xFF00) >> 8) as u8, (raw & 0xFF) as u8])
+            });
+            let ship_name = self.ship_display_names.get(&entity_id).cloned().unwrap_or_else(|| {
+                self.game_params
+                    .localized_name_from_param(player.vehicle())
+                    .unwrap_or_else(|| player.vehicle().name().to_string())
+            });
+            let ship_param_id = Some(player.vehicle().id());
+            // Ship-class icon key: the species name (e.g. "Destroyer"). The
+            // egui side uses this to look up the same icon the minimap draws
+            // beside a ship.
+            let species = player.vehicle().species().and_then(|s| s.known()).copied();
+            let class_icon_key = species.map(|s| s.name().to_string());
+
             let consumables: Vec<RosterConsumable> = inventories
-                .get(entity_id)
+                .get(&entity_id)
                 .map(|slots| {
                     slots
                         .iter()
                         .map(|slot| {
-                            let active_remaining_secs = active
-                                .get(entity_id)
-                                .and_then(|list| {
+                            // Dead ships can't have a consumable running; stop the
+                            // countdown the instant they go down rather than letting
+                            // it tick to zero.
+                            let active_remaining_secs = if is_dead {
+                                None
+                            } else {
+                                active.get(&entity_id).and_then(|list| {
                                     list.iter()
                                         .filter(|a| a.consumable.known() == slot.consumable.known())
                                         .map(|a| a.activated_at.0 + a.duration - clock.0)
                                         .find(|remaining| *remaining > 0.0)
-                                });
+                                })
+                            };
+                            let display_name = wowsunpack::game_params::translations::translate_consumable(
+                                &slot.icon_key,
+                                self.game_params,
+                            )
+                            .unwrap_or_else(|| slot.consumable_type_raw.clone());
+                            let description = wowsunpack::game_params::translations::translate_consumable_description(
+                                &slot.icon_key,
+                                self.game_params,
+                            )
+                            .unwrap_or_default();
                             RosterConsumable {
                                 icon_key: slot.icon_key.clone(),
-                                tooltip_name: format!("{:?}", slot.consumable.known()),
+                                display_name,
+                                description,
                                 total_charges: CmdChargeCount::from(slot.total_charges),
                                 charges_used: slot.charges_used,
+                                work_time_secs: slot.work_time,
+                                reload_time_secs: slot.reload_time,
                                 active_remaining_secs,
                             }
                         })
@@ -2098,16 +2220,26 @@ impl<'a> MinimapRenderer<'a> {
                 })
                 .unwrap_or_default();
 
+            let team_id = player.initial_state().team_id();
             let row = RosterRow {
+                entity_id,
+                team_id,
                 player_name,
                 clan_tag,
                 clan_color,
                 ship_name,
                 ship_param_id,
+                class_icon_key,
+                species,
                 hp_current,
                 hp_max,
+                hp_healable,
                 is_dead,
                 is_self,
+                is_spotted,
+                kills,
+                damage_dealt,
+                seconds_since_damage,
                 consumables,
             };
 
@@ -2118,23 +2250,29 @@ impl<'a> MinimapRenderer<'a> {
             }
         }
 
+        // Mirrors the replay inspector's default ordering: ship species first
+        // (CV/BB/CA/DD/SS via the Species enum's variant order), then ship
+        // identity, then player name. Dead ships sink to the bottom of each
+        // team but keep the same intra-group ordering.
         let sort_key = |row: &RosterRow| {
-            (
-                row.is_dead,
-                row.ship_param_id.map(|id| id.raw()).unwrap_or(0),
-                row.player_name.clone(),
-            )
+            (row.is_dead, row.species, row.ship_param_id.map(|id| id.raw()).unwrap_or(0), row.player_name.clone())
         };
         friendly.sort_by_key(sort_key);
         enemy.sort_by_key(sort_key);
 
+        // Roster panels live in dedicated gutters, flanking the minimap.
+        // Canvas layout (when both rosters and stats panel are off): just the
+        // minimap occupies 0..MINIMAP_SIZE. With rosters on, the consumer
+        // (replay renderer / video export) widens the canvas to include
+        // TEAM_ROSTER_WIDTH on each side; the friendly roster sits at x=0 and
+        // the enemy roster at x=MINIMAP_SIZE+TEAM_ROSTER_WIDTH.
         let roster_w = crate::TEAM_ROSTER_WIDTH as i32;
-        let roster_h = MINIMAP_SIZE as i32 - 16;
-        let roster_y = HUD_HEIGHT as i32 + 8;
+        let roster_h = MINIMAP_SIZE as i32;
+        let roster_y = HUD_HEIGHT as i32;
         if !friendly.is_empty() {
             commands.push(DrawCommand::TeamRoster {
                 side: RosterSide::Friendly,
-                x: 8,
+                x: 0,
                 y: roster_y,
                 width: roster_w,
                 height: roster_h,
@@ -2144,7 +2282,7 @@ impl<'a> MinimapRenderer<'a> {
         if !enemy.is_empty() {
             commands.push(DrawCommand::TeamRoster {
                 side: RosterSide::Enemy,
-                x: MINIMAP_SIZE as i32 - roster_w - 8,
+                x: roster_w + MINIMAP_SIZE as i32,
                 y: roster_y,
                 width: roster_w,
                 height: roster_h,

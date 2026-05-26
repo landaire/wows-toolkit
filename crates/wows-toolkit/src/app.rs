@@ -596,7 +596,7 @@ impl WowsToolkitApp {
     }
 
     /// Initialize the tracing subscriber with file logging.
-    /// Only logs from `wows_toolkit`, `wows_replays`, and `wows_minimap_renderer` are captured.
+    /// Captures logs from `wows_toolkit`, `wows_replay_insights`, and `wows_replays`.
     #[cfg(feature = "logging")]
     fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
         use tracing_appender::rolling::Rotation;
@@ -617,8 +617,10 @@ impl WowsToolkitApp {
             .ok()?;
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        let target_filter =
-            tracing_subscriber::filter::Targets::new().with_target("wows_toolkit", tracing::Level::DEBUG);
+        let target_filter = tracing_subscriber::filter::Targets::new()
+            .with_target("wows_toolkit", tracing::Level::DEBUG)
+            .with_target("wows_replay_insights", tracing::Level::DEBUG)
+            .with_target("wows_replays", tracing::Level::INFO);
 
         let subscriber = tracing_subscriber::registry().with(
             fmt::Layer::new()
@@ -632,8 +634,10 @@ impl WowsToolkitApp {
         // In debug builds, also log to the console
         #[cfg(debug_assertions)]
         let subscriber = {
-            let console_filter =
-                tracing_subscriber::filter::Targets::new().with_target("wows_toolkit", tracing::Level::DEBUG);
+            let console_filter = tracing_subscriber::filter::Targets::new()
+                .with_target("wows_toolkit", tracing::Level::DEBUG)
+                .with_target("wows_replay_insights", tracing::Level::DEBUG)
+                .with_target("wows_replays", tracing::Level::INFO);
 
             subscriber.with(fmt::Layer::new().with_ansi(true).with_target(true).with_filter(console_filter))
         };
@@ -2452,6 +2456,7 @@ impl WowsToolkitApp {
                     // Launch client viewer windows for each open replay (up to 2).
                     let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                    let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                     for replay in open_replays.into_iter().take(2) {
                         self.tab_state.toasts.lock().info(t!("ui.messages.joined_session", name = &replay.replay_name));
                         let viewer = crate::replay::renderer::launch_client_renderer(
@@ -2464,6 +2469,7 @@ impl WowsToolkitApp {
                             &self.tab_state.renderer_asset_cache,
                             self.tab_state.window_settings.clone(),
                             self.tab_state.save_notify.clone(),
+                            is_debug_mode,
                         );
                         if let Some(ref client_handle) = self.tab_state.client_session {
                             let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -2526,6 +2532,7 @@ impl WowsToolkitApp {
 
                     let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                     let suppress = Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                    let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                     self.tab_state.toasts.lock().info(t!("ui.messages.host_opened_replay", name = replay_name));
                     let viewer = crate::replay::renderer::launch_client_renderer(
                         replay_name,
@@ -2537,6 +2544,7 @@ impl WowsToolkitApp {
                         &self.tab_state.renderer_asset_cache,
                         self.tab_state.window_settings.clone(),
                         self.tab_state.save_notify.clone(),
+                        is_debug_mode,
                     );
                     // Wire the client viewer to the session.
                     if let Some(ref client_handle) = self.tab_state.client_session {

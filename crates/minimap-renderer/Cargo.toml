@@ -42,7 +42,7 @@ rendering = [
     "wowsunpack/parsing",
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
-rkyv = ["dep:rkyv", "wowsunpack/rkyv"]
+rkyv = ["dep:rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
 # Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
 vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
 # VideoToolbox encoder (macOS only)

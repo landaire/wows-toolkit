@@ -16,12 +16,12 @@ use crate::types::GameClock;
 use crate::types::GameParamId;
 use crate::types::PlaneId;
 
+use super::controller::DamageEvent;
 use super::controller::Entity;
 use super::controller::GameMessage;
 use super::controller::Player;
 use super::controller::SharedPlayer;
 use super::state::ActiveConsumable;
-use super::state::ConsumableInventory;
 use super::state::ActivePlane;
 use super::state::ActiveShot;
 use super::state::ActiveTorpedo;
@@ -29,6 +29,7 @@ use super::state::ActiveWard;
 use super::state::BuffZoneState;
 use super::state::CapturePointState;
 use super::state::CapturedBuff;
+use super::state::ConsumableInventory;
 use super::state::DeadShip;
 use super::state::KillRecord;
 use super::state::LocalWeatherZone;
@@ -105,6 +106,10 @@ pub trait BattleControllerState {
 
     /// All ship kills that have occurred
     fn kills(&self) -> &[KillRecord];
+
+    /// All damage events keyed by aggressor entity_id. Each entry is the list
+    /// of hits that entity has landed (amount, victim, clock).
+    fn damage_dealt(&self) -> &HashMap<EntityId, Vec<DamageEvent>>;
 
     /// Dead ships and their last known positions
     fn dead_ships(&self) -> &HashMap<EntityId, DeadShip>;

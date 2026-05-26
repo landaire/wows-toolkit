@@ -133,32 +133,53 @@ fn resolve_slots<P: GameParamProvider>(
     let mut out = Vec::with_capacity(chosen_abilities.len());
     for (slot_index, ability_id) in chosen_abilities.iter().enumerate() {
         let Some(ability_param) = gp.game_param_by_id(*ability_id) else {
+            tracing::debug!(
+                ?ability_id,
+                ship = ship.index(),
+                slot_index,
+                "resolve_slots: gp.game_param_by_id returned None"
+            );
             continue;
         };
         let Some(ability) = ability_param.ability() else {
+            tracing::debug!(
+                ?ability_id,
+                ship = ship.index(),
+                slot_index,
+                ability_param_index = ability_param.index(),
+                ability_param_type = ?std::mem::discriminant(ability_param.data()),
+                "resolve_slots: param is not an Ability"
+            );
             continue;
         };
 
+        // Vehicle::abilities slots are keyed by the ability's full name
+        // (e.g. "PCY009_CrashCrewPremium"), not its short index ("PCY009").
+        let ability_full_name = ability_param.name();
         let variant_name = vehicle_slots
             .get(slot_index)
             .and_then(|opts| {
-                opts.iter().find_map(|(name, variant)| {
-                    (name == ability_param.index()).then(|| variant.clone())
-                })
+                opts.iter().find_map(|(name, variant)| (name == ability_full_name).then(|| variant.clone()))
             })
             .unwrap_or_else(|| "Default".to_owned());
 
         let Some(category) = ability.get_category(&variant_name) else {
+            tracing::debug!(
+                ?ability_id,
+                ship = ship.index(),
+                slot_index,
+                ability_param_index = ability_param.index(),
+                variant_name,
+                available_variants = ?ability.categories().keys().collect::<Vec<_>>(),
+                "resolve_slots: ability has no matching variant category"
+            );
             continue;
         };
 
         let consumable_type_raw = category.consumable_type_raw();
         let base_charges = ChargeCount::from_game_params(category.num_consumables());
-        let bonus_for_slot = if base_charges.is_unlimited() {
-            0
-        } else {
-            modifiers.consumable_charge_bonus(consumable_type_raw)
-        };
+        let bonus_for_slot =
+            if base_charges.is_unlimited() { 0 } else { modifiers.consumable_charge_bonus(consumable_type_raw) };
         let total_charges = base_charges.saturating_add(bonus_for_slot);
 
         let work_factor = modifiers.consumable_work_time_factor(consumable_type_raw);
@@ -166,6 +187,10 @@ fn resolve_slots<P: GameParamProvider>(
         let work_time = Duration::from_secs_f32((category.work_time() * work_factor).max(0.0));
         let reload_time = Duration::from_secs_f32((category.reload_time() * reload_factor).max(0.0));
 
+        // Icon files are stored as `consumable_<full_name>.png` and the
+        // minimap renderer keys its icon map by `<full_name>` (e.g.
+        // `PCY009_CrashCrewPremium`). `Param::index()` is the short prefix
+        // (`PCY009`) and `Param::name()` is the full key, so use `name()`.
         out.push(ConsumableSlot {
             slot_index: slot_index as u8,
             ability: Rc::clone(&ability_param),
@@ -177,7 +202,7 @@ fn resolve_slots<P: GameParamProvider>(
             total_charges,
             work_time,
             reload_time,
-            icon_key: ability_param.index().to_owned(),
+            icon_key: ability_param.name().to_owned(),
         });
     }
     out

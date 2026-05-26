@@ -528,6 +528,11 @@ pub struct ZoomPanConfig {
     /// instead of the full canvas width, preventing the map from panning into
     /// non-map areas (e.g. a stats panel). `None` = use full canvas width.
     pub map_width: Option<f32>,
+    /// Horizontal offset in logical pixels from the canvas origin to the
+    /// minimap's left edge. Non-zero when team-roster panels reserve a left
+    /// gutter; must match the `MapTransform.map_x_offset` used at draw time so
+    /// cursor-centered zoom lines up with where ships actually render.
+    pub map_x_offset: f32,
 }
 
 /// Handle scroll-to-zoom, drag-to-pan, double-click-to-reset, and pan clamping.
@@ -579,7 +584,7 @@ pub fn handle_viewport_zoom_pan(
                 if new_zoom != old_zoom {
                     // Cursor-centered zoom: keep the point under the cursor fixed
                     if let Some(cursor) = response.hover_pos() {
-                        let local_x = (cursor.x - layout.origin.x) / layout.window_scale;
+                        let local_x = (cursor.x - layout.origin.x) / layout.window_scale - config.map_x_offset;
                         let local_y = (cursor.y - layout.origin.y) / layout.window_scale - config.hud_height;
                         let minimap_x = (local_x + zoom_pan.pan.x) / old_zoom;
                         let minimap_y = (local_y + zoom_pan.pan.y) / old_zoom;

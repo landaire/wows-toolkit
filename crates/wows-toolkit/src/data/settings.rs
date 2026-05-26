@@ -101,7 +101,7 @@ pub struct SavedRenderOptions {
     pub show_timer: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_kill_feed: bool,
-    #[serde(default = "default_bool::<true>")]
+    #[serde(default)]
     pub show_player_names: bool,
     #[serde(default = "default_bool::<true>")]
     pub show_ship_names: bool,
@@ -169,7 +169,7 @@ impl Default for SavedRenderOptions {
             show_score: true,
             show_timer: true,
             show_kill_feed: true,
-            show_player_names: true,
+            show_player_names: false,
             show_ship_names: true,
             show_capture_points: true,
             show_buildings: true,
@@ -193,8 +193,11 @@ impl Default for SavedRenderOptions {
             show_chat: false,
             show_advantage: true,
             show_score_timer: true,
+            // Stats panel is the default side-panel; team rosters get swapped
+            // in automatically when a merged replay is loaded (handled by the
+            // renderer launcher), and the user can flip them manually too.
             show_stats_panel: true,
-            show_team_rosters: true,
+            show_team_rosters: false,
             prefer_cpu_encoder: false,
         }
     }

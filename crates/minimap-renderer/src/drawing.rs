@@ -25,8 +25,7 @@ use std::sync::Arc;
 use crate::STATS_PANEL_WIDTH;
 use crate::assets::GameFonts;
 
-/// Halo width in pixels for the detected-teammate outline drawn around ship icons.
-const SHIP_ICON_OUTLINE_THICKNESS: u32 = 2;
+use crate::SHIP_ICON_OUTLINE_THICKNESS;
 
 use crate::draw_command::ActivityFeedKind;
 use crate::draw_command::ChatEntry;
@@ -766,7 +765,7 @@ fn draw_kill_feed(
     fonts: &GameFonts,
     ship_icons: &HashMap<String, ShipIcon>,
     death_cause_icons: &HashMap<String, RgbaImage>,
-    map_width: u32,
+    right_edge: u32,
 ) {
     let default_font = &fonts.primary;
     let default_name_scale = fonts.scale(12.0);
@@ -775,7 +774,10 @@ fn draw_kill_feed(
     let icon_size = crate::assets::ICON_SIZE as i32;
     let cause_icon_size = icon_size;
     let gap = 2i32; // gap between elements
-    let width = map_width as i32;
+    // `right_edge` is the canvas x at which entries align flush right.
+    // Callers pass the minimap's right edge so the feed stays inside the map
+    // area when team rosters reserve a right-side gutter.
+    let width = right_edge as i32;
 
     let (_, text_h) = text_size(default_name_scale, default_font, "Ag");
     let text_h = text_h as i32;
@@ -1041,6 +1043,7 @@ fn draw_chat_overlay(
     fonts: &GameFonts,
     ship_icons: &HashMap<String, ShipIcon>,
     y_offset: u32,
+    x_offset: u32,
 ) {
     let font = &fonts.primary;
     if entries.is_empty() {
@@ -1119,8 +1122,9 @@ fn draw_chat_overlay(
     total_height -= entry_gap; // remove trailing gap
     total_height += margin; // bottom padding
 
-    // Position: middle-left of the minimap area
-    let box_x = 0i32;
+    // Position: middle-left of the minimap area, shifted right by the
+    // left-side roster gutter (if any) so chat stays inside the map.
+    let box_x = x_offset as i32;
     let map_mid_y = y_offset as i32 + (minimap_w as i32) / 2;
     let box_y = map_mid_y - total_height / 2;
 
@@ -1211,33 +1215,52 @@ fn draw_chat_overlay(
 }
 
 /// Draw the 10x10 grid overlay with labels.
-fn draw_grid(pm: &mut Pixmap, minimap_size: u32, y_off: u32, fonts: &GameFonts) {
+fn draw_grid_at(pm: &mut Pixmap, minimap_size: u32, x_off: u32, y_off: u32, fonts: &GameFonts) {
     let font = &fonts.primary;
     let cell = minimap_size as f32 / 10.0;
     let grid_color = [180, 180, 180];
     let alpha = 0.25f32;
     let label_scale = fonts.scale(11.0);
+    let x_off_f = x_off as f32;
 
     // Draw 9 interior lines in each direction
     for i in 1..10 {
         let pos = (i as f32 * cell).round();
         // Vertical line
-        draw_line(pm, pos, y_off as f32, pos, (y_off + minimap_size) as f32, grid_color, alpha, 1.0);
+        draw_line(
+            pm,
+            x_off_f + pos,
+            y_off as f32,
+            x_off_f + pos,
+            (y_off + minimap_size) as f32,
+            grid_color,
+            alpha,
+            1.0,
+        );
         // Horizontal line
-        draw_line(pm, 0.0, pos + y_off as f32, minimap_size as f32, pos + y_off as f32, grid_color, alpha, 1.0);
+        draw_line(
+            pm,
+            x_off_f,
+            pos + y_off as f32,
+            x_off_f + minimap_size as f32,
+            pos + y_off as f32,
+            grid_color,
+            alpha,
+            1.0,
+        );
     }
 
     // Labels: numbers 1-10 across the top, letters A-J down the left
     for i in 0..10 {
         let label = format!("{}", i + 1);
-        let x = (i as f32 * cell + cell / 2.0 - 3.0) as i32;
+        let x = (x_off_f + i as f32 * cell + cell / 2.0 - 3.0) as i32;
         let y = y_off as i32 + 2;
         draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
     }
     let labels_row = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
     for (i, &ch) in labels_row.iter().enumerate() {
         let label = ch.to_string();
-        let x = 3i32;
+        let x = x_off as i32 + 3i32;
         let y = y_off as i32 + (i as f32 * cell + cell / 2.0 - 5.0) as i32;
         draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
     }
@@ -1328,17 +1351,20 @@ fn tint_silhouette(img: &RgbaImage, color: [u8; 3]) -> RgbaImage {
     out
 }
 
-/// HP bar color lerp: green (>66%) → yellow (33-66%) → red (<33%).
+/// HP bar color lerp: soft green at full HP, lerped through amber to a muted
+/// red. The previous gradient ran between pure primaries (`[0,255,0]` →
+/// `[255,255,0]` → `[255,0,0]`) which read as eye-searing lime / sodium yellow
+/// against the roster background; these stops desaturate the endpoints while
+/// keeping the same semantic gradient.
 fn hp_bar_color_lerp(fraction: f32) -> [u8; 3] {
-    if fraction > 0.66 {
-        [0, 255, 0] // green
-    } else if fraction > 0.33 {
-        let t = (fraction - 0.33) / 0.33;
-        [(255.0 * (1.0 - t)) as u8, 255, 0]
-    } else {
-        let t = fraction / 0.33;
-        [255, (255.0 * t) as u8, 0]
-    }
+    const GREEN: [f32; 3] = [85.0, 175.0, 110.0];
+    const AMBER: [f32; 3] = [220.0, 195.0, 90.0];
+    const RED: [f32; 3] = [215.0, 95.0, 85.0];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| -> [u8; 3] {
+        let t = t.clamp(0.0, 1.0);
+        [(a[0] + (b[0] - a[0]) * t) as u8, (a[1] + (b[1] - a[1]) * t) as u8, (a[2] + (b[2] - a[2]) * t) as u8]
+    };
+    if fraction > 0.5 { lerp(AMBER, GREEN, (fraction - 0.5) / 0.5) } else { lerp(RED, AMBER, fraction / 0.5) }
 }
 
 /// Draw an RGBA image at a non-centered position (top-left corner).
@@ -1383,11 +1409,318 @@ fn damage_label_color_rgb(label: &str) -> [u8; 3] {
     }
 }
 
+// ── Team roster rendering ──────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn draw_team_roster(
+    pm: &mut Pixmap,
+    side: crate::draw_command::RosterSide,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    rows: &[crate::draw_command::RosterRow],
+    fonts: &GameFonts,
+    ship_icons: &HashMap<String, ShipIcon>,
+    consumable_icons: &HashMap<String, RgbaImage>,
+    death_cause_icons: &HashMap<String, RgbaImage>,
+) {
+    use crate::draw_command::ChargeCount as RosterCharge;
+    use crate::draw_command::RosterSide;
+
+    let panel_x = x as f32;
+    let panel_y = y as f32;
+    let panel_w = width as f32;
+    let panel_h = height as f32;
+
+    // Panel background + accent line.
+    draw_filled_rect(pm, panel_x, panel_y, panel_w, panel_h, [20, 24, 32], 0.78);
+    let accent: [u8; 3] = match side {
+        RosterSide::Friendly => [80, 200, 120],
+        RosterSide::Enemy => [220, 90, 90],
+    };
+    draw_line(pm, panel_x, panel_y, panel_x + panel_w, panel_y, accent, 1.0, 1.5);
+
+    let row_height: f32 = 64.0;
+    let row_padding: f32 = 4.0;
+    let inner_x = panel_x + row_padding;
+    let inner_w = panel_w - row_padding * 2.0;
+    let name_scale = fonts.scale(15.0);
+    let ship_scale = fonts.scale(13.0);
+    let hp_scale = fonts.scale(11.0);
+
+    // Friendly icons point right (toward the map), enemy icons point left —
+    // mirrors the egui layout's "facing the action" convention.
+    let icon_yaw: f32 = match side {
+        RosterSide::Friendly => 0.0,
+        RosterSide::Enemy => std::f32::consts::PI,
+    };
+
+    const MAX_CONSUMABLE_SLOTS: usize = 6;
+    let icon_size: f32 = 20.0;
+    let icon_gap: f32 = 2.0;
+    let consumables_strip_w = MAX_CONSUMABLE_SLOTS as f32 * icon_size + (MAX_CONSUMABLE_SLOTS as f32 - 1.0) * icon_gap;
+    let strip_gap: f32 = 6.0;
+    let hp_bar_w = (inner_w - consumables_strip_w - strip_gap).max(40.0);
+
+    for (idx, row) in rows.iter().enumerate() {
+        let row_top = panel_y + idx as f32 * row_height + row_padding;
+        if row_top + row_height > panel_y + panel_h {
+            break;
+        }
+        let row_rect_w = inner_w;
+        let row_rect_h = row_height - row_padding;
+
+        // Zebra stripe + dead overlay.
+        if idx % 2 == 1 {
+            draw_filled_rect(pm, inner_x, row_top, row_rect_w, row_rect_h, [255, 255, 255], 0.03);
+        }
+        if row.is_dead {
+            draw_filled_rect(pm, inner_x, row_top, row_rect_w, row_rect_h, [0, 0, 0], 0.32);
+        }
+
+        // ── Header line: clan/player name on the left, damage + frag count
+        // ── on the right ────────────────────────────────────────────────
+        let header_text = match &row.clan_tag {
+            Some(tag) => format!("[{tag}] {}", row.player_name),
+            None => row.player_name.clone(),
+        };
+        let header_color = if row.is_dead {
+            [180, 180, 180]
+        } else if row.is_spotted {
+            [255, 220, 80]
+        } else {
+            accent
+        };
+        let (name_font, name_text_scale) = fonts.font_and_scale(&header_text, 15.0);
+        draw_text(pm, header_color, inner_x as i32, row_top as i32, name_text_scale, name_font, &header_text);
+
+        let stats_color = if row.is_dead { [180, 180, 180] } else { [230, 230, 230] };
+        let damage_text = format_number(row.damage_dealt.round() as i64);
+        let (damage_w_u, _) = text_size(name_scale, &fonts.primary, &damage_text);
+        let damage_w = damage_w_u as f32;
+
+        let frag_icon = death_cause_icons.get("frags");
+        let frag_icon_size = name_scale.y;
+        let frag_gap: f32 = 4.0;
+        let inter_gap: f32 = 8.0;
+        let kills_text = (row.kills > 0).then(|| row.kills.to_string());
+        let kills_w = kills_text.as_ref().map(|t| text_size(name_scale, &fonts.primary, t).0 as f32).unwrap_or(0.0);
+        let kills_block_w = if kills_text.is_some() {
+            if frag_icon.is_some() { frag_icon_size + frag_gap + kills_w } else { kills_w }
+        } else {
+            0.0
+        };
+        let total_w = damage_w + if kills_block_w > 0.0 { inter_gap + kills_block_w } else { 0.0 };
+        let block_x = inner_x + inner_w - total_w;
+        draw_text(pm, stats_color, block_x as i32, row_top as i32, name_scale, &fonts.primary, &damage_text);
+
+        if let Some(kt) = kills_text {
+            let mut cx = block_x + damage_w + inter_gap;
+            if let Some(icon) = frag_icon {
+                let icon_y_top = row_top + (name_scale.y - frag_icon_size) * 0.5;
+                let resized = image::imageops::resize(
+                    icon,
+                    frag_icon_size.round() as u32,
+                    frag_icon_size.round() as u32,
+                    image::imageops::FilterType::Lanczos3,
+                );
+                let tinted = if row.is_dead {
+                    let mut img = resized.clone();
+                    for px in img.pixels_mut() {
+                        px.0[3] = (px.0[3] as f32 * 0.7) as u8;
+                    }
+                    img
+                } else {
+                    resized
+                };
+                let cx_center = cx + frag_icon_size * 0.5;
+                let cy_center = icon_y_top + frag_icon_size * 0.5;
+                draw_icon(pm, &tinted, cx_center, cy_center);
+                cx += frag_icon_size + frag_gap;
+            }
+            draw_text(pm, stats_color, cx as i32, row_top as i32, name_scale, &fonts.primary, &kt);
+        }
+
+        // ── Ship row: rotated class icon + ship name ───────────────────
+        let class_icon_size: f32 = 18.0;
+        let class_icon_padding: f32 = 4.0;
+        let ship_row_y = row_top + name_scale.y + 4.0;
+        let ship_text_x = if let Some(ref class_key) = row.class_icon_key {
+            if let Some(class_icon) = ship_icons.get(class_key) {
+                // Pre-resize then route through the icon helper so the rotation
+                // path matches the in-map ship glyphs.
+                let resized = image::imageops::resize(
+                    class_icon,
+                    class_icon_size.round() as u32,
+                    class_icon_size.round() as u32,
+                    image::imageops::FilterType::Lanczos3,
+                );
+                let tint = if row.is_dead { Some([180u8, 180, 180]) } else { Some(accent) };
+                let opacity = if row.is_dead { 0.55 } else { 1.0 };
+                let cx = inner_x + class_icon_size * 0.5;
+                let cy = ship_row_y + ship_scale.y * 0.5;
+                draw_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity);
+                inner_x + class_icon_size + class_icon_padding
+            } else {
+                inner_x
+            }
+        } else {
+            inner_x
+        };
+        let (ship_name_font, ship_text_scale) = fonts.font_and_scale(&row.ship_name, 13.0);
+        draw_text(
+            pm,
+            [210, 210, 210],
+            ship_text_x as i32,
+            ship_row_y as i32,
+            ship_text_scale,
+            ship_name_font,
+            &row.ship_name,
+        );
+
+        // ── HP bar + consumables row ───────────────────────────────────
+        let hp_bar_y = row_top + name_scale.y + ship_scale.y + 6.0;
+        let hp_bar_h: f32 = 18.0;
+        draw_filled_rect(pm, inner_x, hp_bar_y, hp_bar_w, hp_bar_h, [40, 40, 40], 0.86);
+        if row.hp_max > 0.0 && !row.is_dead {
+            let fill_ratio = (row.hp_current / row.hp_max).clamp(0.0, 1.0);
+            let fill_w = hp_bar_w * fill_ratio;
+            let fill_color = hp_bar_color_lerp(fill_ratio);
+            draw_filled_rect(pm, inner_x, hp_bar_y, fill_w, hp_bar_h, fill_color, 1.0);
+            if row.hp_healable > 0.0 {
+                let heal_ratio = (row.hp_healable / row.hp_max).clamp(0.0, 1.0);
+                let heal_w = (hp_bar_w * heal_ratio).min(hp_bar_w - fill_w);
+                if heal_w > 0.0 {
+                    draw_filled_rect(pm, inner_x + fill_w, hp_bar_y, heal_w, hp_bar_h, [110, 150, 110], 0.63);
+                }
+            }
+        }
+
+        let hp_text =
+            format!("{} / {}", format_number(row.hp_current.max(0.0) as i64), format_number(row.hp_max as i64),);
+        let hp_text_color = if row.is_dead { [220, 220, 220] } else { [255, 255, 255] };
+        let (hp_text_w_u, hp_text_h_u) = text_size(hp_scale, &fonts.primary, &hp_text);
+        let hp_text_w = hp_text_w_u as f32;
+        let hp_text_h = hp_text_h_u as f32;
+        let hp_text_y = hp_bar_y + (hp_bar_h - hp_text_h) * 0.5;
+        let hp_text_x = inner_x + hp_bar_w - hp_text_w - 4.0;
+        // Strong drop shadow rather than a backing pill. A pill at this size
+        // covered most of the HP fill (the bar is only ~18px tall and the
+        // text is ~12 of those), so the colored portion got drowned out.
+        // Doubling up the shadow keeps the white legible against any fill.
+        draw_text(
+            pm,
+            [0, 0, 0],
+            (hp_text_x + 1.0) as i32,
+            (hp_text_y + 1.0) as i32,
+            hp_scale,
+            &fonts.primary,
+            &hp_text,
+        );
+        draw_text(pm, [0, 0, 0], (hp_text_x + 1.0) as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+        draw_text(pm, hp_text_color, hp_text_x as i32, hp_text_y as i32, hp_scale, &fonts.primary, &hp_text);
+
+        // Consumable strip: 6 fixed slots aligned to the right of the row.
+        let strip_y = hp_bar_y + (hp_bar_h - icon_size) * 0.5;
+        let strip_x = inner_x + inner_w - consumables_strip_w;
+        if row.consumables.is_empty() {
+            // Faint asterisk marker so missing inventory data is visible
+            // without shouting.
+            draw_text(
+                pm,
+                [180, 180, 180],
+                strip_x as i32,
+                (strip_y + 4.0) as i32,
+                fonts.scale(11.0),
+                &fonts.primary,
+                "*",
+            );
+        } else {
+            for (i, cons) in row.consumables.iter().enumerate() {
+                let icon_x = strip_x + i as f32 * (icon_size + icon_gap);
+                let charges_remaining = cons.total_charges.remaining(cons.charges_used);
+                let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
+                let is_active = cons.active_remaining_secs.is_some() && !row.is_dead;
+
+                if let Some(icon) = consumable_icons.get(&cons.icon_key) {
+                    let resized = image::imageops::resize(
+                        icon,
+                        icon_size as u32,
+                        icon_size as u32,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                    let mut img = resized;
+                    let dim = if row.is_dead || is_exhausted { 0.4 } else { 0.86 };
+                    for px in img.pixels_mut() {
+                        px.0[3] = (px.0[3] as f32 * dim) as u8;
+                    }
+                    draw_icon(pm, &img, icon_x + icon_size * 0.5, strip_y + icon_size * 0.5);
+                } else {
+                    draw_filled_rect(pm, icon_x, strip_y, icon_size, icon_size, [60, 60, 60], 0.7);
+                }
+
+                // Charge/timer overlay. Unlimited consumables stay blank; the
+                // absence of a number signals "no cap."
+                let label = match (cons.active_remaining_secs, &charges_remaining, &cons.total_charges) {
+                    (Some(sec), _, _) if !row.is_dead => format!("{:.0}s", sec.max(0.0)),
+                    (_, RosterCharge::Unlimited, _) | (_, _, RosterCharge::Unlimited) => String::new(),
+                    (_, RosterCharge::Finite(n), RosterCharge::Finite(t)) => format!("{n}/{t}"),
+                };
+                if label.is_empty() {
+                    continue;
+                }
+                let label_color = if is_exhausted {
+                    [220, 90, 90]
+                } else if is_active {
+                    [255, 220, 80]
+                } else {
+                    [220, 220, 220]
+                };
+                let charges_scale = fonts.scale(9.0);
+                let (lw_u, lh_u) = text_size(charges_scale, &fonts.primary, &label);
+                let lx = icon_x + icon_size - lw_u as f32 - 1.0;
+                let ly = strip_y + icon_size - lh_u as f32;
+                draw_text(pm, [0, 0, 0], (lx + 1.0) as i32, (ly + 1.0) as i32, charges_scale, &fonts.primary, &label);
+                draw_text(pm, label_color, lx as i32, ly as i32, charges_scale, &fonts.primary, &label);
+            }
+        }
+    }
+}
+
 // ── ImageTarget (RenderTarget implementation) ──────────────────────────────
 
 use crate::CANVAS_HEIGHT;
 use crate::HUD_HEIGHT;
 use crate::MINIMAP_SIZE;
+use crate::TEAM_ROSTER_WIDTH;
+
+use crate::config::RenderOptions;
+
+/// Which side panel the CLI canvas should reserve space for. Mirrors the
+/// runtime decision the desktop renderer makes from
+/// `RenderOptions.{show_stats_panel,show_team_rosters}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidePanelLayout {
+    /// Just the minimap.
+    None,
+    /// Self-perspective stats panel on the right.
+    StatsPanel,
+    /// Team rosters in gutters on both sides of the minimap.
+    TeamRosters,
+}
+
+impl SidePanelLayout {
+    pub fn from_options(opts: &RenderOptions) -> Self {
+        if opts.show_team_rosters {
+            Self::TeamRosters
+        } else if opts.show_stats_panel {
+            Self::StatsPanel
+        } else {
+            Self::None
+        }
+    }
+}
 
 /// Pre-rasterized ship icon (RGBA, white/alpha mask to be tinted at draw time).
 pub type ShipIcon = RgbaImage;
@@ -1400,9 +1733,17 @@ pub struct ImageTarget {
     canvas: Pixmap,
     /// Pre-built background: map image + grid overlay. Cloned at start of each frame.
     base_canvas: Pixmap,
-    /// Width of the minimap area (excludes the stats panel).
-    /// HUD elements (score bar, timer, kill feed) are confined to this width.
+    /// Width of the minimap area (excludes side panels). Always `MINIMAP_SIZE`.
     map_width: u32,
+    /// Horizontal offset (in canvas pixels) from the canvas's left edge to the
+    /// minimap's left edge. Non-zero when team rosters reserve a left gutter.
+    /// Map-coordinate draw commands add this offset; HUD elements that span
+    /// the full canvas keep using `canvas.width()` directly.
+    map_x_offset: u32,
+    /// Width of the HUD strip. With team rosters, this spans the rosters plus
+    /// the minimap so the score bar can stretch across both gutters; with the
+    /// stats panel (or no side panel) it's just the minimap width.
+    hud_width: u32,
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
     /// Pre-computed gold outline halos for ship icons. Same keys as `ship_icons`;
@@ -1455,19 +1796,51 @@ impl ImageTarget {
         powerup_icons: HashMap<String, RgbaImage>,
         stats_panel: bool,
     ) -> Self {
+        let layout = if stats_panel { SidePanelLayout::StatsPanel } else { SidePanelLayout::None };
+        Self::with_side_panel(
+            map_image,
+            fonts,
+            ship_icons,
+            plane_icons,
+            building_icons,
+            consumable_icons,
+            death_cause_icons,
+            powerup_icons,
+            layout,
+        )
+    }
+
+    pub fn with_side_panel(
+        map_image: Option<RgbImage>,
+        fonts: GameFonts,
+        ship_icons: HashMap<String, ShipIcon>,
+        plane_icons: HashMap<String, RgbaImage>,
+        building_icons: HashMap<String, RgbaImage>,
+        consumable_icons: HashMap<String, RgbaImage>,
+        death_cause_icons: HashMap<String, RgbaImage>,
+        powerup_icons: HashMap<String, RgbaImage>,
+        layout: SidePanelLayout,
+    ) -> Self {
         let map = map_image.unwrap_or_else(|| RgbImage::from_pixel(MINIMAP_SIZE, MINIMAP_SIZE, Rgb([30, 40, 60])));
 
-        let canvas_width = if stats_panel { MINIMAP_SIZE + STATS_PANEL_WIDTH } else { MINIMAP_SIZE };
+        let (canvas_width, map_x_offset, hud_width) = match layout {
+            SidePanelLayout::None => (MINIMAP_SIZE, 0, MINIMAP_SIZE),
+            SidePanelLayout::StatsPanel => (MINIMAP_SIZE + STATS_PANEL_WIDTH, 0, MINIMAP_SIZE),
+            SidePanelLayout::TeamRosters => {
+                let cw = MINIMAP_SIZE + TEAM_ROSTER_WIDTH * 2;
+                (cw, TEAM_ROSTER_WIDTH, cw)
+            }
+        };
 
         // Pre-build the base canvas: dark background + map + grid
         let mut base_rgb = RgbImage::from_pixel(canvas_width, CANVAS_HEIGHT, Rgb([20, 25, 35]));
         for y in 0..map.height().min(MINIMAP_SIZE) {
             for x in 0..map.width().min(MINIMAP_SIZE) {
-                base_rgb.put_pixel(x, y + HUD_HEIGHT, *map.get_pixel(x, y));
+                base_rgb.put_pixel(x + map_x_offset, y + HUD_HEIGHT, *map.get_pixel(x, y));
             }
         }
         let mut base = rgb_to_pixmap(&base_rgb);
-        draw_grid(&mut base, MINIMAP_SIZE, HUD_HEIGHT, &fonts);
+        draw_grid_at(&mut base, MINIMAP_SIZE, map_x_offset, HUD_HEIGHT, &fonts);
 
         let ship_icon_outlines = ship_icons
             .iter()
@@ -1478,6 +1851,8 @@ impl ImageTarget {
             canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
             base_canvas: base,
             map_width: MINIMAP_SIZE,
+            map_x_offset,
+            hud_width,
             fonts,
             ship_icons,
             ship_icon_outlines,
@@ -1515,18 +1890,28 @@ impl RenderTarget for ImageTarget {
 
     fn draw(&mut self, cmd: &DrawCommand) {
         let y_off = HUD_HEIGHT as f32;
+        let x_off = self.map_x_offset as f32;
         match cmd {
             DrawCommand::ShotTracer { from, to, color } => {
-                draw_line(&mut self.canvas, from.x, from.y + y_off, to.x, to.y + y_off, *color, 1.0, 1.5);
+                draw_line(
+                    &mut self.canvas,
+                    from.x + x_off,
+                    from.y + y_off,
+                    to.x + x_off,
+                    to.y + y_off,
+                    *color,
+                    1.0,
+                    1.5,
+                );
             }
             DrawCommand::Torpedo { pos, color } => {
-                draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, 2.5, *color, 1.0);
+                draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 2.5, *color, 1.0);
             }
             DrawCommand::Smoke { pos, radius, color, alpha } => {
-                draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, *radius as f32, *color, *alpha);
+                draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, *radius as f32, *color, *alpha);
             }
             DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
-                let cx = pos.x;
+                let cx = pos.x + x_off;
                 let cy = pos.y + y_off;
                 let r = *radius as f32;
                 // Filled circle
@@ -1543,7 +1928,7 @@ impl RenderTarget for ImageTarget {
             DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, flag_icon } => {
                 draw_capture_point(
                     &mut self.canvas,
-                    pos.x,
+                    pos.x + x_off,
                     pos.y + y_off,
                     *radius as f32,
                     *color,
@@ -1556,7 +1941,7 @@ impl RenderTarget for ImageTarget {
                 );
             }
             DrawCommand::TurretDirection { pos, yaw, color, length, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 let dx = *length as f32 * yaw.cos();
                 let dy = -*length as f32 * yaw.sin();
@@ -1567,14 +1952,21 @@ impl RenderTarget for ImageTarget {
                 let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
                 let icon = icon_key.as_ref().and_then(|k| self.building_icons.get(k));
                 if let Some(icon) = icon {
-                    draw_icon(&mut self.canvas, icon, pos.x, pos.y + y_off);
+                    draw_icon(&mut self.canvas, icon, pos.x + x_off, pos.y + y_off);
                 } else {
-                    draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, 2.5, *color, 1.0);
+                    draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 2.5, *color, 1.0);
                 }
             }
             DrawCommand::WeatherZone { pos, radius } => {
                 // Semi-transparent light gray circle for weather zones (squalls/storms)
-                draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, *radius as f32, [255, 255, 255], 0.25);
+                draw_filled_circle(
+                    &mut self.canvas,
+                    pos.x + x_off,
+                    pos.y + y_off,
+                    *radius as f32,
+                    [255, 255, 255],
+                    0.25,
+                );
             }
             DrawCommand::Ship {
                 pos,
@@ -1590,7 +1982,7 @@ impl RenderTarget for ImageTarget {
                 name_color,
                 ..
             } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
 
                 let fallback_key = match (*visibility, *is_self) {
@@ -1634,7 +2026,7 @@ impl RenderTarget for ImageTarget {
             DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
                 draw_health_bar(
                     &mut self.canvas,
-                    pos.x,
+                    pos.x + x_off,
                     pos.y + y_off,
                     *fraction,
                     *fill_color,
@@ -1643,7 +2035,7 @@ impl RenderTarget for ImageTarget {
                 );
             }
             DrawCommand::DeadShip { pos, yaw, species, color, is_self, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
 
                 let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
@@ -1664,7 +2056,7 @@ impl RenderTarget for ImageTarget {
                 draw_ship_icon(&mut self.canvas, icon, x, y, *yaw, color.map(|c| c), 1.0);
             }
             DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 let Some(icon) = self.plane_icons.get(icon_key) else {
                     tracing::warn!(icon_key, "Missing plane icon, skipping");
@@ -1682,7 +2074,7 @@ impl RenderTarget for ImageTarget {
                 );
             }
             DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 // Semi-transparent filled circle
                 draw_filled_circle(&mut self.canvas, x, y, *radius_px as f32, *color, *alpha);
@@ -1690,13 +2082,13 @@ impl RenderTarget for ImageTarget {
                 draw_circle_outline(&mut self.canvas, x, y, *radius_px as f32, *color, 0.5, 2.0);
             }
             DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 // Filled circle only, no outline
                 draw_filled_circle(&mut self.canvas, x, y, *radius_px as f32, *color, *alpha);
             }
             DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
-                let x = pos.x.round() as i32;
+                let x = (pos.x + x_off).round() as i32;
                 let y = (pos.y + y_off).round() as i32;
                 let base_y = if *has_hp_bar { y + 28 } else { y + 26 };
                 let icon_size = 28i32;
@@ -1737,7 +2129,7 @@ impl RenderTarget for ImageTarget {
                     &advantage_label,
                     advantage_team,
                     &self.fonts,
-                    self.map_width,
+                    self.hud_width,
                 );
             }
             DrawCommand::TeamAdvantage { .. } => {
@@ -1745,7 +2137,7 @@ impl RenderTarget for ImageTarget {
                 // this command is retained for consumers that want the breakdown data.
             }
             DrawCommand::Timer { time_remaining, elapsed } => {
-                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.map_width);
+                draw_timer(&mut self.canvas, *time_remaining, *elapsed, &self.fonts, self.hud_width);
             }
             DrawCommand::PreBattleCountdown { seconds } => {
                 draw_pre_battle_countdown(
@@ -1753,7 +2145,7 @@ impl RenderTarget for ImageTarget {
                     *seconds,
                     &self.fonts,
                     &*self.text_resolver,
-                    self.map_width,
+                    self.hud_width,
                 );
             }
             DrawCommand::TeamBuffs { friendly_buffs, enemy_buffs } => {
@@ -1762,8 +2154,9 @@ impl RenderTarget for ImageTarget {
                 let buff_y = HUD_HEIGHT as i32;
                 let count_scale = self.fonts.scale(10.0);
 
-                // Friendly buffs: left side, starting from x=4
-                let mut x = 4i32;
+                // Friendly buffs: left side of the minimap (shifted right by
+                // the roster gutter when team rosters are on).
+                let mut x = self.map_x_offset as i32 + 4i32;
                 for (marker, count) in friendly_buffs {
                     if let Some(icon) = self.powerup_icons.get(marker.as_str()) {
                         let resized = image::imageops::resize(
@@ -1797,8 +2190,9 @@ impl RenderTarget for ImageTarget {
                     }
                 }
 
-                // Enemy buffs: right side, starting from right edge of map area
-                let width = self.map_width as i32;
+                // Enemy buffs: right side, starting from the minimap's right
+                // edge (map_x_offset + map_width) rather than the canvas edge.
+                let width = (self.map_x_offset + self.map_width) as i32;
                 let mut x = width - 4;
                 for (marker, count) in enemy_buffs {
                     if let Some(icon) = self.powerup_icons.get(marker.as_str()) {
@@ -1837,11 +2231,11 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::PositionTrail { points, .. } => {
                 for (pos, color) in points {
-                    draw_filled_circle(&mut self.canvas, pos.x, pos.y + y_off, 1.0, *color, 1.0);
+                    draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 1.0, *color, 1.0);
                 }
             }
             DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
-                let x = pos.x;
+                let x = pos.x + x_off;
                 let y = pos.y + y_off;
                 let r = *radius_px;
                 if *dashed {
@@ -1917,11 +2311,18 @@ impl RenderTarget for ImageTarget {
                     &self.fonts,
                     &self.ship_icons,
                     &self.death_cause_icons,
-                    self.map_width,
+                    self.map_x_offset + self.map_width,
                 );
             }
             DrawCommand::ChatOverlay { entries } => {
-                draw_chat_overlay(&mut self.canvas, entries, &self.fonts, &self.ship_icons, HUD_HEIGHT);
+                draw_chat_overlay(
+                    &mut self.canvas,
+                    entries,
+                    &self.fonts,
+                    &self.ship_icons,
+                    HUD_HEIGHT,
+                    self.map_x_offset,
+                );
             }
             DrawCommand::BattleResultOverlay { result, finish_type, color, subtitle_above } => {
                 let text = self.text_resolver.resolve(&TranslatableText::BattleResult(*result));
@@ -1935,7 +2336,7 @@ impl RenderTarget for ImageTarget {
                     *color,
                     *subtitle_above,
                     &self.fonts,
-                    self.map_width,
+                    self.hud_width,
                 );
             }
             DrawCommand::StatsPanel { x, width } => {
@@ -2462,19 +2863,19 @@ impl RenderTarget for ImageTarget {
                     }
                 }
             }
-            DrawCommand::TeamRoster { x, y, width, height, .. } => {
-                // CLI image rendering for team rosters is a stub: just draw the
-                // panel background so video export shows the layout placeholder.
-                // Full row contents (HP bars, consumables) land in a follow-up
-                // because they need text + icon support not present here yet.
-                draw_filled_rect(
+            DrawCommand::TeamRoster { side, x, y, width, height, rows } => {
+                draw_team_roster(
                     &mut self.canvas,
-                    *x as f32,
-                    *y as f32,
-                    *width as f32,
-                    *height as f32,
-                    [24, 28, 36],
-                    0.5,
+                    *side,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    rows,
+                    &self.fonts,
+                    &self.ship_icons,
+                    &self.consumable_icons,
+                    &self.death_cause_icons,
                 );
             }
         }

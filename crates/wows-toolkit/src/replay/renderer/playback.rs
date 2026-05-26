@@ -74,6 +74,9 @@ pub(super) fn playback_thread(
         let consumable_icons = cache.get_or_load_consumable_icons(&vfs);
         let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs);
         let powerup_icons = cache.get_or_load_powerup_icons(&vfs);
+        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&vfs);
+        let modernization_icons = cache.get_or_load_modernization_icons(&vfs);
+        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&vfs);
         let game_fonts = cache.get_or_load_game_fonts(&vfs);
         let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs);
 
@@ -86,6 +89,9 @@ pub(super) fn playback_thread(
             consumable_icons,
             death_cause_icons,
             powerup_icons,
+            crew_skill_icons,
+            modernization_icons,
+            signal_flag_icons,
         });
 
         shared_state.lock().map_space_size = map_info.as_ref().map(|m| m.space_size as f32);
@@ -301,6 +307,46 @@ pub(super) fn playback_thread(
             frame_snapshots.push(FrameSnapshot { clock: prev_clock });
         }
     }
+    // Cache per-vehicle facts (max HP, ship config, captain) by running a
+    // BattleController over each replay independently and unioning the
+    // results. The merged controller alone only sees what passed its merge
+    // filter, so ships only one alt perspective ever spotted would be missing.
+    let (vehicle_facts, damage_events) = {
+        let mut all = vec![&replay_file];
+        all.extend(alt_replay_files.iter());
+        let facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
+            &game_constants,
+            version,
+            game_metadata.entity_specs(),
+            &all,
+        );
+        let damage = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+            &*game_metadata,
+            &game_constants,
+            version,
+            game_metadata.entity_specs(),
+            &all,
+        );
+        (facts, damage)
+    };
+
+    // One-shot build snapshot from the lookahead pass. The merged session
+    // here has stepped through every packet in every replay (primary plus
+    // alts), so its controller's `entities_by_id` contains every player
+    // ever spotted from any perspective in this input set. In single-replay
+    // mode that still catches every enemy the primary spotted; in
+    // merged-replay mode it catches both teams' loadouts. Builds are
+    // invariant during a battle, so this snapshot stays valid for the
+    // session's entire lifetime — later live refreshes only fill in the
+    // (rare) gaps the lookahead missed.
+    let initial_builds = snapshot_player_builds(session.controller(), &game_metadata, version, |_| true);
+    if !initial_builds.is_empty() {
+        let mut s = shared_state.lock();
+        for (eid, display) in initial_builds {
+            s.player_builds.insert(eid, display);
+        }
+    }
+
     session.finish();
 
     let actual_total_frames = frame_snapshots.len();
@@ -393,6 +439,8 @@ pub(super) fn playback_thread(
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
+    live_renderer.set_vehicle_facts(vehicle_facts.clone());
+    live_renderer.set_damage_events(damage_events.clone());
     if let Some(ref sil) = self_silhouette {
         live_renderer.set_self_silhouette(sil.clone());
     }
@@ -413,6 +461,15 @@ pub(super) fn playback_thread(
         Ok(s) => s,
         Err(_) => return,
     };
+
+    // Capture the set of teams for which we have a recording-player replay.
+    // The build popover gates enemy-team visibility on this: an enemy build
+    // is only revealed when we have packet-level data from someone on that
+    // team. Invariant for the session's lifetime (rebuilds reuse the same
+    // replay set).
+    let teams_with_replays: std::collections::HashSet<i64> =
+        live_session.self_teams().iter().filter_map(|t| t.map(|tid| tid.raw())).collect();
+    shared_state.lock().teams_with_replays = teams_with_replays;
 
     // Pull out the cancellation flag once so step callers below don't have to
     // re-lock shared_state every time.
@@ -435,8 +492,9 @@ pub(super) fn playback_thread(
         live_clock = outcome.final_clock;
         populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
         finalize_bridge_staging(&armor_bridges, staging, true);
-        wows_replay_insights::build::seed_consumable_inventories(
+        wows_replay_insights::build::seed_consumable_inventories_from_facts(
             live_session.controller_mut(),
+            &vehicle_facts,
             &*game_metadata,
             version,
         );
@@ -672,6 +730,32 @@ pub(super) fn playback_thread(
         }
     };
 
+    // Refresh the per-player build snapshot for the roster hover popover.
+    // Builds are invariant during a battle, so each call only ADDS entries
+    // the cache hasn't seen before. That way builds captured during the
+    // initial lookahead pass (where the merged controller sees every player
+    // any perspective ever spotted, including enemies in non-merge mode)
+    // stay available even after the live controller has dropped an entity
+    // (death, smoke screen removal).
+    //
+    // The resolver's `from_player` constructor only works on a finalized
+    // BattleReport (it reads `Player.vehicle_entity`, which is populated at
+    // battle end), so we look up the live VehicleEntity through
+    // `entities_by_id` and call `ResolvedBuild::from_ids` directly.
+    let refresh_player_builds =
+        |state: &Arc<Mutex<SharedRendererState>>, controller: &BattleController<'_, '_, GameMetadataProvider>| {
+            let new_entries = snapshot_player_builds(controller, &game_metadata, version, |eid| {
+                !state.lock().player_builds.contains_key(&eid)
+            });
+            if new_entries.is_empty() {
+                return;
+            }
+            let mut s = state.lock();
+            for (eid, display) in new_entries {
+                s.player_builds.insert(eid, display);
+            }
+        };
+
     // Set a new playback frame on shared state and broadcast to collab session if active.
     let set_frame = |state: &Arc<Mutex<SharedRendererState>>,
                      commands: Vec<DrawCommand>,
@@ -712,6 +796,8 @@ pub(super) fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
+            live_renderer.set_vehicle_facts(vehicle_facts.clone());
+            live_renderer.set_damage_events(damage_events.clone());
             if let Some(ref sil) = self_silhouette {
                 live_renderer.set_self_silhouette(sil.clone());
             }
@@ -742,17 +828,40 @@ pub(super) fn playback_thread(
                 &cancel_step,
             );
             live_clock = outcome.final_clock;
+            // Seed inventories whether or not the step was cancelled. The
+            // facts cache is pre-computed and doesn't depend on which packets
+            // the controller has processed; skipping the seed on cancel left
+            // the freshly-built controller with empty inventories, which
+            // surfaced as transient "no inventory" rows on rapid seek scrubs
+            // when the cancelled-rebuild controller stayed in play.
+            wows_replay_insights::build::seed_consumable_inventories_from_facts(
+                live_session.controller_mut(),
+                &vehicle_facts,
+                &*game_metadata,
+                version,
+            );
             if !outcome.cancelled {
                 populate_bridge_players(live_session.controller(), &game_metadata, &armor_bridges);
                 finalize_bridge_staging(&armor_bridges, staging, true);
-                wows_replay_insights::build::seed_consumable_inventories(
-                    live_session.controller_mut(),
-                    &*game_metadata,
-                    version,
-                );
             }
             !outcome.cancelled
         }};
+    }
+
+    // Overwrite the placeholder first frame from the initial parse pass with a
+    // freshly drawn one from live_renderer. The initial pass renders before
+    // vehicle_facts exists, so its rosters carry no HP or consumables; redraw
+    // here with the cache installed and inventories seeded.
+    if !frame_snapshots.is_empty() {
+        live_renderer.options = shared_state.lock().options.clone();
+        let first_clock = frame_snapshots[0].clock;
+        let commands = live_renderer.draw_frame(live_session.controller());
+        let inventory_count = live_session.controller().consumable_inventories().len();
+        let player_count = live_session.controller().player_entities().len();
+        tracing::info!(clock = first_clock.0, inventory_count, player_count, "initial first-frame redraw");
+        refresh_player_builds(&shared_state, live_session.controller());
+        set_frame(&shared_state, commands, first_clock, 0, actual_total_frames, actual_game_duration);
+        request_repaint(&shared_state);
     }
 
     let mut last_bridge_count: usize = shared_state.lock().armor_bridges.len();
@@ -778,6 +887,7 @@ pub(super) fn playback_thread(
                 if completed {
                     live_renderer.options = shared_state.lock().options.clone();
                     let commands = live_renderer.draw_frame(live_session.controller());
+                    refresh_player_builds(&shared_state, live_session.controller());
                     set_frame(
                         &shared_state,
                         commands,
@@ -854,6 +964,7 @@ pub(super) fn playback_thread(
                     if completed {
                         live_renderer.options = shared_state.lock().options.clone();
                         let commands = live_renderer.draw_frame(live_session.controller());
+                        refresh_player_builds(&shared_state, live_session.controller());
                         set_frame(
                             &shared_state,
                             commands,
@@ -915,6 +1026,7 @@ pub(super) fn playback_thread(
 
                     live_renderer.options = shared_state.lock().options.clone();
                     let commands = live_renderer.draw_frame(live_session.controller());
+                    refresh_player_builds(&shared_state, live_session.controller());
                     set_frame(
                         &shared_state,
                         commands,
@@ -937,6 +1049,7 @@ pub(super) fn playback_thread(
                 let commands = live_renderer.draw_frame(live_session.controller());
                 let clock =
                     frame_snapshots.get(current_frame).map(|s| s.clock).unwrap_or(GameClock(actual_game_duration));
+                refresh_player_builds(&shared_state, live_session.controller());
                 set_frame(&shared_state, commands, clock, current_frame, actual_total_frames, actual_game_duration);
                 request_repaint(&shared_state);
             }
@@ -949,4 +1062,160 @@ pub(super) fn playback_thread(
 
 struct FrameSnapshot {
     clock: GameClock,
+}
+
+/// Translate a `ResolvedBuild` into the display struct the hover popover
+/// consumes. Looks up localized names/descriptions for the captain, every
+/// learned skill, each modernization, and each signal flag. Skill icon keys
+/// are derived from `internal_name` via snake_case conversion so they match
+/// the filenames in `gui/crew_commander/skills/`.
+fn build_display_from_resolved(
+    build: &wows_replay_insights::build::ResolvedBuild,
+    metadata: &GameMetadataProvider,
+) -> super::PlayerBuildDisplay {
+    use convert_case::Case;
+    use convert_case::Casing;
+    use wowsunpack::data::ResourceLoader;
+
+    let captain_name = build.captain.as_deref().and_then(|c| metadata.localized_name_from_param(c));
+
+    // Show the captain's learned skills grouped by tier (= point cost).
+    // GameParams doesn't expose the in-game per-species skill grid (the
+    // 5-wide layout the WoWs client paints is a hidden UI manifest; the
+    // `tier` map carries values for every species on every skill), so
+    // listing the full catalog would dump all ~80 skills instead of the
+    // 16-20 a player actually sees in port. The learned set is exact.
+    let mut all_skills: Vec<super::SkillDisplay> = build
+        .captain
+        .as_deref()
+        .and_then(|c| c.data().crew_ref())
+        .map(|crew| {
+            build
+                .skills
+                .iter()
+                .filter_map(|skill_type| crew.skill_by_type(*skill_type as u32))
+                .map(|skill| {
+                    let internal = skill.internal_name();
+                    super::SkillDisplay {
+                        icon_key: internal.to_case(Case::Snake),
+                        name: skill.translated_name(metadata).unwrap_or_else(|| internal.to_string()),
+                        description: skill.translated_description(metadata).unwrap_or_default(),
+                        tier: skill_tier_for_species(skill, build.species),
+                        skill_type: skill.skill_type() as u32,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    all_skills.sort_by_key(|s| (s.tier, s.skill_type));
+    let mut skill_rows: Vec<super::SkillRow> = Vec::new();
+    for skill in all_skills {
+        match skill_rows.last_mut() {
+            Some(row) if row.tier == skill.tier => row.skills.push(skill),
+            _ => skill_rows.push(super::SkillRow { tier: skill.tier, skills: vec![skill] }),
+        }
+    }
+
+    let upgrades = build.upgrades.iter().map(|p| equipment_display_for_param(p, metadata)).collect();
+    // `config.exteriors()` returns every exterior the player has mounted:
+    // signal flags, permoflages, ensigns, camos, skins, boosters. The popover
+    // has a single Signals row aimed at combat flags, which GameParams tags
+    // as `typeinfo.species == "Flags"`. Drop the rest so cosmetics don't show
+    // up as broken icons.
+    let signals = build
+        .signals
+        .iter()
+        .filter(|p| matches!(p.species().and_then(|r| r.known()), Some(wowsunpack::game_params::types::Species::Flags)))
+        .map(|p| equipment_display_for_param(p, metadata))
+        .collect();
+    super::PlayerBuildDisplay { captain_name, skill_rows, upgrades, signals }
+}
+
+/// Look up a skill's tier for the captain's ship species. Returns 0 for
+/// species without an explicit tier (e.g. Auxiliary, Airship event ships)
+/// rather than panicking the way `CrewSkillTiers::get_for_species` does.
+fn skill_tier_for_species(
+    skill: &wowsunpack::game_params::types::CrewSkill,
+    species: wowsunpack::game_params::types::Species,
+) -> u8 {
+    use wowsunpack::game_params::types::Species;
+    let tiers = skill.tier();
+    let tier_usize = match species {
+        Species::AirCarrier => tiers.aircraft_carrier(),
+        Species::Battleship => tiers.battleship(),
+        Species::Cruiser => tiers.cruiser(),
+        Species::Destroyer => tiers.destroyer(),
+        Species::Submarine => tiers.submarine(),
+        Species::Auxiliary => tiers.auxiliary(),
+        _ => 0,
+    };
+    tier_usize as u8
+}
+
+/// Snapshot every player whose entity is currently tracked by `controller`,
+/// returning a list of (entity_id, display) pairs for which the caller's
+/// `accept` predicate returned true. Used both for the one-shot lookahead
+/// snapshot (where the merged controller has seen every spotted player)
+/// and for the per-frame additive refresh on the live controller.
+fn snapshot_player_builds<F: FnMut(EntityId) -> bool>(
+    controller: &BattleController<'_, '_, GameMetadataProvider>,
+    metadata: &GameMetadataProvider,
+    version: Version,
+    mut accept: F,
+) -> Vec<(EntityId, Arc<super::PlayerBuildDisplay>)> {
+    let mut out = Vec::new();
+    let entities = controller.entities_by_id();
+    for player in controller.player_entities().values() {
+        let entity_id = player.initial_state().entity_id();
+        if !accept(entity_id) {
+            continue;
+        }
+        let Some(vehicle_rc) = entities.get(&entity_id).and_then(|e| e.vehicle_ref()) else {
+            continue;
+        };
+        let vehicle = vehicle_rc.borrow();
+        let Some(species) = player.vehicle().species().and_then(|s| s.known()).copied() else {
+            continue;
+        };
+        let config = vehicle.props().ship_config();
+        let captain_id = vehicle.captain().map(|c| c.id());
+        let skills = vehicle.commander_skills_raw(species);
+        let Some(build) = wows_replay_insights::build::ResolvedBuild::from_ids(
+            config.ship_params_id(),
+            config.units(),
+            config.modernization(),
+            captain_id,
+            skills,
+            config.exteriors(),
+            config.abilities(),
+            species,
+            version,
+            metadata,
+        ) else {
+            continue;
+        };
+        out.push((entity_id, Arc::new(build_display_from_resolved(&build, metadata))));
+    }
+    out
+}
+
+fn equipment_display_for_param(
+    param: &wowsunpack::game_params::types::Param,
+    metadata: &GameMetadataProvider,
+) -> super::EquipmentDisplay {
+    use wowsunpack::data::ResourceLoader;
+    // Modernizations translate via IDS_TITLE_<NAME> / IDS_DESC_<NAME>.
+    let (mod_name, mod_desc) = wowsunpack::game_params::translations::translate_module(param.name(), metadata);
+    // Signal flags translate via IDS_<NAME> / IDS_<NAME>_DESCRIPTION
+    // (e.g. `IDS_PCEF019_JW1_SIGNALFLAG`). The "TITLE"/"DESC" prefixes
+    // only show up on modernization keys, so try the bare form here.
+    let upper = param.name().to_ascii_uppercase();
+    let direct_name = metadata.localized_name_from_id(&format!("IDS_{}", upper));
+    let direct_desc = metadata.localized_name_from_id(&format!("IDS_{}_DESCRIPTION", upper));
+    // Other exteriors (permoflages, ensigns) embed their own title key on
+    // the Exterior struct.
+    let exterior_name = param.exterior().and_then(|e| e.title()).and_then(|id| metadata.localized_name_from_id(id));
+    let name = mod_name.or(direct_name).or(exterior_name).unwrap_or_else(|| param.name().to_string());
+    let description = mod_desc.or(direct_desc).unwrap_or_default();
+    super::EquipmentDisplay { icon_key: param.name().to_string(), name, description }
 }

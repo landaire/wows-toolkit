@@ -662,7 +662,13 @@ impl WebApp {
             &mut self.viewport,
             &layout,
             logical_canvas,
-            &ZoomPanConfig { allow_left_drag_pan: true, hud_height, handle_tool_yaw: true, map_width: None },
+            &ZoomPanConfig {
+                allow_left_drag_pan: true,
+                hud_height,
+                handle_tool_yaw: true,
+                map_width: None,
+                map_x_offset: 0.0,
+            },
             Some(&mut self.annotation_state),
             false,
         );
@@ -673,12 +679,14 @@ impl WebApp {
             zoom: self.viewport.zoom,
             pan: self.viewport.pan,
             hud_height,
+            canvas_height: hud_height + MINIMAP_SIZE as f32,
             canvas_width: MINIMAP_SIZE as f32,
             hud_width: MINIMAP_SIZE as f32,
+            map_x_offset: 0.0,
         };
 
         // Clip rect for map elements (excludes HUD area above)
-        let map_clip = compute_map_clip_rect(&layout, hud_height, None);
+        let map_clip = compute_map_clip_rect(&layout, hud_height, None, 0.0);
         let map_painter = painter.with_clip_rect(map_clip);
 
         // Draw map background
@@ -710,8 +718,17 @@ impl WebApp {
 
             for cmd in &commands {
                 let is_hud = cmd.is_hud();
-                let cmd_shapes =
-                    draw_command_to_shapes(cmd, &transform, &textures, ctx, &label_opts, None, &text_resolver);
+                let cmd_shapes = draw_command_to_shapes(
+                    cmd,
+                    &transform,
+                    &textures,
+                    ctx,
+                    &label_opts,
+                    None,
+                    &text_resolver,
+                    None,
+                    None,
+                );
                 let target_painter = if is_hud { &painter } else { &map_painter };
                 for shape in cmd_shapes {
                     target_painter.add(shape);

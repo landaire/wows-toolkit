@@ -314,6 +314,91 @@ pub fn load_consumable_icons(vfs: &VfsPath) -> HashMap<String, RgbaImage> {
     icons
 }
 
+/// Load captain-skill icons from `gui/crew_commander/skills/`.
+///
+/// Filenames are snake_case matching `CrewSkill::internal_name()` after a
+/// `Case::Snake` conversion. The map is keyed by that snake_case slug
+/// (e.g. `"consumables_duration"`), so callers feed the converted internal
+/// name when looking up the icon for a learned skill.
+pub fn load_crew_skill_icons(vfs: &VfsPath, size: u32) -> HashMap<String, RgbaImage> {
+    let mut icons = HashMap::new();
+
+    if let Ok(dir) = vfs.join("gui/crew_commander/skills")
+        && let Ok(entries) = dir.read_dir()
+    {
+        for entry in entries {
+            let filename = entry.filename();
+            if let Some(key) = filename.strip_suffix(".png") {
+                let path = format!("gui/crew_commander/skills/{}", filename);
+                if let Some(img) = load_packed_image(&path, vfs) {
+                    let resized = image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
+                    icons.insert(key.to_string(), resized);
+                }
+            }
+        }
+    }
+
+    debug!(count = icons.len(), "Loaded crew skill icons");
+    icons
+}
+
+/// Load modernization (ship upgrade) icons from `gui/modernization_icons/`.
+///
+/// Filenames are `icon_modernization_<PCM full name>.png`; the map is keyed
+/// by the full PCM name (`Param::name()`, e.g. `"PCM082_SpecialBonus_Mod_I"`)
+/// so callers can look up by the upgrade param's full name.
+pub fn load_modernization_icons(vfs: &VfsPath, size: u32) -> HashMap<String, RgbaImage> {
+    let mut icons = HashMap::new();
+
+    if let Ok(dir) = vfs.join("gui/modernization_icons")
+        && let Ok(entries) = dir.read_dir()
+    {
+        for entry in entries {
+            let filename = entry.filename();
+            if let Some(pcm_name) = filename.strip_prefix("icon_modernization_").and_then(|s| s.strip_suffix(".png")) {
+                let path = format!("gui/modernization_icons/{}", filename);
+                if let Some(img) = load_packed_image(&path, vfs) {
+                    let resized = image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
+                    icons.insert(pcm_name.to_string(), resized);
+                }
+            }
+        }
+    }
+
+    debug!(count = icons.len(), "Loaded modernization icons");
+    icons
+}
+
+/// Load signal-flag icons from `gui/signal_flags/`.
+///
+/// Filenames are `<PCEF full name>.png`; the map is keyed by the full PCEF
+/// name (`Param::name()`, e.g. `"PCEF014_NF_SignalFlag"`) so callers can
+/// look up by the signal param's full name.
+pub fn load_signal_flag_icons(vfs: &VfsPath, size: u32) -> HashMap<String, RgbaImage> {
+    let mut icons = HashMap::new();
+
+    if let Ok(dir) = vfs.join("gui/signal_flags")
+        && let Ok(entries) = dir.read_dir()
+    {
+        for entry in entries {
+            let filename = entry.filename();
+            if let Some(pcef_name) = filename.strip_suffix(".png") {
+                if !pcef_name.starts_with("PCEF") {
+                    continue;
+                }
+                let path = format!("gui/signal_flags/{}", filename);
+                if let Some(img) = load_packed_image(&path, vfs) {
+                    let resized = image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
+                    icons.insert(pcef_name.to_string(), resized);
+                }
+            }
+        }
+    }
+
+    debug!(count = icons.len(), "Loaded signal flag icons");
+    icons
+}
+
 /// Load death cause icons from game files into a HashMap keyed by cause name.
 ///
 /// Discovers `icon_frag_*.png` files in `gui/battle_hud/icon_frag/` and stores
@@ -326,11 +411,18 @@ pub fn load_death_cause_icons(vfs: &VfsPath, size: u32) -> HashMap<String, RgbaI
     {
         for entry in entries {
             let filename = entry.filename();
-            if let Some(base_name) = filename.strip_prefix("icon_frag_").and_then(|s| s.strip_suffix(".png")) {
+            // `frags.png` sits next to the per-cause icons and is the in-game
+            // kill-count glyph (used by the roster panel's frag column).
+            let key = if filename == "frags.png" {
+                Some("frags".to_string())
+            } else {
+                filename.strip_prefix("icon_frag_").and_then(|s| s.strip_suffix(".png")).map(|s| s.to_string())
+            };
+            if let Some(base_name) = key {
                 let path = format!("gui/battle_hud/icon_frag/{}", filename);
                 if let Some(img) = load_packed_image(&path, vfs) {
                     let resized = image::imageops::resize(&img, size, size, image::imageops::FilterType::Lanczos3);
-                    icons.insert(base_name.to_string(), resized);
+                    icons.insert(base_name, resized);
                 }
             }
         }

@@ -474,12 +474,33 @@ pub(super) fn render_video_blocking(
         Some(rgba)
     });
 
+    // Pre-scan facts + damage so roster HP, consumable inventories, and the
+    // damage column render correctly from frame zero (matches the live
+    // playback renderer in playback.rs).
+    let mut primary_with_alts: Vec<&ReplayFile> = vec![&replay_file];
+    primary_with_alts.extend(alt_replay_files.iter());
+    let vehicle_facts = wows_replays::analyzer::battle_controller::merged::gather_replay_facts(
+        &game_constants,
+        version,
+        game_metadata.entity_specs(),
+        &primary_with_alts,
+    );
+    let damage_events = wows_replays::analyzer::battle_controller::merged::gather_damage_events(
+        &*game_metadata,
+        &game_constants,
+        version,
+        game_metadata.entity_specs(),
+        &primary_with_alts,
+    );
+
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options.clone());
     renderer.set_fonts(game_fonts.clone());
+    renderer.set_vehicle_facts(vehicle_facts.clone());
+    renderer.set_damage_events(damage_events);
     if let Some(ref sil) = self_silhouette {
         renderer.set_self_silhouette(sil.clone());
     }
-    let mut target = ImageTarget::with_stats_panel(
+    let mut target = ImageTarget::with_side_panel(
         map_image_rgb,
         game_fonts,
         ship_icons_rgba,
@@ -488,7 +509,7 @@ pub(super) fn render_video_blocking(
         consumable_icons_rgba,
         death_cause_icons,
         powerup_icons,
-        options.show_stats_panel,
+        wows_minimap_renderer::drawing::SidePanelLayout::from_options(&options),
     );
     target.set_text_resolver(std::sync::Arc::new(crate::LocalizedTextResolver));
     let (cw, ch) = target.canvas_size();
@@ -517,6 +538,12 @@ pub(super) fn render_video_blocking(
         &alt_replay_files,
     )
     .map_err(|e| report!("{e}"))?;
+    wows_replay_insights::build::seed_consumable_inventories_from_facts(
+        session.controller_mut(),
+        &vehicle_facts,
+        &*game_metadata,
+        version,
+    );
 
     let mut prev_render_clock = GameClock(0.0);
     while let Some(safe_clock) = session.step().map_err(|e| report!("{e}"))? {

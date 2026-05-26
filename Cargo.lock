@@ -10631,6 +10631,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+ "wows-data-mgr",
  "wows_replays",
  "wowsunpack",
 ]
@@ -10707,6 +10708,7 @@ dependencies = [
  "arboard",
  "bytemuck",
  "const_format",
+ "convert_case 0.11.0",
  "csv",
  "data-encoding",
  "eframe",

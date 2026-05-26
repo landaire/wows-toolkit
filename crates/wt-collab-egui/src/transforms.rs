@@ -32,11 +32,17 @@ pub struct MapTransform {
     pub pan: Vec2,
     /// HUD height in logical pixels.
     pub hud_height: f32,
-    /// Logical canvas width (includes stats panel when enabled).
+    /// Logical canvas height in pixels (hud_height + map area). Used by
+    /// overlays that need a true center; don't infer it from hud_width.
+    pub canvas_height: f32,
+    /// Logical canvas width (includes stats panel and team rosters when enabled).
     pub canvas_width: f32,
     /// Logical width available for HUD elements (excludes stats panel area).
     /// When no stats panel, equals `canvas_width`.
     pub hud_width: f32,
+    /// Horizontal offset (in logical pixels) from canvas origin to the minimap's
+    /// left edge. Used when team-roster panels reserve a left gutter; otherwise 0.
+    pub map_x_offset: f32,
 }
 
 impl MapTransform {
@@ -46,7 +52,7 @@ impl MapTransform {
         let zoomed_x = pos.x * self.zoom - self.pan.x;
         let zoomed_y = pos.y * self.zoom - self.pan.y;
         Pos2::new(
-            self.origin.x + zoomed_x * self.window_scale,
+            self.origin.x + (self.map_x_offset + zoomed_x) * self.window_scale,
             self.origin.y + (self.hud_height + zoomed_y) * self.window_scale,
         )
     }
@@ -81,7 +87,7 @@ impl MapTransform {
 
     /// Convert a screen Pos2 to minimap logical coords (inverse of minimap_to_screen).
     pub fn screen_to_minimap(&self, screen_pos: Pos2) -> Vec2 {
-        let sx = (screen_pos.x - self.origin.x) / self.window_scale;
+        let sx = (screen_pos.x - self.origin.x) / self.window_scale - self.map_x_offset;
         let sy = (screen_pos.y - self.origin.y) / self.window_scale - self.hud_height;
         Vec2::new((sx + self.pan.x) / self.zoom, (sy + self.pan.y) / self.zoom)
     }
@@ -149,14 +155,20 @@ pub fn compute_canvas_layout(
 /// `map_width` restricts the horizontal extent of the clip rect (in logical pixels).
 /// Pass `None` to use the full canvas width, or `Some(MINIMAP_SIZE)` when a stats panel
 /// is present to prevent map elements from bleeding into the panel area.
-pub fn compute_map_clip_rect(layout: &CanvasLayout, hud_height: f32, map_width: Option<f32>) -> Rect {
+pub fn compute_map_clip_rect(
+    layout: &CanvasLayout,
+    hud_height: f32,
+    map_width: Option<f32>,
+    map_x_offset: f32,
+) -> Rect {
     let hud_screen_height = hud_height * layout.window_scale;
+    let left = layout.origin.x + map_x_offset * layout.window_scale;
     let right = match map_width {
-        Some(w) => layout.origin.x + w * layout.window_scale,
+        Some(w) => left + w * layout.window_scale,
         None => layout.origin.x + layout.scaled_canvas.x,
     };
     Rect::from_min_max(
-        Pos2::new(layout.origin.x, layout.origin.y + hud_screen_height),
+        Pos2::new(left, layout.origin.y + hud_screen_height),
         Pos2::new(right, layout.origin.y + layout.scaled_canvas.y),
     )
 }

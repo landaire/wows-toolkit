@@ -17,13 +17,19 @@ serde_json = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 data-encoding = { workspace = true, optional = true }
 
+[dev-dependencies]
+wows-data-mgr = { workspace = true }
+wows_replays = { workspace = true, features = ["vfs", "arc"] }
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap"] }
+
 [features]
-default = ["build"]
+default = ["build", "arc"]
 build = []
 serde = ["dep:serde"]
 # Forwards to wowsunpack/wows_replays so Arc-backed `Param` storage in the
-# provider matches the smart pointer this crate hands back. Consumers that
-# enable `arc` upstream must also enable it here.
+# provider matches the smart pointer this crate hands back. On by default
+# because the rest of the workspace uses Arc; non-arc consumers opt out via
+# `default-features = false`.
 arc = ["wowsunpack/arc", "wows_replays/arc"]
 # wowssb URL helpers (long + short build URLs for app.wowssb.com).
 wowssb = ["build", "dep:serde_json", "dep:flate2", "dep:data-encoding"]

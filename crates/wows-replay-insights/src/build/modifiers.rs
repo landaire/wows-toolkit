@@ -53,11 +53,7 @@ impl ModifierSet {
         let name = modifier.name();
         let excluded = modifier.excluded_consumables();
         if !excluded.is_empty() {
-            self.scoped.push(ScopedModifier {
-                name: name.to_owned(),
-                value,
-                excluded: excluded.to_vec(),
-            });
+            self.scoped.push(ScopedModifier { name: name.to_owned(), value, excluded: excluded.to_vec() });
             return;
         }
         if is_additive(name) {

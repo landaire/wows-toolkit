@@ -208,12 +208,7 @@ fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<Crew
     let excluded_consumables: Vec<String> = modifiers
         .get(&HashableValue::String("excludedConsumables".to_owned().into()))
         .and_then(|v| v.list_ref())
-        .map(|list| {
-            list.inner()
-                .iter()
-                .filter_map(|item| item.string_ref().map(|s| s.inner().to_owned()))
-                .collect()
-        })
+        .map(|list| list.inner().iter().filter_map(|item| item.string_ref().map(|s| s.inner().to_owned())).collect())
         .unwrap_or_default();
 
     modifiers
@@ -477,13 +472,11 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
     AbilityCategory::builder()
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
         .consumable_type(game_param_to_type!(category_data, "consumableType", String))
-        .description_id(game_param_to_type!(category_data, "descIDs", String))
         .group(game_param_to_type!(category_data, "group", String))
         .icon_id(game_param_to_type!(category_data, "iconIDs", String))
         .num_consumables(game_param_to_type!(category_data, "numConsumables", isize))
         .preparation_time(game_param_to_type!(category_data, "preparationTime", f32))
         .reload_time(reload_time)
-        .title_id(game_param_to_type!(category_data, "titleIDs", String))
         .work_time(work_time)
         .maybe_dist_ship(dist_ship)
         .maybe_dist_torpedo(dist_torpedo)
@@ -496,14 +489,13 @@ fn build_ability(ability_data: &BTreeMap<HashableValue, Value>) -> Ability {
     let test_key = HashableValue::String("numConsumables".to_string().into());
     let categories: HashMap<String, AbilityCategory> =
         HashMap::from_iter(ability_data.iter().filter_map(|(key, value)| {
-            if value.is_not_dict() {
-                return None;
-            }
-
-            let value = value.dict_or_object_dict().unwrap();
-            let value = value.inner();
-            if value.contains_key(&test_key) {
-                Some((key.string_ref().unwrap().inner().to_owned(), build_ability_category(&value)))
+            // GameParams pickled categories arrive as either Value::Dict or
+            // Value::Object(DictObject); `is_not_dict` misses the object case
+            // and was dropping every Ability variant on the floor.
+            let dict = value.dict_or_object_dict()?;
+            let inner = dict.inner();
+            if inner.contains_key(&test_key) {
+                Some((key.string_ref().unwrap().inner().to_owned(), build_ability_category(&inner)))
             } else {
                 None
             }
@@ -1140,11 +1132,7 @@ impl GameMetadataProvider {
                     .map(|d| build_skill_modifiers(&d.inner()))
                     .unwrap_or_default();
                 Some(ParamData::Exterior(
-                    Exterior::builder()
-                        .maybe_camouflage(camouflage)
-                        .maybe_title(title)
-                        .modifiers(modifiers)
-                        .build(),
+                    Exterior::builder().maybe_camouflage(camouflage).maybe_title(title).modifiers(modifiers).build(),
                 ))
             }
             ParamType::Modernization => {

@@ -24,6 +24,6 @@ pub struct ConsumableSlot {
     pub total_charges: ChargeCount,
     pub work_time: Duration,
     pub reload_time: Duration,
-    /// Lookup key for the consumable icon map. Equals `ability.index()`.
+    /// Lookup key for the consumable icon map. Equals `ability.name()`.
     pub icon_key: String,
 }

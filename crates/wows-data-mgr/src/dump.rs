@@ -7,6 +7,7 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rootcause::prelude::*;
 use wowsunpack::game_data;
+use wowsunpack::game_params::cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Param;
@@ -30,6 +31,9 @@ const REQUIRED_VFS_DIRS: &[&str] = &[
     "gui/fonts",
     "gui/data/constants",
     "gui/ships_silhouettes",
+    "gui/crew_commander/skills",
+    "gui/modernization_icons",
+    "gui/signal_flags",
     "scripts/entity_defs",
 ];
 
@@ -280,8 +284,7 @@ fn derive_game_params_rkyv(vfs_dir: &Path) -> Option<Vec<u8>> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let gmp = GameMetadataProvider::from_vfs(&vfs)?;
         let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&params).map_err(|e| report!("Failed to serialize: {e}"))?;
-        Ok::<Vec<u8>, Report>(bytes.to_vec())
+        cache::encode(&params).map_err(|e| report!("Failed to serialize: {e}"))
     }));
     match result {
         Ok(Ok(bytes)) => Some(bytes),

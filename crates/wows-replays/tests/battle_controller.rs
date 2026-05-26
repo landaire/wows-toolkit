@@ -151,6 +151,40 @@ fn vermont_has_team_scores() {
     assert!(scores.iter().any(|s| s.score > 0), "at least one team should have points");
 }
 
+#[test]
+#[cfg_attr(not(all(has_game_data, has_build_11965230)), ignore)]
+fn vermont_capture_vehicle_facts_is_complete() {
+    use wows_replays::analyzer::battle_controller::merged::capture_vehicle_facts;
+
+    let (replay, controller) = run_replay("20260213_143518_PASB110-Vermont_22_tierra_del_fuego.wowsreplay");
+    let facts = capture_vehicle_facts(&controller);
+
+    let recording_player = controller
+        .player_entities()
+        .values()
+        .find(|p| p.initial_state().username() == replay.meta.playerName)
+        .expect("recording player should be in player_entities");
+
+    let recording_facts =
+        facts.get(&recording_player.initial_state().entity_id()).expect("recording player's facts should be captured");
+    assert_eq!(
+        recording_facts.vehicle_id,
+        recording_player.vehicle().id(),
+        "captured vehicle_id should match the player's ship param id"
+    );
+    assert!(
+        !recording_facts.ship_config.abilities().is_empty(),
+        "ship_config should carry the chosen abilities; consumable seeding depends on this"
+    );
+
+    // Every captured vehicle was created via EntityCreate by some perspective,
+    // which means maxHealth was either in that bundle or was broadcast as an
+    // EntityProperty before the parse finished. A zero here means our capture
+    // missed an update path or the source-of-truth shifted.
+    let zero_hp: Vec<_> = facts.iter().filter(|(_, f)| f.max_health == 0.0).collect();
+    assert!(zero_hp.is_empty(), "every captured vehicle should have max_health > 0; bad entries: {zero_hp:?}",);
+}
+
 // =============================================================================
 // v15.1 Marceau (PvP, 12v12, Tierra del Fuego)
 // =============================================================================

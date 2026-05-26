@@ -956,11 +956,7 @@ pub enum ChargeCount {
 
 impl ChargeCount {
     pub fn from_game_params(num_consumables: isize) -> Self {
-        if num_consumables < 0 {
-            ChargeCount::Unlimited
-        } else {
-            ChargeCount::Finite(num_consumables as u32)
-        }
+        if num_consumables < 0 { ChargeCount::Unlimited } else { ChargeCount::Finite(num_consumables as u32) }
     }
 
     pub fn saturating_sub(self, used: u32) -> Self {

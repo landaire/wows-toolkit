@@ -1415,13 +1415,11 @@ impl Vehicle {
 pub struct AbilityCategory {
     special_sound_id: Option<String>,
     consumable_type: String,
-    description_id: String,
     group: String,
     icon_id: String,
     num_consumables: isize,
     preparation_time: f32,
     reload_time: f32,
-    title_id: String,
     work_time: f32,
     /// Detection radius for ships (radar, hydro, sublocator). BigWorld units.
     #[cfg_attr(feature = "serde", serde(default))]

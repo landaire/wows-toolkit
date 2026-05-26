@@ -1368,7 +1368,13 @@ impl TacticsBoardViewer {
                 &mut zp,
                 &layout,
                 logical_canvas,
-                &ZoomPanConfig { allow_left_drag_pan: true, hud_height: 0.0, handle_tool_yaw: true, map_width: None },
+                &ZoomPanConfig {
+                    allow_left_drag_pan: true,
+                    hud_height: 0.0,
+                    handle_tool_yaw: true,
+                    map_width: None,
+                    map_x_offset: 0.0,
+                },
                 Some(&mut annotation_state_arc.lock()),
                 left_pan_blocked,
             );
@@ -1381,13 +1387,15 @@ impl TacticsBoardViewer {
             zoom: zp.zoom,
             pan: zp.pan,
             hud_height: 0.0,
+            canvas_height: canvas_size,
             canvas_width: canvas_size,
             hud_width: canvas_size,
+            map_x_offset: 0.0,
         };
         drop(zp);
 
         // Clip to map area
-        let map_clip = compute_map_clip_rect(&layout, 0.0, None);
+        let map_clip = compute_map_clip_rect(&layout, 0.0, None, 0.0);
         let map_painter = painter.with_clip_rect(map_clip);
 
         // Draw map background

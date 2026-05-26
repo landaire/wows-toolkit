@@ -99,6 +99,15 @@ pub fn translate_consumable(game_params_name: &str, resource_loader: &dyn Resour
     resource_loader.localized_name_from_id(&id)
 }
 
+/// Translate a consumable's tooltip description by its GameParams name.
+pub fn translate_consumable_description(
+    game_params_name: &str,
+    resource_loader: &dyn ResourceLoader,
+) -> Option<String> {
+    let id = format!("IDS_DOCK_CONSUME_DESCRIPTION_{}", game_params_name.to_uppercase());
+    resource_loader.localized_name_from_id(&id)
+}
+
 // =============================================================================
 // Icon path helpers
 // =============================================================================

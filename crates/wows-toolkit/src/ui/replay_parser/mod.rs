@@ -3271,6 +3271,7 @@ impl ToolkitTabViewer<'_> {
                             packet_data: r.packet_data.clone(),
                         })
                         .collect();
+                    let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                     let viewer = crate::replay::renderer::launch_replay_renderer(
                         raw_meta,
                         pkt_data,
@@ -3284,6 +3285,7 @@ impl ToolkitTabViewer<'_> {
                         Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
                         self.tab_state.window_settings.clone(),
                         self.tab_state.save_notify.clone(),
+                        is_debug_mode,
                     );
                     self.tab_state.replay_renderers.lock().push(viewer);
                 }
@@ -4304,6 +4306,7 @@ impl ToolkitTabViewer<'_> {
                             drop(renderers);
                             let saved_options = self.tab_state.persisted.read().settings.renderer.clone();
                             let suppress = std::sync::Arc::clone(&self.tab_state.suppress_gpu_encoder_warning);
+                            let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
                             let viewer = crate::replay::renderer::launch_client_renderer(
                                 replay.replay_name.clone(),
                                 replay.map_image_png.clone(),
@@ -4314,6 +4317,7 @@ impl ToolkitTabViewer<'_> {
                                 &self.tab_state.renderer_asset_cache,
                                 self.tab_state.window_settings.clone(),
                                 self.tab_state.save_notify.clone(),
+                                is_debug_mode,
                             );
                             if let Some(ref client_handle) = self.tab_state.client_session {
                                 let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel(2);
@@ -4635,6 +4639,7 @@ impl ToolkitTabViewer<'_> {
                 return;
             };
             let asset_cache = self.tab_state.renderer_asset_cache.clone();
+            let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
             let viewer = crate::replay::renderer::launch_replay_renderer(
                 raw_meta,
                 pkt_data,
@@ -4648,6 +4653,7 @@ impl ToolkitTabViewer<'_> {
                 Arc::clone(&self.tab_state.suppress_gpu_encoder_warning),
                 self.tab_state.window_settings.clone(),
                 self.tab_state.save_notify.clone(),
+                is_debug_mode,
             );
             self.tab_state.replay_renderers.lock().push(viewer);
         }

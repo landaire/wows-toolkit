@@ -13,4 +13,7 @@ pub use consumables::ConsumableSlot;
 pub use modifiers::ModifierSet;
 pub use resolver::ResolvedBuild;
 pub use seed::build_inventory_for_player;
+pub use seed::build_inventory_from_facts;
+pub use seed::facts_species;
 pub use seed::seed_consumable_inventories;
+pub use seed::seed_consumable_inventories_from_facts;
