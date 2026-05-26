@@ -32,7 +32,7 @@ pub(super) fn execute_video_export(
     *video_export_progress.lock() = None;
 
     match action {
-        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, actual_game_duration } => {
+        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, codec, actual_game_duration } => {
             save_as_video(
                 output_path,
                 video_export_data.raw_meta.clone(),
@@ -47,10 +47,11 @@ pub(super) fn execute_video_export(
                 Arc::clone(video_exporting),
                 Arc::clone(video_export_progress),
                 prefer_cpu,
+                codec,
                 actual_game_duration,
             );
         }
-        PendingVideoExport::CopyToClipboard { options, prefer_cpu, actual_game_duration } => {
+        PendingVideoExport::CopyToClipboard { options, prefer_cpu, codec, actual_game_duration } => {
             let file_name = format!("{}.mp4", video_export_data.replay_name);
             render_video_to_clipboard(
                 file_name,
@@ -60,6 +61,7 @@ pub(super) fn execute_video_export(
                 Arc::clone(video_exporting),
                 Arc::clone(video_export_progress),
                 prefer_cpu,
+                codec,
                 actual_game_duration,
             );
         }
@@ -83,6 +85,7 @@ pub(super) fn save_as_video(
     video_exporting: Arc<AtomicBool>,
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
@@ -100,6 +103,7 @@ pub(super) fn save_as_video(
             &asset_cache,
             &video_export_progress,
             prefer_cpu,
+            codec,
             actual_game_duration,
         );
 
@@ -127,6 +131,7 @@ pub(super) fn render_video_to_clipboard(
     video_exporting: Arc<AtomicBool>,
     video_export_progress: Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
@@ -156,6 +161,7 @@ pub(super) fn render_video_to_clipboard(
             &export_data.asset_cache,
             &video_export_progress,
             prefer_cpu,
+            codec,
             actual_game_duration,
         );
 
@@ -199,6 +205,7 @@ fn render_batch(
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
@@ -245,6 +252,7 @@ fn render_batch(
             asset_cache,
             &per_replay_progress,
             prefer_cpu,
+            codec,
             None,
         );
 
@@ -275,6 +283,7 @@ pub fn batch_render_to_folder(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -291,7 +300,7 @@ pub fn batch_render_to_folder(
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
         let (succeeded, failed, _) =
-            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, prefer_cpu);
+            render_batch(&replays, &output_dir, &options, &asset_cache, &progress_clone, prefer_cpu, codec);
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -316,6 +325,7 @@ pub fn batch_render_to_clipboard(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
 ) -> crate::task::BackgroundTask {
     let total_frames: u64 = replays.iter().map(|r| (r.game_duration * 7.0) as u64).sum();
     let total_replays = replays.len();
@@ -341,7 +351,7 @@ pub fn batch_render_to_clipboard(
         };
 
         let (succeeded, failed, paths) =
-            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, prefer_cpu);
+            render_batch(&replays, temp_dir.path(), &options, &asset_cache, &progress_clone, prefer_cpu, codec);
 
         if !paths.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
@@ -379,6 +389,7 @@ pub(super) fn render_video_blocking(
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,
+    codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
@@ -515,6 +526,10 @@ pub(super) fn render_video_blocking(
     let (cw, ch) = target.canvas_size();
     let mut encoder = VideoEncoder::new(Some(output_path), None, false, game_duration, cw, ch);
     encoder.set_prefer_cpu(prefer_cpu);
+    encoder.set_codec(match codec {
+        Some(c) => wows_minimap_renderer::video::CodecChoice::Explicit(c),
+        None => wows_minimap_renderer::video::CodecChoice::Auto,
+    });
     if let Some(duration) = actual_game_duration {
         encoder.set_battle_duration(GameClock(duration));
     }

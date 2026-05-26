@@ -24,7 +24,7 @@ impl CpuEncoder {
         let config = EncoderConfig::new()
             .max_frame_rate(FrameRate::from_hz(FPS as f32))
             .rate_control_mode(openh264::encoder::RateControlMode::Quality)
-            .bitrate(BitRate::from_bps(20_000_000))
+            .bitrate(BitRate::from_bps(40_000_000))
             .complexity(Complexity::High);
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| report!(VideoError::EncoderInit(format!("Failed to create H.264 encoder: {e:?}"))))?;

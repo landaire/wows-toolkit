@@ -28,7 +28,8 @@ jobs:
           sudo apt-get install -y \
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
-            libssl-dev libvulkan-dev pkg-config
+            libssl-dev libvulkan-dev pkg-config \
+            nasm
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -66,7 +67,8 @@ jobs:
           sudo apt-get install -y \
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
-            libssl-dev libvulkan-dev pkg-config
+            libssl-dev libvulkan-dev pkg-config \
+            nasm
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -114,7 +116,8 @@ jobs:
           sudo apt-get install -y \
             libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
             libxrandr-dev libxi-dev libgl-dev libfontconfig-dev \
-            libssl-dev libvulkan-dev pkg-config
+            libssl-dev libvulkan-dev pkg-config \
+            nasm
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}

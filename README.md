@@ -77,6 +77,38 @@ On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
 
+#### NASM (optional — full rav1e optimization suite)
+
+The minimap renderer's default features include a CPU AV1 encoder (rav1e).
+rav1e itself doesn't require NASM, but its `asm` feature compiles
+hand-tuned x86 SIMD that runs ~3x faster than the pure-Rust path.
+That `asm` feature is gated behind our `cpu-av1-asm` crate feature (on by
+default in the CLI binary).
+
+**Quick reference:**
+
+| Need | What to do |
+|---|---|
+| Default build, full AV1 perf | Install NASM (see below) |
+| Default build, no NASM | `--no-default-features --features bin,vulkan,videotoolbox,cpu,cpu-av1,arc` |
+| Skip AV1 entirely | `--no-default-features --features bin,vulkan,videotoolbox,cpu,arc` |
+
+If you used `mise run setup` to install NASM into the project-local
+`.tooling/` directory, run cargo through the bundled wrapper so it picks the
+right `nasm.exe` up automatically: `mise run cargo -- build --release`. The
+wrapper also finds the winget install location (`C:\Program Files\NASM`)
+without you needing to fix your PATH.
+
+Installing NASM:
+
+- **Windows (recommended):** `winget install -e --id NASM.NASM`
+- **Windows (no admin, scripted):** `mise run setup` — downloads NASM into a
+  gitignored `.tooling/` directory and exports it on PATH for the current
+  process.
+- **Linux:** `sudo apt-get install nasm` (or your distro's equivalent)
+- **macOS:** `brew install nasm`
+- **Nix:** already provisioned in the flake's devShell
+
 ### Nix
 
 A Nix flake is provided with a devShell and packages for the CLI tools:

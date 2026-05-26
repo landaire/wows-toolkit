@@ -3,6 +3,7 @@
 pub mod advantage;
 #[cfg(feature = "rendering")]
 pub mod assets;
+pub mod codec;
 pub mod config;
 pub mod draw_command;
 #[cfg(feature = "rendering")]
@@ -34,6 +35,8 @@ pub const SHIP_ICON_OUTLINE_THICKNESS: u32 = 2;
 
 #[cfg(feature = "rendering")]
 pub use assets::GameFonts;
+pub use codec::EncoderKind;
+pub use codec::VideoCodec;
 pub use config::RenderOptions;
 pub use draw_command::ActivityFeedEntry;
 pub use draw_command::DrawCommand;

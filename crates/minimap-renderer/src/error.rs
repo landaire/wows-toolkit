@@ -3,14 +3,17 @@ use std::fmt;
 /// Typed error for video encoding and muxing operations.
 #[derive(Debug)]
 pub enum VideoError {
-    /// Encoder initialization failed (Vulkan, openh264, etc.)
     EncoderInit(String),
-    /// Frame encoding failed.
     EncodeFailed(String),
-    /// MP4 muxing failed.
     MuxFailed(String),
-    /// I/O error (file creation, writes, etc.)
     Io(std::io::Error),
+    /// Requested codec is not supported by any compiled-in backend or
+    /// available device for the chosen execution mode.
+    UnsupportedCodec {
+        codec: &'static str,
+        backend: &'static str,
+        reason: String,
+    },
 }
 
 impl fmt::Display for VideoError {
@@ -20,6 +23,9 @@ impl fmt::Display for VideoError {
             Self::EncodeFailed(msg) => write!(f, "encode failed: {msg}"),
             Self::MuxFailed(msg) => write!(f, "MP4 mux failed: {msg}"),
             Self::Io(e) => write!(f, "I/O error: {e}"),
+            Self::UnsupportedCodec { codec, backend, reason } => {
+                write!(f, "{backend} backend does not support codec {codec}: {reason}")
+            }
         }
     }
 }

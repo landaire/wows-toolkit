@@ -113,8 +113,8 @@ impl VideoToolboxEncoder {
 
         // Configure encoder properties
         unsafe {
-            // Average bitrate: 20 Mbps
-            let bitrate = CFNumber::new_i32(20_000_000);
+            // Average bitrate: 40 Mbps (bumped for HUD text legibility)
+            let bitrate = CFNumber::new_i32(40_000_000);
             let _ =
                 VTSessionSetProperty(&session, kVTCompressionPropertyKey_AverageBitRate, Some(&*bitrate as &CFType));
 

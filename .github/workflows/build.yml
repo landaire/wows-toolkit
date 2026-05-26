@@ -23,6 +23,11 @@ jobs:
           toolchain: 1.92.0
           targets: x86_64-pc-windows-msvc
 
+      - name: Install NASM
+        # rav1e's `asm` feature needs nasm. Avoid third-party JS actions.
+        shell: pwsh
+        run: ./scripts/install-nasm-windows.ps1
+
       - name: Build release binary
         run: cargo build --release --target x86_64-pc-windows-msvc -p wows_toolkit
 
@@ -91,6 +96,7 @@ jobs:
             libssl-dev \
             libvulkan-dev \
             pkg-config \
+            nasm \
             flatpak
 
       - name: Install Rust toolchain
@@ -165,6 +171,9 @@ jobs:
         with:
           toolchain: 1.92.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install NASM
+        run: brew install nasm
 
       - name: Build release binaries
         run: |

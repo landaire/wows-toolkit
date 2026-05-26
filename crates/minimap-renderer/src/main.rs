@@ -32,9 +32,30 @@ use wows_minimap_renderer::assets::load_ship_icons;
 use wows_minimap_renderer::config::RendererConfig;
 use wows_minimap_renderer::drawing::ImageTarget;
 use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_minimap_renderer::EncoderKind;
+use wows_minimap_renderer::VideoCodec;
+use wows_minimap_renderer::encoder::Mode as EncoderMode;
+use wows_minimap_renderer::video::CodecChoice;
 use wows_minimap_renderer::video::DumpMode;
 use wows_minimap_renderer::video::RenderStage;
 use wows_minimap_renderer::video::VideoEncoder;
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum CodecArg {
+    H264,
+    H265,
+    Av1,
+}
+
+impl From<CodecArg> for VideoCodec {
+    fn from(c: CodecArg) -> Self {
+        match c {
+            CodecArg::H264 => VideoCodec::H264,
+            CodecArg::H265 => VideoCodec::H265,
+            CodecArg::Av1 => VideoCodec::Av1,
+        }
+    }
+}
 
 /// Generates a minimap timelapse video from a WoWS replay
 #[derive(Parser)]
@@ -141,9 +162,14 @@ struct Args {
     #[arg(long)]
     check_encoder: bool,
 
-    /// Use CPU encoder (openh264) instead of GPU
+    /// Force CPU encoder (no GPU). Combine with --codec to pick the CPU encoder.
     #[arg(long)]
     cpu: bool,
+
+    /// Video codec for output. Defaults to the best codec supported by the
+    /// active backend (GPU H.265 if available, otherwise CPU AV1).
+    #[arg(long, value_enum)]
+    codec: Option<CodecArg>,
 
     /// Disable progress bar and use log output instead
     #[arg(long)]
@@ -384,11 +410,30 @@ fn main() -> Result<(), Report> {
 
     let (cw, ch) = target.canvas_size();
     let mut encoder = VideoEncoder::new(output, dump_mode, args.dump_frames, game_duration, cw, ch);
-    if args.cpu {
-        encoder.set_prefer_cpu(true);
-    }
-    // Initialize the encoder eagerly so startup logs appear before the
-    // progress bar. Skip for dump modes which don't encode video.
+    let mode = if args.cpu { EncoderMode::ForceCpu } else { EncoderMode::Auto };
+    encoder.set_mode(mode);
+    let codec_choice = match args.codec {
+        None => CodecChoice::Auto,
+        Some(c) => {
+            let codec: VideoCodec = c.into();
+            let kind = if args.cpu { EncoderKind::Cpu } else { EncoderKind::Gpu };
+            let status = wows_minimap_renderer::check_encoder();
+            if args.cpu && !status.supports(EncoderKind::Cpu, codec) {
+                bail!(
+                    "codec {codec} is not supported by the CPU backend on this build; available CPU codecs: {}",
+                    available_codecs_for(EncoderKind::Cpu, &status)
+                );
+            }
+            if !args.cpu && !status.supports(kind, codec) {
+                bail!(
+                    "codec {codec} is not supported by the GPU backend on this system; pass --cpu to use software encoding, or pick a supported codec: {}",
+                    available_codecs_for(kind, &status)
+                );
+            }
+            CodecChoice::Explicit(codec)
+        }
+    };
+    encoder.set_codec(codec_choice);
     if args.dump_frame.is_none() {
         encoder.init()?;
     }
@@ -496,6 +541,18 @@ fn main() -> Result<(), Report> {
 
     info!("Done");
     Ok(())
+}
+
+fn available_codecs_for(kind: EncoderKind, status: &wows_minimap_renderer::encoder::EncoderStatus) -> String {
+    let mut names: Vec<&str> = VideoCodec::ALL
+        .into_iter()
+        .filter(|c| status.supports(kind, *c))
+        .map(VideoCodec::as_str)
+        .collect();
+    if names.is_empty() {
+        names.push("(none)");
+    }
+    names.join(", ")
 }
 
 type LoadedGameData =

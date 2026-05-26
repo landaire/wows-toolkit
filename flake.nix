@@ -48,6 +48,8 @@
 
         nativeBuildInputs = with pkgs; [
           pkg-config
+          # rav1e (AV1 CPU encoder) builds hand-tuned x86 asm via nasm.
+          nasm
         ];
 
         buildInputs = with pkgs;
@@ -123,7 +125,7 @@
             // {
               inherit cargoArtifacts;
               cargoExtraArgs =
-                "-p wows_minimap_renderer --features bin,cpu"
+                "-p wows_minimap_renderer --features bin,cpu,cpu-av1"
                 + lib.optionalString stdenv.hostPlatform.isLinux ",vulkan"
                 + lib.optionalString stdenv.hostPlatform.isDarwin ",videotoolbox";
               buildInputs =
@@ -149,6 +151,9 @@
               # misc. libraries
               openssl
               pkg-config
+
+              # rav1e (AV1 CPU encoder) needs nasm to build hand-tuned x86 asm.
+              nasm
 
               # Development tools
               depotdownloader

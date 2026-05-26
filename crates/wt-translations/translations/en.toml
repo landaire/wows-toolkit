@@ -577,6 +577,8 @@ timer = "Timer"
 export_settings = "Export Settings"
 prefer_cpu = "Prefer CPU Encoder"
 prefer_cpu_tooltip = "Use software (CPU) encoder instead of GPU for video export"
+codec = "Codec"
+codec_auto = "Auto"
 save_defaults = "Save Defaults"
 event_timeline = "Event Timeline"
 

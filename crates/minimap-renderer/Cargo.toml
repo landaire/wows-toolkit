@@ -19,16 +19,11 @@ path = "src/main.rs"
 required-features = ["bin"]
 
 [features]
-default = ["bin", "vulkan", "videotoolbox", "arc"]
-# Core rendering: gates heavy deps (image, ab_glyph, tiny-skia, resvg, etc.) and
-# modules that use them (renderer, drawing, video, encoder, assets).
-# Without this feature, only lightweight type modules are available (draw_command, map_data,
-# config, advantage, error).
+default = ["bin", "vulkan", "videotoolbox", "cpu", "cpu-av1", "cpu-av1-asm", "arc"]
 rendering = [
     "dep:image",
     "dep:ab_glyph",
-    "dep:mp4",
-    "dep:bytes",
+    "dep:muxide",
     "dep:convert_case",
     "dep:roxmltree",
     "dep:resvg",
@@ -43,12 +38,12 @@ rendering = [
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
 rkyv = ["dep:rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
-# Vulkan Video encoder (Linux/Windows) - automatically disabled on macOS
-vulkan = ["dep:vk-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
-# VideoToolbox encoder (macOS only)
+vulkan = ["dep:gpu-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
 videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
-# CPU encoder (fallback, all platforms)
 cpu = ["dep:openh264", "rendering"]
+cpu-av1 = ["dep:rav1e", "dep:yuvutils-rs", "rendering"]
+# Opt in to rav1e's hand-tuned x86 SIMD (~3x faster). Requires NASM at build time.
+cpu-av1-asm = ["cpu-av1", "rav1e/asm"]
 arc = ["wows_replays/arc", "wows-replay-insights?/arc"]
 
 [dependencies]
@@ -58,8 +53,6 @@ wows-replay-insights = { workspace = true, optional = true, features = ["build"]
 wt-translations = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg"], optional = true }
 ab_glyph = { version = "0.2", optional = true }
-mp4 = { version = "0.14", optional = true }
-bytes = { version = "1", optional = true }
 clap = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 serde = { workspace = true }
@@ -76,15 +69,14 @@ tracing-subscriber = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 wows-data-mgr = { workspace = true, optional = true }
 
-# YUV conversion (shared by vulkan and videotoolbox backends)
 yuvutils-rs = { version = "0.8", optional = true }
 
-# CPU encoder (fallback)
 openh264 = { version = "0.9", features = ["source"], optional = true }
+rav1e = { version = "0.8.1", default-features = false, features = ["threading"], optional = true }
+muxide = { version = "0.2.5", optional = true }
 
-# Vulkan Video encoder (Linux/Windows only)
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-vk-video = { version = "0.3", optional = true }
+gpu-video = { version = "0.4.0", default-features = false, features = ["wgpu"], optional = true }
 wgpu = { version = "29", optional = true }
 
 # VideoToolbox encoder (macOS only)

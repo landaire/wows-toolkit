@@ -156,6 +156,9 @@ pub struct SavedRenderOptions {
     /// Prefer CPU (software) encoder for video export instead of GPU hardware encoder.
     #[serde(default)]
     pub prefer_cpu_encoder: bool,
+    /// Video codec preference. `None` means "best codec for the current backend".
+    #[serde(default)]
+    pub video_codec: Option<wows_minimap_renderer::VideoCodec>,
 }
 
 impl Default for SavedRenderOptions {
@@ -199,6 +202,7 @@ impl Default for SavedRenderOptions {
             show_stats_panel: true,
             show_team_rosters: false,
             prefer_cpu_encoder: false,
+            video_codec: None,
         }
     }
 }

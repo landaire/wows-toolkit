@@ -16,12 +16,20 @@ jobs:
           toolchain: 1.92.0
           targets: x86_64-pc-windows-msvc
 
+      - name: Install NASM
+        # rav1e's `asm` feature (default in cpu-av1) requires nasm. Avoid JS actions.
+        shell: pwsh
+        run: ./scripts/install-nasm-windows.ps1
+
       - name: Build release binary
         run: |
           cargo build --release --target x86_64-pc-windows-msvc -p wowsunpack
           cargo build --release --target x86_64-pc-windows-msvc -p wows-data-mgr
           cargo build --release --target x86_64-pc-windows-msvc -p replayshark
           cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer --features cpu
+          Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\minimap_renderer.exe `
+            -Destination ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\minimap_renderer_cpu.exe
+          cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer
 
       - name: Collect artifacts
         run: |
@@ -46,6 +54,10 @@ jobs:
         with:
           toolchain: 1.92.0
           targets: x86_64-unknown-linux-gnu
+
+      - name: Install NASM
+        # rav1e's `asm` feature (default in our cpu-av1 path) requires nasm.
+        run: sudo apt-get update && sudo apt-get install -y nasm
 
       - name: Build release binary
         run: |

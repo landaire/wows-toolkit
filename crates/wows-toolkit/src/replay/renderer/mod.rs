@@ -378,6 +378,7 @@ fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
         show_stats_panel: opts.show_stats_panel,
         show_team_rosters: opts.show_team_rosters,
         prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
+        video_codec: None,         // Same: caller persists the user's codec choice.
     }
 }
 /// Commands sent from the UI thread to the background playback thread.
@@ -399,6 +400,42 @@ pub struct PlaybackFrame {
     pub total_frames: usize,
     pub game_duration: f32,
 }
+/// Probe the encoder status at most once per session and cache the result in
+/// egui memory. `check_encoder()` enumerates Vulkan devices and is too
+/// expensive to call every frame from the settings popover.
+fn cached_encoder_status(ctx: &egui::Context) -> Arc<wows_minimap_renderer::encoder::EncoderStatus> {
+    let id = egui::Id::new("wt::encoder_status");
+    if let Some(cached) = ctx.data(|d| d.get_temp::<Arc<wows_minimap_renderer::encoder::EncoderStatus>>(id)) {
+        return cached;
+    }
+    let status = Arc::new(wows_minimap_renderer::check_encoder());
+    ctx.data_mut(|d| d.insert_temp(id, Arc::clone(&status)));
+    status
+}
+
+/// Resolve the effective `prefer_cpu` flag for a video export.
+///
+/// The GUI rule: if the user explicitly picked a codec the GPU can't encode
+/// (e.g. AV1, which gpu-video doesn't yet support), silently fall back to CPU
+/// instead of erroring. With `CodecChoice::Auto` we honor the user's CPU
+/// preference and otherwise let the encoder pick the best GPU codec.
+pub fn resolve_prefer_cpu(
+    user_prefers_cpu: bool,
+    codec_choice: Option<wows_minimap_renderer::VideoCodec>,
+    status: &wows_minimap_renderer::encoder::EncoderStatus,
+) -> bool {
+    if user_prefers_cpu {
+        return true;
+    }
+    if !status.gpu_available() {
+        return true;
+    }
+    match codec_choice {
+        Some(codec) => !status.supports(wows_minimap_renderer::EncoderKind::Gpu, codec),
+        None => false,
+    }
+}
+
 /// Player info snapshot captured from BattleController for the armor viewer.
 #[derive(Clone, Debug)]
 pub struct ReplayPlayerInfo {
@@ -622,9 +659,20 @@ pub struct SharedRendererState {
 /// What kind of video export action is pending behind the GPU warning dialog.
 enum PendingVideoExport {
     /// Save to a user-chosen file path.
-    SaveToFile { output_path: String, options: RenderOptions, prefer_cpu: bool, actual_game_duration: Option<f32> },
+    SaveToFile {
+        output_path: String,
+        options: RenderOptions,
+        prefer_cpu: bool,
+        codec: Option<wows_minimap_renderer::VideoCodec>,
+        actual_game_duration: Option<f32>,
+    },
     /// Render to a temporary file and copy to clipboard.
-    CopyToClipboard { options: RenderOptions, prefer_cpu: bool, actual_game_duration: Option<f32> },
+    CopyToClipboard {
+        options: RenderOptions,
+        prefer_cpu: bool,
+        codec: Option<wows_minimap_renderer::VideoCodec>,
+        actual_game_duration: Option<f32>,
+    },
 }
 
 /// State for the GPU encoder warning dialog.
@@ -666,6 +714,8 @@ pub struct ReplayRendererViewer {
     gpu_encoder_warning: Arc<Mutex<Option<GpuEncoderWarning>>>,
     /// User preference: prefer CPU (software) encoder for video export.
     prefer_cpu_encoder: Arc<AtomicBool>,
+    /// User preference: codec for video export. `None` means "best available".
+    video_codec: Arc<Mutex<Option<wows_minimap_renderer::VideoCodec>>>,
     /// Shared window settings tracker for persisting viewport geometry.
     window_settings: crate::tab_state::SharedWindowSettings,
     /// Notify handle to trigger an immediate settings save.
@@ -806,6 +856,7 @@ pub fn launch_replay_renderer(
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(saved_options.prefer_cpu_encoder)),
+        video_codec: Arc::new(Mutex::new(saved_options.video_codec)),
         window_settings,
         save_notify,
     };
@@ -978,6 +1029,7 @@ pub fn launch_client_renderer(
         suppress_gpu_warning,
         gpu_encoder_warning: Arc::new(Mutex::new(None)),
         prefer_cpu_encoder: Arc::new(AtomicBool::new(false)),
+        video_codec: Arc::new(Mutex::new(None)),
         window_settings,
         save_notify,
     }
@@ -1042,6 +1094,7 @@ impl ReplayRendererViewer {
         let suppress_gpu_warning = self.suppress_gpu_warning.clone();
         let gpu_encoder_warning = self.gpu_encoder_warning.clone();
         let prefer_cpu_encoder = self.prefer_cpu_encoder.clone();
+        let video_codec = self.video_codec.clone();
         let window_settings = self.window_settings.clone();
         let save_notify = self.save_notify.clone();
         let parent_ctx = ctx.clone();
@@ -2632,15 +2685,17 @@ impl ReplayRendererViewer {
                                                         .add_filter("MP4 Video", &["mp4"])
                                                         .save_file()
                                                     {
-                                                        let status = wows_minimap_renderer::check_encoder();
-                                                        let prefer_cpu = prefer_cpu_encoder.load(Ordering::Relaxed) || !status.gpu_available;
+                                                        let status = cached_encoder_status(&ctx);
+                                                        let codec_pref = *video_codec.lock();
+                                                        let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
                                                         let action = PendingVideoExport::SaveToFile {
                                                             output_path: path.to_string_lossy().to_string(),
                                                             options: opts,
                                                             prefer_cpu,
+                                                            codec: codec_pref,
                                                             actual_game_duration,
                                                         };
-                                                        if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                        if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                             execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                         } else {
                                                             *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
@@ -2673,9 +2728,10 @@ impl ReplayRendererViewer {
                                                         }));
                                                     }
                                                     let status = wows_minimap_renderer::check_encoder();
-                                                    let prefer_cpu = prefer_cpu_encoder.load(Ordering::Relaxed) || !status.gpu_available;
-                                                    let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, actual_game_duration };
-                                                    if prefer_cpu || status.gpu_available || suppress_gpu_warning.load(Ordering::Relaxed) {
+                                                    let codec_pref = *video_codec.lock();
+                                                    let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
+                                                    let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, codec: codec_pref, actual_game_duration };
+                                                    if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                         execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                     } else {
                                                         *gpu_encoder_warning.lock() = Some(GpuEncoderWarning {
@@ -2862,6 +2918,29 @@ impl ReplayRendererViewer {
                                                 if ui.checkbox(&mut cpu, t!("ui.renderer.settings.prefer_cpu")).on_hover_text(t!("ui.renderer.settings.prefer_cpu_tooltip")).changed() {
                                                     prefer_cpu_encoder.store(cpu, Ordering::Relaxed);
                                                 }
+                                                let status = cached_encoder_status(ui.ctx());
+                                                let default_codec = status.best_codec(cpu);
+                                                let mut current = *video_codec.lock();
+                                                ui.label(t!("ui.renderer.settings.codec"));
+                                                ui.indent("codec_choice", |ui| {
+                                                    let auto_label = format!(
+                                                        "{} ({})",
+                                                        t!("ui.renderer.settings.codec_auto"),
+                                                        default_codec.display_name(),
+                                                    );
+                                                    if ui.selectable_label(current.is_none(), auto_label).clicked() {
+                                                        current = None;
+                                                    }
+                                                    for codec in wows_minimap_renderer::VideoCodec::ALL {
+                                                        if !status.supported_codecs().any(|c| c == codec) {
+                                                            continue;
+                                                        }
+                                                        if ui.selectable_label(current == Some(codec), codec.display_name()).clicked() {
+                                                            current = Some(codec);
+                                                        }
+                                                    }
+                                                });
+                                                *video_codec.lock() = current;
                                             });
 
                                             if changed {
@@ -2887,6 +2966,7 @@ impl ReplayRendererViewer {
                                                 let mut saved = saved_from_render_options(&opts);
                                                 saved.show_dead_ships = show_dead;
                                                 saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
+                                                saved.video_codec = *video_codec.lock();
                                                 // Persist self range flags from annotation overrides
                                                 if let Some(self_eid) = self_entity_id {
                                                     let ann = annotation_arc.lock();

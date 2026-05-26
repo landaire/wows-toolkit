@@ -1,3 +1,11 @@
+[tasks.setup]
+description = "Ensure the local build environment is configured (currently: NASM for rav1e asm)."
+run = "python scripts/setup.py"
+
+[tasks.cargo]
+description = "Run cargo with NASM on PATH (locates it via PATH, .tooling/nasm, or 'C:\\Program Files\\NASM'). Use: 'mise run cargo -- build --release'."
+run = "python scripts/cargo-with-nasm.py {{arg(name=\"args\", var=true)}}"
+
 [tasks.fmt]
 description = "Runs rustfmt with unstable features"
 run = "cargo fmt -- --config unstable_features=true --config imports_granularity=Item --config imports_layout=Vertical"

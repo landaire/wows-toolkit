@@ -4722,7 +4722,13 @@ impl ToolkitTabViewer<'_> {
 
             let options =
                 crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
-            let prefer_cpu = self.tab_state.persisted.read().settings.renderer.prefer_cpu_encoder;
+            let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
+            let status = wows_minimap_renderer::check_encoder();
+            let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
+                renderer_settings.prefer_cpu_encoder,
+                renderer_settings.video_codec,
+                &status,
+            );
 
             let task = crate::replay::renderer::batch_render_to_folder(
                 output_dir,
@@ -4731,6 +4737,7 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
                 prefer_cpu,
+                renderer_settings.video_codec,
             );
             self.tab_state.background_tasks.push(task);
             return;
@@ -4749,7 +4756,13 @@ impl ToolkitTabViewer<'_> {
 
             let options =
                 crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
-            let prefer_cpu = self.tab_state.persisted.read().settings.renderer.prefer_cpu_encoder;
+            let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
+            let status = wows_minimap_renderer::check_encoder();
+            let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
+                renderer_settings.prefer_cpu_encoder,
+                renderer_settings.video_codec,
+                &status,
+            );
 
             let task = crate::replay::renderer::batch_render_to_clipboard(
                 batch_infos,
@@ -4757,6 +4770,7 @@ impl ToolkitTabViewer<'_> {
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
                 prefer_cpu,
+                renderer_settings.video_codec,
             );
             self.tab_state.background_tasks.push(task);
         }
