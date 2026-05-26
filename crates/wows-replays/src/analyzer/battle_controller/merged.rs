@@ -465,6 +465,11 @@ pub fn capture_vehicle_facts<G: ResourceLoader>(
 /// Also folds in `maxHealth` from any later `EntityProperty(maxHealth)`
 /// update, since some ships only broadcast it on first damage.
 ///
+/// Also seeds `max_health` + `vehicle_id` from `onArenaStateReceived` for
+/// ships the active perspective never detects (the corresponding
+/// `EntityCreate` never arrives but `onArenaStateReceived` lists every
+/// participant with their max HP and ship params id).
+///
 /// Bypasses `BattleController` to avoid timing artifacts in the lifecycle
 /// (e.g. Cell/Base props arriving before the entity is constructed). The
 /// trade-off is that we don't get controller-derived state like resolved
@@ -481,6 +486,12 @@ pub fn gather_replay_facts(
     for (replay_idx, replay) in replays.iter().enumerate() {
         let before = combined.len();
         let mut parser = Parser::with_build(specs, version.build);
+        let decoder = PacketDecoder::builder()
+            .version(version)
+            .battle_constants(constants.battle())
+            .common_constants(constants.common())
+            .ships_constants(constants.ships())
+            .build();
         let mut remaining = &replay.packet_data[..];
         while !remaining.is_empty() {
             let Ok(packet) = parser.parse_packet(&mut remaining) else { break };
@@ -502,6 +513,31 @@ pub fn gather_replay_facts(
                         continue;
                     }
                     fold_props_into(&mut combined, base.entity_id, &base.props, version, constants);
+                }
+                PacketType::EntityMethod(em) if em.method == "onArenaStateReceived" => {
+                    let decoded = decoder.decode(&packet);
+                    if let DecodedPacketPayload::OnArenaStateReceived { player_states, bot_states, .. } =
+                        decoded.payload
+                    {
+                        for player in player_states.iter().chain(bot_states.iter()) {
+                            let entity_id = player.entity_id();
+                            let entry = combined.entry(entity_id).or_insert_with(|| VehicleFacts {
+                                vehicle_id: GameParamId::default(),
+                                max_health: 0.0,
+                                ship_config: ShipConfig::default(),
+                                crew: CrewModifiersCompactParams::default(),
+                            });
+                            if entry.max_health == 0.0 && player.max_health() > 0 {
+                                entry.max_health = player.max_health() as f32;
+                            }
+                            if entry.vehicle_id.raw() == 0
+                                && let Some(spid) = player.ship_params_id()
+                                && spid.raw() != 0
+                            {
+                                entry.vehicle_id = spid;
+                            }
+                        }
+                    }
                 }
                 PacketType::EntityProperty(ep) => {
                     // Fold any single-property update that carries one of the

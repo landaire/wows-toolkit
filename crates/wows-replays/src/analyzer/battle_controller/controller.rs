@@ -957,6 +957,60 @@ where
         self.handle_entity_create_with_clock(clock, packet);
     }
 
+    /// Pre-create Vehicle entities for every participant listed in
+    /// `onArenaStateReceived`. This guarantees the controller has a Vehicle for
+    /// each ship even if the active perspective never sees its `EntityCreate`
+    /// (i.e. enemies that stay outside detection all match). The seed routes
+    /// the player-state fields through `VehicleProps::update_from_args` using
+    /// the EntityCreate naming, so any field VehicleProps already knows how to
+    /// parse (maxHealth, shipConfig, teamId, isAlive, isBot) lands without
+    /// duplicating the parsing logic. `EntityCreate` later overwrites the
+    /// entity with full ground truth when (or if) the ship is actually spotted.
+    ///
+    /// `crewParams` from arena state is a different shape than the EntityCreate
+    /// `crewModifiersCompactParams` struct and is not translated here.
+    fn seed_vehicles_from_arena_state<'a>(
+        &mut self,
+        players: impl Iterator<Item = &'a crate::analyzer::decoder::PlayerStateData>,
+    ) {
+        let version = self.version;
+        let constants = self.constants().clone();
+        for player in players {
+            let entity_id = player.entity_id();
+            if self.entities_by_id.contains_key(&entity_id) {
+                continue;
+            }
+
+            let args = arena_state_to_entity_create_args(player);
+            let mut props = VehicleProps::default();
+            props.update_from_args(&args, version, &constants);
+            // Health isn't broadcast in arena state; seed from max so the HP
+            // bar shows full instead of 0 until EntityProperty(health) lands.
+            if props.health == 0.0 && props.max_health > 0.0 {
+                props.health = props.max_health;
+            }
+
+            let captain_id = props.crew_modifiers_compact_params.params_id;
+            let captain = if captain_id.raw() != 0 {
+                self.game_resources.game_param_by_id(captain_id)
+            } else {
+                None
+            };
+
+            let vehicle = Rc::new(RefCell::new(VehicleEntity {
+                id: entity_id,
+                props,
+                visibility_changed_at: 0.0,
+                captain,
+                damage: 0.0,
+                death_info: None,
+                results_info: None,
+                frags: Vec::default(),
+            }));
+            self.entities_by_id.insert(entity_id, Entity::Vehicle(vehicle));
+        }
+    }
+
     pub fn game_chat(&self) -> &[GameMessage] {
         self.game_chat.as_slice()
     }
@@ -2976,6 +3030,8 @@ where
 
                     self.player_entities.insert(battle_player.initial_state.entity_id(), battle_player);
                 }
+
+                self.seed_vehicles_from_arena_state(players.iter().chain(bots.iter()));
             }
             crate::analyzer::decoder::DecodedPacketPayload::NewPlayerSpawnedInBattle {
                 player_states: players,
@@ -3492,6 +3548,29 @@ where
 
 /// Pick the inventory slot to charge for a `Consumable` activation event.
 ///
+/// Translate the subset of `onArenaStateReceived` player-state fields that
+/// have a 1:1 mapping to EntityCreate Vehicle props into an `ArgValue` map
+/// `VehicleProps::update_from_args` can consume directly.
+///
+/// Renames `shipConfigDump` to `shipConfig` (same bytes, different key on the
+/// wire) and otherwise reuses the EntityCreate names. `crewParams` is shaped
+/// differently from `crewModifiersCompactParams` and is intentionally skipped.
+fn arena_state_to_entity_create_args(
+    player: &crate::analyzer::decoder::PlayerStateData,
+) -> HashMap<&'static str, ArgValue<'static>> {
+    let mut args: HashMap<&'static str, ArgValue<'static>> = HashMap::new();
+    if player.max_health() > 0 {
+        args.insert("maxHealth", ArgValue::Float32(player.max_health() as f32));
+    }
+    if let Some(blob) = player.ship_config_dump() {
+        args.insert("shipConfig", ArgValue::Blob(blob));
+    }
+    args.insert("teamId", ArgValue::Int8(player.team_id() as i8));
+    args.insert("isAlive", ArgValue::Uint8(if player.is_alive() { 1 } else { 0 }));
+    args.insert("isBot", ArgValue::Uint8(if player.is_bot() { 1 } else { 0 }));
+    args
+}
+
 /// Matches on the typed `Consumable` enum and falls back to the first slot
 /// with charges remaining when several slots carry the same type (rare:
 /// only certain CV setups have duplicate consumable types).

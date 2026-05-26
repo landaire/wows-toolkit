@@ -565,6 +565,10 @@ impl PlayerStateData {
         self.is_abuser
     }
 
+    pub fn is_alive(&self) -> bool {
+        self.raw_with_names.get(Self::KEY_IS_ALIVE).and_then(|v| v.as_bool()).unwrap_or(true)
+    }
+
     pub fn is_hidden(&self) -> bool {
         self.is_hidden
     }
@@ -591,6 +595,17 @@ impl PlayerStateData {
             .get(Self::KEY_SHIP_PARAMS_ID)
             .and_then(|v| v.as_u64())
             .map(|id| GameParamId::from(id as u32))
+    }
+
+    /// Encoded ship configuration blob (modules, upgrades, signals, etc.).
+    /// Same format as the `shipConfig` arg on a Vehicle `EntityCreate` packet,
+    /// so `wowsunpack::data::ship_config::parse_ship_config` accepts it directly.
+    /// Lets callers reconstruct a ship's build for players never seen via
+    /// `EntityCreate` (i.e. enemies that stay outside detection all match).
+    pub fn ship_config_dump(&self) -> Option<Vec<u8>> {
+        self.raw_with_names.get(Self::KEY_SHIP_CONFIG_DUMP).and_then(|v| {
+            v.as_array().map(|arr| arr.iter().filter_map(|n| n.as_u64().map(|u| u as u8)).collect())
+        })
     }
 
     pub fn raw(&self) -> &HashMap<i64, String> {
