@@ -472,6 +472,99 @@ pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
     Ok(())
 }
 
+/// Remove content-addressed objects no longer referenced by any build present
+/// on disk. Scans every directory under `output_base` that contains a
+/// `metadata.toml`, so it stays correct even when `builds.toml` is out of sync
+/// (e.g. a build directory was deleted manually without GC). Aborts without
+/// removing anything if any metadata file cannot be read, so in-use objects are
+/// never deleted. Returns the number of objects removed.
+pub fn gc_unreferenced(output_base: &Path) -> Result<usize, Report> {
+    let cas_root = output_base.join("vfs_common");
+    if !cas_root.exists() {
+        return Ok(0);
+    }
+
+    let mut live = std::collections::HashSet::new();
+    for entry in std::fs::read_dir(output_base)
+        .attach_with(|| format!("Failed to read {}", output_base.display()))?
+        .flatten()
+    {
+        let meta_path = entry.path().join("metadata.toml");
+        if !meta_path.exists() {
+            continue;
+        }
+        match BuildMetadata::load(&meta_path) {
+            Some(meta) => live.extend(meta.referenced_hashes()),
+            None => bail!("unreadable metadata at {}; aborting GC", meta_path.display()),
+        }
+    }
+
+    cas::gc(&cas_root, &live)
+}
+
+/// Migrate any pre-CAS dumps in `output_base` into content-addressed storage.
+///
+/// Older dumps stored the extracted `vfs/` tree as plain files with no entries
+/// in `metadata.files`. This rehashes those files into `vfs_common/`, replaces
+/// them with symlinks, records the hashes, and regenerates derived artifacts so
+/// the dump deduplicates against every other build. Returns the number of
+/// builds migrated. Builds already in CAS format are left untouched.
+pub fn migrate_to_cas(output_base: &Path) -> Result<usize, Report> {
+    let cas_root = output_base.join("vfs_common");
+    let mut migrated = 0;
+    for entry in std::fs::read_dir(output_base)
+        .attach_with(|| format!("Failed to read {}", output_base.display()))?
+        .flatten()
+    {
+        let build_dir = entry.path();
+        let meta_path = build_dir.join("metadata.toml");
+        let Some(mut metadata) = BuildMetadata::load(&meta_path) else {
+            continue;
+        };
+        if metadata.has_file_hashes() || !build_dir.join("vfs").exists() {
+            continue;
+        }
+        match migrate_build_to_cas(&build_dir, &cas_root, &mut metadata) {
+            Ok(()) => {
+                metadata.save(&meta_path)?;
+                migrated += 1;
+            }
+            Err(e) => tracing::warn!("failed to migrate {} to CAS: {e}", build_dir.display()),
+        }
+    }
+    Ok(migrated)
+}
+
+/// Rehash a single pre-CAS build's `vfs/` tree into the CAS, replacing each
+/// plain file with a symlink and recording its hash in `metadata.files`.
+fn migrate_build_to_cas(build_dir: &Path, cas_root: &Path, metadata: &mut BuildMetadata) -> Result<(), Report> {
+    let vfs_dir = build_dir.join("vfs");
+    let mut stack = vec![vfs_dir.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in
+            std::fs::read_dir(&dir).attach_with(|| format!("Failed to read {}", dir.display()))?.flatten()
+        {
+            let path = entry.path();
+            let file_type = entry.file_type().attach_with(|| format!("Failed to stat {}", path.display()))?;
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            // Symlinks are already-migrated CAS references; leave them alone.
+            if file_type.is_symlink() {
+                continue;
+            }
+            let rel = path.strip_prefix(&vfs_dir).expect("walked path is under vfs_dir").to_string_lossy().replace('\\', "/");
+            let data = std::fs::read(&path).attach_with(|| format!("Failed to read {}", path.display()))?;
+            let hash = cas::store(cas_root, &data)?;
+            std::fs::remove_file(&path).attach_with(|| format!("Failed to remove {}", path.display()))?;
+            cas::link_file(cas_root, &hash, &path)?;
+            metadata.files.insert(rel, hash);
+        }
+    }
+    refresh_build_derived(build_dir, cas_root, metadata)
+}
+
 fn extract_vfs_dir_cas(
     vfs: &VfsPath,
     vfs_path: &str,
@@ -620,4 +713,76 @@ fn count_map_files(vfs: &VfsPath, parent_dir: &str, filenames: &[&str]) -> u64 {
         }
     }
     count
+}
+
+#[cfg(test)]
+mod maintenance_tests {
+    use super::*;
+
+    fn write_build_metadata(build_dir: &Path, version: &str, build: u32, files: &[(&str, &str)]) {
+        std::fs::create_dir_all(build_dir).unwrap();
+        let mut meta = BuildMetadata { version: version.to_string(), build, ..Default::default() };
+        for (rel, hash) in files {
+            meta.files.insert((*rel).to_string(), (*hash).to_string());
+        }
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+    }
+
+    #[test]
+    fn gc_unreferenced_removes_orphans_and_keeps_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join("vfs_common");
+
+        let live_hash = cas::store(&cas_root, b"live object").unwrap();
+        let orphan_hash = cas::store(&cas_root, b"orphan object").unwrap();
+        write_build_metadata(&base.join("1.0.0_100"), "1.0.0", 100, &[("gui/a.png", &live_hash)]);
+
+        let removed = gc_unreferenced(base).unwrap();
+        assert_eq!(removed, 1);
+        assert!(cas::object_exists(&cas_root, &live_hash));
+        assert!(!cas::object_exists(&cas_root, &orphan_hash));
+    }
+
+    #[test]
+    fn gc_unreferenced_aborts_on_unreadable_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join("vfs_common");
+        let orphan_hash = cas::store(&cas_root, b"orphan object").unwrap();
+
+        let build_dir = base.join("1.0.0_100");
+        std::fs::create_dir_all(&build_dir).unwrap();
+        std::fs::write(build_dir.join("metadata.toml"), b"this is not valid toml = =").unwrap();
+
+        assert!(gc_unreferenced(base).is_err());
+        // Nothing was removed because GC aborted.
+        assert!(cas::object_exists(&cas_root, &orphan_hash));
+    }
+
+    #[test]
+    fn migrate_to_cas_dedups_plain_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let build_dir = base.join("1.0.0_100");
+
+        // Old-format dump: plain files in vfs/, no file hashes in metadata.
+        write_build_metadata(&build_dir, "1.0.0", 100, &[]);
+        let file_path = build_dir.join("vfs/gui/a.png");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, b"some asset bytes").unwrap();
+
+        let migrated = migrate_to_cas(base).unwrap();
+        assert_eq!(migrated, 1);
+
+        // The plain file is now a symlink whose content still reads back.
+        assert!(std::fs::symlink_metadata(&file_path).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&file_path).unwrap(), b"some asset bytes");
+
+        // Metadata now records the hash, and a second pass is a no-op.
+        let meta = BuildMetadata::load(&build_dir.join("metadata.toml")).unwrap();
+        assert!(meta.has_file_hashes());
+        assert!(meta.files.contains_key("gui/a.png"));
+        assert_eq!(migrate_to_cas(base).unwrap(), 0);
+    }
 }

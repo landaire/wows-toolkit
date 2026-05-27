@@ -26,6 +26,8 @@ pub mod builds;
 pub mod cas;
 #[cfg(feature = "constants")]
 pub mod constants;
+#[cfg(feature = "download")]
+pub mod download_repo;
 pub mod dump;
 pub mod manifest;
 pub mod registry;

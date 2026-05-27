@@ -33,6 +33,11 @@ pub fn cas_path(cas_root: &Path, hash: &str) -> PathBuf {
     cas_root.join(&hash[..2]).join(&hash[2..])
 }
 
+/// Whether a content object with the given hash is already stored.
+pub fn object_exists(cas_root: &Path, hash: &str) -> bool {
+    cas_path(cas_root, hash).exists()
+}
+
 /// Store data into the CAS. Returns the hash.
 /// Idempotent: skips writing if the hash file already exists.
 pub fn store(cas_root: &Path, data: &[u8]) -> Result<String, rootcause::Report> {

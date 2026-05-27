@@ -1858,6 +1858,7 @@ impl ToolkitTabViewer<'_> {
                                                             crate::util::error::ToolkitError::ReplayBuildUnavailable {
                                                                 build,
                                                                 version: format!("{}", build),
+                                                                replay_path: None,
                                                             }
                                                             .into();
                                                         let _ = tx.send(Err(report

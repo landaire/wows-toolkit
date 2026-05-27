@@ -25,7 +25,7 @@ pub enum ToolkitError {
     #[error(
         "Game data for replay build {build} (version {version}) is not available. The game installation does not contain this build."
     )]
-    ReplayBuildUnavailable { build: u32, version: String },
+    ReplayBuildUnavailable { build: u32, version: String, replay_path: Option<PathBuf> },
 
     #[error("Background task completed")]
     BackgroundTaskCompleted,

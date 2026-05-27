@@ -10900,6 +10900,7 @@ dependencies = [
  "indicatif 0.18.4",
  "jiff",
  "octocrab",
+ "reqwest",
  "rkyv",
  "rootcause",
  "ruzstd",

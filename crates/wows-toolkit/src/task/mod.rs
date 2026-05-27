@@ -1,3 +1,4 @@
+pub mod game_data_download;
 pub mod networking;
 pub mod replays;
 
@@ -48,6 +49,7 @@ pub use networking::load_versioned_constants_from_disk_with_fallback;
 pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
+pub use game_data_download::start_game_data_download_task;
 pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
@@ -113,6 +115,10 @@ pub enum BackgroundTaskKind {
     },
     PopulatePlayerInspectorFromReplays,
     LoadingPersonalRatingData,
+    DownloadingGameData {
+        rx: mpsc::Receiver<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(ToastMessage),
@@ -202,6 +208,25 @@ impl BackgroundTask {
                         ui.spinner();
                         ui.label("Populating player inspector from historical replays...");
                     }
+                    BackgroundTaskKind::DownloadingGameData { rx, last_progress } => {
+                        match rx.try_recv() {
+                            Ok(progress) => *last_progress = Some(progress),
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {}
+                        }
+                        match last_progress {
+                            Some(progress) if progress.total > 0 => {
+                                ui.add(
+                                    egui::ProgressBar::new(progress.downloaded as f32 / progress.total as f32)
+                                        .text(t!("ui.messages.downloading_game_data")),
+                                );
+                            }
+                            _ => {
+                                ui.spinner();
+                                ui.label(t!("ui.messages.downloading_game_data"));
+                            }
+                        }
+                    }
                     #[cfg(feature = "mod_manager")]
                     BackgroundTaskKind::ModTask(mod_task) => match mod_task.as_mut() {
                         crate::mod_manager::ModTaskInfo::LoadingModDatabase => {
@@ -289,6 +314,10 @@ pub enum BackgroundTaskCompletion {
     BuildDataLoaded {
         build: u32,
     },
+    GameDataDownloaded {
+        requested_build: u32,
+        build: u32,
+    },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
         source: ReplaySource,
@@ -320,6 +349,11 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("available_builds", available_builds)
                 .finish(),
             Self::BuildDataLoaded { build } => f.debug_struct("BuildDataLoaded").field("build", build).finish(),
+            Self::GameDataDownloaded { requested_build, build } => f
+                .debug_struct("GameDataDownloaded")
+                .field("requested_build", requested_build)
+                .field("build", build)
+                .finish(),
             Self::ReplayLoaded { replay: _, source } => {
                 f.debug_struct("ReplayLoaded").field("replay", &"<...>").field("source", source).finish()
             }

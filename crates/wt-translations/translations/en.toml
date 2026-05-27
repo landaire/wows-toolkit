@@ -59,6 +59,7 @@ crash_detected = "Application Crash Detected"
 update_available = "Update Available"
 confirm = "Confirm"
 network_warning = "Network Warning"
+download_game_data = "Download Game Data"
 error = "Error"
 about = "About"
 
@@ -71,6 +72,7 @@ crash_clear_settings = "If for some reason data that the application persists ma
 update_message = "Version %{tag} of WoWs Toolkit is available"
 update_windows_only = "Update available, but only Windows is supported at this time."
 p2p_warning = "Collaborative sessions use peer-to-peer networking. Other users in the session may be able to see your IP address."
+download_game_data_message = "Game data for build %{build} (version %{version}) is not available locally. Would you like to check if it can be downloaded?"
 
 # -- Labels --
 
@@ -94,6 +96,9 @@ constants_fetch_failed = "Failed to fetch updated replay data mapping. Will retr
 game_data_loaded = "Successfully loaded game data"
 no_replays_detected = "No replays detected — is your WoWs directory properly configured?"
 build_loaded = "Loaded build %{build}"
+downloading_game_data = "Downloading game data..."
+game_data_downloaded = "Downloaded game data for build %{build}"
+game_data_download_failed = "Could not download game data"
 replay_loaded = "Successfully loaded replay"
 twitch_token_invalid = "Twitch token is invalid or expired. Please update it in Settings."
 twitch_token_expired = "Twitch token is invalid or expired"

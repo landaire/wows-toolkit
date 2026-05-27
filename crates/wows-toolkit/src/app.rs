@@ -229,6 +229,25 @@ pub struct WowsToolkitApp {
     /// Flushed to disk once we know the build number (in `DataLoaded`).
     #[serde(skip)]
     pending_constants_data: Option<Vec<u8>>,
+
+    /// Prompt asking whether to download game data for a build the user opened
+    /// a replay for but does not have locally.
+    #[serde(skip)]
+    download_prompt: Option<GameDataDownloadPrompt>,
+
+    /// Replay to reopen automatically once a triggered game data download
+    /// finishes.
+    #[serde(skip)]
+    pending_replay_retry: Option<PathBuf>,
+}
+
+/// Details of a pending offer to download missing game data.
+struct GameDataDownloadPrompt {
+    build: u32,
+    /// The replay's `major.minor.patch` version, used as a fallback hint when no
+    /// exact build match is published.
+    version: String,
+    replay_path: Option<PathBuf>,
 }
 
 impl Default for WowsToolkitApp {
@@ -262,6 +281,8 @@ impl Default for WowsToolkitApp {
             db_pool: None,
             shutdown_tx: None,
             save_task_handle: None,
+            download_prompt: None,
+            pending_replay_retry: None,
             pending_constants_data: None,
         }
     }
@@ -589,6 +610,30 @@ impl WowsToolkitApp {
         #[cfg(feature = "mod_manager")]
         update_background_task!(self.tab_state.background_tasks, Some(crate::mod_manager::load_mods_db()));
 
+        // Migrate any pre-dedup game data caches and garbage-collect orphaned
+        // content objects (e.g. left behind when a build directory was deleted
+        // by hand). Runs off the UI thread so startup is never blocked.
+        {
+            let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+            if let Some(dump_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) {
+                crate::util::thread::spawn_logged("game-data-cache-maintenance", move || {
+                    if !dump_base.exists() {
+                        return;
+                    }
+                    match wows_data_mgr::dump::migrate_to_cas(&dump_base) {
+                        Ok(n) if n > 0 => tracing::info!("migrated {n} cached build(s) to deduplicated storage"),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("game data cache migration failed: {e}"),
+                    }
+                    match wows_data_mgr::dump::gc_unreferenced(&dump_base) {
+                        Ok(n) if n > 0 => tracing::info!("removed {n} orphaned game data object(s)"),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("game data cache GC skipped: {e}"),
+                    }
+                });
+            }
+        }
+
         // Load PR expected values from disk if available
         let pr_path = crate::util::personal_rating::get_expected_values_path();
         if pr_path.exists() {
@@ -726,6 +771,7 @@ impl WowsToolkitApp {
                                 self.tab_state.file_viewer.lock().push(plaintext_file_viewer.clone());
                             }
                             BackgroundTaskKind::BatchVideoExport { .. } => {}
+                            BackgroundTaskKind::DownloadingGameData { .. } => {}
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1008,6 +1054,22 @@ impl WowsToolkitApp {
                     self.tab_state.browser_state.reset_filters();
                     self.tab_state.toasts.lock().success(t!("ui.messages.build_loaded", build = build));
                 }
+                BackgroundTaskCompletion::GameDataDownloaded { requested_build, build } => {
+                    self.tab_state.toasts.lock().success(t!("ui.messages.game_data_downloaded", build = build));
+
+                    // Reopen the replay that triggered the download, now that its
+                    // data is available.
+                    if let Some(path) = self.pending_replay_retry.take()
+                        && let Some(deps) = self.tab_state.replay_dependencies()
+                    {
+                        update_background_task!(
+                            self.tab_state.background_tasks,
+                            deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
+                        );
+                    } else if requested_build != build {
+                        debug!("downloaded build {build} as a fallback for requested build {requested_build}");
+                    }
+                }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
                     use crate::task::ReplaySource;
 
@@ -1102,13 +1164,26 @@ impl WowsToolkitApp {
             Err(e) => {
                 error!("Background task error: {e:?}");
 
-                if e.downcast_current_context::<ToolkitError>()
-                    .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
+                if let Some(ToolkitError::ReplayBuildUnavailable { build, version, replay_path }) =
+                    e.downcast_current_context::<ToolkitError>()
                 {
-                    self.tab_state.settings_needs_attention = true;
-                }
+                    // Offer to download the missing data unless a prompt is already open.
+                    if self.download_prompt.is_none() {
+                        self.download_prompt = Some(GameDataDownloadPrompt {
+                            build: *build,
+                            version: version.clone(),
+                            replay_path: replay_path.clone(),
+                        });
+                    }
+                } else {
+                    if e.downcast_current_context::<ToolkitError>()
+                        .is_some_and(|e| matches!(e, ToolkitError::InvalidWowsDirectory(_)))
+                    {
+                        self.tab_state.settings_needs_attention = true;
+                    }
 
-                self.tab_state.toasts.lock().error(format!("{e}"));
+                    self.tab_state.toasts.lock().error(format!("{e}"));
+                }
             }
         }
     }
@@ -1792,6 +1867,40 @@ impl WowsToolkitApp {
             });
         }
 
+        if let Some(prompt) = &self.download_prompt {
+            let mut start_download = false;
+            let mut dismiss = false;
+            egui::Window::new(t!("ui.windows.download_game_data"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(t!(
+                        "ui.dialogs.download_game_data_message",
+                        build = prompt.build,
+                        version = &prompt.version
+                    ));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(t!("ui.buttons.yes")).clicked() {
+                            start_download = true;
+                        }
+                        if ui.button(t!("ui.buttons.no")).clicked() {
+                            dismiss = true;
+                        }
+                    });
+                });
+
+            if start_download {
+                if let Some(prompt) = self.download_prompt.take() {
+                    self.start_game_data_download(prompt);
+                }
+            } else if dismiss {
+                self.download_prompt = None;
+                self.pending_replay_retry = None;
+            }
+        }
+
         if self.language_selection_open {
             let detected_locale =
                 self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".into());
@@ -2139,6 +2248,44 @@ impl WowsToolkitApp {
         self.show_error_window = true;
         let formatted = err.format_with(&DefaultReportFormatter::ASCII);
         self.error_to_show = Some(format!("{formatted}"));
+    }
+
+    /// Start downloading missing game data for the build in `prompt`. The data
+    /// is checked against the remote repository and, if published, fetched into
+    /// the local cache directory.
+    fn start_game_data_download(&mut self, prompt: GameDataDownloadPrompt) {
+        let cache_dir = self.tab_state.persisted.read().settings.game.game_data_cache_dir.clone();
+        let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
+            self.tab_state.toasts.lock().error(t!("ui.messages.game_data_download_failed"));
+            return;
+        };
+
+        // Fetch the user's locale, its primary language, and English so the
+        // downloaded build can render names in the active language.
+        let locale =
+            self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".to_string());
+        let primary = locale
+            .replace('_', "-")
+            .parse::<language_tags::LanguageTag>()
+            .map(|tag| tag.primary_language().to_string())
+            .unwrap_or_else(|_| locale.clone());
+        let mut locales = vec![locale];
+        for extra in [primary, "en".to_string()] {
+            if !locales.contains(&extra) {
+                locales.push(extra);
+            }
+        }
+
+        self.pending_replay_retry = prompt.replay_path;
+        update_background_task!(
+            self.tab_state.background_tasks,
+            Some(crate::task::start_game_data_download_task(
+                output_base,
+                prompt.build,
+                Some(prompt.version),
+                locales,
+            ))
+        );
     }
 
     fn pick_up_confirmation_request(&mut self, ctx: &egui::Context) {
