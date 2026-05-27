@@ -93,11 +93,12 @@ default in the CLI binary).
 | Default build, no NASM | `--no-default-features --features bin,vulkan,videotoolbox,cpu,cpu-av1,arc` |
 | Skip AV1 entirely | `--no-default-features --features bin,vulkan,videotoolbox,cpu,arc` |
 
-If you used `mise run setup` to install NASM into the project-local
-`.tooling/` directory, run cargo through the bundled wrapper so it picks the
-right `nasm.exe` up automatically: `mise run cargo -- build --release`. The
-wrapper also finds the winget install location (`C:\Program Files\NASM`)
-without you needing to fix your PATH.
+`mise.toml` adds the project-local `.tooling/nasm` directory and the winget
+default install location (`C:\Program Files\NASM`) to `PATH` via mise's
+`[env]._.path` block, so plain `cargo build` works inside any shell with
+`mise activate` (and inside `mise exec -- ...`) without needing to fix
+your system PATH. rust-analyzer and other IDE integrations pick this up
+automatically when launched from a mise-activated shell.
 
 Installing NASM:
 

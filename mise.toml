@@ -1,10 +1,14 @@
+[env]
+# Make NASM discoverable to rav1e's build.rs without forcing contributors to
+# fix their system PATH. Covers both the project-local install dropped by
+# `mise run setup` and the winget default install location. Nonexistent
+# entries (e.g. the Windows path on Linux/macOS) are ignored. Active in any
+# shell with `mise activate`, and via `mise exec -- <cmd>`.
+_.path = [".tooling/nasm", "C:/Program Files/NASM"]
+
 [tasks.setup]
 description = "Ensure the local build environment is configured (currently: NASM for rav1e asm)."
 run = "python scripts/setup.py"
-
-[tasks.cargo]
-description = "Run cargo with NASM on PATH (locates it via PATH, .tooling/nasm, or 'C:\\Program Files\\NASM'). Use: 'mise run cargo -- build --release'."
-run = "python scripts/cargo-with-nasm.py {{arg(name=\"args\", var=true)}}"
 
 [tasks.fmt]
 description = "Runs rustfmt with unstable features"
