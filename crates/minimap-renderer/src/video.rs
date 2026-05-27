@@ -52,18 +52,15 @@ pub fn check_encoder() -> crate::encoder::EncoderStatus {
 
 /// Codec selection passed to `VideoEncoder`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CodecChoice {
     /// Pick the best codec for the prevailing mode at init time.
+    #[default]
     Auto,
     /// Use the named codec.
     Explicit(VideoCodec),
 }
 
-impl Default for CodecChoice {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
 
 /// Stored encoded output per frame, with metadata muxide needs.
 struct EncodedSample {

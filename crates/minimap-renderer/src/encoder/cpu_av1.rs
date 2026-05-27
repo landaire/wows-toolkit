@@ -38,7 +38,7 @@ pub struct CpuAv1Encoder {
 
 impl CpuAv1Encoder {
     pub fn new(width: u32, height: u32) -> rootcause::Result<Self, VideoError> {
-        if width % 2 != 0 || height % 2 != 0 {
+        if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             return Err(report!(VideoError::EncoderInit(format!(
                 "AV1 requires even dimensions; got {width}x{height}"
             ))));
