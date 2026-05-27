@@ -402,6 +402,7 @@ fn main() -> Result<(), Report> {
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_params, replay_version, options);
     renderer.set_fonts(game_fonts);
     renderer.set_flag_icons(flag_icons);
+    renderer.set_merged_perspectives(!merge_replays.is_empty());
     renderer.set_vehicle_facts(vehicle_facts.clone());
     renderer.set_damage_events(damage_events);
     if let Some(sil) = self_silhouette {

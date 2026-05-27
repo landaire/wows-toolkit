@@ -211,6 +211,7 @@ pub(super) fn playback_thread(
     // and the renderer.
     let mut renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, RenderOptions::default());
     renderer.set_fonts(game_fonts.clone());
+    renderer.set_merged_perspectives(!alt_replay_files.is_empty());
     if let Some(ref sil) = self_silhouette {
         renderer.set_self_silhouette(sil.clone());
         // Store raw silhouette for the UI thread to convert to an egui TextureHandle
@@ -439,6 +440,7 @@ pub(super) fn playback_thread(
     let initial_opts = shared_state.lock().options.clone();
     let mut live_renderer = MinimapRenderer::new(map_info.clone(), &game_metadata, version, initial_opts);
     live_renderer.set_fonts(game_fonts.clone());
+    live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
     live_renderer.set_vehicle_facts(vehicle_facts.clone());
     live_renderer.set_damage_events(damage_events.clone());
     if let Some(ref sil) = self_silhouette {
@@ -796,6 +798,7 @@ pub(super) fn playback_thread(
             let current_opts = shared_state.lock().options.clone();
             live_renderer = MinimapRenderer::new(map_info.clone(), &*game_metadata, version, current_opts);
             live_renderer.set_fonts(game_fonts.clone());
+            live_renderer.set_merged_perspectives(!live_alt_files.is_empty());
             live_renderer.set_vehicle_facts(vehicle_facts.clone());
             live_renderer.set_damage_events(damage_events.clone());
             if let Some(ref sil) = self_silhouette {

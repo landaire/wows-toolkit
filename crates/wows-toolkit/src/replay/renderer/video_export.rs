@@ -506,6 +506,7 @@ pub(super) fn render_video_blocking(
 
     let mut renderer = MinimapRenderer::new(map_info, &game_metadata, version, options.clone());
     renderer.set_fonts(game_fonts.clone());
+    renderer.set_merged_perspectives(!alt_replay_files.is_empty());
     renderer.set_vehicle_facts(vehicle_facts.clone());
     renderer.set_damage_events(damage_events);
     if let Some(ref sil) = self_silhouette {

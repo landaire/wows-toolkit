@@ -209,6 +209,14 @@ pub struct MinimapRenderer<'a> {
     /// roster show damage dealt by teammates against enemies that the
     /// primary perspective never spotted. Empty until populated.
     damage_events: HashMap<EntityId, Vec<wows_replays::analyzer::battle_controller::DamageEvent>>,
+
+    /// True when this renderer is driving a session with one or more alt
+    /// perspectives merged in. Enables the spotted outline on enemy icons,
+    /// which conveys real information only when enemy positions are visible
+    /// even before the primary spots them. In single-replay mode the enemy
+    /// icon's mere presence already implies detection, so the outline is
+    /// suppressed to avoid visual noise.
+    has_merged_perspectives: bool,
 }
 
 impl<'a> MinimapRenderer<'a> {
@@ -244,7 +252,15 @@ impl<'a> MinimapRenderer<'a> {
             self_entity_id: None,
             vehicle_facts: HashMap::new(),
             damage_events: HashMap::new(),
+            has_merged_perspectives: false,
         }
+    }
+
+    /// Mark whether this renderer is driving a merged session (primary plus
+    /// one or more alt perspectives). Call before the first frame; affects
+    /// whether enemy ship icons get the spotted outline.
+    pub fn set_merged_perspectives(&mut self, has_alts: bool) {
+        self.has_merged_perspectives = has_alts;
     }
 
     /// Set the ship silhouette image for the self player's stats panel.
@@ -1190,12 +1206,15 @@ impl<'a> MinimapRenderer<'a> {
             let world_yaw = world.map(|sp| sp.yaw);
 
             // A ship is "spotted" when its visibility_flags are non-zero
-            // (detected by radar, hydro, direct vision, etc.). Outline applies
-            // to every ship including the recording player's own, so the
-            // viewer can see exactly when they would have been visible to the
-            // enemy.
+            // (detected by radar, hydro, direct vision, etc.). On friendlies
+            // and self this outlines the icon to show when the enemy can see
+            // them. On enemies the outline is only meaningful in merged
+            // sessions, where enemy icons render continuously from alt-
+            // perspective data; without that, an enemy icon's mere presence
+            // already implies detection and the outline is redundant.
             let is_spotted = vis_flags != 0;
-            let is_detected_teammate = is_spotted;
+            let show_outline_for_relation = !relation.is_enemy() || self.has_merged_perspectives;
+            let is_detected_teammate = is_spotted && show_outline_for_relation;
 
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
