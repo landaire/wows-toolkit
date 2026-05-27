@@ -437,6 +437,71 @@ fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Va
     wowsunpack::battle_results::resolve_battle_results(results, constants)
 }
 
+/// Resolve a player's equipped consumables and tally activations against each
+/// slot. Returns an empty inventory and `None` heal count when the build can't
+/// be resolved (no vehicle entity yet, unknown ship, missing species). Heal
+/// count is `None` for ships that don't carry a Repair Party slot, and `Some`
+/// otherwise (summed across all RepairParty slots on the ship).
+fn resolve_player_consumables(
+    player: &Player,
+    metadata_provider: &GameMetadataProvider,
+    version: wowsunpack::data::Version,
+    activations: &[wows_replays::analyzer::battle_controller::state::ActiveConsumable],
+) -> (Vec<models::PlayerConsumable>, Option<u32>) {
+    let Some(build) = wows_replay_insights::build::ResolvedBuild::from_player(player, metadata_provider, version)
+    else {
+        return (Vec::new(), None);
+    };
+
+    let mut charges_used: Vec<u32> = vec![0; build.slots.len()];
+    for activation in activations {
+        let pick = build.slots.iter().enumerate().find(|(idx, slot)| {
+            if slot.consumable_type.known() != activation.consumable.known() {
+                return false;
+            }
+            match slot.total_charges {
+                wowsunpack::game_types::ChargeCount::Unlimited => true,
+                wowsunpack::game_types::ChargeCount::Finite(total) => charges_used[*idx] < total,
+            }
+        });
+        if let Some((idx, _)) = pick {
+            charges_used[idx] = charges_used[idx].saturating_add(1);
+        }
+    }
+
+    let mut heal_count: Option<u32> = None;
+    for (slot, used) in build.slots.iter().zip(charges_used.iter()) {
+        if slot.consumable_type.known() == Some(&wowsunpack::game_types::Consumable::RepairParty) {
+            heal_count = Some(heal_count.unwrap_or(0).saturating_add(*used));
+        }
+    }
+
+    let consumables = build
+        .slots
+        .iter()
+        .zip(charges_used)
+        .map(|(slot, used)| {
+            let display_name =
+                wowsunpack::game_params::translations::translate_consumable(&slot.icon_key, metadata_provider)
+                    .unwrap_or_else(|| slot.consumable_type_raw.clone());
+            let description = wowsunpack::game_params::translations::translate_consumable_description(
+                &slot.icon_key,
+                metadata_provider,
+            )
+            .unwrap_or_default();
+            models::PlayerConsumable {
+                display_name,
+                description,
+                icon_key: slot.icon_key.clone(),
+                charges_used: used,
+                total_charges: slot.total_charges,
+            }
+        })
+        .collect();
+
+    (consumables, heal_count)
+}
+
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
@@ -1038,6 +1103,13 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
+            let (consumables, heal_count) = resolve_player_consumables(
+                player,
+                metadata_provider.as_ref(),
+                report.version(),
+                report.active_consumables().get(&player_state.entity_id()).map(Vec::as_slice).unwrap_or(&[]),
+            );
+
             PlayerReport {
                 player: Arc::clone(player),
                 color: player_color,
@@ -1089,6 +1161,8 @@ impl UiReport {
                 damage_interactions,
                 achievements,
                 ribbons,
+                consumables,
+                heal_count,
                 personal_rating: None,
                 has_vehicle_entity: vehicle.is_some(),
             }
@@ -1235,6 +1309,7 @@ impl UiReport {
                 ReplayColumn::ObservedDamage,
                 ReplayColumn::ActualDamage,
                 ReplayColumn::Hits,
+                ReplayColumn::Heals,
                 ReplayColumn::ReceivedDamage,
                 ReplayColumn::PotentialDamage,
                 ReplayColumn::SpottingDamage,
@@ -1311,6 +1386,7 @@ impl UiReport {
                 SortColumn::Hits => {
                     SortKey::U64(if report.should_hide_stats() && !self.debug_mode { None } else { report.hits })
                 }
+                SortColumn::Heals => SortKey::U64(report.heal_count.map(|c| c as u64)),
                 SortColumn::PersonalRating => SortKey::F64(report.personal_rating.as_ref().map(|pr| pr.pr)),
             };
 
@@ -1336,6 +1412,7 @@ impl UiReport {
         let optional_columns = [
             (ReplayColumn::RawXp, settings.show_raw_xp),
             (ReplayColumn::ObservedDamage, settings.show_observed_damage),
+            (ReplayColumn::Heals, settings.show_heals),
             (ReplayColumn::Fires, settings.show_fires),
             (ReplayColumn::Floods, settings.show_floods),
             (ReplayColumn::Citadels, settings.show_citadels),
@@ -1450,6 +1527,91 @@ impl UiReport {
                 }
             };
         });
+    }
+
+    fn render_consumable_inventory(&self, ui: &mut egui::Ui, consumables: &[models::PlayerConsumable]) {
+        const NAME_COL_WIDTH: f32 = 170.0;
+        const COUNT_COL_WIDTH: f32 = 64.0;
+        const ICON_SIZE: f32 = 20.0;
+        const ROW_HEIGHT: f32 = 22.0;
+
+        let icons: Vec<Option<Arc<GameAsset>>> = {
+            let wows_data = self.wows_data.read();
+            consumables.iter().map(|c| wows_data.cached_consumable_icon(&c.icon_key)).collect()
+        };
+        let icons: Vec<Option<Arc<GameAsset>>> = if icons.iter().any(|i| i.is_none()) {
+            let mut wows_data = self.wows_data.write();
+            consumables
+                .iter()
+                .zip(icons)
+                .map(|(c, cached)| cached.or_else(|| wows_data.load_consumable_icon(&c.icon_key)))
+                .collect()
+        } else {
+            icons
+        };
+
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [NAME_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_consumable")).strong()),
+            );
+            ui.add_sized(
+                [COUNT_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_remaining")).strong()),
+            );
+            ui.add_sized(
+                [COUNT_COL_WIDTH, ROW_HEIGHT],
+                egui::Label::new(RichText::new(t!("ui.replay.consumable_header_total")).strong()),
+            );
+        });
+
+        for (consumable, icon) in consumables.iter().zip(icons) {
+            let (remaining_text, total_text, hover_text) = match consumable.total_charges {
+                wowsunpack::game_types::ChargeCount::Unlimited => (
+                    consumable.charges_used.to_string(),
+                    t!("ui.replay.consumable_charges_infinite").to_string(),
+                    t!("ui.replay.consumable_charges_unlimited", used = consumable.charges_used).to_string(),
+                ),
+                wowsunpack::game_types::ChargeCount::Finite(total) => {
+                    let remaining = total.saturating_sub(consumable.charges_used);
+                    (
+                        remaining.to_string(),
+                        total.to_string(),
+                        t!("ui.replay.consumable_charges_remaining", remaining = remaining, total = total).to_string(),
+                    )
+                }
+            };
+
+            ui.horizontal(|ui| {
+                let (name_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(NAME_COL_WIDTH, ROW_HEIGHT), egui::Sense::hover());
+                let mut name_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(name_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                if let Some(icon) = icon.as_ref() {
+                    let image = Image::new(ImageSource::Bytes {
+                        uri: icon.path.clone().into(),
+                        bytes: icon.data.clone().into(),
+                    })
+                    .fit_to_exact_size((ICON_SIZE, ICON_SIZE).into());
+                    let response = name_ui.add(image);
+                    if !consumable.description.is_empty() {
+                        response.on_hover_text(&consumable.description);
+                    }
+                }
+                let name_label = name_ui.label(&consumable.display_name);
+                if !consumable.description.is_empty() {
+                    name_label.on_hover_text(&consumable.description);
+                }
+
+                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&remaining_text))
+                    .on_hover_text(&hover_text);
+                ui.add_sized([COUNT_COL_WIDTH, ROW_HEIGHT], egui::Label::new(&total_text))
+                    .on_hover_text(&hover_text);
+            });
+        }
     }
 
     fn dealt_damage_details(&self, report: &PlayerReport, ui: &mut egui::Ui) {
@@ -1950,6 +2112,14 @@ impl UiReport {
                             ui.label("-");
                         }
                     }
+                    ReplayColumn::Heals => {
+                        if let Some(heal_count) = report.heal_count {
+                            ui.label(format!("{heal_count}"))
+                                .on_hover_text(t!("ui.replay.column.heals_tooltip"));
+                        } else {
+                            ui.label("-").on_hover_text(t!("ui.replay.column.heals_no_repair_tooltip"));
+                        }
+                    }
                 }
             });
 
@@ -2153,6 +2323,12 @@ impl UiReport {
                                     } else {
                                         ui.label(t!("ui.replay.sections.captain_skills_none"));
                                     }
+                                }
+
+                                if !report.consumables.is_empty() {
+                                    ui.separator();
+                                    ui.label(t!("ui.replay.sections.consumables"));
+                                    self.render_consumable_inventory(ui, &report.consumables);
                                 }
                             });
                         }
@@ -2415,6 +2591,22 @@ impl egui_table::TableDelegate for UiReport {
                         .clicked()
                     {
                         let new_sort = self.replay_sort.lock().update_column(SortColumn::Hits);
+
+                        self.sort_players(new_sort);
+                    };
+                }
+                ReplayColumn::Heals => {
+                    if ui
+                        .strong(column_name_with_sort_order(
+                            &t!("ui.replay.column.heals"),
+                            false,
+                            *self.replay_sort.lock(),
+                            SortColumn::Heals,
+                        ))
+                        .on_hover_text(t!("ui.replay.column.heals_tooltip"))
+                        .clicked()
+                    {
+                        let new_sort = self.replay_sort.lock().update_column(SortColumn::Heals);
 
                         self.sort_players(new_sort);
                     };
@@ -3648,7 +3840,7 @@ impl ToolkitTabViewer<'_> {
         let merge_count = replay_file.alt_replays.len();
         let mut label = wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.replay.load_alt_perspective"));
         if merge_count > 0 {
-            label.push_str(&format!(" ({})", t!("ui.replay.load_alt_perspective_count", count = merge_count)));
+            label.push_str(&format!(" ({})", merge_count));
         }
 
         if !ui.button(label).on_hover_text(t!("ui.replay.load_alt_perspective_tooltip")).clicked() {
@@ -3826,6 +4018,7 @@ impl ToolkitTabViewer<'_> {
                     changed |= ui.checkbox(&mut rs.show_entity_id, t!("ui.replay.filter.entity_id")).changed();
                     changed |=
                         ui.checkbox(&mut rs.show_observed_damage, t!("ui.replay.filter.observed_damage")).changed();
+                    changed |= ui.checkbox(&mut rs.show_heals, t!("ui.replay.filter.heals")).changed();
                     changed |= ui.checkbox(&mut rs.show_fires, t!("ui.replay.filter.fires")).changed();
                     changed |= ui.checkbox(&mut rs.show_floods, t!("ui.replay.filter.floods")).changed();
                     changed |= ui.checkbox(&mut rs.show_citadels, t!("ui.replay.filter.citadels")).changed();

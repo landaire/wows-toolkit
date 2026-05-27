@@ -344,6 +344,7 @@ pub fn draw_command_to_shapes(
             player_name,
             ship_name,
             is_detected_teammate,
+            is_disconnected,
             name_color,
             ..
         } => {
@@ -398,6 +399,18 @@ pub fn draw_command_to_shapes(
                             * (ICON_SIZE + 2.0 * wows_minimap_renderer::SHIP_ICON_OUTLINE_THICKNESS as f32)
                             / ICON_SIZE;
                         shapes.push(make_rotated_icon_mesh(otex.id(), center, outline_size, *yaw, Color32::WHITE));
+                    }
+                }
+                if *is_disconnected && let Some(outlines) = textures.ship_icon_outlines {
+                    let outline_tex = variant_key
+                        .as_ref()
+                        .and_then(|vk| outlines.get(vk))
+                        .or_else(|| species.as_ref().and_then(|sp| outlines.get(sp)));
+                    if let Some(otex) = outline_tex {
+                        let outline_size = icon_size
+                            * (ICON_SIZE + 2.0 * wows_minimap_renderer::SHIP_ICON_OUTLINE_THICKNESS as f32)
+                            / ICON_SIZE;
+                        shapes.push(make_rotated_icon_mesh(otex.id(), center, outline_size, *yaw, Color32::RED));
                     }
                 }
 

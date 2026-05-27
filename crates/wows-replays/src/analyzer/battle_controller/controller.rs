@@ -444,6 +444,7 @@ pub struct BattleReport {
     local_weather_zones: Vec<LocalWeatherZone>,
     battle_start_clock: Option<GameClock>,
     self_damage_stats: Vec<DamageStatEntry>,
+    active_consumables: HashMap<EntityId, Vec<ActiveConsumable>>,
     /// Maximum match duration from replay metadata (time limit), in seconds.
     max_duration: u32,
     /// Actual played duration of the battle phase (battle start to battle end), in seconds.
@@ -547,6 +548,12 @@ impl BattleReport {
     /// Only populated from `receiveDamageStat` on the Avatar entity.
     pub fn self_damage_stats(&self) -> &[DamageStatEntry] {
         &self.self_damage_stats
+    }
+
+    /// All consumable activations observed during the match, keyed by
+    /// avatar entity ID. Order matches activation order within each entity.
+    pub fn active_consumables(&self) -> &HashMap<EntityId, Vec<ActiveConsumable>> {
+        &self.active_consumables
     }
 
     /// Convert an absolute game clock to elapsed time since battle start.
@@ -1167,6 +1174,7 @@ where
             local_weather_zones: self.local_weather_zones,
             battle_start_clock: self.battle_start_clock,
             self_damage_stats: self.self_damage_stats.into_values().collect(),
+            active_consumables: std::mem::take(&mut self.active_consumables),
             max_duration: self.game_meta.duration,
             played_duration,
             extra_duration,

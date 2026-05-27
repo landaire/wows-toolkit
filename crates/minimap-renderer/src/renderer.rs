@@ -21,6 +21,7 @@ use wowsunpack::game_types::DamageStatWeapon;
 
 use wows_replay_insights::build::ResolvedBuild;
 use wows_replays::analyzer::battle_controller::ChatChannel;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::analyzer::battle_controller::listener::BattleControllerState;
 use wows_replays::analyzer::battle_controller::state::ControlPointType;
 use wows_replays::analyzer::decoder::Consumable;
@@ -1216,6 +1217,8 @@ impl<'a> MinimapRenderer<'a> {
             let show_outline_for_relation = !relation.is_enemy() || self.has_merged_perspectives;
             let is_detected_teammate = is_spotted && show_outline_for_relation;
 
+            let is_disconnected = is_player_disconnected_at(controller, *entity_id, clock);
+
             if detected {
                 let yaw = minimap_yaw.or(world_yaw).unwrap_or(0.0);
                 if let Some(mm) = minimap {
@@ -1248,6 +1251,7 @@ impl<'a> MinimapRenderer<'a> {
                         player_name: player_name.clone(),
                         ship_name: ship_name.clone(),
                         is_detected_teammate,
+                        is_disconnected,
                         name_color,
                     });
                     if self.options.show_hp_bars
@@ -1284,6 +1288,7 @@ impl<'a> MinimapRenderer<'a> {
                     player_name: None,
                     ship_name: None,
                     is_detected_teammate: false,
+                    is_disconnected,
                     name_color: None,
                 });
             }
@@ -2147,6 +2152,7 @@ impl<'a> MinimapRenderer<'a> {
             // the ship is detected (radar, hydro, direct vision, etc.).
             let is_spotted =
                 vehicle_entity.as_ref().map(|v_ref| v_ref.borrow().props().visibility_flags() != 0).unwrap_or(false);
+            let is_disconnected = !is_dead && is_player_disconnected_at(controller, entity_id, clock);
 
             // Kills at the current clock: filter the global kill list by
             // killer and clock. Damage at the current clock: sum the merged
@@ -2256,6 +2262,7 @@ impl<'a> MinimapRenderer<'a> {
                 is_dead,
                 is_self,
                 is_spotted,
+                is_disconnected,
                 kills,
                 damage_dealt,
                 seconds_since_damage,
@@ -2312,6 +2319,27 @@ impl<'a> MinimapRenderer<'a> {
 }
 
 /// English fallback name for a ribbon when translation is unavailable.
+/// True if the most recent connection-change event for this player at or
+/// before `clock` is `Disconnected`. Returns false when there are no events
+/// recorded (player has been connected since arena start).
+fn is_player_disconnected_at(
+    controller: &dyn BattleControllerState,
+    entity_id: EntityId,
+    clock: GameClock,
+) -> bool {
+    let Some(player) = controller.player_entities().get(&entity_id) else {
+        return false;
+    };
+    let threshold = clock.to_duration();
+    let events = player.connection_change_info();
+    events
+        .iter()
+        .rev()
+        .find(|info| info.at_game_duration() <= threshold)
+        .map(|info| info.event_kind() == ConnectionChangeKind::Disconnected)
+        .unwrap_or(false)
+}
+
 fn ribbon_fallback_name(ribbon: &wowsunpack::game_types::Ribbon) -> &'static str {
     use wowsunpack::game_types::Ribbon;
     match ribbon {

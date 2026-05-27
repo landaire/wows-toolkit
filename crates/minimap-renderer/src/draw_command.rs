@@ -331,6 +331,10 @@ pub enum DrawCommand {
         ship_name: Option<String>,
         /// Whether this ship is a detected teammate (ally visible but not self)
         is_detected_teammate: bool,
+        /// Whether this player is currently disconnected (latest connection
+        /// event before the current clock is `Disconnected`). Draws a red
+        /// outline around the icon, mirroring `is_detected_teammate`.
+        is_disconnected: bool,
         /// Override color for player name based on selected armament
         /// (e.g. orange=HE, light blue=AP, green=torp). None = default white.
         name_color: Option<[u8; 3]>,
@@ -632,6 +636,9 @@ pub struct RosterRow {
     /// True while the ship is currently visible to the opposing team. Drives
     /// the yellow name highlight.
     pub is_spotted: bool,
+    /// True if the most recent connection event for this player at the current
+    /// clock is `Disconnected`. Drives the red outline on the icon.
+    pub is_disconnected: bool,
     /// Number of kills the player has scored at the current clock.
     pub kills: u32,
     /// Total damage dealt by the player at the current clock.

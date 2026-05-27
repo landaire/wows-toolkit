@@ -229,6 +229,17 @@ pub struct Ribbon {
     pub count: u64,
 }
 
+/// One consumable slot equipped on a player's ship, with charge usage
+/// resolved from the battle controller's activation log.
+#[derive(Clone)]
+pub struct PlayerConsumable {
+    pub display_name: String,
+    pub description: String,
+    pub icon_key: String,
+    pub charges_used: u32,
+    pub total_charges: wowsunpack::game_types::ChargeCount,
+}
+
 /// Report for a single player in a battle.
 pub struct PlayerReport {
     pub player: Arc<Player>,
@@ -284,6 +295,12 @@ pub struct PlayerReport {
     pub translated_build: Option<TranslatedBuild>,
     pub achievements: Vec<Achievement>,
     pub ribbons: HashMap<String, Ribbon>,
+    pub consumables: Vec<PlayerConsumable>,
+    /// Number of Repair Party (`RepairParty`) activations observed for this
+    /// player. `None` when the ship doesn't carry a Repair Party slot. This
+    /// count only covers consumable activations seen in the parsed packets,
+    /// so it may be incomplete for ships outside the recording perspective(s).
+    pub heal_count: Option<u32>,
     pub personal_rating: Option<crate::util::personal_rating::PersonalRatingResult>,
     pub has_vehicle_entity: bool,
 }

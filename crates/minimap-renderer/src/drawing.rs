@@ -1979,6 +1979,7 @@ impl RenderTarget for ImageTarget {
                 player_name,
                 ship_name,
                 is_detected_teammate,
+                is_disconnected,
                 name_color,
                 ..
             } => {
@@ -2010,6 +2011,9 @@ impl RenderTarget for ImageTarget {
 
                 if *is_detected_teammate && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
                     draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, None, 1.0);
+                }
+                if *is_disconnected && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
+                    draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, Some([255, 60, 60]), 1.0);
                 }
 
                 draw_ship_icon(&mut self.canvas, icon, x, y, *yaw, color.map(|c| c), *opacity);

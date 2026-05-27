@@ -293,6 +293,10 @@ pub struct WorldOfWarshipsData {
     /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
     pub achievement_icons: HashMap<String, Arc<GameAsset>>,
 
+    /// Consumable icons, lazy-loaded and cached. Keyed by PCY name
+    /// (e.g. `"PCY009_CrashCrewPremium"`).
+    pub consumable_icons: HashMap<String, Arc<GameAsset>>,
+
     /// Cached game constants loaded from game files.
     pub game_constants: Arc<GameConstants>,
 
@@ -342,6 +346,27 @@ impl WorldOfWarshipsData {
         Some(asset)
     }
 
+    /// Look up a cached consumable icon (read-only, no loading).
+    pub fn cached_consumable_icon(&self, icon_key: &str) -> Option<Arc<GameAsset>> {
+        self.consumable_icons.get(icon_key).cloned()
+    }
+
+    /// Load and cache a consumable icon from `gui/consumables/consumable_{PCY}.png`.
+    /// Only call this on a cache miss (when `cached_consumable_icon` returns None).
+    pub fn load_consumable_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
+        if let Some(icon) = self.consumable_icons.get(icon_key) {
+            return Some(icon.clone());
+        }
+
+        let path = format!("gui/consumables/consumable_{}.png", icon_key);
+        let mut icon_data = Vec::new();
+        self.vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
+
+        let asset = Arc::new(GameAsset { path, data: icon_data });
+        self.consumable_icons.insert(icon_key.to_string(), asset.clone());
+        Some(asset)
+    }
+
     /// Rebuild this data from scratch after constants have changed.
     /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, filtered_files, file_tree,
     /// full_version, patch_version, build_number.
@@ -383,6 +408,7 @@ impl WorldOfWarshipsData {
         self.ribbon_icons = new_ribbon_icons;
         self.subribbon_icons = new_subribbon_icons;
         self.achievement_icons = HashMap::new();
+        self.consumable_icons = HashMap::new();
         self.game_constants = Arc::new(new_game_constants);
         *self.replay_constants.write() = new_replay_constants;
         self.replay_constants_exact_match = exact_match;
