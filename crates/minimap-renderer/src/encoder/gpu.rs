@@ -28,6 +28,7 @@ use yuvutils_rs::YuvStandardMatrix;
 
 use crate::codec::VideoCodec;
 use crate::encoder::CodecSupport;
+use crate::encoder::EncoderConfig;
 use crate::encoder::EncoderStatus;
 use crate::error::VideoError;
 use crate::video::FPS;
@@ -96,16 +97,17 @@ pub fn probe_status(status: &mut EncoderStatus) {
     };
     status.gpu_adapter_name = Some(name);
 
+    let probe_config = EncoderConfig::default();
     status.gpu_codecs.insert(
         VideoCodec::H264,
-        match device.encoder_output_parameters_h264_high_quality(default_rate_control()) {
+        match device.encoder_output_parameters_h264_high_quality(rate_control_for_h264(probe_config)) {
             Ok(_) => CodecSupport::Supported,
             Err(e) => CodecSupport::Unsupported(format!("{e:?}")),
         },
     );
     status.gpu_codecs.insert(
         VideoCodec::H265,
-        match device.encoder_output_parameters_h265_high_quality(default_rate_control()) {
+        match device.encoder_output_parameters_h265_high_quality(rate_control_for_h265(probe_config)) {
             Ok(_) => CodecSupport::Supported,
             Err(e) => CodecSupport::Unsupported(format!("{e:?}")),
         },
@@ -115,18 +117,33 @@ pub fn probe_status(status: &mut EncoderStatus) {
         .insert(VideoCodec::Av1, CodecSupport::Unsupported("gpu-video does not yet support AV1 encode".into()));
 }
 
-fn default_rate_control() -> RateControl {
-    // Bumped for HUD/HP-bar text legibility. Minimap content is mostly
-    // flat-color UI overlay where small text loses detail at lower bitrates.
+fn rate_control_for_h264(config: EncoderConfig) -> RateControl {
+    let target = config.h264_bitrate_bps();
+    let max = config.max_bitrate_for(target);
     RateControl::VariableBitrate {
-        average_bitrate: 40_000_000,
-        max_bitrate: 80_000_000,
+        average_bitrate: target as u64,
+        max_bitrate: max as u64,
+        virtual_buffer_size: std::time::Duration::from_secs(2),
+    }
+}
+
+fn rate_control_for_h265(config: EncoderConfig) -> RateControl {
+    let target = config.h265_bitrate_bps();
+    let max = config.max_bitrate_for(target);
+    RateControl::VariableBitrate {
+        average_bitrate: target as u64,
+        max_bitrate: max as u64,
         virtual_buffer_size: std::time::Duration::from_secs(2),
     }
 }
 
 impl GpuEncoder {
-    pub fn new(width: u32, height: u32, codec: VideoCodec) -> rootcause::Result<Self, VideoError> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        codec: VideoCodec,
+        config: EncoderConfig,
+    ) -> rootcause::Result<Self, VideoError> {
         let (_instance, device, _name) =
             open_device().map_err(|e| report!(VideoError::EncoderInit(e.to_string())))?;
 
@@ -139,7 +156,7 @@ impl GpuEncoder {
         let inner = match codec {
             VideoCodec::H264 => {
                 let output_parameters = device
-                    .encoder_output_parameters_h264_high_quality(default_rate_control())
+                    .encoder_output_parameters_h264_high_quality(rate_control_for_h264(config))
                     .map_err(|e| report!(VideoError::EncoderInit(format!("H.264 encoder params: {e:?}"))))?;
                 let encoder = device
                     .create_bytes_encoder_h264(EncoderParametersH264 { input_parameters, output_parameters })
@@ -148,7 +165,7 @@ impl GpuEncoder {
             }
             VideoCodec::H265 => {
                 let output_parameters = device
-                    .encoder_output_parameters_h265_high_quality(default_rate_control())
+                    .encoder_output_parameters_h265_high_quality(rate_control_for_h265(config))
                     .map_err(|e| report!(VideoError::EncoderInit(format!("H.265 encoder params: {e:?}"))))?;
                 let encoder = device
                     .create_bytes_encoder_h265(EncoderParametersH265 { input_parameters, output_parameters })

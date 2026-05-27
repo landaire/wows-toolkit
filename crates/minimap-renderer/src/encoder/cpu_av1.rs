@@ -16,6 +16,7 @@ use yuvutils_rs::YuvPlanarImageMut;
 use yuvutils_rs::YuvRange;
 use yuvutils_rs::YuvStandardMatrix;
 
+use crate::encoder::EncoderConfig as Cfg;
 use crate::error::VideoError;
 use crate::video::FPS;
 
@@ -37,7 +38,7 @@ pub struct CpuAv1Encoder {
 }
 
 impl CpuAv1Encoder {
-    pub fn new(width: u32, height: u32) -> rootcause::Result<Self, VideoError> {
+    pub fn new(width: u32, height: u32, config: Cfg) -> rootcause::Result<Self, VideoError> {
         if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
             return Err(report!(VideoError::EncoderInit(format!(
                 "AV1 requires even dimensions; got {width}x{height}"
@@ -56,10 +57,16 @@ impl CpuAv1Encoder {
         cfg.max_key_frame_interval = FPS as u64;
         cfg.low_latency = true;
         cfg.speed_settings = SpeedSettings::from_preset(6);
-        // Lower quantizer = higher quality. rav1e's default is 100; 60 lands
-        // around "visually lossless" for our HUD-heavy frames without
-        // ballooning the output too much.
-        cfg.quantizer = 60;
+        // rav1e: lower quantizer = higher quality. Default 100; 60 is
+        // visually lossless on HUD-heavy frames. When the caller asks for a
+        // specific bitrate we use rav1e's `bitrate` field (it'll pick the
+        // quantizer to meet the target); otherwise honor any explicit
+        // quantizer override and fall back to the default.
+        if let Some(target_bps) = config.target_bitrate_bps {
+            cfg.bitrate = target_bps as i32;
+        } else {
+            cfg.quantizer = config.av1_quantizer() as usize;
+        }
         // Workaround for muxide 0.2.5: its AV1 sequence-header parser reads
         // `decoder_model_info_present_flag` unconditionally instead of guarding
         // it on `timing_info_present_flag` (AV1 spec 5.5.1). Forcing

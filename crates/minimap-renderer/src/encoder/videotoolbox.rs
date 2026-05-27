@@ -75,7 +75,7 @@ pub struct VideoToolboxEncoder {
 unsafe impl Send for VideoToolboxEncoder {}
 
 impl VideoToolboxEncoder {
-    pub fn new(width: u32, height: u32) -> rootcause::Result<Self, VideoError> {
+    pub fn new(width: u32, height: u32, config: crate::encoder::EncoderConfig) -> rootcause::Result<Self, VideoError> {
         // Create output buffer and leak it (we'll clean it up in Drop)
         let output_buffer = Box::into_raw(Box::new(Mutex::new(Vec::new())));
 
@@ -113,8 +113,7 @@ impl VideoToolboxEncoder {
 
         // Configure encoder properties
         unsafe {
-            // Average bitrate: 40 Mbps (bumped for HUD text legibility)
-            let bitrate = CFNumber::new_i32(40_000_000);
+            let bitrate = CFNumber::new_i32(config.h264_bitrate_bps() as i32);
             let _ =
                 VTSessionSetProperty(&session, kVTCompressionPropertyKey_AverageBitRate, Some(&*bitrate as &CFType));
 

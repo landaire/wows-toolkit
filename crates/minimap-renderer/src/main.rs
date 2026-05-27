@@ -171,6 +171,18 @@ struct Args {
     #[arg(long, value_enum)]
     codec: Option<CodecArg>,
 
+    /// Target average bitrate in kilobits per second. Applies to H.264/H.265
+    /// (VBR target); for AV1 the encoder picks a quantizer to meet the rate.
+    /// Mutually exclusive with --max-size-mib.
+    #[arg(long, conflicts_with = "max_size_mib")]
+    bitrate_kbps: Option<u32>,
+
+    /// Target a maximum encoded file size in MiB. The bitrate is derived from
+    /// the match duration with a small safety margin. Mutually exclusive with
+    /// --bitrate-kbps.
+    #[arg(long, conflicts_with = "bitrate_kbps")]
+    max_size_mib: Option<u32>,
+
     /// Disable progress bar and use log output instead
     #[arg(long)]
     no_progress: bool,
@@ -435,6 +447,16 @@ fn main() -> Result<(), Report> {
         }
     };
     encoder.set_codec(codec_choice);
+    if let Some(kbps) = args.bitrate_kbps {
+        let bps = kbps.saturating_mul(1000);
+        encoder.set_encoder_config(wows_minimap_renderer::EncoderConfig {
+            target_bitrate_bps: Some(bps),
+            max_bitrate_bps: Some(bps.saturating_mul(2)),
+            av1_quantizer: None,
+        });
+    } else if let Some(mib) = args.max_size_mib {
+        encoder.target_max_file_size((mib as u64) * 1024 * 1024);
+    }
     if args.dump_frame.is_none() {
         encoder.init()?;
     }

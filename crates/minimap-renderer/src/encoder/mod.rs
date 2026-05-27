@@ -23,6 +23,71 @@ use crate::codec::EncoderKind;
 use crate::codec::VideoCodec;
 use crate::error::VideoError;
 
+/// Default target file size, in bytes. 10 MiB matches Discord's free-tier
+/// upload cap, which is the most common destination for these clips. The
+/// per-codec default bitrates below are derived from this and the renderer's
+/// `OUTPUT_DURATION` cap so a maximum-length clip lands at the target.
+pub const DEFAULT_TARGET_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Default target bitrate (bits per second). Derived from
+/// [`DEFAULT_TARGET_FILE_SIZE_BYTES`] divided by the 60 s output cap, with a
+/// safety margin for container overhead and the Vulkan H.265 encoder's VBR
+/// overshoot (its effective rate runs ~15% above target). One value covers
+/// both H.264 and H.265 because picking the looser of the two safe targets
+/// keeps a maximum-length clip under 10 MiB for either codec. Callers
+/// prioritizing fidelity over file size should pass a higher
+/// `target_bitrate_bps` override via [`EncoderConfig`].
+pub const DEFAULT_BITRATE_BPS: u32 = 1_100_000;
+
+/// rav1e quantizer (0-255, lower = higher quality). 60 produces visually
+/// lossless output for HUD-heavy frames at moderate bitrates.
+pub const DEFAULT_AV1_QUANTIZER: u8 = 60;
+
+/// Encoder tunables, primarily bitrate-related. All fields are optional and
+/// fall back to the backend's default when `None`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EncoderConfig {
+    /// Target average bitrate in bits per second. Applies to H.264/H.265
+    /// (VBR target) and is converted into a quantizer for AV1.
+    pub target_bitrate_bps: Option<u32>,
+    /// Peak bitrate for VBR rate control, in bits per second. Defaults to
+    /// `2 * target_bitrate_bps` when unset.
+    pub max_bitrate_bps: Option<u32>,
+    /// AV1 quantizer override (0-255, lower = higher quality). Ignored when
+    /// `target_bitrate_bps` is set; bitrate-based control wins.
+    pub av1_quantizer: Option<u8>,
+}
+
+impl EncoderConfig {
+    /// Pick a target bitrate that should land an encoded file under
+    /// `target_size_bytes` for a clip of `duration_seconds`. Includes a small
+    /// safety margin to account for container overhead and encoder variance.
+    pub fn from_target_size(target_size_bytes: u64, duration_seconds: f32) -> Self {
+        if duration_seconds <= 0.0 || target_size_bytes == 0 {
+            return Self::default();
+        }
+        let usable = (target_size_bytes as f64) * 0.92;
+        let bps = (usable * 8.0 / duration_seconds as f64).max(64_000.0) as u32;
+        Self { target_bitrate_bps: Some(bps), max_bitrate_bps: Some(bps.saturating_mul(2)), av1_quantizer: None }
+    }
+
+    pub fn h264_bitrate_bps(&self) -> u32 {
+        self.target_bitrate_bps.unwrap_or(DEFAULT_BITRATE_BPS)
+    }
+
+    pub fn h265_bitrate_bps(&self) -> u32 {
+        self.target_bitrate_bps.unwrap_or(DEFAULT_BITRATE_BPS)
+    }
+
+    pub fn max_bitrate_for(&self, target: u32) -> u32 {
+        self.max_bitrate_bps.unwrap_or_else(|| target.saturating_mul(2))
+    }
+
+    pub fn av1_quantizer(&self) -> u8 {
+        self.av1_quantizer.unwrap_or(DEFAULT_AV1_QUANTIZER)
+    }
+}
+
 #[cfg(all(feature = "vulkan", not(target_os = "macos")))]
 pub mod gpu;
 
@@ -242,11 +307,12 @@ impl EncoderBackend {
         height: u32,
         codec: VideoCodec,
         mode: Mode,
+        config: EncoderConfig,
     ) -> rootcause::Result<CreatedEncoder, VideoError> {
         let status = check_encoder();
 
         if mode != Mode::ForceCpu && status.supports(EncoderKind::Gpu, codec) {
-            match Self::create_gpu(width, height, codec) {
+            match Self::create_gpu(width, height, codec, config) {
                 Ok(backend) => {
                     info!(codec = %codec, "Using GPU encoder");
                     return Ok(CreatedEncoder { backend, codec, kind: EncoderKind::Gpu });
@@ -284,13 +350,18 @@ impl EncoderBackend {
             }));
         }
 
-        let backend = Self::create_cpu(width, height, codec)?;
+        let backend = Self::create_cpu(width, height, codec, config)?;
         info!(codec = %codec, "Using CPU encoder");
         Ok(CreatedEncoder { backend, codec, kind: EncoderKind::Cpu })
     }
 
     #[allow(unused_variables)]
-    fn create_gpu(width: u32, height: u32, codec: VideoCodec) -> rootcause::Result<Self, VideoError> {
+    fn create_gpu(
+        width: u32,
+        height: u32,
+        codec: VideoCodec,
+        config: EncoderConfig,
+    ) -> rootcause::Result<Self, VideoError> {
         #[cfg(all(feature = "videotoolbox", target_os = "macos"))]
         {
             if codec != VideoCodec::H264 {
@@ -300,12 +371,12 @@ impl EncoderBackend {
                     reason: "only H.264 is wired up".into(),
                 }));
             }
-            return Ok(Self::VideoToolbox(Box::new(videotoolbox::VideoToolboxEncoder::new(width, height)?)));
+            return Ok(Self::VideoToolbox(Box::new(videotoolbox::VideoToolboxEncoder::new(width, height, config)?)));
         }
 
         #[cfg(all(feature = "vulkan", not(target_os = "macos")))]
         {
-            return Ok(Self::Gpu(Box::new(gpu::GpuEncoder::new(width, height, codec)?)));
+            return Ok(Self::Gpu(Box::new(gpu::GpuEncoder::new(width, height, codec, config)?)));
         }
 
         #[allow(unreachable_code)]
@@ -317,12 +388,17 @@ impl EncoderBackend {
     }
 
     #[allow(unused_variables)]
-    fn create_cpu(width: u32, height: u32, codec: VideoCodec) -> rootcause::Result<Self, VideoError> {
+    fn create_cpu(
+        width: u32,
+        height: u32,
+        codec: VideoCodec,
+        config: EncoderConfig,
+    ) -> rootcause::Result<Self, VideoError> {
         match codec {
             #[cfg(feature = "cpu")]
-            VideoCodec::H264 => Ok(Self::CpuH264(Box::new(cpu::CpuEncoder::new()?))),
+            VideoCodec::H264 => Ok(Self::CpuH264(Box::new(cpu::CpuEncoder::new(config)?))),
             #[cfg(feature = "cpu-av1")]
-            VideoCodec::Av1 => Ok(Self::CpuAv1(Box::new(cpu_av1::CpuAv1Encoder::new(width, height)?))),
+            VideoCodec::Av1 => Ok(Self::CpuAv1(Box::new(cpu_av1::CpuAv1Encoder::new(width, height, config)?))),
             other => Err(report!(VideoError::UnsupportedCodec {
                 codec: other.as_str(),
                 backend: "cpu",

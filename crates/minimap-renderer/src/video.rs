@@ -80,6 +80,7 @@ pub struct VideoEncoder {
     encoder_error: Option<String>,
     codec_choice: CodecChoice,
     mode: Mode,
+    encoder_config: crate::encoder::EncoderConfig,
     /// Codec resolved at encoder-init time; `None` until init().
     active_codec: Option<VideoCodec>,
     expected_frames: u64,
@@ -109,6 +110,7 @@ impl VideoEncoder {
             encoder_error: None,
             codec_choice: CodecChoice::Auto,
             mode: Mode::Auto,
+            encoder_config: crate::encoder::EncoderConfig::default(),
             active_codec: None,
             expected_frames: total_frames as u64,
             progress_callback: None,
@@ -133,6 +135,21 @@ impl VideoEncoder {
     /// `Mode::ForceGpu` to bubble up an error if GPU encode is unavailable.
     pub fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
+    }
+
+    /// Set encoder tunables (bitrate, AV1 quantizer). Must be called before
+    /// `init()`/the first frame submission to take effect.
+    pub fn set_encoder_config(&mut self, config: crate::encoder::EncoderConfig) {
+        self.encoder_config = config;
+    }
+
+    /// Convenience: pick a target bitrate that should keep the encoded file
+    /// under `target_size_bytes`. Sizing is based on `OUTPUT_DURATION` (the
+    /// renderer's hard cap on output video length), not the match's time
+    /// limit, so the chosen bitrate is the worst-case rate that still hits
+    /// the target even for a maximum-length clip.
+    pub fn target_max_file_size(&mut self, target_size_bytes: u64) {
+        self.encoder_config = crate::encoder::EncoderConfig::from_target_size(target_size_bytes, OUTPUT_DURATION as f32);
     }
 
     pub fn set_battle_duration(&mut self, duration: GameClock) {
@@ -162,7 +179,13 @@ impl VideoEncoder {
             CodecChoice::Explicit(c) => c,
             CodecChoice::Auto => status.best_codec(matches!(self.mode, Mode::ForceCpu)),
         };
-        let created = EncoderBackend::create(self.canvas_width, self.canvas_height, codec, self.mode)?;
+        let created = EncoderBackend::create(
+            self.canvas_width,
+            self.canvas_height,
+            codec,
+            self.mode,
+            self.encoder_config,
+        )?;
         self.active_codec = Some(created.codec);
         self.backend = Some(created.backend);
         info!(

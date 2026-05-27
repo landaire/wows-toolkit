@@ -51,6 +51,8 @@ pub use drawing::ImageTarget;
 #[cfg(feature = "rendering")]
 pub use drawing::ShipIcon;
 #[cfg(feature = "rendering")]
+pub use encoder::EncoderConfig;
+#[cfg(feature = "rendering")]
 pub use encoder::EncoderStatus;
 #[cfg(feature = "rendering")]
 pub use encoder::check_encoder;

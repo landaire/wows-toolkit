@@ -665,6 +665,7 @@ enum PendingVideoExport {
         prefer_cpu: bool,
         codec: Option<wows_minimap_renderer::VideoCodec>,
         actual_game_duration: Option<f32>,
+        encoder_config: wows_minimap_renderer::EncoderConfig,
     },
     /// Render to a temporary file and copy to clipboard.
     CopyToClipboard {
@@ -672,6 +673,7 @@ enum PendingVideoExport {
         prefer_cpu: bool,
         codec: Option<wows_minimap_renderer::VideoCodec>,
         actual_game_duration: Option<f32>,
+        encoder_config: wows_minimap_renderer::EncoderConfig,
     },
 }
 
@@ -2694,6 +2696,7 @@ impl ReplayRendererViewer {
                                                             prefer_cpu,
                                                             codec: codec_pref,
                                                             actual_game_duration,
+                                                            encoder_config: wows_minimap_renderer::EncoderConfig::default(),
                                                         };
                                                         if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                             execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
@@ -2730,7 +2733,13 @@ impl ReplayRendererViewer {
                                                     let status = wows_minimap_renderer::check_encoder();
                                                     let codec_pref = *video_codec.lock();
                                                     let prefer_cpu = resolve_prefer_cpu(prefer_cpu_encoder.load(Ordering::Relaxed), codec_pref, &status);
-                                                    let action = PendingVideoExport::CopyToClipboard { options: opts, prefer_cpu, codec: codec_pref, actual_game_duration };
+                                                    let action = PendingVideoExport::CopyToClipboard {
+                                                        options: opts,
+                                                        prefer_cpu,
+                                                        codec: codec_pref,
+                                                        actual_game_duration,
+                                                        encoder_config: wows_minimap_renderer::EncoderConfig::default(),
+                                                    };
                                                     if prefer_cpu || status.gpu_available() || suppress_gpu_warning.load(Ordering::Relaxed) {
                                                         execute_video_export(action, video_export_data, &toasts, &video_exporting, &video_export_progress);
                                                     } else {

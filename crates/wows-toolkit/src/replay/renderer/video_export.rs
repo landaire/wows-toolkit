@@ -32,7 +32,7 @@ pub(super) fn execute_video_export(
     *video_export_progress.lock() = None;
 
     match action {
-        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, codec, actual_game_duration } => {
+        PendingVideoExport::SaveToFile { output_path, options, prefer_cpu, codec, actual_game_duration, encoder_config } => {
             save_as_video(
                 output_path,
                 video_export_data.raw_meta.clone(),
@@ -49,9 +49,10 @@ pub(super) fn execute_video_export(
                 prefer_cpu,
                 codec,
                 actual_game_duration,
+                encoder_config,
             );
         }
-        PendingVideoExport::CopyToClipboard { options, prefer_cpu, codec, actual_game_duration } => {
+        PendingVideoExport::CopyToClipboard { options, prefer_cpu, codec, actual_game_duration, encoder_config } => {
             let file_name = format!("{}.mp4", video_export_data.replay_name);
             render_video_to_clipboard(
                 file_name,
@@ -63,6 +64,7 @@ pub(super) fn execute_video_export(
                 prefer_cpu,
                 codec,
                 actual_game_duration,
+                encoder_config,
             );
         }
     }
@@ -87,6 +89,7 @@ pub(super) fn save_as_video(
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
+    encoder_config: wows_minimap_renderer::EncoderConfig,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -105,6 +108,7 @@ pub(super) fn save_as_video(
             prefer_cpu,
             codec,
             actual_game_duration,
+            encoder_config,
         );
 
         match result {
@@ -133,6 +137,7 @@ pub(super) fn render_video_to_clipboard(
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
+    encoder_config: wows_minimap_renderer::EncoderConfig,
 ) {
     video_exporting.store(true, Ordering::Relaxed);
 
@@ -163,6 +168,7 @@ pub(super) fn render_video_to_clipboard(
             prefer_cpu,
             codec,
             actual_game_duration,
+            encoder_config,
         );
 
         match result {
@@ -254,6 +260,7 @@ fn render_batch(
             prefer_cpu,
             codec,
             None,
+            wows_minimap_renderer::EncoderConfig::default(),
         );
 
         let estimated_frames = (replay.game_duration * 7.0) as u64;
@@ -391,6 +398,7 @@ pub(super) fn render_video_blocking(
     prefer_cpu: bool,
     codec: Option<wows_minimap_renderer::VideoCodec>,
     actual_game_duration: Option<f32>,
+    encoder_config: wows_minimap_renderer::EncoderConfig,
 ) -> rootcause::Result<()> {
     use wows_minimap_renderer::drawing::ImageTarget;
     use wows_minimap_renderer::video::VideoEncoder;
@@ -531,6 +539,7 @@ pub(super) fn render_video_blocking(
         Some(c) => wows_minimap_renderer::video::CodecChoice::Explicit(c),
         None => wows_minimap_renderer::video::CodecChoice::Auto,
     });
+    encoder.set_encoder_config(encoder_config);
     if let Some(duration) = actual_game_duration {
         encoder.set_battle_duration(GameClock(duration));
     }
