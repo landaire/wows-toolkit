@@ -588,8 +588,12 @@ impl UiReport {
 
             let ship_species_text: String = known_species
                 .as_ref()
-                .and_then(|species| metadata_provider.localized_name_from_id(&species.translation_id()))
-                .unwrap_or_else(|| "unk".to_string());
+                .and_then(|species| {
+                    metadata_provider
+                        .localized_name_from_id(&species.translation_id())
+                        .or_else(|| Some(species.name().to_string()))
+                })
+                .unwrap_or_default();
 
             let icon =
                 known_species.as_ref().and_then(|species| ship_class_icon_from_species(*species, &wows_data_inner));
@@ -1726,7 +1730,10 @@ impl UiReport {
                             .fit_to_exact_size((20.0, 20.0).into())
                             .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
 
-                            ui.add(image).on_hover_text(&report.ship_species_text);
+                            let response = ui.add(image);
+                            if !report.ship_species_text.is_empty() {
+                                response.on_hover_text(&report.ship_species_text);
+                            }
                         } else {
                             ui.label(&report.ship_species_text);
                         }
@@ -2426,10 +2433,10 @@ impl UiReport {
                 .unwrap_or_else(|| format!("{}", vehicle_param.id()));
 
             // Ship species text
-            if let Some(species) = vehicle_param.species().and_then(|r| r.known().cloned())
-                && let Some(name) = metadata_provider.localized_name_from_id(&species.translation_id())
-            {
-                report.ship_species_text = name;
+            if let Some(species) = vehicle_param.species().and_then(|r| r.known().cloned()) {
+                report.ship_species_text = metadata_provider
+                    .localized_name_from_id(&species.translation_id())
+                    .unwrap_or_else(|| species.name().to_string());
             }
 
             // Bot display name
@@ -3559,12 +3566,10 @@ impl ToolkitTabViewer<'_> {
             }
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::ScrollArea::horizontal().id_salt("replay_player_list_scroll_area").show(ui, |ui| {
-                    if let Some(ui_report) = replay_file.ui_report.as_mut() {
-                        ui_report.debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
-                        self.build_replay_player_list(ui_report, ui);
-                    }
-                });
+                if let Some(ui_report) = replay_file.ui_report.as_mut() {
+                    ui_report.debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
+                    self.build_replay_player_list(ui_report, ui);
+                }
             });
         }
     }
@@ -5088,6 +5093,12 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
 
     fn allowed_in_windows(&self, _tab: &mut Self::Tab) -> bool {
         false
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        // The replay view manages its own panels and the player-list table
+        // brings its own scroll area. The outer wrapper would duplicate bars.
+        [false, false]
     }
 }
 

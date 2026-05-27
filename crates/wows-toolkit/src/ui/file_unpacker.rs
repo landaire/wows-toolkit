@@ -479,18 +479,16 @@ impl UnpackerPaneViewer<'_> {
                     });
                     ui.separator();
 
-                    egui::ScrollArea::both().id_salt(format!("filter_results_scroll_{}", source_id)).show(ui, |ui| {
-                        render_filter_results_table(
-                            ui,
-                            filtered_files,
-                            &queued_paths,
-                            self.items_to_extract,
-                            self.file_viewer,
-                            self.navigate_to,
-                            self.clear_filter,
-                            &browser.source,
-                        );
-                    });
+                    render_filter_results_table(
+                        ui,
+                        filtered_files,
+                        &queued_paths,
+                        self.items_to_extract,
+                        self.file_viewer,
+                        self.navigate_to,
+                        self.clear_filter,
+                        &browser.source,
+                    );
                 }
             } else {
                 // ── Directory browsing mode ──
@@ -557,17 +555,15 @@ impl UnpackerPaneViewer<'_> {
                             ui.separator();
                         }
 
-                        egui::ScrollArea::both().id_salt(format!("file_listing_scroll_{}", source_id)).show(ui, |ui| {
-                            render_file_listing_table(
-                                ui,
-                                entries,
-                                &queued_paths,
-                                self.items_to_extract,
-                                self.file_viewer,
-                                self.navigate_to,
-                                &browser.source,
-                            );
-                        });
+                        render_file_listing_table(
+                            ui,
+                            entries,
+                            &queued_paths,
+                            self.items_to_extract,
+                            self.file_viewer,
+                            self.navigate_to,
+                            &browser.source,
+                        );
                     }
                 }
             }

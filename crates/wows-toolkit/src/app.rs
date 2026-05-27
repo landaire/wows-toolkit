@@ -132,6 +132,14 @@ impl TabViewer for ToolkitTabViewer<'_> {
             None
         }
     }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        // egui_dock wraps every tab body in an outer ScrollArea by default. All
+        // top-level tabs in this app build their own panels and add scroll
+        // areas only where genuinely needed, so the outer wrapper just doubles
+        // up and forces bars to appear when nothing actually overflows.
+        [false, false]
+    }
 }
 
 #[derive(Default)]
