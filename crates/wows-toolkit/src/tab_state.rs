@@ -643,24 +643,6 @@ impl TabState {
         }
     }
 
-    /// Translation catalogs to fetch when downloading a build: the user's locale,
-    /// its primary language, and English, matching what the data loader looks for.
-    pub fn game_data_download_locales(&self) -> Vec<String> {
-        let locale = self.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".to_string());
-        let primary = locale
-            .replace('_', "-")
-            .parse::<language_tags::LanguageTag>()
-            .map(|tag| tag.primary_language().to_string())
-            .unwrap_or_else(|_| locale.clone());
-        let mut locales = vec![locale];
-        for extra in [primary, "en".to_string()] {
-            if !locales.contains(&extra) {
-                locales.push(extra);
-            }
-        }
-        locales
-    }
-
     /// Start a background check for updates to cached builds. No-op if a check
     /// is already running or no cache directory is configured.
     pub fn check_game_data_updates(&mut self) {
@@ -685,7 +667,6 @@ impl TabState {
         let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
             return;
         };
-        let locales = self.game_data_download_locales();
         for update in std::mem::take(&mut self.game_data_updates) {
             update_background_task!(
                 self.background_tasks,
@@ -693,7 +674,6 @@ impl TabState {
                     output_base.clone(),
                     update.build,
                     Some(update.version),
-                    locales.clone(),
                     true,
                 ))
             );

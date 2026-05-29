@@ -90,7 +90,7 @@ pub fn dump_exists(output_base: &Path, version_str: &str, build: u32) -> bool {
 
 /// Dump game data with content-addressed deduplication.
 ///
-/// VFS files are stored in `{output_base}/vfs_common/` by hash, with symlinks
+/// VFS files are stored in `{output_base}/common/` by hash, with symlinks
 /// in the build's `vfs/` directory. Non-VFS files (game_params.rkyv, translations)
 /// are stored directly in the build directory.
 ///
@@ -106,7 +106,7 @@ pub fn dump_renderer_data(
 ) -> Result<(), Report> {
     let output_dir = dump_dir(output_base, version_str, build);
     let vfs_dir = output_dir.join("vfs");
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
 
     if output_dir.join("metadata.toml").exists() {
         if allow_existing {
@@ -269,7 +269,7 @@ pub fn remove_build(output_base: &Path, target_build: u32) -> Result<(), Report>
 
     // Delete orphaned CAS objects
     if let Some(meta) = target_meta {
-        let cas_root = output_base.join("vfs_common");
+        let cas_root = cas::cas_root(output_base);
         for hash in meta.referenced_hashes() {
             if !live_hashes.contains(&hash) {
                 let path = cas::cas_path(&cas_root, &hash);
@@ -404,6 +404,30 @@ pub fn refresh_build_derived(build_dir: &Path, cas_root: &Path, metadata: &mut B
         metadata.derived.insert("game_params.rkyv.zst".to_string(), hash);
     }
 
+    // Content-address the per-locale translation catalogs (raw .mo files copied
+    // from the game install). They are identical across many builds, so this
+    // deduplicates them into the shared store like every other asset.
+    let translations_dir = build_dir.join("translations");
+    if translations_dir.exists() {
+        for lang_entry in std::fs::read_dir(&translations_dir)
+            .attach_with(|| format!("Failed to read {}", translations_dir.display()))?
+            .flatten()
+        {
+            if !lang_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let lang = lang_entry.file_name().to_string_lossy().into_owned();
+            let mo_rel = format!("translations/{lang}/LC_MESSAGES/global.mo");
+            let mo_path = build_dir.join(&mo_rel);
+            if !mo_path.exists() {
+                continue;
+            }
+            let bytes = std::fs::read(&mo_path).attach_with(|| format!("Failed to read {}", mo_path.display()))?;
+            let hash = store_and_relink(&bytes, &mo_path, cas_root)?;
+            metadata.derived.insert(mo_rel, hash);
+        }
+    }
+
     // The web client fetches only the English catalog, zstd-compressed.
     let mo_rel = "translations/en/LC_MESSAGES/global.mo";
     let mo_path = build_dir.join(mo_rel);
@@ -424,7 +448,7 @@ pub fn refresh_build_derived(build_dir: &Path, cas_root: &Path, metadata: &mut B
 /// referenced by any build.
 pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<(), Report> {
     let index = BuildsIndex::load(&output_base.join("builds.toml"));
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
 
     let targets: Vec<&BuildEntry> = match only_build {
         Some(b) => index.builds.iter().filter(|e| e.build == b).collect(),
@@ -523,7 +547,7 @@ fn update_constants_if_missing(build_dir: &Path, build: u32, fetcher: &crate::co
 /// build's metadata cannot be read, so in-use objects are never removed.
 pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
     let index = BuildsIndex::load(&output_base.join("builds.toml"));
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
 
     let mut live = std::collections::HashSet::new();
     for entry in &index.builds {
@@ -545,7 +569,7 @@ pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
 /// removing anything if any metadata file cannot be read, so in-use objects are
 /// never deleted. Returns the number of objects removed.
 pub fn gc_unreferenced(output_base: &Path) -> Result<usize, Report> {
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
     if !cas_root.exists() {
         return Ok(0);
     }
@@ -568,15 +592,58 @@ pub fn gc_unreferenced(output_base: &Path) -> Result<usize, Report> {
     cas::gc(&cas_root, &live)
 }
 
+/// Migrate a dump base from the legacy `vfs_common/` CAS directory to `common/`,
+/// rewriting every build's symlinks to point at the renamed store. No-op when
+/// the legacy directory is absent or `common/` already exists. Returns whether a
+/// migration happened.
+pub fn migrate_cas_dir_name(output_base: &Path) -> Result<bool, Report> {
+    let legacy = output_base.join(cas::LEGACY_CAS_DIR);
+    let current = cas::cas_root(output_base);
+    if !legacy.exists() || current.exists() {
+        return Ok(false);
+    }
+
+    std::fs::rename(&legacy, &current)
+        .attach_with(|| format!("failed to rename {} to {}", legacy.display(), current.display()))?;
+
+    // Relative symlinks under each build's vfs/ still point at the old name, so
+    // re-create them against the renamed store.
+    for entry in std::fs::read_dir(output_base)
+        .attach_with(|| format!("Failed to read {}", output_base.display()))?
+        .flatten()
+    {
+        let build_dir = entry.path();
+        let Some(meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
+            continue;
+        };
+        let vfs_dir = build_dir.join("vfs");
+        let relink = |rel: &str, hash: &str, base: &Path| {
+            let link = base.join(rel);
+            let _ = std::fs::remove_file(&link);
+            if let Err(e) = cas::link_file(&current, hash, &link) {
+                tracing::warn!("failed to relink {}: {e}", link.display());
+            }
+        };
+        for (rel, hash) in &meta.files {
+            relink(rel, hash, &vfs_dir);
+        }
+        for (rel, hash) in &meta.derived {
+            relink(rel, hash, &build_dir);
+        }
+    }
+
+    Ok(true)
+}
+
 /// Migrate any pre-CAS dumps in `output_base` into content-addressed storage.
 ///
 /// Older dumps stored the extracted `vfs/` tree as plain files with no entries
-/// in `metadata.files`. This rehashes those files into `vfs_common/`, replaces
+/// in `metadata.files`. This rehashes those files into `common/`, replaces
 /// them with symlinks, records the hashes, and regenerates derived artifacts so
 /// the dump deduplicates against every other build. Returns the number of
 /// builds migrated. Builds already in CAS format are left untouched.
 pub fn migrate_to_cas(output_base: &Path) -> Result<usize, Report> {
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
     let mut migrated = 0;
     for entry in std::fs::read_dir(output_base)
         .attach_with(|| format!("Failed to read {}", output_base.display()))?
@@ -805,7 +872,7 @@ mod maintenance_tests {
     fn gc_unreferenced_removes_orphans_and_keeps_live() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
-        let cas_root = base.join("vfs_common");
+        let cas_root = base.join("common");
 
         let live_hash = cas::store(&cas_root, b"live object").unwrap();
         let orphan_hash = cas::store(&cas_root, b"orphan object").unwrap();
@@ -821,7 +888,7 @@ mod maintenance_tests {
     fn gc_unreferenced_aborts_on_unreadable_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
-        let cas_root = base.join("vfs_common");
+        let cas_root = base.join("common");
         let orphan_hash = cas::store(&cas_root, b"orphan object").unwrap();
 
         let build_dir = base.join("1.0.0_100");
@@ -857,5 +924,28 @@ mod maintenance_tests {
         assert!(meta.has_file_hashes());
         assert!(meta.files.contains_key("gui/a.png"));
         assert_eq!(migrate_to_cas(base).unwrap(), 0);
+    }
+
+    #[test]
+    fn migrate_cas_dir_name_renames_and_relinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        // Legacy layout: vfs_common/ store + a build whose vfs file symlinks into it.
+        let legacy = base.join(cas::LEGACY_CAS_DIR);
+        let hash = cas::store(&legacy, b"icon bytes").unwrap();
+        let build_dir = base.join("1.0.0_100");
+        let link = build_dir.join("vfs/gui/x.png");
+        cas::link_file(&legacy, &hash, &link).unwrap();
+        write_build_metadata(&build_dir, "1.0.0", 100, &[("gui/x.png", &hash)]);
+
+        assert!(migrate_cas_dir_name(base).unwrap());
+        assert!(base.join(cas::CAS_DIR).exists());
+        assert!(!base.join(cas::LEGACY_CAS_DIR).exists());
+        // The symlink now resolves through common/ and still reads back.
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&link).unwrap(), b"icon bytes");
+        // Idempotent: nothing to migrate the second time.
+        assert!(!migrate_cas_dir_name(base).unwrap());
     }
 }

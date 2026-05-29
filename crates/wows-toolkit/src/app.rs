@@ -620,6 +620,11 @@ impl WowsToolkitApp {
                     if !dump_base.exists() {
                         return;
                     }
+                    match wows_data_mgr::dump::migrate_cas_dir_name(&dump_base) {
+                        Ok(true) => tracing::info!("migrated game data cache from vfs_common/ to common/"),
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!("game data cache rename migration failed: {e}"),
+                    }
                     match wows_data_mgr::dump::migrate_to_cas(&dump_base) {
                         Ok(n) if n > 0 => tracing::info!("migrated {n} cached build(s) to deduplicated storage"),
                         Ok(_) => {}
@@ -2277,18 +2282,10 @@ impl WowsToolkitApp {
             return;
         };
 
-        let locales = self.tab_state.game_data_download_locales();
-
         self.pending_replay_retry = prompt.replay_path;
         update_background_task!(
             self.tab_state.background_tasks,
-            Some(crate::task::start_game_data_download_task(
-                output_base,
-                prompt.build,
-                Some(prompt.version),
-                locales,
-                false,
-            ))
+            Some(crate::task::start_game_data_download_task(output_base, prompt.build, Some(prompt.version), false))
         );
     }
 

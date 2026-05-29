@@ -1,7 +1,7 @@
 //! Content-addressed storage for deduplicated VFS file storage.
 //!
 //! Files are stored by truncated SHA-256 hash in a git-style fanout directory:
-//! `vfs_common/ab/cdef1234567890ab1234`
+//! `common/ab/cdef1234567890ab1234`
 //!
 //! Build directories contain symlinks (or copies as fallback) pointing to the
 //! shared CAS objects, avoiding duplication across game versions.
@@ -17,6 +17,18 @@ use sha2::Sha256;
 /// Number of hex characters to keep from the SHA-256 hash.
 /// 20 hex chars = 80 bits, plenty for content addressing.
 const HASH_LEN: usize = 20;
+
+/// Directory name of the content-addressed store within a dump base. All builds
+/// in a dump base share this one store, deduplicating files across versions.
+pub const CAS_DIR: &str = "common";
+
+/// Legacy name of the content-addressed store, migrated to [`CAS_DIR`].
+pub const LEGACY_CAS_DIR: &str = "vfs_common";
+
+/// Path to the content-addressed store within a dump base.
+pub fn cas_root(output_base: &Path) -> PathBuf {
+    output_base.join(CAS_DIR)
+}
 
 /// Compute a truncated SHA-256 hash of the given data.
 /// Returns a lowercase hex string of `HASH_LEN` characters.
@@ -167,7 +179,7 @@ mod tests {
     #[test]
     fn store_and_retrieve() {
         let dir = tempfile::tempdir().unwrap();
-        let cas_root = dir.path().join("vfs_common");
+        let cas_root = dir.path().join("common");
 
         let data = b"test file contents";
         let hash = store(&cas_root, data).unwrap();
@@ -184,7 +196,7 @@ mod tests {
     #[test]
     fn link_creates_readable_file() {
         let dir = tempfile::tempdir().unwrap();
-        let cas_root = dir.path().join("vfs_common");
+        let cas_root = dir.path().join("common");
 
         let data = b"linked file";
         let hash = store(&cas_root, data).unwrap();
@@ -199,7 +211,7 @@ mod tests {
     #[test]
     fn gc_removes_orphans() {
         let dir = tempfile::tempdir().unwrap();
-        let cas_root = dir.path().join("vfs_common");
+        let cas_root = dir.path().join("common");
 
         let hash_a = store(&cas_root, b"file a").unwrap();
         let hash_b = store(&cas_root, b"file b").unwrap();

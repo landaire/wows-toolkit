@@ -12,20 +12,19 @@ use super::DownloadProgress;
 /// Download game data for `target_build` from the wows-replay-data repository
 /// into `output_base`. `version_hint` (the replay's `major.minor.patch` string)
 /// allows falling back to a different build of the same version when no exact
-/// match is published. `locales` lists the translation catalogs to fetch. When
-/// `force` is true an existing copy is rebuilt to pick up newer remote data.
+/// match is published. When `force` is true an existing copy is rebuilt to pick
+/// up newer remote data.
 pub fn start_game_data_download_task(
     output_base: PathBuf,
     target_build: u32,
     version_hint: Option<String>,
-    locales: Vec<String>,
     force: bool,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
     let (progress_tx, progress_rx) = mpsc::channel();
 
     crate::util::thread::spawn_logged("download-game-data", move || {
-        let _ = tx.send(download(output_base, target_build, version_hint, locales, force, &progress_tx));
+        let _ = tx.send(download(output_base, target_build, version_hint, force, &progress_tx));
     });
 
     BackgroundTask {
@@ -58,7 +57,6 @@ fn download(
     output_base: PathBuf,
     target_build: u32,
     version_hint: Option<String>,
-    locales: Vec<String>,
     force: bool,
     progress_tx: &mpsc::Sender<DownloadProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
@@ -74,7 +72,6 @@ fn download(
         &output_base,
         target_build,
         version_hint.as_deref(),
-        &locales,
         force,
         |downloaded, total| {
             let _ = progress_tx.send(DownloadProgress { downloaded, total });

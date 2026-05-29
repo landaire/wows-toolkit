@@ -127,18 +127,16 @@ pub async fn fetch_builds_index(client: &reqwest::Client, base_url: &str) -> Res
 ///
 /// `version_hint` is the replay's `major.minor.patch` string, used to fall back
 /// to a different build of the same version when no exact match is published.
-/// `locales` lists the translation catalogs to fetch (e.g. the user's locale,
-/// its primary language, and `en`). When `force` is true an existing copy is
-/// rebuilt rather than skipped, picking up newer remote data.
+/// All referenced content (including the content-addressed per-locale
+/// translation catalogs) is fetched from the CAS. When `force` is true an
+/// existing copy is rebuilt rather than skipped, picking up newer remote data.
 /// `on_progress(completed, total)` is invoked as content objects are downloaded.
-#[allow(clippy::too_many_arguments)]
 pub async fn download_build(
     client: &reqwest::Client,
     base_url: &str,
     output_base: &Path,
     target_build: u32,
     version_hint: Option<&str>,
-    locales: &[String],
     force: bool,
     on_progress: impl Fn(u64, u64),
 ) -> Result<u32, Report> {
@@ -154,7 +152,7 @@ pub async fn download_build(
         );
     }
 
-    let cas_root = output_base.join("vfs_common");
+    let cas_root = cas::cas_root(output_base);
     let output_dir = output_base.join(&entry.dir);
 
     // A complete download already on disk only needs to be registered, unless a
@@ -165,7 +163,7 @@ pub async fn download_build(
     }
 
     // Clear any partial or stale directory before rebuilding. Content objects in
-    // vfs_common are left in place so the rebuild only fetches what changed.
+    // the shared common/ store are left in place so the rebuild only fetches what changed.
     if output_dir.exists() {
         std::fs::remove_dir_all(&output_dir)
             .attach_with(|| format!("failed to clear download directory at {}", output_dir.display()))?;
@@ -202,22 +200,14 @@ pub async fn download_build(
         on_progress(completed, total);
     }
 
-    // Recreate the extracted vfs tree and derived artifacts as symlinks into the CAS.
+    // Recreate the extracted vfs tree and derived artifacts (rkyv blobs and the
+    // content-addressed per-locale translation catalogs) as symlinks into the CAS.
     let vfs_dir = output_dir.join("vfs");
     for (rel, hash) in &metadata.files {
         cas::link_file(&cas_root, hash, &vfs_dir.join(rel))?;
     }
     for (rel, hash) in &metadata.derived {
         cas::link_file(&cas_root, hash, &output_dir.join(rel))?;
-    }
-
-    // Translation catalogs are stored as plain files, not content-addressed.
-    for locale in locales {
-        let rel = format!("translations/{locale}/LC_MESSAGES/global.mo");
-        let url = format!("{base_url}/{}/{rel}", entry.dir);
-        if let Some(bytes) = get_bytes(client, &url).await? {
-            write_file(&output_dir.join(&rel), &bytes)?;
-        }
     }
 
     // Versioned constants, when published for this build.
@@ -239,7 +229,7 @@ async fn download_object(
     cas_root: &Path,
     hash: &str,
 ) -> Result<(), Report> {
-    let url = format!("{base_url}/vfs_common/{}/{}", &hash[..2], &hash[2..]);
+    let url = format!("{base_url}/{}/{}/{}", cas::CAS_DIR, &hash[..2], &hash[2..]);
     let bytes = get_bytes(client, &url).await?.ok_or_else(|| report!("content object {hash} missing from remote"))?;
     let actual = cas::hash_bytes(&bytes);
     if actual != hash {
@@ -295,10 +285,9 @@ mod tests {
         let base = dir.path();
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let client = reqwest::Client::builder().user_agent("wows-data-mgr-test").build().unwrap();
-        let locales = ["en".to_string()];
 
         let build = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, false, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, |_, _| {}))
             .unwrap();
         assert_eq!(build, 296659);
 
@@ -313,7 +302,7 @@ mod tests {
 
         // A second download is a cheap no-op that still reports the same build.
         let again = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, false, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), false, |_, _| {}))
             .unwrap();
         assert_eq!(again, 296659);
 
