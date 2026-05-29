@@ -11,13 +11,18 @@ Usage:
 
 Requires:
     - steamroom built: cargo build --release (in G:\\dev\\depotdownloader-rs-mit)
-    - wows-data-mgr built: cargo build --release -p wows-data-mgr (via WSL nix)
+    - wows-data-mgr + wowsunpack built: cargo build --release (via WSL nix)
     - Steam credentials (steamroom will prompt interactively on first run)
 
 Steam App 552990 uses multiple depots:
-    552993 - Client (~59 GiB): idx, pkg, exe, scripts
-    552991 - Content (~20 GiB): additional game assets
+    552993 - Client (~59 GiB): base idx + pkg, exe, scripts
+    552991 - Content (~20 GiB): map (spaces/) idx + pkg, other assets
     552994 - Localizations (~252 MiB): translation .mo files
+
+Maps live in the content depot (552991), so both depots are needed. To avoid
+downloading tens of GiB, we fetch all idx (small) from both depots first, ask
+`wowsunpack pkgs` for the minimal set of .pkg files that satisfies the dump's
+required paths, then download only those packages.
 
 Each WoWs update ships TWO builds (current + previous version), so we
 skip every other major manifest and dump both builds from one download.
@@ -27,6 +32,9 @@ from the previous manifest, saving bandwidth.
 """
 
 import argparse
+import json
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,7 +44,6 @@ from pathlib import Path
 
 TEMP_DIR = Path(r"G:\wows_builds\temp_game_data")
 ARCHIVE_DIR = Path(r"G:\wows_builds")
-BINARIES_DIR = Path(r"G:\wows_builds\binaries")
 APP_ID = 552990
 CLIENT_DEPOT = 552993
 LOCALIZATION_DEPOT = 552994
@@ -48,9 +55,6 @@ STEAMROOM = Path(r"G:\dev\depotdownloader-rs-mit\target\release\steamroom.exe")
 CLIENT_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_raw.txt"
 LOCALIZATION_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_552994_raw.txt"
 CONTENT_MANIFESTS_FILE = REPO_ROOT / "scripts" / "manifests_552991_raw.txt"
-
-# Filelist for client depot (depot 552993)
-CLIENT_FILELIST = REPO_ROOT / "scripts" / ".download_filelist.tmp"
 
 # Filelist for localization depot (depot 552994) - just .mo files
 LOCALIZATION_FILELIST = REPO_ROOT / "scripts" / ".download_translations_only.tmp"
@@ -161,6 +165,59 @@ def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
     return False
 
 
+WSL_REPO = "/mnt/g/dev/wows-toolkit"
+
+
+def to_wsl(path: Path) -> str:
+    """Convert a Windows path to its WSL /mnt form."""
+    s = str(path).replace("\\", "/")
+    if len(s) >= 2 and s[1] == ":":
+        s = "/mnt/" + s[0].lower() + s[2:]
+    return s
+
+
+def run_wsl_tool(tool_args: str, timeout: int = 600) -> subprocess.CompletedProcess:
+    """Run a workspace Rust tool inside the WSL nix dev shell, capturing output."""
+    cmd = ["wsl", "bash", "-lc", f"cd {WSL_REPO} && nix develop --command {tool_args}"]
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+
+
+_REQUIRED_GLOBS: list[str] | None = None
+
+
+def get_required_globs() -> list[str]:
+    """The dump's required VFS path globs (cached; same for every build)."""
+    global _REQUIRED_GLOBS
+    if _REQUIRED_GLOBS is None:
+        res = run_wsl_tool("./target/release/wows-data-mgr required-paths")
+        if res.returncode != 0:
+            raise RuntimeError(f"required-paths failed: {res.stderr.strip()}")
+        _REQUIRED_GLOBS = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    return _REQUIRED_GLOBS
+
+
+def resolve_pkgs(build: int) -> list[str]:
+    """Resolve the minimal set of .pkg files needed to dump `build`, from idx alone."""
+    globs = get_required_globs()
+    idx_wsl = f"{to_wsl(TEMP_DIR)}/bin/{build}/idx"
+    quoted = " ".join(shlex.quote(g) for g in globs)
+    res = run_wsl_tool(f"./target/release/wowsunpack --idx-files {idx_wsl} pkgs --json {quoted}")
+    if res.returncode != 0:
+        raise RuntimeError(f"pkg resolution failed for build {build}: {res.stderr.strip()}")
+    data = json.loads(res.stdout)
+    unmatched = data.get("unmatched_patterns", [])
+    if unmatched:
+        # Expected for version-specific dirs absent in this build; informational.
+        print(f"    note: {len(unmatched)} required glob(s) matched nothing in build {build}")
+    return data["pkgs"]
+
+
+def write_pkg_filelist(pkgs: list[str], path: Path):
+    """Write a steamroom filelist matching exactly the given pkg names in res_packages."""
+    lines = [f"regex:res_packages[/\\\\]{re.escape(p)}$" for p in pkgs]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def copy_translations(temp_dir: Path, archive_dir: Path):
     """Copy translation .mo files from temp download to archive build dirs."""
     bin_dir = temp_dir / "bin"
@@ -219,6 +276,11 @@ def main():
     download_list = major if args.no_skip else major[::2]
 
     loc_manifests = parse_manifests(LOCALIZATION_MANIFESTS_FILE) if LOCALIZATION_MANIFESTS_FILE.exists() else []
+    content_manifests = parse_manifests(CONTENT_MANIFESTS_FILE) if CONTENT_MANIFESTS_FILE.exists() else []
+    if not content_manifests:
+        print(f"ERROR: no content-depot manifests ({CONTENT_MANIFESTS_FILE}); maps live in depot "
+              f"{CONTENT_DEPOT} and cannot be dumped without it.")
+        sys.exit(1)
 
     print(f"Total client manifests: {len(client_manifests)}")
     print(f"Major manifests: {len(major)}")
@@ -243,28 +305,33 @@ def main():
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     discovered = {}
 
-    # Ensure filelists exist
-    if not CLIENT_FILELIST.exists():
-        # Written with double backslashes for regex character classes
-        CLIENT_FILELIST.write_bytes(
-            b"regex:bin[/\\\\]\\d+[/\\\\]idx[/\\\\].*\\.idx$\n"
-            b"regex:res_packages[/\\\\].*\\.pkg$\n"
-            b"regex:WorldOfWarships.*\\.exe$\n"
-            b"regex:scripts\\.zip$\n"
-            b"regex:bin[/\\\\]\\d+[/\\\\]res[/\\\\]texts[/\\\\].*[/\\\\]LC_MESSAGES[/\\\\]global\\.mo$\n"
-        )
+    # idx files are small and index every packed file, so we fetch all of them
+    # from both depots first, resolve the minimal pkg set, then download only
+    # those pkgs. The pkg filelist is regenerated per build.
+    IDX_FILELIST = REPO_ROOT / "scripts" / ".download_idx.tmp"
+    IDX_FILELIST.write_bytes(b"regex:\\.idx$\n")
+    PKG_FILELIST = REPO_ROOT / "scripts" / ".download_pkgs.tmp"
 
     for i, (date_str, manifest_id) in enumerate(download_list):
         idx = i + args.start_from
         print(f"\n{'='*60}")
         print(f"[{idx+1}] {date_str} - manifest {manifest_id}")
 
+        manifest_date = parse_date(date_str)
+        content_manifest = find_closest_manifest(manifest_date, content_manifests) if manifest_date else None
+        if not content_manifest:
+            print(f"  No content-depot ({CONTENT_DEPOT}) manifest near {date_str}; maps would be missing. Skipping.")
+            continue
+
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
         builds_before = set(detect_builds(TEMP_DIR))
 
-        # --- Download client depot (552993) ---
-        print(f"  Downloading client depot {CLIENT_DEPOT}...")
-        if not run_steamroom(steam_user, CLIENT_DEPOT, manifest_id, TEMP_DIR, CLIENT_FILELIST):
+        # --- Download idx from both depots (client base + content maps) ---
+        print(f"  Downloading idx: client depot {CLIENT_DEPOT}...")
+        if not run_steamroom(steam_user, CLIENT_DEPOT, manifest_id, TEMP_DIR, IDX_FILELIST, timeout=900):
+            continue
+        print(f"  Downloading idx: content depot {CONTENT_DEPOT} (manifest {content_manifest})...")
+        if not run_steamroom(steam_user, CONTENT_DEPOT, content_manifest, TEMP_DIR, IDX_FILELIST, timeout=900):
             continue
 
         # Detect new builds
@@ -276,7 +343,6 @@ def main():
             continue
 
         # --- Download localization depot (552994) if manifest exists ---
-        manifest_date = parse_date(date_str)
         loc_manifest = find_closest_manifest(manifest_date, loc_manifests) if manifest_date else None
         if loc_manifest and LOCALIZATION_FILELIST.exists():
             print(f"  Downloading localizations depot {LOCALIZATION_DEPOT}...")
@@ -287,24 +353,32 @@ def main():
                 copy_translations(loc_temp, ARCHIVE_DIR)
             shutil.rmtree(loc_temp, ignore_errors=True)
 
-        # --- Dump each build ---
+        # --- Per build: resolve minimal pkg set, download it, dump ---
+        wsl_archive = to_wsl(ARCHIVE_DIR)
+        wsl_temp = to_wsl(TEMP_DIR)
         for build in builds:
-            wsl_archive = str(ARCHIVE_DIR).replace("\\", "/").replace("G:", "/mnt/g")
-            wsl_temp = str(TEMP_DIR).replace("\\", "/").replace("G:", "/mnt/g")
+            try:
+                pkgs = resolve_pkgs(build)
+            except (RuntimeError, json.JSONDecodeError) as e:
+                print(f"    PKG RESOLUTION FAILED for build {build}: {e}")
+                continue
+            print(f"    Build {build}: {len(pkgs)} pkg(s) required")
+            write_pkg_filelist(pkgs, PKG_FILELIST)
 
-            # Register temp dir for wows-data-mgr
-            reg_cmd = [
-                "wsl", "bash", "-lc",
-                f"cd /mnt/g/dev/wows-toolkit && nix develop --command "
-                f"./target/release/wows-data-mgr register --latest --path {wsl_temp}"
-            ]
-            subprocess.run(reg_cmd, capture_output=True, text=True, timeout=120)
+            # The required pkgs are split across both depots; each download grabs
+            # whatever subset it holds.
+            print(f"    Downloading {len(pkgs)} pkg(s) from depots {CLIENT_DEPOT} + {CONTENT_DEPOT}...")
+            ok_client = run_steamroom(steam_user, CLIENT_DEPOT, manifest_id, TEMP_DIR, PKG_FILELIST, timeout=3600)
+            ok_content = run_steamroom(steam_user, CONTENT_DEPOT, content_manifest, TEMP_DIR, PKG_FILELIST, timeout=3600)
+            if not (ok_client and ok_content):
+                print(f"    PKG DOWNLOAD FAILED for build {build}")
+                continue
 
             dump_cmd = [
                 "wsl", "bash", "-lc",
-                f"cd /mnt/g/dev/wows-toolkit && nix develop --command "
+                f"cd {WSL_REPO} && nix develop --command "
                 f"./target/release/wows-data-mgr dump-renderer-data "
-                f"--build {build} --output {wsl_archive}"
+                f"--build {build} --game-dir {wsl_temp} --output {wsl_archive} --force"
             ]
             print(f"    Dumping build {build}...")
             dump_result = subprocess.run(dump_cmd, capture_output=True, timeout=600,
@@ -312,12 +386,11 @@ def main():
             if dump_result.returncode != 0:
                 print(f"    DUMP FAILED (exit {dump_result.returncode}):")
                 stdout = (dump_result.stdout or "").strip()[:500].encode("ascii", "replace").decode()
-                stderr = (dump_result.stderr or "").strip()[:500].encode("ascii", "replace").decode()
+                stderr = (dump_result.stderr or "").strip()[:800].encode("ascii", "replace").decode()
                 print(f"      stdout: {stdout}")
                 print(f"      stderr: {stderr}")
                 continue
 
-            # Print warnings from stderr
             stderr = (dump_result.stderr or "").strip()
             if stderr:
                 for line in stderr.splitlines():
@@ -326,31 +399,6 @@ def main():
                         print(f"      {safe}")
 
             discovered[build] = {"manifest_id": manifest_id, "date": date_str}
-
-            # Archive exe and scripts.zip with version-based dir name
-            version_str = "unknown"
-            for entry in ARCHIVE_DIR.iterdir():
-                if entry.is_dir() and entry.name.endswith(f"_{build}") and (entry / "metadata.toml").exists():
-                    version_str = entry.name.rsplit(f"_{build}", 1)[0]
-                    break
-
-            bin_dir = BINARIES_DIR / f"{version_str}_{build}"
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            build_dir = TEMP_DIR / "bin" / str(build)
-
-            for exe in list(build_dir.rglob("WorldOfWarships*.exe")) + list(TEMP_DIR.glob("WorldOfWarships*.exe")):
-                dest = bin_dir / exe.name
-                if not dest.exists():
-                    shutil.copy2(exe, dest)
-                    print(f"    Archived {exe.name} -> {bin_dir.name}")
-
-            for scripts_zip in list(build_dir.rglob("scripts.zip")) + list(TEMP_DIR.glob("scripts.zip")):
-                dest = bin_dir / "scripts.zip"
-                if not dest.exists():
-                    shutil.copy2(scripts_zip, dest)
-                    print(f"    Archived scripts.zip -> {bin_dir.name}")
-                break
-
             print(f"    OK")
 
     # Final cleanup
