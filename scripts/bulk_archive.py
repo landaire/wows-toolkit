@@ -192,7 +192,9 @@ def get_required_globs() -> list[str]:
         res = run_wsl_tool("./target/release/wows-data-mgr required-paths")
         if res.returncode != 0:
             raise RuntimeError(f"required-paths failed: {res.stderr.strip()}")
-        _REQUIRED_GLOBS = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        # `nix develop` may prepend "warning: Git tree ... is dirty" lines to
+        # stdout. Globs never contain whitespace, so drop any line that does.
+        _REQUIRED_GLOBS = [s for line in res.stdout.splitlines() if (s := line.strip()) and " " not in s]
     return _REQUIRED_GLOBS
 
 
@@ -204,7 +206,11 @@ def resolve_pkgs(build: int) -> list[str]:
     res = run_wsl_tool(f"./target/release/wowsunpack --idx-files {idx_wsl} pkgs --json {quoted}")
     if res.returncode != 0:
         raise RuntimeError(f"pkg resolution failed for build {build}: {res.stderr.strip()}")
-    data = json.loads(res.stdout)
+    # `nix develop` may prepend warnings to stdout; parse from the first brace.
+    brace = res.stdout.find("{")
+    if brace < 0:
+        raise RuntimeError(f"no JSON in pkgs output for build {build}: {res.stdout[:200]!r}")
+    data = json.loads(res.stdout[brace:])
     unmatched = data.get("unmatched_patterns", [])
     if unmatched:
         # Expected for version-specific dirs absent in this build; informational.
