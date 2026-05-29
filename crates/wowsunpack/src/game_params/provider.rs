@@ -157,17 +157,12 @@ macro_rules! game_param_to_type {
             .unwrap_or_else(|| panic!("{} is not a bool", $key))
     };
 
-    // Hashmaps that may fail to resolve
+    // Optional hashmap: None when the key is absent or its value is none.
     ($params:ident, $key:expr, Option<HashMap<(), ()>>) => {
-        if
         $params
             .get(&HashableValue::String($key.to_string().into()))
-            .unwrap_or_else(|| panic!("could not get {}", $key))
-            .is_none() {
-                None
-            } else {
-                Some(game_param_to_type!($params, $key, HashMap<(), ()>))
-            }
+            .filter(|value| !value.is_none())
+            .map(|_| game_param_to_type!($params, $key, HashMap<(), ()>))
     };
     ($params:ident, $key:expr, Option<$ty:tt>) => {
         $params
@@ -271,6 +266,21 @@ fn build_skill_modifiers(modifiers: &BTreeMap<HashableValue, Value>) -> Vec<Crew
         .collect()
 }
 
+/// Keys on a crew-skill dict that are structural rather than effect modifiers.
+/// Pre-rework skills (=0.6.x and earlier) store modifier coefficients as flat
+/// sibling keys, so any key outside this set is treated as a modifier.
+const SKILL_STRUCTURAL_KEYS: &[&str] = &[
+    "column",
+    "skillType",
+    "tier",
+    "turnOffOnRetraining",
+    "modifiers",
+    "LogicTrigger",
+    "canBeLearned",
+    "isEpic",
+    "uiTreatAsTrigger",
+];
+
 fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> {
     skills
         .iter()
@@ -317,28 +327,57 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
                     .build()
             });
 
-            let modifiers = game_param_to_type!(skill_data, "modifiers", Option<HashMap<(), ()>>);
+            // Modern skills nest effect coefficients under "modifiers"; pre-rework
+            // skills store them as flat sibling keys alongside the structural keys.
+            let modifiers = match skill_data.get(&pk("modifiers")).and_then(|v| v.dict_or_object_dict()) {
+                Some(modifiers) => Some(build_skill_modifiers(&modifiers.inner())),
+                None => {
+                    let flat: BTreeMap<HashableValue, Value> = skill_data
+                        .iter()
+                        .filter(|(key, _)| {
+                            key.string_ref().map(|s| !SKILL_STRUCTURAL_KEYS.contains(&s.inner().as_str())).unwrap_or(false)
+                        })
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect();
+                    (!flat.is_empty()).then(|| build_skill_modifiers(&flat))
+                }
+            };
 
-            let modifiers = modifiers.map(|modifiers| build_skill_modifiers(&modifiers.inner()));
-
-            let tier_data = game_param_to_type!(skill_data, "tier", HashMap<(), ()>);
-            let tier_data = tier_data.inner();
-            let tier = CrewSkillTiers::builder()
-                .aircraft_carrier(game_param_to_type!(tier_data, "AirCarrier", usize))
-                .auxiliary(game_param_to_type!(tier_data, "Auxiliary", usize))
-                .battleship(game_param_to_type!(tier_data, "Battleship", usize))
-                .cruiser(game_param_to_type!(tier_data, "Cruiser", usize))
-                .destroyer(game_param_to_type!(tier_data, "Destroyer", usize))
-                .submarine(game_param_to_type!(tier_data, "Submarine", usize))
-                .build();
+            // Modern tier is a per-species dict; pre-rework builds use one scalar.
+            let tier = match skill_data.get(&pk("tier")).and_then(|v| v.dict_or_object_dict()) {
+                Some(tier_data) => {
+                    let tier_data = tier_data.inner();
+                    CrewSkillTiers::builder()
+                        .aircraft_carrier(game_param_to_type!(tier_data, "AirCarrier", usize))
+                        .auxiliary(game_param_to_type!(tier_data, "Auxiliary", usize))
+                        .battleship(game_param_to_type!(tier_data, "Battleship", usize))
+                        .cruiser(game_param_to_type!(tier_data, "Cruiser", usize))
+                        .destroyer(game_param_to_type!(tier_data, "Destroyer", usize))
+                        .submarine(game_param_to_type!(tier_data, "Submarine", usize))
+                        .build()
+                }
+                None => {
+                    let t = skill_data.get(&pk("tier")).and_then(|v| v.i64_ref()).map(|&v| v as usize).unwrap_or_default();
+                    CrewSkillTiers::builder()
+                        .aircraft_carrier(t)
+                        .auxiliary(t)
+                        .battleship(t)
+                        .cruiser(t)
+                        .destroyer(t)
+                        .submarine(t)
+                        .build()
+                }
+            };
 
             Some(
                 CrewSkill::builder()
                     .internal_name(skill_name.to_owned())
-                    .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", bool))
-                    .is_epic(game_param_to_type!(skill_data, "isEpic", bool))
-                    .skill_type(game_param_to_type!(skill_data, "skillType", usize))
-                    .ui_treat_as_trigger(game_param_to_type!(skill_data, "uiTreatAsTrigger", bool))
+                    .can_be_learned(game_param_to_type!(skill_data, "canBeLearned", Option<bool>).unwrap_or_default())
+                    .is_epic(game_param_to_type!(skill_data, "isEpic", Option<bool>).unwrap_or_default())
+                    .skill_type(game_param_to_type!(skill_data, "skillType", Option<usize>).unwrap_or_default())
+                    .ui_treat_as_trigger(
+                        game_param_to_type!(skill_data, "uiTreatAsTrigger", Option<bool>).unwrap_or_default(),
+                    )
                     .tier(tier)
                     .maybe_modifiers(modifiers)
                     .maybe_logic_trigger(logic_trigger)
@@ -348,46 +387,31 @@ fn build_crew_skills(skills: &BTreeMap<HashableValue, Value>) -> Vec<CrewSkill> 
         .collect()
 }
 
+/// Extract a list-of-strings field, returning empty when the field is absent or
+/// not a string list. Older builds omit some of these list fields entirely.
+fn string_list_field(dict: &BTreeMap<HashableValue, Value>, key: &str) -> Vec<String> {
+    dict.get(&HashableValue::String(key.to_owned().into()))
+        .and_then(|value| value.list_ref())
+        .map(|list| list.inner().iter().filter_map(|v| v.string_ref().map(|s| s.inner().to_owned())).collect())
+        .unwrap_or_default()
+}
+
 fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewPersonality {
     let ships = game_param_to_type!(personality, "ships", HashMap<(), ()>);
     let ships = ships.inner();
     let ships = CrewPersonalityShips::builder()
-        .groups(
-            game_param_to_type!(ships, "groups", &[()])
-                .inner()
-                .iter()
-                .map(|value| value.string_ref().expect("group entry is not a string").inner().to_owned())
-                .collect(),
-        )
-        .nation(
-            game_param_to_type!(ships, "nation", &[()])
-                .inner()
-                .iter()
-                .map(|value| value.string_ref().expect("nation entry is not a string").inner().to_owned())
-                .collect(),
-        )
-        .peculiarity(
-            game_param_to_type!(ships, "peculiarity", &[()])
-                .inner()
-                .iter()
-                .map(|value| value.string_ref().expect("peculiarity entry is not a string").inner().to_owned())
-                .collect(),
-        )
-        .ships(
-            game_param_to_type!(ships, "ships", &[()])
-                .inner()
-                .iter()
-                .map(|value| value.string_ref().expect("ships entry is not a string").inner().to_owned())
-                .collect(),
-        )
+        .groups(string_list_field(&ships, "groups"))
+        .nation(string_list_field(&ships, "nation"))
+        .peculiarity(string_list_field(&ships, "peculiarity"))
+        .ships(string_list_field(&ships, "ships"))
         .build();
 
     CrewPersonality::builder()
-        .can_reset_skills_for_free(game_param_to_type!(personality, "canResetSkillsForFree", bool))
-        .cost_credits(game_param_to_type!(personality, "costCR", usize))
-        .cost_elite_xp(game_param_to_type!(personality, "costELXP", usize))
-        .cost_gold(game_param_to_type!(personality, "costGold", usize))
-        .cost_xp(game_param_to_type!(personality, "costXP", usize))
+        .can_reset_skills_for_free(game_param_to_type!(personality, "canResetSkillsForFree", Option<bool>).unwrap_or_default())
+        .cost_credits(game_param_to_type!(personality, "costCR", Option<usize>).unwrap_or_default())
+        .cost_elite_xp(game_param_to_type!(personality, "costELXP", Option<usize>).unwrap_or_default())
+        .cost_gold(game_param_to_type!(personality, "costGold", Option<usize>).unwrap_or_default())
+        .cost_xp(game_param_to_type!(personality, "costXP", Option<usize>).unwrap_or_default())
         .maybe_has_custom_background(personality.get(&pk("hasCustomBackground")).and_then(|v| v.bool_ref().copied()))
         .maybe_has_overlay(personality.get(&pk("hasOverlay")).and_then(|v| v.bool_ref().copied()))
         .maybe_has_rank(personality.get(&pk("hasRank")).and_then(|v| v.bool_ref().copied()))
@@ -400,7 +424,7 @@ fn build_crew_personality(personality: &BTreeMap<HashableValue, Value>) -> CrewP
             personality.get(&pk("peculiarity")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()),
         )
         .maybe_permissions(personality.get(&pk("permissions")).and_then(|v| v.i64_ref()).map(|&v| v as u32))
-        .person_name(game_param_to_type!(personality, "personName", String))
+        .person_name(game_param_to_type!(personality, "personName", Option<String>).unwrap_or_default())
         .maybe_subnation(personality.get(&pk("subnation")).and_then(|v| v.string_ref()).map(|s| s.inner().to_string()))
         .tags(
             personality
@@ -471,11 +495,11 @@ fn build_ability_category(category_data: &BTreeMap<HashableValue, Value>) -> Abi
 
     AbilityCategory::builder()
         .maybe_special_sound_id(game_param_to_type!(category_data, "SpecialSoundID", Option<String>))
-        .consumable_type(game_param_to_type!(category_data, "consumableType", String))
-        .group(game_param_to_type!(category_data, "group", String))
-        .icon_id(game_param_to_type!(category_data, "iconIDs", String))
-        .num_consumables(game_param_to_type!(category_data, "numConsumables", isize))
-        .preparation_time(game_param_to_type!(category_data, "preparationTime", f32))
+        .consumable_type(game_param_to_type!(category_data, "consumableType", Option<String>).unwrap_or_default())
+        .group(game_param_to_type!(category_data, "group", Option<String>).unwrap_or_default())
+        .icon_id(game_param_to_type!(category_data, "iconIDs", Option<String>).unwrap_or_default())
+        .num_consumables(game_param_to_type!(category_data, "numConsumables", Option<isize>).unwrap_or_default())
+        .preparation_time(game_param_to_type!(category_data, "preparationTime", Option<f32>).unwrap_or_default())
         .reload_time(reload_time)
         .work_time(work_time)
         .maybe_dist_ship(dist_ship)
@@ -1100,10 +1124,10 @@ impl GameMetadataProvider {
                 ))
             }
             ParamType::Achievement => {
-                let is_group = game_param_to_type!(param_data, "group", bool);
-                let one_per_battle = game_param_to_type!(param_data, "onePerBattle", bool);
-                let ui_type = game_param_to_type!(param_data, "uiType", String);
-                let ui_name = game_param_to_type!(param_data, "uiName", String);
+                let is_group = game_param_to_type!(param_data, "group", Option<bool>).unwrap_or_default();
+                let one_per_battle = game_param_to_type!(param_data, "onePerBattle", Option<bool>).unwrap_or_default();
+                let ui_type = game_param_to_type!(param_data, "uiType", Option<String>).unwrap_or_default();
+                let ui_name = game_param_to_type!(param_data, "uiName", Option<String>).unwrap_or_default();
 
                 Some(ParamData::Achievement(
                     Achievement::builder()
