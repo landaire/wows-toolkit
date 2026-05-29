@@ -404,11 +404,12 @@ pub(super) fn render_video_blocking(
     use wows_minimap_renderer::video::VideoEncoder;
 
     // Get game metadata and load assets for the software renderer
-    let (vfs, game_metadata, game_constants) = {
+    let (vfs, version, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = data.game_metadata.clone().ok_or_else(|| report!("Game metadata not loaded"))?;
-        (data.vfs.clone(), gm, Arc::clone(&data.game_constants))
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants))
     };
+    let version = version.as_ref();
 
     // Load assets — reuse cached raw RGBA data and convert to image types
     let (
@@ -423,14 +424,14 @@ pub(super) fn render_video_blocking(
         game_fonts,
     ) = {
         let mut cache = asset_cache.lock();
-        let ship_raw = cache.get_or_load_ship_icons(&vfs);
-        let plane_raw = cache.get_or_load_plane_icons(&vfs);
-        let building_raw = cache.get_or_load_building_icons(&vfs);
-        let consumable_raw = cache.get_or_load_consumable_icons(&vfs);
-        let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs);
-        let powerup_raw = cache.get_or_load_powerup_icons(&vfs);
-        let game_fonts = cache.get_or_load_game_fonts(&vfs);
-        let (map_raw, map_info) = cache.get_or_load_map(map_name, &vfs);
+        let ship_raw = cache.get_or_load_ship_icons(&vfs, version);
+        let plane_raw = cache.get_or_load_plane_icons(&vfs, version);
+        let building_raw = cache.get_or_load_building_icons(&vfs, version);
+        let consumable_raw = cache.get_or_load_consumable_icons(&vfs, version);
+        let death_cause_raw = cache.get_or_load_death_cause_icons(&vfs, version);
+        let powerup_raw = cache.get_or_load_powerup_icons(&vfs, version);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs, version);
+        let (map_raw, map_info) = cache.get_or_load_map(map_name, &vfs, version);
 
         // Convert cached RGBA bytes back to image types for ImageTarget
         let to_rgba = |a: &super::RgbaAsset| image::RgbaImage::from_raw(a.width, a.height, a.data.clone()).unwrap();

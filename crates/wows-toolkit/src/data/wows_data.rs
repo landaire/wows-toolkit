@@ -324,17 +324,17 @@ pub struct WorldOfWarshipsData {
 }
 
 impl WorldOfWarshipsData {
-    /// The game version for this data. Prefers the full `major.minor.patch`
-    /// (server-independent); falls back to a build-only version when the
-    /// semantic version isn't known.
-    pub fn version(&self) -> Version {
-        self.full_version.unwrap_or(Version { major: 0, minor: 0, patch: 0, build: self.build_number })
+    /// The full `major.minor.patch` game version for this data, if known. The
+    /// resolver branches on this (never the build number, which differs across
+    /// servers); `None` means use the newest layout with its fallbacks.
+    pub fn version(&self) -> Option<&Version> {
+        self.full_version.as_ref()
     }
 
     /// Load a GUI asset by what it is, letting the resolver pick the right path
     /// for this build's version. Returns `None` when the asset isn't present.
     fn load_gui_asset(&self, asset: wowsunpack::game_assets::GuiAsset<'_>) -> Option<Arc<GameAsset>> {
-        let resolved = asset.resolve(&self.vfs, &self.version())?;
+        let resolved = asset.resolve(&self.vfs, self.version())?;
         let path = resolved.as_str().trim_start_matches('/').to_owned();
         let mut data = Vec::new();
         resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
@@ -406,11 +406,12 @@ impl WorldOfWarshipsData {
         let new_game_constants = build_game_constants(&self.vfs, &new_replay_constants, self.build_number);
 
         // Reload all icons from game files
-        let new_ship_icons = crate::task::load_ship_icons(&self.vfs);
+        let version = self.full_version.as_ref();
+        let new_ship_icons = crate::task::load_ship_icons(&self.vfs, version);
         let new_ribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
+            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
         let new_subribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
+            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
 
         // Apply all regenerated fields
         self.ship_icons = new_ship_icons;

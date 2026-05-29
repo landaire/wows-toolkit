@@ -82,15 +82,16 @@ pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
 }
 
 #[instrument(skip(vfs))]
-pub fn load_ribbon_icons(vfs: &VfsPath, dir_path: &str) -> HashMap<String, Arc<GameAsset>> {
+pub fn load_ribbon_icons(
+    vfs: &VfsPath,
+    dir: wowsunpack::game_assets::GuiAssetDir,
+    version: Option<&Version>,
+) -> HashMap<String, Arc<GameAsset>> {
     let mut icons = HashMap::new();
 
-    let dir = match vfs.join(dir_path) {
-        Ok(dir) => dir,
-        Err(e) => {
-            error!("failed to join input paths: {e:?}");
-            return icons;
-        }
+    let Some(dir) = dir.resolve(vfs, version) else {
+        // Absent in this build (e.g. the Flash-era GUI has no per-file ribbons).
+        return icons;
     };
 
     let Ok(entries) = dir.read_dir() else {
@@ -114,18 +115,19 @@ pub fn load_ribbon_icons(vfs: &VfsPath, dir_path: &str) -> HashMap<String, Arc<G
 }
 
 /// Load a single nation flag PNG from `gui/nation_flags/tiny/flag_{nation}.png`.
-pub fn load_nation_flag(vfs: &VfsPath, nation: &str) -> Option<Arc<GameAsset>> {
-    let path = format!("gui/nation_flags/tiny/flag_{nation}.png");
+pub fn load_nation_flag(vfs: &VfsPath, nation: &str, version: Option<&Version>) -> Option<Arc<GameAsset>> {
+    let resolved = wowsunpack::game_assets::GuiAsset::NationFlag(nation).resolve(vfs, version)?;
+    let path = resolved.as_str().trim_start_matches('/').to_string();
     let mut data = Vec::new();
-    vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut data).ok()?;
-    if data.is_empty() {
-        return None;
-    }
-    Some(Arc::new(GameAsset { path, data }))
+    resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
+    (!data.is_empty()).then(|| Arc::new(GameAsset { path, data }))
 }
 
 #[instrument(skip_all)]
-pub fn load_ship_icons(vfs: &VfsPath) -> HashMap<Species, Arc<GameAsset>> {
+pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<Species, Arc<GameAsset>> {
+    use wowsunpack::game_assets::GuiAsset;
+    use wowsunpack::game_assets::ShipIconState;
+
     let species = [
         Species::AirCarrier,
         Species::Battleship,
@@ -136,10 +138,11 @@ pub fn load_ship_icons(vfs: &VfsPath) -> HashMap<Species, Arc<GameAsset>> {
     ];
 
     HashMap::from_iter(species.iter().filter_map(|species| {
-        let path = wowsunpack::game_params::translations::ship_class_icon_path(species);
-        let mut icon_data = Vec::new();
-        vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
-        Some((*species, Arc::new(GameAsset { path, data: icon_data })))
+        let resolved = GuiAsset::ShipClassIcon { species: *species, state: ShipIconState::Alive }.resolve(vfs, version)?;
+        let path = resolved.as_str().trim_start_matches('/').to_string();
+        let mut data = Vec::new();
+        resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
+        Some((*species, Arc::new(GameAsset { path, data })))
     }))
 }
 
@@ -252,9 +255,11 @@ pub fn load_wows_data_for_build(
     });
 
     debug!("Loading icons for build {}", build);
-    let icons = load_ship_icons(&vfs);
-    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
-    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
+    // The semantic version isn't resolved at this point for a live install, so
+    // the resolver gets `None` and picks the newest layout with its fallbacks.
+    let icons = load_ship_icons(&vfs, None);
+    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, None);
+    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, None);
 
     // Load version-matched constants from disk cache only (no network I/O).
     // If not cached, use fallback constants. The networking thread will fetch
@@ -517,10 +522,11 @@ pub fn load_wows_data_from_dump(
     }
     let metadata_provider = Some(Arc::new(metadata_provider));
 
-    // Load icons
-    let icons = load_ship_icons(&vfs);
-    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_ICONS_DIR);
-    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_params::translations::RIBBON_SUBICONS_DIR);
+    // Load icons, using the semantic version recovered from the dump if present.
+    let version = full_version.as_ref();
+    let icons = load_ship_icons(&vfs, version);
+    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
+    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
 
     // Load constants: try dump dir first, then disk cache, then fallback
     let (replay_constants, replay_constants_exact_match) = {

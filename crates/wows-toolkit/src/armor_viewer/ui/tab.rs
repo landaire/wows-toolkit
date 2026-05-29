@@ -161,7 +161,7 @@ impl ToolkitTabViewer<'_> {
                         // Load nation flags for each nation in the catalog.
                         for nation_group in &catalog.nations {
                             if !state.nation_flag_textures.contains_key(&nation_group.nation)
-                                && let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
+                                && let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation, wd.version())
                             {
                                 state.nation_flag_textures.insert(nation_group.nation.clone(), asset);
                             }

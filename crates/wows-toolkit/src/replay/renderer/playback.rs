@@ -53,7 +53,7 @@ pub(super) fn playback_thread(
     open: Arc<AtomicBool>,
 ) {
     // 1. Get VFS, game metadata, and game constants from the app
-    let (vfs, game_metadata, game_constants) = {
+    let (vfs, version, game_metadata, game_constants) = {
         let data = wows_data.read();
         let gm = match data.game_metadata.clone() {
             Some(gm) => gm,
@@ -62,23 +62,24 @@ pub(super) fn playback_thread(
                 return;
             }
         };
-        (data.vfs.clone(), gm, Arc::clone(&data.game_constants))
+        (data.vfs.clone(), data.version().copied(), gm, Arc::clone(&data.game_constants))
     };
+    let version = version.as_ref();
 
     // 2. Load visual assets (cached across renderer instances)
     let (map_info, game_fonts, map_image_for_announce) = {
         let mut cache = asset_cache.lock();
-        let ship_icons = cache.get_or_load_ship_icons(&vfs);
-        let plane_icons = cache.get_or_load_plane_icons(&vfs);
-        let building_icons = cache.get_or_load_building_icons(&vfs);
-        let consumable_icons = cache.get_or_load_consumable_icons(&vfs);
-        let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs);
-        let powerup_icons = cache.get_or_load_powerup_icons(&vfs);
-        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&vfs);
-        let modernization_icons = cache.get_or_load_modernization_icons(&vfs);
-        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&vfs);
-        let game_fonts = cache.get_or_load_game_fonts(&vfs);
-        let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs);
+        let ship_icons = cache.get_or_load_ship_icons(&vfs, version);
+        let plane_icons = cache.get_or_load_plane_icons(&vfs, version);
+        let building_icons = cache.get_or_load_building_icons(&vfs, version);
+        let consumable_icons = cache.get_or_load_consumable_icons(&vfs, version);
+        let death_cause_icons = cache.get_or_load_death_cause_icons(&vfs, version);
+        let powerup_icons = cache.get_or_load_powerup_icons(&vfs, version);
+        let crew_skill_icons = cache.get_or_load_crew_skill_icons(&vfs, version);
+        let modernization_icons = cache.get_or_load_modernization_icons(&vfs, version);
+        let signal_flag_icons = cache.get_or_load_signal_flag_icons(&vfs, version);
+        let game_fonts = cache.get_or_load_game_fonts(&vfs, version);
+        let (map_image, map_info) = cache.get_or_load_map(&map_name, &vfs, version);
 
         let map_image_for_announce = map_image.clone();
         shared_state.lock().assets = Some(ReplayRendererAssets {
@@ -169,8 +170,8 @@ pub(super) fn playback_thread(
         let self_vehicle = meta.vehicles.iter().find(|v| v.relation == 0)?;
         let param = GameParamProvider::game_param_by_id(&*game_metadata, self_vehicle.shipId)?;
         let index = param.index();
-        let path = format!("gui/ships_silhouettes/{index}.png");
-        let img = wows_minimap_renderer::assets::load_packed_image(&path, &vfs)?;
+        let buf = wowsunpack::game_assets::GuiAsset::ShipSilhouette(index).read(&vfs, version)?;
+        let img = image::load_from_memory(&buf).ok()?;
         let mut rgba = img.into_rgba8();
         // Normalize to white pixels with original alpha — source silhouettes are dark,
         // and tint multiplication needs white (255) to produce the desired tint color.

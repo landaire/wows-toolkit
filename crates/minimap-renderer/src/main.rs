@@ -284,13 +284,14 @@ fn main() -> Result<(), Report> {
 
     info!("Loading fonts and icons");
     let game_fonts = load_game_fonts(vfs);
-    let ship_icons = load_ship_icons(vfs);
-    let plane_icons = load_plane_icons(vfs);
-    let building_icons = load_building_icons(vfs);
-    let consumable_icons = load_consumable_icons(vfs);
-    let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE);
-    let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE);
-    let flag_icons = load_flag_icons(vfs);
+    let version = Some(&replay_version);
+    let ship_icons = load_ship_icons(vfs, version);
+    let plane_icons = load_plane_icons(vfs, version);
+    let building_icons = load_building_icons(vfs, version);
+    let consumable_icons = load_consumable_icons(vfs, version);
+    let death_cause_icons = load_death_cause_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
+    let powerup_icons = load_powerup_icons(vfs, wows_minimap_renderer::assets::ICON_SIZE, version);
+    let flag_icons = load_flag_icons(vfs, version);
 
     // Load game constants from game data (falls back to hardcoded defaults per-field)
     let mut game_constants = GameConstants::from_vfs(vfs);

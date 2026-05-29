@@ -991,7 +991,11 @@ impl WowsToolkitApp {
                     // Register real game fonts from VFS now that data is available.
                     {
                         let wdata = self.tab_state.world_of_warships_data.as_ref().unwrap().read();
-                        let gf = self.tab_state.renderer_asset_cache.lock().get_or_load_game_fonts(&wdata.vfs);
+                        let gf = self
+                            .tab_state
+                            .renderer_asset_cache
+                            .lock()
+                            .get_or_load_game_fonts(&wdata.vfs, wdata.version());
                         let mut font_defs = ctx.fonts(|r| r.definitions().clone());
                         crate::replay::minimap_view::shapes::register_game_fonts(&mut font_defs, Some(&gf));
                         ctx.set_fonts(font_defs);
@@ -1614,7 +1618,8 @@ impl WowsToolkitApp {
                             let catalog = crate::armor_viewer::ship_selector::ShipCatalog::build(metadata);
                             for nation_group in &catalog.nations {
                                 if !self.tab_state.armor_viewer.nation_flag_textures.contains_key(&nation_group.nation)
-                                    && let Some(asset) = crate::task::load_nation_flag(&wd.vfs, &nation_group.nation)
+                                    && let Some(asset) =
+                                        crate::task::load_nation_flag(&wd.vfs, &nation_group.nation, wd.version())
                                 {
                                     self.tab_state
                                         .armor_viewer
@@ -2463,13 +2468,14 @@ impl WowsToolkitApp {
             }).collect()
         };
 
-        let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs));
-        let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs));
-        let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs));
-        let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs));
-        let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs));
+        let version = wd.version();
+        let ship_icons = convert_icons(&cache.get_or_load_ship_icons(&wd.vfs, version));
+        let plane_icons = convert_icons(&cache.get_or_load_plane_icons(&wd.vfs, version));
+        let consumable_icons = convert_icons(&cache.get_or_load_consumable_icons(&wd.vfs, version));
+        let death_cause_icons = convert_icons(&cache.get_or_load_death_cause_icons(&wd.vfs, version));
+        let powerup_icons = convert_icons(&cache.get_or_load_powerup_icons(&wd.vfs, version));
 
-        let fonts = cache.get_or_load_game_fonts(&wd.vfs);
+        let fonts = cache.get_or_load_game_fonts(&wd.vfs, version);
         let game_fonts = Some(GameFontsWire {
             primary: fonts.primary_bytes.clone(),
             fallback_ko: fonts.fallback_bytes.first().cloned(),

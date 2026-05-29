@@ -35,6 +35,7 @@ use wows_minimap_renderer::renderer::RenderOptions;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wowsunpack::data::Version;
 use wowsunpack::vfs::VfsPath;
 
 use egui_taffy::AsTuiBuilder as _;
@@ -79,27 +80,56 @@ struct ScoreBarInfo {
 }
 
 /// RGBA image data with dimensions.
+#[derive(PartialEq, Eq)]
 pub struct RgbaAsset {
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
 
+type IconMap = HashMap<String, RgbaAsset>;
+
+/// A GUI-asset set cached per game version. Asset paths are version-aware, so a
+/// session that mixes replays from different versions must keep their assets
+/// apart. Most versions resolve byte-identical assets, so on load we reuse an
+/// existing version's `Arc` when the freshly-loaded set matches — keeping the
+/// extra versions nearly free.
+#[derive(Default)]
+struct VersionedAssets {
+    by_version: HashMap<Option<Version>, Arc<IconMap>>,
+}
+
+impl VersionedAssets {
+    fn get_or_load(&mut self, version: Option<&Version>, load: impl FnOnce() -> IconMap) -> Arc<IconMap> {
+        let key = version.copied();
+        if let Some(cached) = self.by_version.get(&key) {
+            return Arc::clone(cached);
+        }
+        let fresh = load();
+        let arc = match self.by_version.values().find(|existing| ***existing == fresh) {
+            Some(identical) => Arc::clone(identical),
+            None => Arc::new(fresh),
+        };
+        self.by_version.insert(key, Arc::clone(&arc));
+        arc
+    }
+}
+
 /// Cached assets shared across renderer instances. Lives in TabState.
-/// Ship and plane icons are game-global; map data is per-map.
+/// Icons are keyed by game version; map data by version and map name.
 #[derive(Default)]
 pub struct RendererAssetCache {
-    ship_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    plane_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    building_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    consumable_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    death_cause_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    powerup_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    crew_skill_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    modernization_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    signal_flag_icons: Option<Arc<HashMap<String, RgbaAsset>>>,
-    game_fonts: Option<GameFonts>,
-    maps: HashMap<String, CachedMapData>,
+    ship_icons: VersionedAssets,
+    plane_icons: VersionedAssets,
+    building_icons: VersionedAssets,
+    consumable_icons: VersionedAssets,
+    death_cause_icons: VersionedAssets,
+    powerup_icons: VersionedAssets,
+    crew_skill_icons: VersionedAssets,
+    modernization_icons: VersionedAssets,
+    signal_flag_icons: VersionedAssets,
+    game_fonts: HashMap<Option<Version>, GameFonts>,
+    maps: HashMap<(Option<Version>, String), CachedMapData>,
 }
 
 struct CachedMapData {
@@ -107,171 +137,72 @@ struct CachedMapData {
     info: Option<MapInfo>,
 }
 
+/// Convert a loader's `RgbaImage` map into the cache's `RgbaAsset` map.
+fn convert_icons(raw: HashMap<String, image::RgbaImage>) -> IconMap {
+    raw.into_iter()
+        .map(|(k, img)| {
+            let (w, h) = (img.width(), img.height());
+            (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
+        })
+        .collect()
+}
+
 impl RendererAssetCache {
-    pub fn get_or_load_ship_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.ship_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_ship_icons(vfs);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.ship_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_ship_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.ship_icons.get_or_load(version, || convert_icons(assets::load_ship_icons(vfs, version)))
     }
 
-    pub fn get_or_load_plane_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.plane_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_plane_icons(vfs);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.plane_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_plane_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.plane_icons.get_or_load(version, || convert_icons(assets::load_plane_icons(vfs, version)))
     }
 
-    pub fn get_or_load_building_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.building_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_building_icons(vfs);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.building_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_building_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.building_icons.get_or_load(version, || convert_icons(assets::load_building_icons(vfs, version)))
     }
 
-    pub fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.consumable_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_consumable_icons(vfs);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.consumable_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_consumable_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.consumable_icons.get_or_load(version, || convert_icons(assets::load_consumable_icons(vfs, version)))
     }
 
-    pub fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.death_cause_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_death_cause_icons(vfs, 16);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.death_cause_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_death_cause_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.death_cause_icons.get_or_load(version, || convert_icons(assets::load_death_cause_icons(vfs, 16, version)))
     }
 
-    pub fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.powerup_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_powerup_icons(vfs, 16);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.powerup_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_powerup_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.powerup_icons.get_or_load(version, || convert_icons(assets::load_powerup_icons(vfs, 16, version)))
     }
 
-    pub fn get_or_load_crew_skill_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.crew_skill_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_crew_skill_icons(vfs, 36);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.crew_skill_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_crew_skill_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.crew_skill_icons.get_or_load(version, || convert_icons(assets::load_crew_skill_icons(vfs, 36, version)))
     }
 
-    pub fn get_or_load_modernization_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.modernization_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_modernization_icons(vfs, 36);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.modernization_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_modernization_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.modernization_icons
+            .get_or_load(version, || convert_icons(assets::load_modernization_icons(vfs, 36, version)))
     }
 
-    pub fn get_or_load_signal_flag_icons(&mut self, vfs: &VfsPath) -> Arc<HashMap<String, RgbaAsset>> {
-        if let Some(ref cached) = self.signal_flag_icons {
-            return Arc::clone(cached);
-        }
-        let raw = assets::load_signal_flag_icons(vfs, 36);
-        let converted: HashMap<String, RgbaAsset> = raw
-            .into_iter()
-            .map(|(k, img)| {
-                let (w, h) = (img.width(), img.height());
-                (k, RgbaAsset { data: img.into_raw(), width: w, height: h })
-            })
-            .collect();
-        let arc = Arc::new(converted);
-        self.signal_flag_icons = Some(Arc::clone(&arc));
-        arc
+    pub fn get_or_load_signal_flag_icons(&mut self, vfs: &VfsPath, version: Option<&Version>) -> Arc<IconMap> {
+        self.signal_flag_icons
+            .get_or_load(version, || convert_icons(assets::load_signal_flag_icons(vfs, 36, version)))
     }
 
-    pub fn get_or_load_game_fonts(&mut self, vfs: &VfsPath) -> GameFonts {
-        if let Some(ref cached) = self.game_fonts {
+    pub fn get_or_load_game_fonts(&mut self, vfs: &VfsPath, version: Option<&Version>) -> GameFonts {
+        if let Some(cached) = self.game_fonts.get(&version.copied()) {
             return cached.clone();
         }
         let fonts = assets::load_game_fonts(vfs);
-        self.game_fonts = Some(fonts.clone());
+        self.game_fonts.insert(version.copied(), fonts.clone());
         fonts
     }
 
-    pub fn get_or_load_map(&mut self, map_name: &str, vfs: &VfsPath) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
-        if let Some(cached) = self.maps.get(map_name) {
+    pub fn get_or_load_map(
+        &mut self,
+        map_name: &str,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+    ) -> (Option<Arc<RgbaAsset>>, Option<MapInfo>) {
+        let key = (version.copied(), map_name.to_string());
+        if let Some(cached) = self.maps.get(&key) {
             return (cached.image.clone(), cached.info.clone());
         }
         let map_image = assets::load_map_image(map_name, vfs).map(|img| {
@@ -280,7 +211,7 @@ impl RendererAssetCache {
             Arc::new(RgbaAsset { data: rgba.into_raw(), width: w, height: h })
         });
         let map_info = assets::load_map_info(map_name, vfs);
-        self.maps.insert(map_name.to_string(), CachedMapData { image: map_image.clone(), info: map_info.clone() });
+        self.maps.insert(key, CachedMapData { image: map_image.clone(), info: map_info.clone() });
         (map_image, map_info)
     }
 }
@@ -923,18 +854,22 @@ pub fn launch_client_renderer(
         modernization_icons,
         signal_flag_icons,
         game_fonts,
-    ) = if let Some(vfs) = wows_data.map(|d| d.read().vfs.clone()) {
+    ) = if let Some((vfs, version)) = wows_data.map(|d| {
+        let guard = d.read();
+        (guard.vfs.clone(), guard.version().copied())
+    }) {
+        let version = version.as_ref();
         let mut cache = asset_cache.lock();
-        let si = cache.get_or_load_ship_icons(&vfs);
-        let pi = cache.get_or_load_plane_icons(&vfs);
-        let bi = cache.get_or_load_building_icons(&vfs);
-        let ci = cache.get_or_load_consumable_icons(&vfs);
-        let di = cache.get_or_load_death_cause_icons(&vfs);
-        let pwi = cache.get_or_load_powerup_icons(&vfs);
-        let ski = cache.get_or_load_crew_skill_icons(&vfs);
-        let mi = cache.get_or_load_modernization_icons(&vfs);
-        let sfi = cache.get_or_load_signal_flag_icons(&vfs);
-        let gf = cache.get_or_load_game_fonts(&vfs);
+        let si = cache.get_or_load_ship_icons(&vfs, version);
+        let pi = cache.get_or_load_plane_icons(&vfs, version);
+        let bi = cache.get_or_load_building_icons(&vfs, version);
+        let ci = cache.get_or_load_consumable_icons(&vfs, version);
+        let di = cache.get_or_load_death_cause_icons(&vfs, version);
+        let pwi = cache.get_or_load_powerup_icons(&vfs, version);
+        let ski = cache.get_or_load_crew_skill_icons(&vfs, version);
+        let mi = cache.get_or_load_modernization_icons(&vfs, version);
+        let sfi = cache.get_or_load_signal_flag_icons(&vfs, version);
+        let gf = cache.get_or_load_game_fonts(&vfs, version);
         (si, pi, bi, ci, di, pwi, ski, mi, sfi, Some(gf))
     } else {
         (
