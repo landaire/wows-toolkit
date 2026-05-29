@@ -13,6 +13,7 @@ use std::io::Read;
 
 use vfs::VfsPath;
 
+use crate::data::Version;
 use crate::game_params::types::Species;
 
 /// Minimap ship-icon state.
@@ -82,14 +83,18 @@ pub enum GuiAsset<'a> {
 
 impl GuiAsset<'_> {
     /// Candidate VFS paths for this asset, highest-priority (newest layout)
-    /// first. `build` lets the mapping branch when a path genuinely moved
+    /// first. `version` lets the mapping branch when a path genuinely moved
     /// between game versions; today most assets share one path plus a fallback.
-    pub fn candidate_paths(&self, build: u32) -> Vec<String> {
-        // Reserved for build-gated path overrides, e.g.
-        // `if build < N { vec![old_path] } else { vec![new_path] }`. Today every
-        // asset resolves the same across modern builds (with in-order fallbacks),
-        // so the parameter is not yet branched on.
-        let _ = build;
+    ///
+    /// Branch on `major`/`minor`/`patch` only — never the build number — so the
+    /// same logic works across servers (e.g. the China client ships different
+    /// build numbers for the same `major.minor.patch`).
+    pub fn candidate_paths(&self, version: &Version) -> Vec<String> {
+        // Reserved for version-gated path overrides, e.g.
+        // `if (version.major, version.minor) < (N, M) { vec![old] } else { vec![new] }`.
+        // Today every asset resolves the same across modern versions (with
+        // in-order fallbacks), so the parameter is not yet branched on.
+        let _ = version;
         match *self {
             GuiAsset::ShipClassIcon { species, state } => {
                 let s = species.name().to_ascii_lowercase();
@@ -119,8 +124,8 @@ impl GuiAsset<'_> {
 
     /// Resolve to the first candidate path that exists in `vfs`, or `None` when
     /// the asset isn't present in this build.
-    pub fn resolve(&self, vfs: &VfsPath, build: u32) -> Option<VfsPath> {
-        for path in self.candidate_paths(build) {
+    pub fn resolve(&self, vfs: &VfsPath, version: &Version) -> Option<VfsPath> {
+        for path in self.candidate_paths(version) {
             if let Ok(entry) = vfs.join(&path)
                 && entry.exists().unwrap_or(false)
             {
@@ -131,8 +136,8 @@ impl GuiAsset<'_> {
     }
 
     /// Read the asset's bytes from the first candidate path that exists.
-    pub fn read(&self, vfs: &VfsPath, build: u32) -> Option<Vec<u8>> {
-        let entry = self.resolve(vfs, build)?;
+    pub fn read(&self, vfs: &VfsPath, version: &Version) -> Option<Vec<u8>> {
+        let entry = self.resolve(vfs, version)?;
         let mut buf = Vec::new();
         entry.open_file().ok()?.read_to_end(&mut buf).ok()?;
         (!buf.is_empty()).then_some(buf)
@@ -143,11 +148,11 @@ impl GuiAsset<'_> {
 mod tests {
     use super::*;
 
-    const SOME_BUILD: u32 = 11791718;
+    const VERSION: Version = Version { major: 15, minor: 0, patch: 0, build: 11791718 };
 
     #[test]
     fn self_icon_falls_back_to_generic() {
-        let paths = GuiAsset::SelfShipIcon { species: Species::Destroyer, alive: true }.candidate_paths(SOME_BUILD);
+        let paths = GuiAsset::SelfShipIcon { species: Species::Destroyer, alive: true }.candidate_paths(&VERSION);
         assert_eq!(paths[0], "gui/fla/minimap/ship_icons_self/minimap_self_alive_destroyer.svg");
         assert_eq!(paths[1], "gui/fla/minimap/ship_icons_self/minimap_self_alive.svg");
     }
@@ -155,11 +160,11 @@ mod tests {
     #[test]
     fn consumable_and_capture_point_paths() {
         assert_eq!(
-            GuiAsset::Consumable("PCY009_CrashCrewPremium").candidate_paths(SOME_BUILD)[0],
+            GuiAsset::Consumable("PCY009_CrashCrewPremium").candidate_paths(&VERSION)[0],
             "gui/consumables/consumable_PCY009_CrashCrewPremium.png"
         );
         assert_eq!(
-            GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(SOME_BUILD)[0],
+            GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(&VERSION)[0],
             "gui/battle_hud/markers/capture_point/icon_base_enemy_flag.png"
         );
     }

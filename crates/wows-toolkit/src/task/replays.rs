@@ -143,6 +143,16 @@ pub fn load_ship_icons(vfs: &VfsPath) -> HashMap<Species, Arc<GameAsset>> {
     }))
 }
 
+/// Parse a dotted version string like `"0.6.13"` or `"15.1.0"` into a
+/// [`Version`], attaching the build number. Missing components default to 0.
+fn parse_dotted_version(version: &str, build: u32) -> Option<Version> {
+    let mut parts = version.split('.').map(|p| p.trim().parse::<u32>().ok());
+    let major = parts.next()??;
+    let minor = parts.next().flatten().unwrap_or(0);
+    let patch = parts.next().flatten().unwrap_or(0);
+    Some(Version { major, minor, patch, build })
+}
+
 fn current_build_from_preferences(path: &Path) -> Option<String> {
     let data = std::fs::read_to_string(path).ok()?;
     let start_of_node = data.find("<last_server_version>")?;
@@ -457,6 +467,13 @@ pub fn load_wows_data_from_dump(
     }
     let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
 
+    // Recover the semantic version from the dump's metadata so version-aware
+    // asset resolution works. Build numbers differ across servers (e.g. the
+    // China client) for the same major.minor.patch, so the version is the
+    // server-independent key.
+    let full_version = wows_data_mgr::builds::BuildMetadata::load(&dump_dir.join("metadata.toml"))
+        .and_then(|meta| parse_dotted_version(&meta.version, build));
+
     // Load translations from dump
     let bcp47 = locale.replace('_', "-");
     let primary_lang = bcp47
@@ -530,7 +547,7 @@ pub fn load_wows_data_from_dump(
         vfs,
         filtered_files: Vec::new(), // No file browser for dump-based data
         patch_version: build as usize,
-        full_version: None,
+        full_version,
         build_number: build,
         ship_icons: icons,
         ribbon_icons,

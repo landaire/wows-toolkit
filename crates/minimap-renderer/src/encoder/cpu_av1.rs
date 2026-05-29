@@ -57,15 +57,20 @@ impl CpuAv1Encoder {
         cfg.max_key_frame_interval = FPS as u64;
         cfg.low_latency = true;
         cfg.speed_settings = SpeedSettings::from_preset(6);
-        // rav1e: lower quantizer = higher quality. Default 100; 60 is
-        // visually lossless on HUD-heavy frames. When the caller asks for a
-        // specific bitrate we use rav1e's `bitrate` field (it'll pick the
-        // quantizer to meet the target); otherwise honor any explicit
-        // quantizer override and fall back to the default.
+        // rav1e knobs:
+        //   - explicit `target_bitrate_bps` -> bitrate-based ABR
+        //   - explicit `av1_quantizer`      -> quantizer-based CQP
+        //   - neither -> match H.264/H.265 by targeting the size-derived
+        //     default bitrate. Quantizer-only mode (q=60) hits ~10.5 MiB
+        //     on a maximum-length 60 s clip, which blows past Discord's
+        //     cap; using ABR with the shared default keeps AV1 under the
+        //     same 10 MiB target the other codecs aim for.
         if let Some(target_bps) = config.target_bitrate_bps {
             cfg.bitrate = target_bps as i32;
+        } else if let Some(quant) = config.av1_quantizer {
+            cfg.quantizer = quant as usize;
         } else {
-            cfg.quantizer = config.av1_quantizer() as usize;
+            cfg.bitrate = crate::encoder::DEFAULT_BITRATE_BPS as i32;
         }
         // Workaround for muxide 0.2.5: its AV1 sequence-header parser reads
         // `decoder_model_info_present_flag` unconditionally instead of guarding

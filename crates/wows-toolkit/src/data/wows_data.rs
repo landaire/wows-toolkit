@@ -324,10 +324,17 @@ pub struct WorldOfWarshipsData {
 }
 
 impl WorldOfWarshipsData {
+    /// The game version for this data. Prefers the full `major.minor.patch`
+    /// (server-independent); falls back to a build-only version when the
+    /// semantic version isn't known.
+    pub fn version(&self) -> Version {
+        self.full_version.unwrap_or(Version { major: 0, minor: 0, patch: 0, build: self.build_number })
+    }
+
     /// Load a GUI asset by what it is, letting the resolver pick the right path
     /// for this build's version. Returns `None` when the asset isn't present.
-    fn load_gui_asset(&self, asset: wowsunpack::game_assets::GuiAsset) -> Option<Arc<GameAsset>> {
-        let resolved = asset.resolve(&self.vfs, self.build_number)?;
+    fn load_gui_asset(&self, asset: wowsunpack::game_assets::GuiAsset<'_>) -> Option<Arc<GameAsset>> {
+        let resolved = asset.resolve(&self.vfs, &self.version())?;
         let path = resolved.as_str().trim_start_matches('/').to_owned();
         let mut data = Vec::new();
         resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
