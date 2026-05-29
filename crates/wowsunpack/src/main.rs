@@ -4,6 +4,7 @@ use pickled::HashableValue;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
@@ -80,6 +81,20 @@ enum Commands {
 
         /// Directory name to list
         dir: Option<String>,
+    },
+    /// Resolve the minimal set of `.pkg` volume files that hold the files
+    /// matching the given glob patterns. Reads only the idx files, so it can be
+    /// run before any `.pkg` has been downloaded to determine which packages are
+    /// actually needed to extract a target path set.
+    Pkgs {
+        /// Glob patterns to resolve, e.g. `spaces/*/minimap*.png`. Uses the same
+        /// path format as `list`/`extract` (leading slash optional).
+        patterns: Vec<String>,
+
+        /// Emit JSON (`{"pkgs":[...],"matched_files":N,"unmatched_patterns":[...]}`)
+        /// instead of one pkg filename per line.
+        #[clap(long)]
+        json: bool,
     },
     /// Extract files to an output directory
     Extract {
@@ -545,6 +560,59 @@ fn run() -> Result<(), Report> {
     }
 
     match args.command {
+        Commands::Pkgs { patterns, json } => {
+            if patterns.is_empty() {
+                bail!("at least one glob pattern is required");
+            }
+            // Normalize: file_tree keys carry a leading slash, but patterns are
+            // written without one (matching the extract/list convention), so
+            // strip it from both sides before comparing.
+            let globs: Vec<glob::Pattern> = patterns
+                .iter()
+                .map(|p| glob::Pattern::new(p.trim_start_matches('/')).expect("invalid glob pattern"))
+                .collect();
+
+            let mut pkgs: BTreeSet<String> = BTreeSet::new();
+            let mut pattern_hit = vec![false; globs.len()];
+            let mut matched_files = 0usize;
+
+            for (path, entry) in &file_tree {
+                // assets.bin-backed paths have no standalone pkg, and the dump's
+                // required paths are all real volume files, so only consider
+                // volume-backed files.
+                let VfsEntry::File { volume, .. } = entry else {
+                    continue;
+                };
+                let rel = path.trim_start_matches('/');
+                for (i, glob) in globs.iter().enumerate() {
+                    if glob.matches(rel) {
+                        pattern_hit[i] = true;
+                        pkgs.insert(volume.filename.clone());
+                        matched_files += 1;
+                        break;
+                    }
+                }
+            }
+
+            let unmatched: Vec<&str> =
+                patterns.iter().zip(&pattern_hit).filter(|(_, hit)| !**hit).map(|(p, _)| p.as_str()).collect();
+
+            if json {
+                let obj = serde_json::json!({
+                    "pkgs": pkgs.iter().collect::<Vec<_>>(),
+                    "matched_files": matched_files,
+                    "unmatched_patterns": unmatched,
+                });
+                println!("{}", serde_json::to_string_pretty(&obj)?);
+            } else {
+                for pkg in &pkgs {
+                    println!("{pkg}");
+                }
+                if !unmatched.is_empty() {
+                    eprintln!("WARN: {} pattern(s) matched no files: {}", unmatched.len(), unmatched.join(", "));
+                }
+            }
+        }
         Commands::Extract { assets, flatten, files, out_dir, strip_prefix } => {
             let Some(vfs) = &vfs else {
                 bail!("Package file loader is unavailable. Check that the pkg_dir exists.");
