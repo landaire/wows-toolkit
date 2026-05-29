@@ -218,39 +218,6 @@ def write_pkg_filelist(pkgs: list[str], path: Path):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def copy_translations(temp_dir: Path, archive_dir: Path):
-    """Copy translation .mo files from temp download to archive build dirs."""
-    bin_dir = temp_dir / "bin"
-    if not bin_dir.exists():
-        return
-    for build_dir in sorted(bin_dir.iterdir()):
-        if not build_dir.is_dir() or not build_dir.name.isdigit():
-            continue
-        build = build_dir.name
-        texts_dir = build_dir / "res" / "texts"
-        if not texts_dir.exists():
-            continue
-        # Find the archive dir for this build
-        target = None
-        for entry in archive_dir.iterdir():
-            if entry.is_dir() and entry.name.endswith(f"_{build}") and (entry / "metadata.toml").exists():
-                target = entry
-                break
-        if not target or (target / "translations").exists():
-            continue
-        trans_dest = target / "translations"
-        for lang_dir in texts_dir.iterdir():
-            if not lang_dir.is_dir():
-                continue
-            mo_src = lang_dir / "LC_MESSAGES" / "global.mo"
-            if mo_src.exists():
-                mo_dest = trans_dest / lang_dir.name / "LC_MESSAGES" / "global.mo"
-                mo_dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(mo_src, mo_dest)
-        if trans_dest.exists():
-            print(f"    Copied translations -> {target.name}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Bulk archive WoWs game versions")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be downloaded without doing it")
@@ -311,6 +278,10 @@ def main():
     IDX_FILELIST = REPO_ROOT / "scripts" / ".download_idx.tmp"
     IDX_FILELIST.write_bytes(b"regex:\\.idx$\n")
     PKG_FILELIST = REPO_ROOT / "scripts" / ".download_pkgs.tmp"
+    # Localization depot: only the per-build per-locale gettext catalogs.
+    LOCALIZATION_FILELIST.write_bytes(
+        b"regex:bin[/\\\\]\\d+[/\\\\]res[/\\\\]texts[/\\\\].*[/\\\\]LC_MESSAGES[/\\\\]global\\.mo$\n"
+    )
 
     for i, (date_str, manifest_id) in enumerate(download_list):
         idx = i + args.start_from
@@ -342,16 +313,17 @@ def main():
             print("  No new builds, skipping")
             continue
 
-        # --- Download localization depot (552994) if manifest exists ---
+        # --- Download localization depot (552994) into TEMP_DIR so the dump's
+        # translation step finds bin/<build>/res/texts/<lang>/.../global.mo and
+        # content-addresses each catalog. ---
         loc_manifest = find_closest_manifest(manifest_date, loc_manifests) if manifest_date else None
-        if loc_manifest and LOCALIZATION_FILELIST.exists():
-            print(f"  Downloading localizations depot {LOCALIZATION_DEPOT}...")
-            loc_temp = TEMP_DIR / "_loc_temp"
-            loc_temp.mkdir(parents=True, exist_ok=True)
-            if run_steamroom(steam_user, LOCALIZATION_DEPOT, loc_manifest, loc_temp,
-                             LOCALIZATION_FILELIST, timeout=300):
-                copy_translations(loc_temp, ARCHIVE_DIR)
-            shutil.rmtree(loc_temp, ignore_errors=True)
+        if loc_manifest:
+            print(f"  Downloading translations: depot {LOCALIZATION_DEPOT} (manifest {loc_manifest})...")
+            if not run_steamroom(steam_user, LOCALIZATION_DEPOT, loc_manifest, TEMP_DIR,
+                                 LOCALIZATION_FILELIST, timeout=600):
+                print("  WARN: translation download failed; dumps for this manifest will lack localized names")
+        else:
+            print(f"  WARN: no localization manifest near {date_str}; dumps will lack localized names")
 
         # --- Per build: resolve minimal pkg set, download it, dump ---
         wsl_archive = to_wsl(ARCHIVE_DIR)

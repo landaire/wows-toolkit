@@ -948,4 +948,24 @@ mod maintenance_tests {
         // Idempotent: nothing to migrate the second time.
         assert!(!migrate_cas_dir_name(base).unwrap());
     }
+
+    #[test]
+    fn refresh_derived_content_addresses_translations() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join(cas::CAS_DIR);
+        let build_dir = base.join("1.0.0_100");
+        // A raw per-locale catalog as a plain file (as copied from the game install).
+        let mo = build_dir.join("translations/ru/LC_MESSAGES/global.mo");
+        std::fs::create_dir_all(mo.parent().unwrap()).unwrap();
+        std::fs::write(&mo, b"catalog bytes").unwrap();
+
+        let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
+
+        // The catalog is now a symlink into the shared store, recorded in derived.
+        assert!(std::fs::symlink_metadata(&mo).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&mo).unwrap(), b"catalog bytes");
+        assert!(meta.derived.contains_key("translations/ru/LC_MESSAGES/global.mo"));
+    }
 }
