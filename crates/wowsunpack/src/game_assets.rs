@@ -88,10 +88,11 @@ impl GuiAsset<'_> {
     ///
     /// Branch on `major`/`minor`/`patch` only — never the build number — so the
     /// same logic works across servers (e.g. the China client ships different
-    /// build numbers for the same `major.minor.patch`).
-    pub fn candidate_paths(&self, version: &Version) -> Vec<String> {
+    /// build numbers for the same `major.minor.patch`). `None` means the version
+    /// is unknown; callers get the newest layout with its fallbacks.
+    pub fn candidate_paths(&self, version: Option<&Version>) -> Vec<String> {
         // Reserved for version-gated path overrides, e.g.
-        // `if (version.major, version.minor) < (N, M) { vec![old] } else { vec![new] }`.
+        // `if version.is_some_and(|v| (v.major, v.minor) < (N, M)) { old } else { new }`.
         // Today every asset resolves the same across modern versions (with
         // in-order fallbacks), so the parameter is not yet branched on.
         let _ = version;
@@ -124,7 +125,7 @@ impl GuiAsset<'_> {
 
     /// Resolve to the first candidate path that exists in `vfs`, or `None` when
     /// the asset isn't present in this build.
-    pub fn resolve(&self, vfs: &VfsPath, version: &Version) -> Option<VfsPath> {
+    pub fn resolve(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<VfsPath> {
         for path in self.candidate_paths(version) {
             if let Ok(entry) = vfs.join(&path)
                 && entry.exists().unwrap_or(false)
@@ -136,11 +137,93 @@ impl GuiAsset<'_> {
     }
 
     /// Read the asset's bytes from the first candidate path that exists.
-    pub fn read(&self, vfs: &VfsPath, version: &Version) -> Option<Vec<u8>> {
+    pub fn read(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<Vec<u8>> {
         let entry = self.resolve(vfs, version)?;
         let mut buf = Vec::new();
         entry.open_file().ok()?.read_to_end(&mut buf).ok()?;
         (!buf.is_empty()).then_some(buf)
+    }
+}
+
+/// Which plane-marker subdirectory under `gui/battle_hud/markers_minimap/plane/`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneMarkerKind {
+    Consumables,
+    Controllable,
+    AirSupport,
+}
+
+impl PlaneMarkerKind {
+    fn dir(self) -> &'static str {
+        match self {
+            PlaneMarkerKind::Consumables => "consumables",
+            PlaneMarkerKind::Controllable => "controllable",
+            PlaneMarkerKind::AirSupport => "airsupport",
+        }
+    }
+}
+
+/// A GUI asset *directory* identified by what it holds, not its path. Used by
+/// bulk loaders that enumerate a whole directory (e.g. all consumable icons),
+/// where only the directory location is version-dependent.
+#[derive(Clone, Copy, Debug)]
+pub enum GuiAssetDir {
+    ShipClassIcons,
+    SelfShipIcons,
+    PlaneMarkers(PlaneMarkerKind),
+    BuildingIcons,
+    Consumables,
+    CrewSkills,
+    Modernizations,
+    SignalFlags,
+    DeathCauseIcons,
+    PowerupDrops,
+    CapturePoint,
+    Ribbons,
+    SubRibbons,
+    Achievements,
+    NationFlags,
+    Silhouettes,
+}
+
+impl GuiAssetDir {
+    /// Candidate directory paths, highest-priority (newest layout) first. As
+    /// with [`GuiAsset::candidate_paths`], branch only on `major.minor.patch`.
+    pub fn candidate_paths(&self, version: Option<&Version>) -> Vec<String> {
+        let _ = version;
+        let dir = match *self {
+            GuiAssetDir::ShipClassIcons => "gui/fla/minimap/ship_icons".to_string(),
+            GuiAssetDir::SelfShipIcons => "gui/fla/minimap/ship_icons_self".to_string(),
+            GuiAssetDir::PlaneMarkers(kind) => {
+                format!("gui/battle_hud/markers_minimap/plane/{}", kind.dir())
+            }
+            GuiAssetDir::BuildingIcons => "gui/battle_hud/markers/building_icons/normal".to_string(),
+            GuiAssetDir::Consumables => "gui/consumables".to_string(),
+            GuiAssetDir::CrewSkills => "gui/crew_commander/skills".to_string(),
+            GuiAssetDir::Modernizations => "gui/modernization_icons".to_string(),
+            GuiAssetDir::SignalFlags => "gui/signal_flags".to_string(),
+            GuiAssetDir::DeathCauseIcons => "gui/battle_hud/icon_frag".to_string(),
+            GuiAssetDir::PowerupDrops => "gui/powerups/drops".to_string(),
+            GuiAssetDir::CapturePoint => "gui/battle_hud/markers/capture_point".to_string(),
+            GuiAssetDir::Ribbons => "gui/ribbons".to_string(),
+            GuiAssetDir::SubRibbons => "gui/ribbons/subribbons".to_string(),
+            GuiAssetDir::Achievements => "gui/achievements".to_string(),
+            GuiAssetDir::NationFlags => "gui/nation_flags/tiny".to_string(),
+            GuiAssetDir::Silhouettes => "gui/ships_silhouettes".to_string(),
+        };
+        vec![dir]
+    }
+
+    /// Resolve to the first candidate directory that exists in `vfs`.
+    pub fn resolve(&self, vfs: &VfsPath, version: Option<&Version>) -> Option<VfsPath> {
+        for path in self.candidate_paths(version) {
+            if let Ok(entry) = vfs.join(&path)
+                && entry.exists().unwrap_or(false)
+            {
+                return Some(entry);
+            }
+        }
+        None
     }
 }
 
@@ -152,7 +235,7 @@ mod tests {
 
     #[test]
     fn self_icon_falls_back_to_generic() {
-        let paths = GuiAsset::SelfShipIcon { species: Species::Destroyer, alive: true }.candidate_paths(&VERSION);
+        let paths = GuiAsset::SelfShipIcon { species: Species::Destroyer, alive: true }.candidate_paths(Some(&VERSION));
         assert_eq!(paths[0], "gui/fla/minimap/ship_icons_self/minimap_self_alive_destroyer.svg");
         assert_eq!(paths[1], "gui/fla/minimap/ship_icons_self/minimap_self_alive.svg");
     }
@@ -160,11 +243,11 @@ mod tests {
     #[test]
     fn consumable_and_capture_point_paths() {
         assert_eq!(
-            GuiAsset::Consumable("PCY009_CrashCrewPremium").candidate_paths(&VERSION)[0],
+            GuiAsset::Consumable("PCY009_CrashCrewPremium").candidate_paths(Some(&VERSION))[0],
             "gui/consumables/consumable_PCY009_CrashCrewPremium.png"
         );
         assert_eq!(
-            GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(&VERSION)[0],
+            GuiAsset::CapturePointFlag(Relation::Enemy).candidate_paths(Some(&VERSION))[0],
             "gui/battle_hud/markers/capture_point/icon_base_enemy_flag.png"
         );
     }
