@@ -50,6 +50,7 @@ pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
 pub use game_data_download::start_game_data_download_task;
+pub use game_data_download::start_game_data_update_check_task;
 pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
@@ -119,6 +120,7 @@ pub enum BackgroundTaskKind {
         rx: mpsc::Receiver<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
     },
+    CheckingGameDataUpdates,
     #[cfg(feature = "mod_manager")]
     ModTask(Box<crate::mod_manager::ModTaskInfo>),
     UpdateTimedMessage(ToastMessage),
@@ -227,6 +229,10 @@ impl BackgroundTask {
                             }
                         }
                     }
+                    BackgroundTaskKind::CheckingGameDataUpdates => {
+                        ui.spinner();
+                        ui.label(t!("ui.messages.checking_game_data_updates"));
+                    }
                     #[cfg(feature = "mod_manager")]
                     BackgroundTaskKind::ModTask(mod_task) => match mod_task.as_mut() {
                         crate::mod_manager::ModTaskInfo::LoadingModDatabase => {
@@ -318,6 +324,10 @@ pub enum BackgroundTaskCompletion {
         requested_build: u32,
         build: u32,
     },
+    GameDataUpdatesChecked {
+        tip: String,
+        updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
+    },
     ReplayLoaded {
         replay: Arc<RwLock<Replay>>,
         source: ReplaySource,
@@ -354,6 +364,9 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
                 .field("requested_build", requested_build)
                 .field("build", build)
                 .finish(),
+            Self::GameDataUpdatesChecked { tip, updates } => {
+                f.debug_struct("GameDataUpdatesChecked").field("tip", tip).field("updates", updates).finish()
+            }
             Self::ReplayLoaded { replay: _, source } => {
                 f.debug_struct("ReplayLoaded").field("replay", &"<...>").field("source", source).finish()
             }

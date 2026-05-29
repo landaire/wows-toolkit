@@ -445,6 +445,10 @@ pub struct TabState {
     pub network_job_tx: Option<Sender<NetworkJob>>,
     /// Whether the Settings tab needs attention (e.g. invalid WoWs directory, invalid twitch token).
     pub settings_needs_attention: bool,
+    /// Cached builds found to have newer data upstream by the last update check.
+    pub game_data_updates: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
+    /// Whether a game data update check is currently running.
+    pub checking_game_data_updates: bool,
     /// Cached result of WoWs directory validation. Updated by `revalidate_wows_dir()`
     /// on startup and whenever `settings.wows_dir` changes — NOT every frame.
     pub wows_dir_invalid: bool,
@@ -546,6 +550,8 @@ impl Default for TabState {
             suppress_gpu_encoder_warning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             network_job_tx: None,
             settings_needs_attention: false,
+            game_data_updates: Vec::new(),
+            checking_game_data_updates: false,
             wows_dir_invalid: false,
             wgpu_render_state: None,
             armor_viewer: Default::default(),
@@ -634,6 +640,63 @@ impl TabState {
     pub fn send_network_job(&self, job: NetworkJob) {
         if let Some(tx) = &self.network_job_tx {
             let _ = tx.send(job);
+        }
+    }
+
+    /// Translation catalogs to fetch when downloading a build: the user's locale,
+    /// its primary language, and English, matching what the data loader looks for.
+    pub fn game_data_download_locales(&self) -> Vec<String> {
+        let locale = self.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".to_string());
+        let primary = locale
+            .replace('_', "-")
+            .parse::<language_tags::LanguageTag>()
+            .map(|tag| tag.primary_language().to_string())
+            .unwrap_or_else(|_| locale.clone());
+        let mut locales = vec![locale];
+        for extra in [primary, "en".to_string()] {
+            if !locales.contains(&extra) {
+                locales.push(extra);
+            }
+        }
+        locales
+    }
+
+    /// Start a background check for updates to cached builds. No-op if a check
+    /// is already running or no cache directory is configured.
+    pub fn check_game_data_updates(&mut self) {
+        if self.checking_game_data_updates {
+            return;
+        }
+        let cache_dir = self.persisted.read().settings.game.game_data_cache_dir.clone();
+        let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
+            return;
+        };
+        let known_tip = self.persisted.read().settings.game.game_data_repo_commit.clone();
+        self.checking_game_data_updates = true;
+        update_background_task!(
+            self.background_tasks,
+            Some(crate::task::start_game_data_update_check_task(output_base, known_tip))
+        );
+    }
+
+    /// Re-download every cached build the last check flagged as out of date.
+    pub fn update_all_game_data(&mut self) {
+        let cache_dir = self.persisted.read().settings.game.game_data_cache_dir.clone();
+        let Some(output_base) = crate::task::replays::game_data_dump_base_with_override(&cache_dir) else {
+            return;
+        };
+        let locales = self.game_data_download_locales();
+        for update in std::mem::take(&mut self.game_data_updates) {
+            update_background_task!(
+                self.background_tasks,
+                Some(crate::task::start_game_data_download_task(
+                    output_base.clone(),
+                    update.build,
+                    Some(update.version),
+                    locales.clone(),
+                    true,
+                ))
+            );
         }
     }
 

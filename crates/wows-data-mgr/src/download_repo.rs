@@ -20,8 +20,99 @@ use crate::cas;
 /// Base URL of the published game data repository, served as raw files.
 pub const DEFAULT_REPO_BASE_URL: &str = "https://raw.githubusercontent.com/landaire/wows-replay-data/main";
 
+/// GitHub API endpoint for the tip commit of the repository's main branch.
+const REPO_TIP_API_URL: &str = "https://api.github.com/repos/landaire/wows-replay-data/commits/main";
+
 /// Maximum number of concurrent file downloads.
 const MAX_CONCURRENT_DOWNLOADS: usize = 16;
+
+/// A locally-cached build whose remote data differs from the copy on disk.
+#[derive(Debug, Clone)]
+pub struct BuildUpdateStatus {
+    pub build: u32,
+    pub version: String,
+}
+
+/// Result of checking the repository for updates to locally-cached builds.
+#[derive(Debug, Clone)]
+pub struct UpdateCheck {
+    /// The repository's current tip commit, to persist for the next check.
+    pub tip: String,
+    /// Builds present locally whose remote data has changed.
+    pub updates: Vec<BuildUpdateStatus>,
+}
+
+/// Fetch the current tip commit SHA of the repository's main branch.
+pub async fn fetch_repo_tip(client: &reqwest::Client) -> Result<String, Report> {
+    let response = client
+        .get(REPO_TIP_API_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .attach_with(|| "failed to request repository tip")?
+        .error_for_status()
+        .attach_with(|| "error status fetching repository tip")?;
+    let bytes = response.bytes().await.attach_with(|| "failed to read repository tip response")?;
+    let json: serde_json::Value =
+        serde_json::from_slice(&bytes).attach_with(|| "failed to parse repository tip response")?;
+    json.get("sha")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| report!("repository tip response missing 'sha'"))
+}
+
+/// Determine which locally-cached builds have newer data published upstream.
+///
+/// Fetches the repository tip first; when it matches `known_tip` nothing has
+/// changed and no per-build requests are made. Otherwise each cached build's
+/// `metadata.toml` (the manifest of every content hash it references) is
+/// compared against the remote copy, so the returned list names exactly the
+/// builds whose content differs.
+pub async fn check_for_updates(
+    client: &reqwest::Client,
+    base_url: &str,
+    output_base: &Path,
+    known_tip: Option<&str>,
+) -> Result<UpdateCheck, Report> {
+    let tip = fetch_repo_tip(client).await?;
+    if known_tip == Some(tip.as_str()) {
+        return Ok(UpdateCheck { tip, updates: Vec::new() });
+    }
+
+    let local = BuildsIndex::load(&output_base.join("builds.toml"));
+    let remote = fetch_builds_index(client, base_url).await?;
+
+    let mut updates = Vec::new();
+    for entry in &local.builds {
+        let meta_path = output_base.join(&entry.dir).join("metadata.toml");
+        if !meta_path.exists() {
+            continue;
+        }
+        let Some(remote_entry) = remote.find_by_build(entry.build) else {
+            continue;
+        };
+        let url = format!("{base_url}/{}/metadata.toml", remote_entry.dir);
+        let Some(remote_text) = get_text(client, &url).await? else {
+            continue;
+        };
+        let remote_md: BuildMetadata = match toml::from_str(&remote_text) {
+            Ok(md) => md,
+            Err(e) => {
+                tracing::warn!("could not parse remote metadata for build {}: {e}", entry.build);
+                continue;
+            }
+        };
+        let differs = match BuildMetadata::load(&meta_path) {
+            Some(local_md) => local_md.files != remote_md.files || local_md.derived != remote_md.derived,
+            None => true,
+        };
+        if differs {
+            updates.push(BuildUpdateStatus { build: entry.build, version: entry.version.clone() });
+        }
+    }
+
+    Ok(UpdateCheck { tip, updates })
+}
 
 /// Fetch and parse the remote `builds.toml` index.
 pub async fn fetch_builds_index(client: &reqwest::Client, base_url: &str) -> Result<BuildsIndex, Report> {
@@ -37,8 +128,10 @@ pub async fn fetch_builds_index(client: &reqwest::Client, base_url: &str) -> Res
 /// `version_hint` is the replay's `major.minor.patch` string, used to fall back
 /// to a different build of the same version when no exact match is published.
 /// `locales` lists the translation catalogs to fetch (e.g. the user's locale,
-/// its primary language, and `en`). `on_progress(completed, total)` is invoked
-/// as content objects are downloaded.
+/// its primary language, and `en`). When `force` is true an existing copy is
+/// rebuilt rather than skipped, picking up newer remote data.
+/// `on_progress(completed, total)` is invoked as content objects are downloaded.
+#[allow(clippy::too_many_arguments)]
 pub async fn download_build(
     client: &reqwest::Client,
     base_url: &str,
@@ -46,6 +139,7 @@ pub async fn download_build(
     target_build: u32,
     version_hint: Option<&str>,
     locales: &[String],
+    force: bool,
     on_progress: impl Fn(u64, u64),
 ) -> Result<u32, Report> {
     let index = fetch_builds_index(client, base_url).await?;
@@ -63,16 +157,18 @@ pub async fn download_build(
     let cas_root = output_base.join("vfs_common");
     let output_dir = output_base.join(&entry.dir);
 
-    // A complete download already on disk only needs to be registered.
-    if output_dir.join("metadata.toml").exists() {
+    // A complete download already on disk only needs to be registered, unless a
+    // forced refresh is rebuilding it to pick up newer remote data.
+    if !force && output_dir.join("metadata.toml").exists() {
         register_build(output_base, &entry)?;
         return Ok(entry.build);
     }
 
-    // Clear any partial directory left by an interrupted download.
+    // Clear any partial or stale directory before rebuilding. Content objects in
+    // vfs_common are left in place so the rebuild only fetches what changed.
     if output_dir.exists() {
         std::fs::remove_dir_all(&output_dir)
-            .attach_with(|| format!("failed to clear partial download at {}", output_dir.display()))?;
+            .attach_with(|| format!("failed to clear download directory at {}", output_dir.display()))?;
     }
 
     // The build's metadata lists every content hash it references.
@@ -202,7 +298,7 @@ mod tests {
         let locales = ["en".to_string()];
 
         let build = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, false, |_, _| {}))
             .unwrap();
         assert_eq!(build, 296659);
 
@@ -217,8 +313,19 @@ mod tests {
 
         // A second download is a cheap no-op that still reports the same build.
         let again = runtime
-            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, |_, _| {}))
+            .block_on(download_build(&client, DEFAULT_REPO_BASE_URL, base, 296659, Some("0.6.13"), &locales, false, |_, _| {}))
             .unwrap();
         assert_eq!(again, 296659);
+
+        // The freshly-downloaded build matches upstream, so no updates are found.
+        let check = runtime.block_on(check_for_updates(&client, DEFAULT_REPO_BASE_URL, base, None)).unwrap();
+        assert!(!check.tip.is_empty());
+        assert!(check.updates.is_empty(), "expected no updates, got {:?}", check.updates);
+
+        // Passing the known tip short-circuits without per-build requests.
+        let cached =
+            runtime.block_on(check_for_updates(&client, DEFAULT_REPO_BASE_URL, base, Some(&check.tip))).unwrap();
+        assert_eq!(cached.tip, check.tip);
+        assert!(cached.updates.is_empty());
     }
 }

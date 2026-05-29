@@ -772,6 +772,7 @@ impl WowsToolkitApp {
                             }
                             BackgroundTaskKind::BatchVideoExport { .. } => {}
                             BackgroundTaskKind::DownloadingGameData { .. } => {}
+                            BackgroundTaskKind::CheckingGameDataUpdates => {}
                         }
 
                         self.handle_task_completion(ui.ctx(), result);
@@ -1068,6 +1069,22 @@ impl WowsToolkitApp {
                         );
                     } else if requested_build != build {
                         debug!("downloaded build {build} as a fallback for requested build {requested_build}");
+                    }
+                }
+                BackgroundTaskCompletion::GameDataUpdatesChecked { tip, updates } => {
+                    self.tab_state.checking_game_data_updates = false;
+                    if updates.is_empty() {
+                        // Everything is current; record the tip so the next check
+                        // can short-circuit without per-build requests.
+                        self.tab_state.persisted.write().settings.game.game_data_repo_commit = Some(tip);
+                        self.tab_state.game_data_updates.clear();
+                        self.tab_state.toasts.lock().success(t!("ui.messages.game_data_up_to_date"));
+                    } else {
+                        // Leave the stored commit untouched until the user updates,
+                        // so a later check re-detects these builds.
+                        let count = updates.len();
+                        self.tab_state.game_data_updates = updates;
+                        self.tab_state.toasts.lock().info(t!("ui.messages.game_data_updates_available", count = count));
                     }
                 }
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
@@ -2260,21 +2277,7 @@ impl WowsToolkitApp {
             return;
         };
 
-        // Fetch the user's locale, its primary language, and English so the
-        // downloaded build can render names in the active language.
-        let locale =
-            self.tab_state.persisted.read().settings.app.locale.clone().unwrap_or_else(|| "en".to_string());
-        let primary = locale
-            .replace('_', "-")
-            .parse::<language_tags::LanguageTag>()
-            .map(|tag| tag.primary_language().to_string())
-            .unwrap_or_else(|_| locale.clone());
-        let mut locales = vec![locale];
-        for extra in [primary, "en".to_string()] {
-            if !locales.contains(&extra) {
-                locales.push(extra);
-            }
-        }
+        let locales = self.tab_state.game_data_download_locales();
 
         self.pending_replay_retry = prompt.replay_path;
         update_background_task!(
@@ -2284,6 +2287,7 @@ impl WowsToolkitApp {
                 prompt.build,
                 Some(prompt.version),
                 locales,
+                false,
             ))
         );
     }

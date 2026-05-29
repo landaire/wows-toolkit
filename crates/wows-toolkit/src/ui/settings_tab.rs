@@ -211,6 +211,32 @@ impl ToolkitTabViewer<'_> {
                                 delete_old_dump_versions(&dump_base);
                             }
                         });
+
+                        ui.horizontal(|ui| {
+                            let checking = self.tab_state.checking_game_data_updates;
+                            if ui
+                                .add_enabled(
+                                    !checking,
+                                    egui::Button::new(t!("ui.settings.wows.cache.check_updates")),
+                                )
+                                .clicked()
+                            {
+                                self.tab_state.check_game_data_updates();
+                            }
+                            if checking {
+                                ui.spinner();
+                            }
+                        });
+
+                        let update_count = self.tab_state.game_data_updates.len();
+                        if update_count > 0 {
+                            ui.horizontal(|ui| {
+                                ui.label(t!("ui.settings.wows.cache.updates_available", count = update_count));
+                                if ui.button(t!("ui.settings.wows.cache.update_all")).clicked() {
+                                    self.tab_state.update_all_game_data();
+                                }
+                            });
+                        }
                     }
                 }
             }

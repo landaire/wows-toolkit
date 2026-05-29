@@ -71,6 +71,9 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<String>(pool, "game_data_cache_dir").await {
         s.game.game_data_cache_dir = v;
     }
+    if let Some(v) = queries::get_setting::<Option<String>>(pool, "game_data_repo_commit").await {
+        s.game.game_data_repo_commit = v;
+    }
     // twitch_token: Option<Token> — stored as JSON
     if let Some(v) = queries::get_setting(pool, "twitch_token").await {
         s.integrations.twitch_token = v;

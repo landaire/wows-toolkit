@@ -293,6 +293,9 @@ pub struct GameSettings {
     pub auto_dump_game_data: bool,
     /// Custom directory for game data cache. When empty, uses the default app data location.
     pub game_data_cache_dir: String,
+    /// Commit of the game data repository at the last successful update check.
+    /// Used to skip per-build comparisons when nothing has changed upstream.
+    pub game_data_repo_commit: Option<String>,
 }
 
 impl Default for GameSettings {
@@ -304,6 +307,7 @@ impl Default for GameSettings {
             has_052_game_params_fix: true,
             auto_dump_game_data: false,
             game_data_cache_dir: String::new(),
+            game_data_repo_commit: None,
         }
     }
 }

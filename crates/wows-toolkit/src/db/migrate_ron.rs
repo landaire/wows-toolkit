@@ -94,6 +94,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         next_chart_id,
         auto_dump_game_data,
         game_data_cache_dir,
+        game_data_repo_commit,
     ) = {
         let p = ctx.persisted.read();
         let s = &p.settings;
@@ -126,6 +127,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             p.next_chart_tab_id,
             s.game.auto_dump_game_data,
             s.game.game_data_cache_dir.clone(),
+            s.game.game_data_repo_commit.clone(),
         )
     };
 
@@ -160,6 +162,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "next_chart_tab_id", &next_chart_id).await?;
     queries::set_setting(pool, "auto_dump_game_data", &auto_dump_game_data).await?;
     queries::set_setting(pool, "game_data_cache_dir", &game_data_cache_dir).await?;
+    queries::set_setting(pool, "game_data_repo_commit", &game_data_repo_commit).await?;
 
     // Window sizes/geometry.
     let sizes = ctx.window_settings.lock().settings.clone();

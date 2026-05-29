@@ -221,6 +221,7 @@ impl LegacyWowsToolkitApp {
                 has_052_game_params_fix: s.has_052_game_params_fix,
                 auto_dump_game_data: false,
                 game_data_cache_dir: String::new(),
+                game_data_repo_commit: None,
             },
             replay: s.replay_settings,
             renderer: s.renderer_options,
