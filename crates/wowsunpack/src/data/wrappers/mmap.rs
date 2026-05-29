@@ -78,8 +78,27 @@ impl AsRef<[u8]> for MmapSlice {
 impl Prime for MmapPkgSource {
     fn prime_volume(&self, volume: &str, range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError> {
         let mmap = self.get_mmap(volume)?;
+        check_range(volume, &mmap, &range)?;
         Ok(MmapSlice { mmap, range })
     }
+}
+
+/// Reject a range that exceeds the mapped file. A truncated or partially
+/// downloaded `.pkg` would otherwise slice out of bounds and panic on deref;
+/// returning an error lets the caller skip the file instead of crashing.
+fn check_range(volume: &str, mmap: &memmap2::Mmap, range: &Range<usize>) -> Result<(), VfsError> {
+    if range.end > mmap.len() {
+        return Err(VfsError::from(VfsErrorKind::IoError(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!(
+                "range {}..{} out of bounds for volume '{volume}' of length {} (truncated package?)",
+                range.start,
+                range.end,
+                mmap.len()
+            ),
+        ))));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "async_vfs")]
@@ -88,6 +107,7 @@ impl crate::data::idx_vfs::AsyncPrime for MmapPkgSource {
     async fn prime_volume(&self, volume: &str, range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError> {
         // For mmap, async is the same as sync — the data is already in memory
         let mmap = self.get_mmap(volume)?;
+        check_range(volume, &mmap, &range)?;
         Ok(MmapSlice { mmap, range })
     }
 }
