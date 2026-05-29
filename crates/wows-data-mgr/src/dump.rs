@@ -19,25 +19,33 @@ use crate::builds::BuildMetadata;
 use crate::builds::BuildsIndex;
 use crate::cas;
 
-/// VFS directories dumped in their entirety.
-const REQUIRED_VFS_DIRS: &[&str] = &[
+/// VFS directories dumped in their entirety. `gui/battle_hud` is dumped whole
+/// (rather than enumerating subdirectories) so newly-added HUD icons are always
+/// captured without code changes.
+const VFS_DIRS: &[&str] = &[
     "gui/fla/minimap",
-    "gui/battle_hud/markers_minimap",
-    "gui/battle_hud/icon_frag",
-    "gui/battle_hud/markers/capture_point",
-    "gui/battle_hud/markers/building_icons",
+    "gui/battle_hud",
     "gui/consumables",
     "gui/powerups/drops",
     "gui/fonts",
     "gui/data/constants",
     "gui/ships_silhouettes",
+    "gui/ribbons",
+    "gui/achievements",
+    "gui/nation_flags",
     "gui/crew_commander/skills",
     "gui/modernization_icons",
     "gui/signal_flags",
     "scripts/entity_defs",
 ];
 
-/// Individual VFS files required beyond the directory dumps.
+/// Directories whose absence (zero files extracted) makes the dump unusable.
+/// Kept deliberately small: most icon directories are version-dependent (added
+/// in later game versions), so their absence is tolerated with a warning.
+const REQUIRED_NONEMPTY_DIRS: &[&str] = &["scripts/entity_defs"];
+
+/// Individual VFS files required beyond the directory dumps. A dump missing any
+/// of these can't parse replays, so their absence is fatal.
 const REQUIRED_VFS_FILES: &[&str] = &["content/GameParams.data", "scripts/entities.xml"];
 
 /// Files to extract per map from `spaces/<map>/`.
@@ -45,6 +53,30 @@ const MAP_FILES_SPACES: &[&str] = &["minimap.png", "minimap_water.png", "space.s
 
 /// Files to extract per map from `content/gameplay/<map>/`.
 const MAP_FILES_GAMEPLAY: &[&str] = &["space.settings"];
+
+/// Glob patterns covering every VFS path the dump extracts.
+///
+/// Feed these to `wowsunpack pkgs` to resolve the minimal set of `.pkg` files
+/// to download for a build — letting callers fetch all idx (small) first, then
+/// only the packages actually required, instead of the full multi-GiB depots.
+pub fn required_path_globs() -> Vec<String> {
+    let mut globs = Vec::new();
+    for dir in VFS_DIRS {
+        // `wowsunpack pkgs` matches with the glob crate's default options, where
+        // `*` spans `/`, so `{dir}/*` matches every file under the tree.
+        globs.push(format!("{dir}/*"));
+    }
+    for file in REQUIRED_VFS_FILES {
+        globs.push((*file).to_string());
+    }
+    for name in MAP_FILES_SPACES {
+        globs.push(format!("spaces/*/{name}"));
+    }
+    for name in MAP_FILES_GAMEPLAY {
+        globs.push(format!("content/gameplay/*/{name}"));
+    }
+    globs
+}
 
 /// Returns the dump directory path for a given version and build.
 pub fn dump_dir(output_base: &Path, version_str: &str, build: u32) -> std::path::PathBuf {
@@ -94,16 +126,22 @@ pub fn dump_renderer_data(
     // Extract VFS files through CAS
     let mut file_hashes: BTreeMap<String, String> = BTreeMap::new();
 
-    for dir in REQUIRED_VFS_DIRS {
-        extract_vfs_dir_cas(&vfs, dir, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
+    let mut dir_counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for dir in VFS_DIRS {
+        let count = extract_vfs_dir_cas(&vfs, dir, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
+        dir_counts.insert(dir, count);
     }
+    let mut missing_files = Vec::new();
     for file in REQUIRED_VFS_FILES {
-        extract_vfs_file_cas(&vfs, file, &vfs_dir, &cas_root, &mut file_hashes)?;
+        if !extract_vfs_file_cas(&vfs, file, &vfs_dir, &cas_root, &mut file_hashes)? {
+            missing_files.push(*file);
+        }
         if let Some(pb) = progress {
             pb.inc(1);
         }
     }
-    extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
+    let map_count =
+        extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
     extract_map_files_cas(
         &vfs,
         "content/gameplay",
@@ -116,6 +154,34 @@ pub fn dump_renderer_data(
 
     if let Some(pb) = progress {
         pb.finish_and_clear();
+    }
+
+    // Fail loudly on an incomplete dump rather than silently shipping one that
+    // renders blank maps or can't parse replays. CAS objects already written
+    // are shared and harmless; only the (unregistered) build dir is discarded.
+    let mut problems = Vec::new();
+    if !missing_files.is_empty() {
+        problems.push(format!("missing required file(s): {}", missing_files.join(", ")));
+    }
+    for dir in REQUIRED_NONEMPTY_DIRS {
+        if dir_counts.get(dir).copied().unwrap_or(0) == 0 {
+            problems.push(format!("required directory '{dir}' extracted no files"));
+        }
+    }
+    if map_count == 0 {
+        problems.push(
+            "no map data extracted (spaces/*/minimap.png); the content depot's spaces packages are likely missing"
+                .to_string(),
+        );
+    }
+    if !problems.is_empty() {
+        let _ = std::fs::remove_dir_all(&output_dir);
+        bail!("Incomplete dump for build {build} ({version_str}): {}", problems.join("; "));
+    }
+    for dir in VFS_DIRS {
+        if dir_counts.get(dir).copied().unwrap_or(0) == 0 {
+            tracing::warn!("dump for build {build}: directory '{dir}' extracted no files");
+        }
     }
 
     std::fs::create_dir_all(&output_dir)
@@ -160,7 +226,7 @@ pub fn dump_renderer_data(
 pub fn create_progress_bar(game_dir: &Path) -> Option<ProgressBar> {
     let vfs = game_data::build_game_vfs(game_dir).ok()?;
     let mut total_files = 0u64;
-    for dir in REQUIRED_VFS_DIRS {
+    for dir in VFS_DIRS {
         total_files += count_vfs_dir_files(&vfs, dir);
     }
     total_files += REQUIRED_VFS_FILES.len() as u64;
@@ -572,16 +638,17 @@ fn extract_vfs_dir_cas(
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
     progress: Option<&ProgressBar>,
-) -> Result<(), Report> {
+) -> Result<usize, Report> {
     let dir = match vfs.join(vfs_path) {
         Ok(d) => d,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(0),
     };
     let walker = match dir.walk_dir() {
         Ok(w) => w,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(0),
     };
 
+    let mut count = 0;
     for entry in walker.flatten() {
         let metadata = match entry.metadata() {
             Ok(m) => m,
@@ -600,25 +667,27 @@ fn extract_vfs_dir_cas(
             }
         };
         store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
+        count += 1;
         if let Some(pb) = progress {
             pb.inc(1);
         }
     }
-    Ok(())
+    Ok(count)
 }
 
+/// Extract a single VFS file. Returns `true` if it was found and stored.
 fn extract_vfs_file_cas(
     vfs: &VfsPath,
     vfs_path: &str,
     vfs_dir: &Path,
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
-) -> Result<(), Report> {
+) -> Result<bool, Report> {
     let file = match vfs.join(vfs_path) {
         Ok(f) => f,
         Err(_) => {
             tracing::warn!("VFS path not found (skipping): {vfs_path}");
-            return Ok(());
+            return Ok(false);
         }
     };
     let mut buf = Vec::new();
@@ -626,13 +695,15 @@ fn extract_vfs_file_cas(
         Ok(mut f) => f.read_to_end(&mut buf)?,
         Err(_) => {
             tracing::warn!("Could not open VFS file (skipping): {vfs_path}");
-            return Ok(());
+            return Ok(false);
         }
     };
     store_and_link(&buf, vfs_path, vfs_dir, cas_root, file_hashes)?;
-    Ok(())
+    Ok(true)
 }
 
+/// Extract the named files from each subdirectory of `parent_dir`. Returns the
+/// number of files extracted.
 fn extract_map_files_cas(
     vfs: &VfsPath,
     parent_dir: &str,
@@ -641,16 +712,17 @@ fn extract_map_files_cas(
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
     progress: Option<&ProgressBar>,
-) -> Result<(), Report> {
+) -> Result<usize, Report> {
     let parent = match vfs.join(parent_dir) {
         Ok(d) => d,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(0),
     };
     let entries = match parent.read_dir() {
         Ok(e) => e,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(0),
     };
 
+    let mut count = 0;
     for entry in entries {
         if !entry.metadata().map(|m| m.file_type == VfsFileType::Directory).unwrap_or(false) {
             continue;
@@ -673,12 +745,13 @@ fn extract_map_files_cas(
                 }
             };
             store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
+            count += 1;
             if let Some(pb) = progress {
                 pb.inc(1);
             }
         }
     }
-    Ok(())
+    Ok(count)
 }
 
 // -- Counting helpers (for progress bar) --

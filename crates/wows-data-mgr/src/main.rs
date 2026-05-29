@@ -126,6 +126,10 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Print the VFS path globs the dump extracts, one per line. Feed these to
+    /// `wowsunpack pkgs` to resolve the minimal set of .pkg files to download.
+    RequiredPaths,
+
     /// Register an existing WoWs installation without downloading
     Register {
         /// Register as the "latest" path — always use whatever builds exist here
@@ -195,6 +199,12 @@ fn main() -> Result<(), Report> {
         Commands::Gc { output } => {
             println!("Garbage-collecting orphaned CAS objects...");
             return dump::gc_cas(output);
+        }
+        Commands::RequiredPaths => {
+            for glob in dump::required_path_globs() {
+                println!("{glob}");
+            }
+            return Ok(());
         }
         // An explicit build + game directory dumps without manifest or registry.
         Commands::DumpRendererData { build: Some(b), game_dir: Some(gd), output, force, .. } => {
@@ -394,7 +404,7 @@ fn main() -> Result<(), Report> {
             }
         }
 
-        Commands::RefreshDerived { .. } | Commands::Gc { .. } => {
+        Commands::RefreshDerived { .. } | Commands::Gc { .. } | Commands::RequiredPaths => {
             unreachable!("handled before manifest load")
         }
 

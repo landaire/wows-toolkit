@@ -2281,7 +2281,9 @@ fn main() -> Result<(), Report> {
 
     run()?;
 
-    println!("Finished in {} seconds", (Instant::now() - timestamp).as_secs_f32());
+    // To stderr so machine-readable command output (e.g. `pkgs --json`) on
+    // stdout stays clean.
+    eprintln!("Finished in {} seconds", (Instant::now() - timestamp).as_secs_f32());
 
     Ok(())
 }
