@@ -436,66 +436,45 @@ impl ReplayDependencies {
         self.wows_data_map.resolve(version)
     }
 
-    /// Parse a replay file from disk and start loading it in the background.
+    /// Read a replay file from disk and start loading it in the background.
+    ///
+    /// The file read and the (potentially expensive) game data resolution both
+    /// happen on the background thread so the UI never blocks.
     pub fn parse_replay_from_path<P: AsRef<Path>>(
         &self,
         replay_path: P,
         source: ReplaySource,
     ) -> Option<BackgroundTask> {
-        let path = replay_path.as_ref();
-
-        let replay_file: ReplayFile = match ReplayFile::from_file(path) {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Failed to parse replay file: {e}");
-                let (tx, rx) = mpsc::channel();
-                let _ = tx.send(Err(e.into_dynamic()));
-                return Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay });
-            }
-        };
-        let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-
-        let Some(wows_data_for_build) = self.wows_data_map.resolve(&replay_version) else {
-            let build = replay_version.build;
-            error!("Failed to load game data for build {}", build);
-            let report: rootcause::Report = ToolkitError::ReplayBuildUnavailable {
-                build,
-                version: replay_version.to_path(),
-                replay_path: Some(path.to_path_buf()),
-            }
-            .into();
-            let (tx, rx) = mpsc::channel();
-            let _ = tx.send(Err(report.attach("try installing the matching game client version")));
-            return Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay });
-        };
-
-        let (game_metadata, game_constants) = {
-            let data = wows_data_for_build.read();
-            (data.game_metadata.clone()?, Arc::clone(&data.game_constants))
-        };
-        let mut replay = Replay::new(replay_file, game_metadata);
-        replay.game_constants = Some(game_constants);
-        replay.source_path = Some(path.to_path_buf());
-
-        ReplayLoader::new(self.clone(), Arc::new(RwLock::new(replay))).source(source).load()
+        ReplayLoader::from_path(self.clone(), replay_path.as_ref().to_path_buf()).source(source).load()
     }
 
     /// Load an already-parsed replay in the background.
     pub fn load_replay(&self, replay: Arc<RwLock<Replay>>, source: ReplaySource) -> Option<BackgroundTask> {
-        ReplayLoader::new(self.clone(), replay).source(source).load()
+        ReplayLoader::from_replay(self.clone(), replay).source(source).load()
     }
+}
+
+/// What a [`ReplayLoader`] starts from: either a replay already constructed by
+/// the caller, or a path to read and construct on the background thread.
+enum ReplayInput {
+    Built(Arc<RwLock<Replay>>),
+    Path(PathBuf),
 }
 
 /// Builder for loading replays in the background with configurable options
 pub struct ReplayLoader {
     deps: ReplayDependencies,
-    replay: Arc<RwLock<Replay>>,
+    input: ReplayInput,
     replay_source: ReplaySource,
 }
 
 impl ReplayLoader {
-    pub fn new(deps: ReplayDependencies, replay: Arc<RwLock<Replay>>) -> Self {
-        Self { deps, replay, replay_source: ReplaySource::FileListing }
+    pub fn from_replay(deps: ReplayDependencies, replay: Arc<RwLock<Replay>>) -> Self {
+        Self { deps, input: ReplayInput::Built(replay), replay_source: ReplaySource::FileListing }
+    }
+
+    pub fn from_path(deps: ReplayDependencies, path: PathBuf) -> Self {
+        Self { deps, input: ReplayInput::Path(path), replay_source: ReplaySource::FileListing }
     }
 
     /// Set the source of this replay load request.
@@ -511,9 +490,22 @@ impl ReplayLoader {
         let (tx, rx) = mpsc::channel();
 
         let deps = self.deps;
-        let replay = self.replay;
+        let input = self.input;
 
         let _join_handle = crate::util::thread::spawn_logged("load-replay", move || {
+            // For a path input, read the file and construct the replay here on
+            // the background thread so the UI never blocks on file I/O.
+            let replay = match input {
+                ReplayInput::Built(replay) => replay,
+                ReplayInput::Path(path) => match Self::build_replay_from_path(&deps, path) {
+                    Ok(replay) => replay,
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                },
+            };
+
             // Determine the replay's build and get version-matched data
             let replay_version = {
                 let r = replay.read();
@@ -579,5 +571,39 @@ impl ReplayLoader {
         });
 
         Some(BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingReplay })
+    }
+
+    /// Read a replay file and construct a [`Replay`] wired to the version-matched
+    /// game data. Runs on the background thread; resolving the data may lazily
+    /// load a build, which is exactly the work we keep off the UI thread.
+    fn build_replay_from_path(
+        deps: &ReplayDependencies,
+        path: PathBuf,
+    ) -> Result<Arc<RwLock<Replay>>, rootcause::Report> {
+        let replay_file = ReplayFile::from_file(&path).map_err(|e| e.into_dynamic())?;
+        let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+
+        let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
+            let report: rootcause::Report = ToolkitError::ReplayBuildUnavailable {
+                build: replay_version.build,
+                version: replay_version.to_path(),
+                replay_path: Some(path),
+            }
+            .into();
+            return Err(report.attach("try installing the matching game client version"));
+        };
+
+        let (game_metadata, game_constants) = {
+            let data = wows_data_for_build.read();
+            let Some(metadata) = data.game_metadata.clone() else {
+                return Err(rootcause::report!("game metadata unavailable for build {}", replay_version.build));
+            };
+            (metadata, Arc::clone(&data.game_constants))
+        };
+
+        let mut replay = Replay::new(replay_file, game_metadata);
+        replay.game_constants = Some(game_constants);
+        replay.source_path = Some(path);
+        Ok(Arc::new(RwLock::new(replay)))
     }
 }
