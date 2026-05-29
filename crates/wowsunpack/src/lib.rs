@@ -15,6 +15,9 @@ pub mod export;
 /// Constants parsed from the game's XML files in `res/gui/data/constants/`
 #[cfg(feature = "parsing")]
 pub mod game_constants;
+/// Version-aware GUI asset resolution: request assets by type, not file path.
+#[cfg(feature = "parsing")]
+pub mod game_assets;
 /// Utilities for loading game resources from a WoWS installation directory.
 #[cfg(feature = "vfs-mmap")]
 pub mod game_data;

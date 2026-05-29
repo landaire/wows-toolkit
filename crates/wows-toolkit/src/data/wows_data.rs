@@ -324,6 +324,16 @@ pub struct WorldOfWarshipsData {
 }
 
 impl WorldOfWarshipsData {
+    /// Load a GUI asset by what it is, letting the resolver pick the right path
+    /// for this build's version. Returns `None` when the asset isn't present.
+    fn load_gui_asset(&self, asset: wowsunpack::game_assets::GuiAsset) -> Option<Arc<GameAsset>> {
+        let resolved = asset.resolve(&self.vfs, self.build_number)?;
+        let path = resolved.as_str().trim_start_matches('/').to_owned();
+        let mut data = Vec::new();
+        resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
+        Some(Arc::new(GameAsset { path, data }))
+    }
+
     /// Look up a cached achievement icon (read-only, no loading).
     pub fn cached_achievement_icon(&self, icon_key: &str) -> Option<Arc<GameAsset>> {
         self.achievement_icons.get(icon_key).cloned()
@@ -337,11 +347,7 @@ impl WorldOfWarshipsData {
             return Some(icon.clone());
         }
 
-        let path = wowsunpack::game_params::translations::achievement_icon_path(icon_key);
-        let mut icon_data = Vec::new();
-        self.vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
-
-        let asset = Arc::new(GameAsset { path, data: icon_data });
+        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Achievement(icon_key))?;
         self.achievement_icons.insert(icon_key.to_string(), asset.clone());
         Some(asset)
     }
@@ -351,18 +357,14 @@ impl WorldOfWarshipsData {
         self.consumable_icons.get(icon_key).cloned()
     }
 
-    /// Load and cache a consumable icon from `gui/consumables/consumable_{PCY}.png`.
+    /// Load and cache a consumable icon by PCY identifier.
     /// Only call this on a cache miss (when `cached_consumable_icon` returns None).
     pub fn load_consumable_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
         if let Some(icon) = self.consumable_icons.get(icon_key) {
             return Some(icon.clone());
         }
 
-        let path = format!("gui/consumables/consumable_{}.png", icon_key);
-        let mut icon_data = Vec::new();
-        self.vfs.join(&path).ok()?.open_file().ok()?.read_to_end(&mut icon_data).ok()?;
-
-        let asset = Arc::new(GameAsset { path, data: icon_data });
+        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Consumable(icon_key))?;
         self.consumable_icons.insert(icon_key.to_string(), asset.clone());
         Some(asset)
     }
