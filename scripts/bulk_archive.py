@@ -242,7 +242,6 @@ def main():
     major = filter_major_manifests(client_manifests)
     download_list = major if args.no_skip else major[::2]
 
-    loc_manifests = parse_manifests(LOCALIZATION_MANIFESTS_FILE) if LOCALIZATION_MANIFESTS_FILE.exists() else []
     content_manifests = parse_manifests(CONTENT_MANIFESTS_FILE) if CONTENT_MANIFESTS_FILE.exists() else []
     if not content_manifests:
         print(f"ERROR: no content-depot manifests ({CONTENT_MANIFESTS_FILE}); maps live in depot "
@@ -275,13 +274,15 @@ def main():
     # idx files are small and index every packed file, so we fetch all of them
     # from both depots first, resolve the minimal pkg set, then download only
     # those pkgs. The pkg filelist is regenerated per build.
+    # idx (both depots) plus the per-build per-locale gettext catalogs, which are
+    # loose files in the client depot under bin/<build>/res/texts. The dump reads
+    # them from there and content-addresses each catalog.
     IDX_FILELIST = REPO_ROOT / "scripts" / ".download_idx.tmp"
-    IDX_FILELIST.write_bytes(b"regex:\\.idx$\n")
-    PKG_FILELIST = REPO_ROOT / "scripts" / ".download_pkgs.tmp"
-    # Localization depot: only the per-build per-locale gettext catalogs.
-    LOCALIZATION_FILELIST.write_bytes(
+    IDX_FILELIST.write_bytes(
+        b"regex:\\.idx$\n"
         b"regex:bin[/\\\\]\\d+[/\\\\]res[/\\\\]texts[/\\\\].*[/\\\\]LC_MESSAGES[/\\\\]global\\.mo$\n"
     )
+    PKG_FILELIST = REPO_ROOT / "scripts" / ".download_pkgs.tmp"
 
     for i, (date_str, manifest_id) in enumerate(download_list):
         idx = i + args.start_from
@@ -312,18 +313,6 @@ def main():
         if not builds:
             print("  No new builds, skipping")
             continue
-
-        # --- Download localization depot (552994) into TEMP_DIR so the dump's
-        # translation step finds bin/<build>/res/texts/<lang>/.../global.mo and
-        # content-addresses each catalog. ---
-        loc_manifest = find_closest_manifest(manifest_date, loc_manifests) if manifest_date else None
-        if loc_manifest:
-            print(f"  Downloading translations: depot {LOCALIZATION_DEPOT} (manifest {loc_manifest})...")
-            if not run_steamroom(steam_user, LOCALIZATION_DEPOT, loc_manifest, TEMP_DIR,
-                                 LOCALIZATION_FILELIST, timeout=600):
-                print("  WARN: translation download failed; dumps for this manifest will lack localized names")
-        else:
-            print(f"  WARN: no localization manifest near {date_str}; dumps will lack localized names")
 
         # --- Per build: resolve minimal pkg set, download it, dump ---
         wsl_archive = to_wsl(ARCHIVE_DIR)
