@@ -130,6 +130,58 @@ enum Commands {
     /// `wowsunpack pkgs` to resolve the minimal set of .pkg files to download.
     RequiredPaths,
 
+    /// Fold a legacy `vfs_common/` store into `common/` and relink every build,
+    /// healing a dump base where a redump created `common/` while old builds
+    /// still reference `vfs_common/`.
+    MigrateCas {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Verify that every build in a dump base is internally consistent: its
+    /// metadata parses and every referenced content object exists in common/.
+    /// Exits non-zero if any build is broken.
+    Verify {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Also check that each reconstructed symlink resolves to a readable file
+        #[arg(long)]
+        check_links: bool,
+    },
+
+    /// Copy dumped builds from a local source dump base into a destination
+    /// (e.g. the toolkit's data cache), deduplicating against content already
+    /// present. The offline equivalent of the toolkit's GitHub download, for
+    /// testing cache updates without publishing data.
+    Update {
+        /// Source dump base to copy from (must contain builds.toml and common/)
+        #[arg(long)]
+        from: PathBuf,
+
+        /// Destination dump base (the toolkit's data cache)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Copy only the latest build in the source
+        #[arg(long, conflicts_with_all = &["build", "version"])]
+        latest: bool,
+
+        /// Copy a single build number
+        #[arg(long, conflicts_with_all = &["latest", "version"])]
+        build: Option<u32>,
+
+        /// Copy all builds matching a version string (e.g. 15.1 or 15.1.0)
+        #[arg(long, conflicts_with_all = &["latest", "build"])]
+        version: Option<String>,
+
+        /// Re-copy even if the destination already has the build
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Register an existing WoWs installation without downloading
     Register {
         /// Register as the "latest" path — always use whatever builds exist here
@@ -204,6 +256,69 @@ fn main() -> Result<(), Report> {
             for glob in dump::required_path_globs() {
                 println!("{glob}");
             }
+            return Ok(());
+        }
+        Commands::MigrateCas { output } => {
+            println!("Merging vfs_common/ into common/ and relinking builds in {}...", output.display());
+            let migrated = dump::migrate_cas_dir_name(output)?;
+            if migrated {
+                println!("Done. Run `verify` to confirm consistency.");
+            } else {
+                println!("Nothing to migrate (no vfs_common/ present).");
+            }
+            return Ok(());
+        }
+        Commands::Verify { output, check_links } => {
+            let reports = dump::verify_builds(output, *check_links)?;
+            if reports.is_empty() {
+                println!("No builds found in {}", output.display());
+                return Ok(());
+            }
+            let mut broken = 0;
+            for r in &reports {
+                if r.is_ok() {
+                    println!("  OK   {} ({} objects)", r.dir, r.referenced);
+                } else {
+                    broken += 1;
+                    if r.metadata_unreadable {
+                        println!("  FAIL {} - metadata.toml unreadable", r.dir);
+                    } else {
+                        println!(
+                            "  FAIL {} - {}/{} objects missing, {} broken link(s)",
+                            r.dir,
+                            r.missing_objects.len(),
+                            r.referenced,
+                            r.broken_links.len()
+                        );
+                    }
+                }
+            }
+            let ok = reports.len() - broken;
+            println!("\n{ok}/{} builds consistent.", reports.len());
+            if broken > 0 {
+                bail!("{broken} build(s) inconsistent");
+            }
+            return Ok(());
+        }
+        Commands::Update { from, output, latest, build, version, force } => {
+            let selector = if *latest {
+                dump::SyncSelector::Latest
+            } else if let Some(b) = build {
+                dump::SyncSelector::Build(*b)
+            } else if let Some(v) = version {
+                dump::SyncSelector::Version(v.clone())
+            } else {
+                dump::SyncSelector::All
+            };
+
+            println!("Syncing from {} into {}...", from.display(), output.display());
+            let synced = dump::sync_from_local(from, output, &selector, *force)?;
+            for s in &synced {
+                let status = if s.copied { "copied" } else { "already present" };
+                println!("  {} (build {}) - {status}", s.version, s.build);
+            }
+            let copied = synced.iter().filter(|s| s.copied).count();
+            println!("Done: {copied} copied, {} up to date.", synced.len() - copied);
             return Ok(());
         }
         // An explicit build + game directory dumps without manifest or registry.
@@ -404,7 +519,12 @@ fn main() -> Result<(), Report> {
             }
         }
 
-        Commands::RefreshDerived { .. } | Commands::Gc { .. } | Commands::RequiredPaths => {
+        Commands::RefreshDerived { .. }
+        | Commands::Gc { .. }
+        | Commands::RequiredPaths
+        | Commands::Update { .. }
+        | Commands::Verify { .. }
+        | Commands::MigrateCas { .. } => {
             unreachable!("handled before manifest load")
         }
 

@@ -293,6 +293,164 @@ pub fn remove_build(output_base: &Path, target_build: u32) -> Result<(), Report>
     Ok(())
 }
 
+// -- Local sync (offline mirror of download_repo) --
+
+/// Which builds to copy when syncing from a local source dump base.
+pub enum SyncSelector {
+    /// Every build listed in the source `builds.toml`.
+    All,
+    /// Only the highest build number in the source.
+    Latest,
+    /// A single exact build number.
+    Build(u32),
+    /// All builds matching a `major.minor.patch` version string.
+    Version(String),
+}
+
+/// Outcome of copying one build during a sync.
+pub struct SyncedBuild {
+    pub build: u32,
+    pub version: String,
+    /// Whether content was copied (`false` means it was already present and skipped).
+    pub copied: bool,
+}
+
+/// Copy builds from a local source dump base into `output_base`, deduplicating
+/// against content already present in the destination CAS.
+///
+/// This is the offline analog of `download_repo::download_build`: it reconstructs
+/// each selected build's directory (vfs/derived symlinks, constants, metadata)
+/// from the source's content-addressed store with no network access, copying only
+/// the content objects the destination is missing. Useful for promoting a
+/// freshly-dumped build into the toolkit's data cache without publishing it.
+pub fn sync_from_local(
+    source_base: &Path,
+    output_base: &Path,
+    selector: &SyncSelector,
+    force: bool,
+) -> Result<Vec<SyncedBuild>, Report> {
+    if source_base == output_base {
+        bail!("source and destination are the same directory");
+    }
+    let source_index = BuildsIndex::load(&source_base.join("builds.toml"));
+    if source_index.builds.is_empty() {
+        bail!("no builds.toml entries found in source {}", source_base.display());
+    }
+
+    let entries: Vec<BuildEntry> = match selector {
+        SyncSelector::All => source_index.builds.clone(),
+        SyncSelector::Latest => {
+            let latest = source_index
+                .builds
+                .iter()
+                .max_by_key(|e| e.build)
+                .ok_or_else(|| report!("source has no builds"))?;
+            vec![latest.clone()]
+        }
+        SyncSelector::Build(b) => {
+            let entry = source_index
+                .find_by_build(*b)
+                .ok_or_else(|| report!("build {b} not found in source {}", source_base.display()))?;
+            vec![entry.clone()]
+        }
+        SyncSelector::Version(v) => {
+            let matches: Vec<BuildEntry> = source_index.find_by_version(v).into_iter().cloned().collect();
+            if matches.is_empty() {
+                bail!("no builds matching version '{v}' in source {}", source_base.display());
+            }
+            matches
+        }
+    };
+
+    let mut synced = Vec::new();
+    for entry in &entries {
+        let copied = copy_build_from_local(source_base, output_base, entry, force)?;
+        synced.push(SyncedBuild { build: entry.build, version: entry.version.clone(), copied });
+    }
+    Ok(synced)
+}
+
+/// Copy one build's data from `source_base` into `output_base`. Returns `true`
+/// when content was copied, `false` when an existing complete copy was reused.
+fn copy_build_from_local(
+    source_base: &Path,
+    output_base: &Path,
+    entry: &BuildEntry,
+    force: bool,
+) -> Result<bool, Report> {
+    let src_cas = cas::cas_root(source_base);
+    let dst_cas = cas::cas_root(output_base);
+    let output_dir = output_base.join(&entry.dir);
+
+    // A complete copy already on disk only needs registering, unless forced.
+    if !force && output_dir.join("metadata.toml").exists() {
+        register_build(output_base, entry)?;
+        return Ok(false);
+    }
+
+    let src_dir = source_base.join(&entry.dir);
+    let meta_path = src_dir.join("metadata.toml");
+    let metadata = BuildMetadata::load(&meta_path)
+        .ok_or_else(|| report!("source build {} has no readable metadata.toml", entry.dir))?;
+
+    // Copy every referenced content object the destination doesn't already have,
+    // verifying each against its hash. This happens before touching the existing
+    // build directory so a failed copy (e.g. an inconsistent source) never
+    // destroys a good local copy. Objects land in the shared store; nothing is
+    // wired into the build until every object is present.
+    for hash in metadata.referenced_hashes() {
+        if cas::object_exists(&dst_cas, &hash) {
+            continue;
+        }
+        let src_obj = cas::cas_path(&src_cas, &hash);
+        let data = std::fs::read(&src_obj)
+            .attach_with(|| format!("source content object {} missing", src_obj.display()))?;
+        let actual = cas::hash_bytes(&data);
+        if actual != hash {
+            bail!("source content object {hash} hashed to {actual}");
+        }
+        cas::store(&dst_cas, &data)?;
+    }
+
+    // All content is present; now clear any partial/stale directory and rebuild.
+    if output_dir.exists() {
+        std::fs::remove_dir_all(&output_dir)
+            .attach_with(|| format!("failed to clear destination build dir {}", output_dir.display()))?;
+    }
+
+    // Recreate the extracted vfs tree and derived artifacts as symlinks into the
+    // destination CAS.
+    let vfs_dir = output_dir.join("vfs");
+    for (rel, hash) in &metadata.files {
+        cas::link_file(&dst_cas, hash, &vfs_dir.join(rel))?;
+    }
+    for (rel, hash) in &metadata.derived {
+        cas::link_file(&dst_cas, hash, &output_dir.join(rel))?;
+    }
+
+    // Versioned constants, when present alongside the source build.
+    let src_constants = src_dir.join("constants.json");
+    if src_constants.exists() {
+        let bytes = std::fs::read(&src_constants)
+            .attach_with(|| format!("failed to read {}", src_constants.display()))?;
+        let dest = output_dir.join("constants.json");
+        std::fs::create_dir_all(dest.parent().unwrap())?;
+        std::fs::write(&dest, &bytes).attach_with(|| format!("failed to write {}", dest.display()))?;
+    }
+
+    metadata.save(&output_dir.join("metadata.toml"))?;
+    register_build(output_base, entry)?;
+    Ok(true)
+}
+
+/// Add or update the build's entry in the destination `builds.toml`.
+fn register_build(output_base: &Path, entry: &BuildEntry) -> Result<(), Report> {
+    let builds_path = output_base.join("builds.toml");
+    let mut index = BuildsIndex::load(&builds_path);
+    index.upsert(entry.clone());
+    index.save(&builds_path)
+}
+
 // -- Translation dumping --
 
 fn dump_all_translations(game_dir: &Path, build: u32, output_dir: &Path) -> Result<(), Report> {
@@ -562,6 +720,82 @@ pub fn gc_cas(output_base: &Path) -> Result<(), Report> {
     Ok(())
 }
 
+/// Consistency report for one build in a dump base.
+pub struct BuildVerification {
+    pub dir: String,
+    pub build: u32,
+    pub version: String,
+    /// Total unique content hashes the build references.
+    pub referenced: usize,
+    /// Referenced hashes with no object in the shared store.
+    pub missing_objects: Vec<String>,
+    /// VFS-relative paths whose symlink target does not resolve to a file.
+    pub broken_links: Vec<String>,
+    /// True when `metadata.toml` was missing or unparseable.
+    pub metadata_unreadable: bool,
+}
+
+impl BuildVerification {
+    pub fn is_ok(&self) -> bool {
+        !self.metadata_unreadable && self.missing_objects.is_empty() && self.broken_links.is_empty()
+    }
+}
+
+/// Verify that every build in `builds.toml` is internally consistent: its
+/// `metadata.toml` parses, every referenced content object exists in the shared
+/// store, and (when `check_links` is set) every reconstructed symlink resolves
+/// to a readable file. Returns a report per build; the caller decides how to act.
+pub fn verify_builds(output_base: &Path, check_links: bool) -> Result<Vec<BuildVerification>, Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let cas_root = cas::cas_root(output_base);
+
+    let mut reports = Vec::new();
+    for entry in &index.builds {
+        let build_dir = output_base.join(&entry.dir);
+        let Some(meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
+            reports.push(BuildVerification {
+                dir: entry.dir.clone(),
+                build: entry.build,
+                version: entry.version.clone(),
+                referenced: 0,
+                missing_objects: Vec::new(),
+                broken_links: Vec::new(),
+                metadata_unreadable: true,
+            });
+            continue;
+        };
+
+        let referenced = meta.referenced_hashes();
+        let mut missing_objects: Vec<String> =
+            referenced.iter().filter(|h| !cas::object_exists(&cas_root, h)).cloned().collect();
+        missing_objects.sort();
+
+        let mut broken_links = Vec::new();
+        if check_links {
+            for (rel, _) in meta.files.iter().chain(meta.derived.iter()) {
+                let path = build_dir.join("vfs").join(rel);
+                // Derived artifacts live at the build root, not under vfs/.
+                let candidate = if path.exists() { path } else { build_dir.join(rel) };
+                if !candidate.exists() {
+                    broken_links.push(rel.clone());
+                }
+            }
+            broken_links.sort();
+        }
+
+        reports.push(BuildVerification {
+            dir: entry.dir.clone(),
+            build: entry.build,
+            version: entry.version.clone(),
+            referenced: referenced.len(),
+            missing_objects,
+            broken_links,
+            metadata_unreadable: false,
+        });
+    }
+    Ok(reports)
+}
+
 /// Remove content-addressed objects no longer referenced by any build present
 /// on disk. Scans every directory under `output_base` that contains a
 /// `metadata.toml`, so it stays correct even when `builds.toml` is out of sync
@@ -593,21 +827,74 @@ pub fn gc_unreferenced(output_base: &Path) -> Result<usize, Report> {
 }
 
 /// Migrate a dump base from the legacy `vfs_common/` CAS directory to `common/`,
-/// rewriting every build's symlinks to point at the renamed store. No-op when
-/// the legacy directory is absent or `common/` already exists. Returns whether a
-/// migration happened.
+/// rewriting every build's symlinks to point at the new store. Handles both a
+/// clean rename (when `common/` doesn't exist yet) and a merge (when a redump
+/// has already created `common/` while old builds still reference `vfs_common/`).
+/// No-op when the legacy directory is absent. Returns whether a migration ran.
 pub fn migrate_cas_dir_name(output_base: &Path) -> Result<bool, Report> {
     let legacy = output_base.join(cas::LEGACY_CAS_DIR);
     let current = cas::cas_root(output_base);
-    if !legacy.exists() || current.exists() {
+    if !legacy.exists() {
         return Ok(false);
     }
 
-    std::fs::rename(&legacy, &current)
-        .attach_with(|| format!("failed to rename {} to {}", legacy.display(), current.display()))?;
+    if !current.exists() {
+        // Fast path: nothing in the new store yet, so move it wholesale.
+        std::fs::rename(&legacy, &current)
+            .attach_with(|| format!("failed to rename {} to {}", legacy.display(), current.display()))?;
+    } else {
+        // Both stores exist: fold legacy objects into `common/`. Objects are
+        // content-addressed, so a name collision means identical bytes — keep
+        // the existing copy and drop the duplicate.
+        merge_cas_objects(&legacy, &current)?;
+    }
 
-    // Relative symlinks under each build's vfs/ still point at the old name, so
-    // re-create them against the renamed store.
+    // Relative symlinks under each build may still name the old store, so
+    // re-create every build's links against `common/`.
+    relink_all_builds(output_base, &current)?;
+
+    // Drop whatever remains of the legacy tree (emptied by the merge, or already
+    // gone after the rename).
+    if legacy.exists() {
+        std::fs::remove_dir_all(&legacy)
+            .attach_with(|| format!("failed to remove emptied legacy store {}", legacy.display()))?;
+    }
+
+    Ok(true)
+}
+
+/// Move every object from a legacy CAS tree into `dest`, deduplicating by hash.
+/// A collision (same fanout/name) is identical content, so the source copy is
+/// simply removed. Empties the source fanout directories as it goes.
+fn merge_cas_objects(legacy: &Path, dest: &Path) -> Result<(), Report> {
+    for fanout in std::fs::read_dir(legacy).attach_with(|| format!("Failed to read {}", legacy.display()))?.flatten() {
+        if !fanout.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let dest_fanout = dest.join(fanout.file_name());
+        for obj in std::fs::read_dir(fanout.path())?.flatten() {
+            if !obj.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let dest_path = dest_fanout.join(obj.file_name());
+            if dest_path.exists() {
+                std::fs::remove_file(obj.path())?;
+                continue;
+            }
+            std::fs::create_dir_all(&dest_fanout)?;
+            // rename works within a volume; fall back to copy+delete across volumes.
+            if std::fs::rename(obj.path(), &dest_path).is_err() {
+                std::fs::copy(obj.path(), &dest_path)?;
+                std::fs::remove_file(obj.path())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Re-create every build's `vfs/` and derived symlinks against `cas_root`,
+/// using the hashes recorded in each `metadata.toml`. Idempotent.
+fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> {
     for entry in std::fs::read_dir(output_base)
         .attach_with(|| format!("Failed to read {}", output_base.display()))?
         .flatten()
@@ -620,7 +907,7 @@ pub fn migrate_cas_dir_name(output_base: &Path) -> Result<bool, Report> {
         let relink = |rel: &str, hash: &str, base: &Path| {
             let link = base.join(rel);
             let _ = std::fs::remove_file(&link);
-            if let Err(e) = cas::link_file(&current, hash, &link) {
+            if let Err(e) = cas::link_file(cas_root, hash, &link) {
                 tracing::warn!("failed to relink {}: {e}", link.display());
             }
         };
@@ -631,8 +918,7 @@ pub fn migrate_cas_dir_name(output_base: &Path) -> Result<bool, Report> {
             relink(rel, hash, &build_dir);
         }
     }
-
-    Ok(true)
+    Ok(())
 }
 
 /// Migrate any pre-CAS dumps in `output_base` into content-addressed storage.
