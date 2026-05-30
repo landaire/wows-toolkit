@@ -1119,8 +1119,13 @@ where
                 Some((Rc::clone(player), kills))
             }));
 
-        let self_player =
-            players.iter().find(|player| player.relation.is_self()).cloned().expect("could not find self_player");
+        // Pre-0.9 replays (e.g. build 8.5.1 / 0.8.5) carry no roster RPC
+        // (onArenaStateReceived / onNewPlayerSpawnedInBattle), so no player is
+        // ever tagged Self and the report cannot be built. Fail fast and loud.
+        let self_player = players.iter().find(|player| player.relation.is_self()).cloned().expect(
+            "could not resolve the recording (self) player: replay carries no roster RPC \
+             (pre-0.9 format, e.g. build 8.5.1 / 0.8.5)",
+        );
 
         // Collect building entities
         let buildings: Vec<BuildingEntity> =
@@ -1809,22 +1814,31 @@ macro_rules! set_arg_value {
         set_arg_value!($set_var, $args, $key, float_32_ref, f32)
     };
     ($set_var:expr, $args:ident, $key:expr, bool) => {
-        if let Some(value) = $args.get($key) {
-            $set_var = (*value.uint_8_ref().unwrap_or_else(|| panic!("{} is not a u8", $key))) != 0
+        // Skip rather than panic if an older version encodes this field with a
+        // different type than expected.
+        if let Some(value) = $args.get($key)
+            && let Some(b) = value.uint_8_ref()
+        {
+            $set_var = (*b) != 0
         }
     };
     ($set_var:expr, $args:ident, $key:expr, Vec<u8>) => {
-        if let Some(value) = $args.get($key) {
-            $set_var = value.blob_ref().unwrap_or_else(|| panic!("{} is not a u8", $key)).clone()
+        if let Some(value) = $args.get($key)
+            && let Some(blob) = value.blob_ref()
+        {
+            $set_var = blob.clone()
         }
     };
     ($set_var:expr, $args:ident, $key:expr, &[()]) => {
         set_arg_value!($set_var, $args, $key, array_ref, &[()])
     };
     ($set_var:expr, $args:ident, $key:expr, $conversion_func:ident, $ty:ty) => {
-        if let Some(value) = $args.get($key) {
-            $set_var =
-                value.$conversion_func().unwrap_or_else(|| panic!("{} is not a {}", $key, stringify!($ty))).clone()
+        // A field present with an unexpected type (common across game versions)
+        // is left at its default instead of panicking.
+        if let Some(value) = $args.get($key)
+            && let Some(converted) = value.$conversion_func()
+        {
+            $set_var = converted.clone()
         }
     };
 }
@@ -1885,10 +1899,17 @@ impl UpdateFromReplayArgs for CrewModifiersCompactParams {
             self.is_in_adaption = arg_value_to_type!(args, IS_IN_ADAPTION_KEY, bool);
         }
 
-        if args.contains_key(LEARNED_SKILLS_KEY) {
-            let learned_skills = arg_value_to_type!(args, LEARNED_SKILLS_KEY, &[()]);
+        // Older crew-skill layouts (e.g. pre-submarine) have a different shape
+        // for `learnedSkills`, so tolerate a missing/short/differently-typed
+        // value rather than panicking. Missing per-species entries default to
+        // an empty skill list.
+        if let Some(learned_skills) = args.get(LEARNED_SKILLS_KEY).and_then(|v| v.array_ref()) {
             let skills_from_idx = |idx: usize| -> Vec<u8> {
-                learned_skills[idx].array_ref().unwrap().iter().map(|idx| *(*idx).uint_8_ref().unwrap()).collect()
+                learned_skills
+                    .get(idx)
+                    .and_then(|v| v.array_ref())
+                    .map(|a| a.iter().filter_map(|x| x.uint_8_ref().copied()).collect())
+                    .unwrap_or_default()
             };
 
             let skills = Skills {
@@ -2418,10 +2439,11 @@ impl UpdateFromReplayArgs for VehicleProps {
 
         // TODO: sounds
 
-        if args.contains_key(SHIP_CONFIG_KEY) {
-            let ship_config = parse_ship_config(arg_value_to_type!(args, SHIP_CONFIG_KEY, &[u8]), &version)
-                .expect("failed to parse ship config");
-
+        // Older versions encode the ship config differently (or not as a blob);
+        // skip it rather than panicking when it isn't a blob or fails to parse.
+        if let Some(blob) = args.get(SHIP_CONFIG_KEY).and_then(|v| v.blob_ref())
+            && let Ok(ship_config) = parse_ship_config(blob.as_ref(), &version)
+        {
             self.ship_config = ship_config;
         }
 
@@ -3000,8 +3022,20 @@ where
                 debug!("OnArenaStateReceived");
                 self.arena_id = Some(ArenaId::from(arg0));
                 for player in players.iter().chain(bots.iter()) {
-                    let Some(metadata_player) =
-                        self.metadata_players.iter().find(|meta_player| meta_player.id == player.meta_ship_id())
+                    let Some(metadata_player) = self
+                        .metadata_players
+                        .iter()
+                        .find(|meta_player| meta_player.id == player.meta_ship_id())
+                        .or_else(|| {
+                            // Older arena-state layouts (pre-0.10.7) omit the meta ship id,
+                            // so fall back to matching on the (match-unique) player name.
+                            let name = player.username();
+                            if name.is_empty() {
+                                None
+                            } else {
+                                self.metadata_players.iter().find(|meta_player| meta_player.name() == name)
+                            }
+                        })
                     else {
                         warn!("could not map arena player to metadata player (meta_ship_id={})", player.meta_ship_id());
                         continue;
@@ -3055,15 +3089,14 @@ where
                     if self.player_entities.contains_key(&entity_id) {
                         continue;
                     }
-                    let relation = self_team_id
-                        .map(|self_team| {
-                            if player.team_id() == self_team {
-                                Relation::new(1) // ally
-                            } else {
-                                Relation::new(2) // enemy
-                            }
-                        })
-                        .unwrap_or(Relation::new(2)); // default to enemy if unknown
+                    // Relation is meaningless without the self player's team; a spawn
+                    // arriving before the roster is established is unexpected, so fail
+                    // fast rather than mislabel the player.
+                    let self_team = self_team_id.expect(
+                        "NewPlayerSpawnedInBattle before self player resolved: cannot derive relation",
+                    );
+                    let relation =
+                        if player.team_id() == self_team { Relation::new(1) } else { Relation::new(2) };
                     if let Some(battle_player) = Player::from_spawned_player(player, self.game_resources, relation) {
                         let battle_player = Rc::new(battle_player);
                         self.player_entities.insert(entity_id, battle_player);

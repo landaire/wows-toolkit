@@ -329,28 +329,25 @@ impl PlayerStateData {
         mut mapped_values: HashMap<&'static str, pickled::Value>,
         _version: &Version,
     ) -> Self {
-        let username =
-            mapped_values.get(Self::KEY_NAME).unwrap().string_ref().expect("name is not a string").inner().clone();
+        // Older arena-state layouts (pre-0.10.7) only provide a subset of these
+        // fields, so every lookup must tolerate a missing key rather than unwrap.
+        let get_str = |key| {
+            mapped_values.get(key).and_then(|v: &pickled::Value| v.string_ref()).map(|s| s.inner().clone())
+        };
+        let get_i64 = |key| mapped_values.get(key).and_then(|v: &pickled::Value| v.i64_ref().copied());
 
-        let clan = mapped_values
-            .get(Self::KEY_CLAN_TAG)
-            .unwrap()
-            .string_ref()
-            .expect("clanTag is not a string")
-            .inner()
-            .clone();
+        let username = get_str(Self::KEY_NAME).unwrap_or_default();
+        let clan = get_str(Self::KEY_CLAN_TAG).unwrap_or_default();
+        let clan_id = get_i64(Self::KEY_CLAN_ID).unwrap_or(0);
 
-        let clan_id = *mapped_values.get(Self::KEY_CLAN_ID).unwrap().i64_ref().expect("clanID is not an i64");
+        let shipid = get_i64(Self::KEY_SHIP_ID).unwrap_or(0);
+        let meta_ship_id = get_i64(Self::KEY_ID).unwrap_or(0);
+        let team = get_i64(Self::KEY_TEAM_ID).unwrap_or(0);
+        let health = get_i64(Self::KEY_MAX_HEALTH).unwrap_or(0);
 
-        let shipid = *mapped_values.get(Self::KEY_SHIP_ID).unwrap().i64_ref().expect("shipId is not an i64");
-        let meta_ship_id = *mapped_values.get(Self::KEY_ID).unwrap().i64_ref().expect("id is not an i64");
-        let team = *mapped_values.get(Self::KEY_TEAM_ID).unwrap().i64_ref().expect("teamId is not an i64");
-        let health = *mapped_values.get(Self::KEY_MAX_HEALTH).unwrap().i64_ref().expect("maxHealth is not an i64");
+        let realm = get_str(Self::KEY_REALM);
 
-        let realm = mapped_values.get(Self::KEY_REALM).unwrap().string_ref().map(|realm| realm.inner().clone());
-
-        let db_id =
-            mapped_values.get(Self::KEY_ACCOUNT_DBID).unwrap().i64_ref().cloned().expect("accountDBID is not an i64");
+        let db_id = get_i64(Self::KEY_ACCOUNT_DBID).unwrap_or(0);
 
         let is_abuser = mapped_values
             .get(Self::KEY_IS_ABUSER)
@@ -364,8 +361,7 @@ impl PlayerStateData {
 
         let is_bot = mapped_values.get(Self::KEY_IS_BOT).and_then(|v| v.bool_ref().cloned()).unwrap_or(false);
 
-        let clan_color =
-            mapped_values.get(Self::KEY_CLAN_COLOR).unwrap().i64_ref().cloned().expect("clanColor is not an integer");
+        let clan_color = get_i64(Self::KEY_CLAN_COLOR).unwrap_or(0);
 
         // Human-only properties (not present for bots)
         let human_properties =
@@ -1531,8 +1527,8 @@ where
             DecodedPacketPayload::Chat {
                 entity_id: *entity_id,
                 sender_id: AccountId::from(*sender_id),
-                audience: std::str::from_utf8(target).unwrap(),
-                message: std::str::from_utf8(message).unwrap(),
+                audience: std::str::from_utf8(target).unwrap_or(""),
+                message: std::str::from_utf8(message).unwrap_or(""),
                 extra_data,
             }
         } else if *method == "receive_CommonCMD" {
