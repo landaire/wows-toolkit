@@ -170,10 +170,12 @@ def already_complete(build: int) -> bool:
 def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
                   filelist: Path, timeout: int = 3600) -> bool:
     """Run steamroom download. Returns True on success."""
+    # Use the token cached by the host Steam install (Steam must be running and
+    # logged in) rather than steamroom's own saved login, which expires and then
+    # fails every download with "login failed: invalid password".
     cmd = [
         str(STEAMROOM),
-        "--username", steam_user,
-        "--remember-password",
+        "--use-steam-token",
         "download",
         "--app", str(APP_ID),
         "--depot", str(depot),
@@ -183,10 +185,17 @@ def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
         "--max-downloads", "4",
         "--non-atomic",
     ]
-    for attempt in range(2):
+    # Steam intermittently rejects --use-steam-token with "login failed: invalid
+    # password" even when the host client is logged in, and the CDN serves
+    # partial manifests under load. Both are transient, so retry several times
+    # with growing backoff; this lets a single pass heal builds that would
+    # otherwise need another full pass to retry.
+    attempts = 5
+    for attempt in range(attempts):
         if attempt > 0:
-            print(f"  Retry attempt {attempt}...")
-            time.sleep(30)
+            backoff = min(30 * attempt, 120)
+            print(f"  Retry attempt {attempt}/{attempts - 1} (sleep {backoff}s)...")
+            time.sleep(backoff)
         try:
             result = subprocess.run(cmd, timeout=timeout)
         except subprocess.TimeoutExpired:
