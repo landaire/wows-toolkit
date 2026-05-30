@@ -61,14 +61,24 @@ LOCALIZATION_FILELIST = REPO_ROOT / "scripts" / ".download_translations_only.tmp
 
 
 def parse_manifests(path: Path) -> list[tuple[str, str]]:
-    """Parse a manifest list file. Returns [(date_str, manifest_id), ...] oldest first."""
+    """Parse a manifest list file. Returns [(date_str, manifest_id), ...] oldest
+    first, sorted by parsed date.
+
+    The source files are not guaranteed to be in clean chronological order (they
+    are pasted from SteamDB and may be appended to out of order), so sort by the
+    actual date rather than trusting file order -- an unsorted file fed to
+    filter_major_manifests silently drops whole patches.
+    """
     entries = []
     for line in path.read_text(encoding="utf-8").strip().split("\n"):
         parts = line.split("\t")
         if len(parts) != 2:
             continue
-        entries.append((parts[0].strip(), parts[1].strip()))
-    entries.reverse()  # oldest first
+        date_str = parts[0].strip()
+        if parse_date(date_str) is None:
+            continue
+        entries.append((date_str, parts[1].strip()))
+    entries.sort(key=lambda e: parse_date(e[0]))  # oldest first
     return entries
 
 
@@ -227,12 +237,15 @@ def resolve_pkgs(build: int) -> list[str]:
     idx_wsl = f"{to_wsl(TEMP_DIR)}/bin/{build}/idx"
     quoted = " ".join(shlex.quote(g) for g in globs)
     res = run_wsl_tool(f"./target/release/wowsunpack --idx-files {idx_wsl} pkgs --json {quoted}")
-    if res.returncode != 0:
-        raise RuntimeError(f"pkg resolution failed for build {build}: {res.stderr.strip()}")
-    # `nix develop` may prepend warnings to stdout; parse from the first brace.
+    # Don't gate on returncode: a dirty working tree makes `nix develop` exit
+    # non-zero while still producing valid JSON on stdout. Treat the run as
+    # successful whenever parseable JSON is present, and only fail if it isn't.
     brace = res.stdout.find("{")
     if brace < 0:
-        raise RuntimeError(f"no JSON in pkgs output for build {build}: {res.stdout[:200]!r}")
+        raise RuntimeError(
+            f"pkg resolution failed for build {build} (rc={res.returncode}): "
+            f"{(res.stderr or res.stdout).strip()[:300]}"
+        )
     data = json.loads(res.stdout[brace:])
     unmatched = data.get("unmatched_patterns", [])
     if unmatched:
