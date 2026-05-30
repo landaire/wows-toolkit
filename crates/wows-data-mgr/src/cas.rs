@@ -84,6 +84,12 @@ pub fn link_file(cas_root: &Path, hash: &str, link_path: &Path) -> Result<(), ro
     let link_parent = link_path.parent().unwrap_or(Path::new("."));
     let rel_target = relative_path(link_parent, &target);
 
+    // Replace any existing entry so re-extraction (e.g. completing a build's gui
+    // dir) is idempotent rather than failing on the already-present link.
+    if link_path.symlink_metadata().is_ok() {
+        let _ = std::fs::remove_file(link_path);
+    }
+
     try_symlink(&rel_target, link_path)
         .attach_with(|| format!("Failed to create symlink {} -> {}", link_path.display(), rel_target.display()))?;
     Ok(())

@@ -222,6 +222,57 @@ pub fn dump_renderer_data(
     Ok(())
 }
 
+/// Add the assets an existing build is missing without re-extracting the data it
+/// already has. Extracts maps (and, with `with_gui`, the `gui/` asset dirs) from
+/// `game_dir` into the build's `vfs/`, then regenerates derived artifacts (the
+/// rkyv game-params blob, with the current parser) from the build's existing
+/// `GameParams.data`.
+///
+/// Unlike [`dump_renderer_data`], this never reads `content/GameParams.data`,
+/// `scripts/`, or other already-present data from the game install, so the caller
+/// only needs the `gui` and `spaces_*` packages on disk -- not the multi-gigabyte
+/// `basecontent` package whose `GameParams.data` the build already holds.
+///
+/// The build must already exist in `builds.toml`. Returns the number of maps
+/// extracted; errors if no maps were found.
+pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui: bool) -> Result<usize, Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let entry = index
+        .find_by_build(build)
+        .ok_or_else(|| report!("build {build} is not in builds.toml; dump it normally first"))?
+        .clone();
+    let output_dir = output_base.join(&entry.dir);
+    let vfs_dir = output_dir.join("vfs");
+    let cas_root = cas::cas_root(output_base);
+    let meta_path = output_dir.join("metadata.toml");
+    let mut metadata =
+        BuildMetadata::load(&meta_path).ok_or_else(|| report!("{} has no readable metadata.toml", entry.dir))?;
+
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build).attach_with(|| "Failed to build game VFS")?;
+
+    if with_gui {
+        // Only the `gui/` dirs live in the gui package; re-extracting other
+        // VFS_DIRS (e.g. scripts/entity_defs) would need packages we deliberately
+        // skip, and that data is already present in the build.
+        for dir in VFS_DIRS.iter().filter(|d| d.starts_with("gui")) {
+            extract_vfs_dir_cas(&vfs, dir, &vfs_dir, &cas_root, &mut metadata.files, None)?;
+        }
+    }
+
+    let map_count =
+        extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut metadata.files, None)?;
+    extract_map_files_cas(&vfs, "content/gameplay", MAP_FILES_GAMEPLAY, &vfs_dir, &cas_root, &mut metadata.files, None)?;
+    if map_count == 0 {
+        bail!("no maps extracted for build {build}; refusing to record an incomplete build");
+    }
+
+    // Regenerate derived artifacts from the build's existing GameParams.data,
+    // picking up the current parser. Needs no package downloads.
+    refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
+    metadata.save(&meta_path)?;
+    Ok(map_count)
+}
+
 /// Create a configured progress bar for CLI use.
 pub fn create_progress_bar(game_dir: &Path) -> Option<ProgressBar> {
     let vfs = game_data::build_game_vfs(game_dir).ok()?;

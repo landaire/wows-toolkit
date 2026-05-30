@@ -130,6 +130,28 @@ enum Commands {
     /// `wowsunpack pkgs` to resolve the minimal set of .pkg files to download.
     RequiredPaths,
 
+    /// Add missing assets (maps, and with --with-gui the gui/ dirs) to an
+    /// existing build without re-extracting data it already has. Regenerates the
+    /// rkyv blob with the current parser. Only needs gui + spaces_* packages on
+    /// disk, not the multi-GiB basecontent package.
+    CompleteBuild {
+        /// Build number to complete (must already exist in builds.toml)
+        #[arg(long)]
+        build: u32,
+
+        /// Game install directory holding bin/<build>/idx and res_packages
+        #[arg(long)]
+        game_dir: PathBuf,
+
+        /// Output directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Also re-extract the gui/ asset dirs (ribbons, achievements, flags, ...)
+        #[arg(long)]
+        with_gui: bool,
+    },
+
     /// Fold a legacy `vfs_common/` store into `common/` and relink every build,
     /// healing a dump base where a redump created `common/` while old builds
     /// still reference `vfs_common/`.
@@ -256,6 +278,12 @@ fn main() -> Result<(), Report> {
             for glob in dump::required_path_globs() {
                 println!("{glob}");
             }
+            return Ok(());
+        }
+        Commands::CompleteBuild { build, game_dir, output, with_gui } => {
+            println!("Completing build {build} from {} (with_gui={with_gui})...", game_dir.display());
+            let map_count = dump::complete_build(game_dir, *build, output, *with_gui)?;
+            println!("Done: extracted {map_count} map(s) and regenerated derived data.");
             return Ok(());
         }
         Commands::MigrateCas { output } => {
@@ -524,7 +552,8 @@ fn main() -> Result<(), Report> {
         | Commands::RequiredPaths
         | Commands::Update { .. }
         | Commands::Verify { .. }
-        | Commands::MigrateCas { .. } => {
+        | Commands::MigrateCas { .. }
+        | Commands::CompleteBuild { .. } => {
             unreachable!("handled before manifest load")
         }
 

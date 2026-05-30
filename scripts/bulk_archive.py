@@ -127,11 +127,34 @@ def detect_builds(game_dir: Path) -> list[int]:
 
 
 def already_archived(build: int) -> bool:
-    """Check if this build already has a complete dump."""
+    """Check if this build already has a dump directory with metadata."""
     for entry in ARCHIVE_DIR.iterdir():
         if entry.is_dir() and entry.name.endswith(f"_{build}") and (entry / "metadata.toml").exists():
             return True
     return False
+
+
+# A real WoWS version ships dozens of battle maps. Partial/old dumps had 0-8
+# minimaps; fully redumped builds have 35+. A build is only treated complete
+# when it clears this floor, so a partially downloaded build is re-completed
+# rather than skipped. Wrongly-not-skipped just costs a re-download; wrongly
+# skipped would leave a build permanently broken, so bias toward re-doing.
+MIN_COMPLETE_MAPS = 15
+
+
+def map_count(build: int) -> int:
+    """Number of extracted minimap images for this build (0 if absent)."""
+    for entry in ARCHIVE_DIR.iterdir():
+        if entry.is_dir() and entry.name.endswith(f"_{build}"):
+            spaces = entry / "vfs" / "spaces"
+            if spaces.exists():
+                return sum(1 for _ in spaces.glob("*/minimap.png"))
+    return 0
+
+
+def already_complete(build: int) -> bool:
+    """True if this build's dump already has a healthy set of minimaps."""
+    return map_count(build) >= MIN_COMPLETE_MAPS
 
 
 def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
@@ -324,12 +347,25 @@ def main():
         wsl_archive = to_wsl(ARCHIVE_DIR)
         wsl_temp = to_wsl(TEMP_DIR)
         for build in builds:
+            if already_complete(build):
+                print(f"    Build {build}: already complete ({map_count(build)} maps), skipping")
+                continue
+
             try:
                 pkgs = resolve_pkgs(build)
             except (RuntimeError, json.JSONDecodeError) as e:
                 print(f"    PKG RESOLUTION FAILED for build {build}: {e}")
                 continue
-            print(f"    Build {build}: {len(pkgs)} pkg(s) required")
+
+            # An existing-but-incomplete build already holds its GameParams.data,
+            # entity defs, and most assets in the shared store; it only needs maps
+            # and the newer gui dirs. Complete it in place and skip the multi-GiB
+            # basecontent package whose GameParams.data we already have.
+            completing = already_archived(build)
+            if completing:
+                pkgs = [p for p in pkgs if not p.startswith("basecontent")]
+            mode = "complete" if completing else "full dump"
+            print(f"    Build {build}: {len(pkgs)} pkg(s) required ({mode})")
             write_pkg_filelist(pkgs, PKG_FILELIST)
 
             # The required pkgs are split across both depots; each download grabs
@@ -341,13 +377,14 @@ def main():
                 print(f"    PKG DOWNLOAD FAILED for build {build}")
                 continue
 
-            dump_cmd = [
-                "wsl", "bash", "-lc",
-                f"cd {WSL_REPO} && nix develop --command "
-                f"./target/release/wows-data-mgr dump-renderer-data "
-                f"--build {build} --game-dir {wsl_temp} --output {wsl_archive} --force"
-            ]
-            print(f"    Dumping build {build}...")
+            if completing:
+                tool = (f"./target/release/wows-data-mgr complete-build "
+                        f"--build {build} --game-dir {wsl_temp} --output {wsl_archive} --with-gui")
+            else:
+                tool = (f"./target/release/wows-data-mgr dump-renderer-data "
+                        f"--build {build} --game-dir {wsl_temp} --output {wsl_archive} --force")
+            dump_cmd = ["wsl", "bash", "-lc", f"cd {WSL_REPO} && nix develop --command {tool}"]
+            print(f"    {'Completing' if completing else 'Dumping'} build {build}...")
             dump_result = subprocess.run(dump_cmd, capture_output=True, timeout=600,
                                          text=True, encoding="utf-8", errors="replace")
             if dump_result.returncode != 0:
