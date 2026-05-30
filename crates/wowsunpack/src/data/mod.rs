@@ -56,6 +56,22 @@ impl Version {
         }
     }
 
+    /// Fallible variant of [`Version::from_client_exe`] that returns `None`
+    /// instead of panicking when the version string is malformed (e.g. read
+    /// from a corrupt or truncated replay).
+    pub fn try_from_client_exe(version: &str) -> Option<Version> {
+        let parts: Vec<_> = version.split(',').collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        Some(Version {
+            major: parts[0].trim().parse::<u32>().ok()?,
+            minor: parts[1].trim().parse::<u32>().ok()?,
+            patch: parts[2].trim().parse::<u32>().ok()?,
+            build: parts[3].trim().parse::<u32>().ok()?,
+        })
+    }
+
     /// Extract the game version from the `Account.def` entity definition XML.
     ///
     /// The file contains a node like `<curVersion_15_1_0_11965230></curVersion_15_1_0_11965230>`

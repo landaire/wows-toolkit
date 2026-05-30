@@ -858,7 +858,7 @@ where
     }
 
     pub fn match_group(&self) -> &str {
-        self.game_meta.matchGroup.as_ref()
+        self.game_meta.matchGroup.as_deref().unwrap_or("")
     }
 
     /// Arena ID assigned to this match by the server. `None` until the

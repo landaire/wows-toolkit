@@ -7,6 +7,9 @@ pub enum ParseError {
     #[error("failed to parse packet bytes")]
     InvalidPacketData,
 
+    #[error("replay file is incomplete or truncated")]
+    IncompleteReplay,
+
     #[error("invalid JSON in replay data")]
     InvalidJson(#[from] serde_json::Error),
 
@@ -56,7 +59,7 @@ impl ParserError<&[u8]> for ParseError {
 impl From<ErrMode<ParseError>> for ParseError {
     fn from(x: ErrMode<ParseError>) -> Self {
         match x {
-            ErrMode::Incomplete(_) => panic!("can't handle incomplete replay files"),
+            ErrMode::Incomplete(_) => ParseError::IncompleteReplay,
             ErrMode::Backtrack(e) | ErrMode::Cut(e) => e,
         }
     }

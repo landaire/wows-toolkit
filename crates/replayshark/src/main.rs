@@ -4,18 +4,24 @@ use clap::Parser;
 use clap::Subcommand;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use wowsunpack::data::DataFileWithCallback;
+use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_data;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
+use wowsunpack::vfs::VfsPath;
+use wowsunpack::vfs::impls::physical::PhysicalFS;
 
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::analyzer::battle_controller::BattleController;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 
@@ -138,6 +144,40 @@ enum QueryCommands {
     /// same battle observes the same arena id. Files that fail to parse or
     /// never reach the arena-state packet print `-`.
     ArenaId {
+        /// Replay files or directories to walk
+        #[arg(required = true)]
+        replays: Vec<PathBuf>,
+    },
+    /// Print the players in a replay along with their in-replay ship entity id,
+    /// ship param id, and localized ship name. Resolves player name <-> entity
+    /// id <-> ship in any direction via the filter flags. Requires game data
+    /// (`-g` or `-e`) to resolve ship names.
+    Players {
+        /// The replay file to use
+        replay: PathBuf,
+
+        /// Only show players whose name contains this (case-insensitive)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Only show the player owning this ship entity id
+        #[arg(long)]
+        entity_id: Option<u32>,
+
+        /// Only show players whose localized ship name contains this (case-insensitive)
+        #[arg(long)]
+        ship: Option<String>,
+
+        /// Emit newline-delimited JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the game version of each replay (one line per file) as
+    /// `version<TAB>path`, where version is `major.minor.patch.build`. The
+    /// version is read from the plaintext metadata header, so this needs no
+    /// game data and works even when a replay's packet stream is corrupt.
+    /// Files that fail to parse print `-`.
+    GameVersion {
         /// Replay files or directories to walk
         #[arg(required = true)]
         replays: Vec<PathBuf>,
@@ -646,6 +686,191 @@ fn load_game_constants(constants_path: Option<&Path>, build: u32) -> &'static Ga
     Box::leak(Box::new(gc))
 }
 
+/// Load the game metadata provider (game params + entity specs + translations)
+/// and battle constants for the given replay version. The provider resolves
+/// ship param ids to localized names; the entity specs drive the packet parser.
+fn load_metadata_provider_and_constants(
+    game_dir: Option<&str>,
+    extracted_dir: Option<&str>,
+    version: &Version,
+) -> anyhow::Result<(GameMetadataProvider, GameConstants)> {
+    match (game_dir, extracted_dir) {
+        (Some(game_dir), _) => {
+            let resources =
+                game_data::load_game_resources(Path::new(game_dir), version).map_err(|e| anyhow!("{}", e))?;
+            let mut provider = GameMetadataProvider::from_vfs(&resources.vfs)
+                .map_err(|e| anyhow!("failed to load game params: {e:?}"))?;
+            let constants = GameConstants::from_vfs(&resources.vfs);
+            let mo_path = game_data::translations_path(Path::new(game_dir), version.build);
+            apply_translations(&mo_path, &mut provider);
+            Ok((provider, constants))
+        }
+        (None, Some(extracted)) => {
+            let dir = resolve_extracted_dir(Path::new(extracted), version)?;
+            let vfs_root = dir.join("vfs");
+            if !vfs_root.exists() {
+                return Err(anyhow!("VFS directory not found: {}", vfs_root.display()));
+            }
+            let vfs = VfsPath::new(PhysicalFS::new(&vfs_root));
+
+            // Prefer the prebuilt rkyv cache; fall back to parsing GameParams.data.
+            let rkyv_path = dir.join("game_params.rkyv");
+            let mut provider = match wowsunpack::game_params::cache::load(&rkyv_path) {
+                Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
+                    .map_err(|e| anyhow!("failed to build game metadata: {e:?}"))?,
+                None => GameMetadataProvider::from_vfs(&vfs)
+                    .map_err(|e| anyhow!("failed to load game params from VFS: {e:?}"))?,
+            };
+            let constants = GameConstants::from_vfs(&vfs);
+            let mo_path = dir.join("translations/en/LC_MESSAGES/global.mo");
+            apply_translations(&mo_path, &mut provider);
+            Ok((provider, constants))
+        }
+        (None, None) => Err(anyhow!("Game directory or extracted files directory must be supplied")),
+    }
+}
+
+/// Load a `.mo` translation catalog into the provider. Ship names are
+/// unavailable (param indices are shown instead) when this fails.
+fn apply_translations(mo_path: &Path, provider: &mut GameMetadataProvider) {
+    match File::open(mo_path) {
+        Ok(file) => match gettext::Catalog::parse(file) {
+            Ok(catalog) => provider.set_translations(catalog),
+            Err(e) => eprintln!("# warning: failed to parse translations {}: {e}", mo_path.display()),
+        },
+        Err(_) => {
+            eprintln!("# warning: translations not found at {} (ship names unavailable)", mo_path.display());
+        }
+    }
+}
+
+/// A resolved player row for the `query players` command.
+struct PlayerRow {
+    player_name: String,
+    entity_id: u32,
+    avatar_id: Option<u32>,
+    account_id: i64,
+    ship_id: u64,
+    ship_index: String,
+    ship_name: String,
+    team_id: i64,
+    relation: &'static str,
+    is_bot: bool,
+}
+
+/// Resolve every player in a replay to their in-replay ship entity id, ship
+/// param id, and localized ship name, applying the requested filters.
+fn run_players_query(
+    replay: &Path,
+    game_dir: Option<&str>,
+    extracted_dir: Option<&str>,
+    name_filter: Option<&str>,
+    entity_filter: Option<u32>,
+    ship_filter: Option<&str>,
+    as_json: bool,
+) -> anyhow::Result<()> {
+    let replay_file = ReplayFile::from_file(replay).map_err(|e| anyhow!("failed to read replay: {e:?}"))?;
+    let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+    let (provider, constants) = load_metadata_provider_and_constants(game_dir, extracted_dir, &version)?;
+
+    let mut controller = BattleController::new(&replay_file.meta, &provider, Some(&constants));
+    controller.set_track_shots(false);
+
+    let mut parser = wows_replays::packet2::Parser::with_build(provider.entity_specs(), version.build);
+    let mut remaining = replay_file.packet_data.as_slice();
+    while !remaining.is_empty() {
+        match parser.parse_packet(&mut remaining) {
+            Ok(packet) => controller.process(&packet),
+            Err(_) => break,
+        }
+    }
+
+    let report = controller.build_report();
+
+    let name_lc = name_filter.map(str::to_lowercase);
+    let ship_lc = ship_filter.map(str::to_lowercase);
+
+    let mut rows: Vec<PlayerRow> = Vec::new();
+    for player in report.players() {
+        let state = player.initial_state();
+        let vehicle = player.vehicle();
+        let ship_name =
+            provider.localized_name_from_param(vehicle).unwrap_or_else(|| vehicle.index().to_string());
+
+        if let Some(n) = &name_lc
+            && !state.username().to_lowercase().contains(n)
+        {
+            continue;
+        }
+        if let Some(eid) = entity_filter
+            && state.entity_id().raw() != eid
+        {
+            continue;
+        }
+        if let Some(s) = &ship_lc
+            && !ship_name.to_lowercase().contains(s)
+        {
+            continue;
+        }
+
+        rows.push(PlayerRow {
+            player_name: state.username().to_string(),
+            entity_id: state.entity_id().raw(),
+            avatar_id: state.avatar_id().map(|a| a.raw()),
+            account_id: state.db_id().raw(),
+            ship_id: vehicle.id().raw(),
+            ship_index: vehicle.index().to_string(),
+            ship_name,
+            team_id: state.team_id(),
+            relation: player.relation().name(),
+            is_bot: player.is_bot(),
+        });
+    }
+
+    rows.sort_by(|a, b| {
+        a.team_id
+            .cmp(&b.team_id)
+            .then_with(|| a.player_name.to_lowercase().cmp(&b.player_name.to_lowercase()))
+    });
+
+    if as_json {
+        for r in &rows {
+            let value = serde_json::json!({
+                "player_name": r.player_name,
+                "entity_id": r.entity_id,
+                "avatar_id": r.avatar_id,
+                "account_id": r.account_id,
+                "ship_id": r.ship_id,
+                "ship_index": r.ship_index,
+                "ship_name": r.ship_name,
+                "team_id": r.team_id,
+                "relation": r.relation,
+                "is_bot": r.is_bot,
+            });
+            println!("{value}");
+        }
+    } else {
+        println!(
+            "{:<9} {:<20} {:<4} {:<6} {:<22} {:<11} {}",
+            "ENTITY", "PLAYER", "TEAM", "REL", "SHIP", "SHIP_ID", "BOT"
+        );
+        for r in &rows {
+            println!(
+                "{:<9} {:<20} {:<4} {:<6} {:<22} {:<11} {}",
+                r.entity_id,
+                truncate_string(&r.player_name, 20),
+                r.team_id,
+                r.relation,
+                truncate_string(&r.ship_name, 22),
+                r.ship_id,
+                if r.is_bot { "bot" } else { "" }
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -801,6 +1026,39 @@ fn main() {
                         };
                         let id_str = arena_id.map(|id| id.to_string()).unwrap_or_else(|| "-".to_string());
                         println!("{}\t{}", id_str, path.display());
+                    }
+                }
+            }
+            QueryCommands::Players { replay, name, entity_id, ship, json } => {
+                run_players_query(
+                    &replay,
+                    game_dir,
+                    extracted,
+                    name.as_deref(),
+                    entity_id,
+                    ship.as_deref(),
+                    json,
+                )
+                .expect("failed to query players");
+            }
+            QueryCommands::GameVersion { replays } => {
+                for replay_path in &replays {
+                    for entry in walkdir::WalkDir::new(replay_path) {
+                        let entry = entry.expect("Error walking replays");
+                        if !entry.path().is_file() {
+                            continue;
+                        }
+                        let path = entry.path();
+                        let version = match ReplayFile::meta_from_file(path) {
+                            Ok(meta) => Version::try_from_client_exe(&meta.clientVersionFromExe)
+                                .map(|v| format!("{}.{}.{}.{}", v.major, v.minor, v.patch, v.build))
+                                .unwrap_or_else(|| "-".to_string()),
+                            Err(e) => {
+                                eprintln!("# {} (parse: {:?})", path.display(), e);
+                                "-".to_string()
+                            }
+                        };
+                        println!("{}\t{}", version, path.display());
                     }
                 }
             }

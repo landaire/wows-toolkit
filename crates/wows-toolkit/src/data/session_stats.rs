@@ -131,7 +131,7 @@ impl PerGameStat {
         let player_id = replay.replay_file.meta.playerID.raw();
         let battle_result = replay.battle_result();
         let is_div = self_report.division_label().is_some();
-        let match_group = replay.replay_file.meta.matchGroup.clone();
+        let match_group = replay.replay_file.meta.matchGroup.clone().unwrap_or_default();
 
         let achievements = self_report
             .achievements

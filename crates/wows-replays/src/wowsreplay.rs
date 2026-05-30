@@ -25,19 +25,30 @@ pub struct VehicleInfoMeta {
     pub name: String,
 }
 
+// Replay metadata. Fields that some game versions omit (older clients did not
+// emit them, or they were added later) are typed as `Option` with
+// `#[serde(default)]` so a missing key deserializes to `None` rather than
+// failing the whole parse. Fields without `Option` are present in every replay
+// format observed across the corpus.
 #[allow(non_snake_case)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReplayMeta {
-    pub matchGroup: String,
+    /// Absent in replays from older clients (~0.5.x and early 0.6.x).
+    #[serde(default)]
+    pub matchGroup: Option<String>,
     pub gameMode: u32,
     #[serde(default)]
     pub gameType: Option<String>,
     pub clientVersionFromExe: String,
-    pub scenarioUiCategoryId: u32,
+    /// Absent in replays from older clients (~0.6.x and earlier).
+    #[serde(default)]
+    pub scenarioUiCategoryId: Option<u32>,
     pub mapDisplayName: String,
     pub mapId: u32,
     pub clientVersionFromXml: String,
-    pub weatherParams: HashMap<String, Vec<String>>,
+    /// Absent in replays from older clients (~0.6.x and earlier).
+    #[serde(default)]
+    pub weatherParams: Option<HashMap<String, Vec<String>>>,
     //mapBorder: Option<...>,
     pub duration: u32,
     pub gameLogic: Option<String>,
@@ -82,6 +93,17 @@ fn parse_meta<'a>(i: &mut &'a [u8]) -> PResult<(&'a str, ReplayMeta)> {
             return Err(winnow::error::ErrMode::Cut(e));
         }
     };
+    Ok(meta)
+}
+
+/// Parse just the file magic, block count, and metadata block, stopping before
+/// the (encrypted, compressed) packet stream. Used to read replay metadata
+/// without decrypting packets, and tolerant of replays whose trailing data is
+/// missing or corrupt.
+fn meta_only(i: &mut &[u8]) -> PResult<ReplayMeta> {
+    let _magic = le_u32.parse_next(i)?;
+    let _block_count = le_u32.parse_next(i)?;
+    let (_raw_meta, meta) = parse_meta(i)?;
     Ok(meta)
 }
 
@@ -163,5 +185,46 @@ impl ReplayFile {
         f.read_to_end(&mut contents).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
 
         Self::from_bytes(&contents).attach_with(path_context)
+    }
+
+    /// Parse only the replay metadata header, skipping decryption and
+    /// decompression of the packet stream.
+    ///
+    /// The metadata block (player, map, game version, etc.) is stored in
+    /// plaintext at the start of the file, so this is much cheaper than
+    /// [`ReplayFile::from_bytes`] and still succeeds when the encrypted packet
+    /// stream is truncated or corrupt: only the leading magic, block count, and
+    /// metadata block are parsed.
+    pub fn meta_from_bytes(bytes: &[u8]) -> rootcause::Result<ReplayMeta, ParseError> {
+        let mut input = bytes;
+        let meta = meta_only(&mut input).map_err(|e| report!(ParseError::from(e)))?;
+        Ok(meta)
+    }
+
+    /// Read [`ReplayFile::meta_from_bytes`] from a file on disk.
+    ///
+    /// Only the file header and metadata block are read off disk, not the
+    /// (potentially many megabytes of) packet stream that follows.
+    pub fn meta_from_file(replay: &std::path::Path) -> rootcause::Result<ReplayMeta, ParseError> {
+        let path_context = || format!("path: {}", replay.display());
+
+        let mut f = std::fs::File::options()
+            .read(true)
+            .open(replay)
+            .map_err(|e| report!(ParseError::from(e)))
+            .attach_with(path_context)?;
+
+        // Layout: magic (u32) | block_count (u32) | meta_len (u32) | meta bytes.
+        let mut header = [0u8; 12];
+        f.read_exact(&mut header).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        let meta_len = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
+
+        let mut buffer = Vec::with_capacity(12 + meta_len);
+        buffer.extend_from_slice(&header);
+        let mut meta_bytes = vec![0u8; meta_len];
+        f.read_exact(&mut meta_bytes).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        buffer.extend_from_slice(&meta_bytes);
+
+        Self::meta_from_bytes(&buffer).attach_with(path_context)
     }
 }

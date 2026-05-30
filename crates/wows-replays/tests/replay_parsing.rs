@@ -46,7 +46,7 @@ fn meta_2025_hull() {
     assert_eq!(m.playerName, "Biiison");
     assert_eq!(m.playerVehicle, "PASD720-Hull");
     assert_eq!(m.mapDisplayName, "47_Sleeping_Giant");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert_eq!(m.mapId, 29);
     assert_eq!(m.vehicles.len(), 24);
     assert!(m.clientVersionFromExe.starts_with("14,1,"));
@@ -62,7 +62,7 @@ fn meta_2026_forrest_sherman() {
     assert_eq!(m.playerName, "QUIDPROQUOWINKWINK");
     assert_eq!(m.playerVehicle, "PASD610-Forrest-Sherman");
     assert_eq!(m.mapDisplayName, "56_AngelWings");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert_eq!(m.mapId, 36);
     assert_eq!(m.vehicles.len(), 24);
     assert!(m.clientVersionFromExe.starts_with("15,0,"));
@@ -78,7 +78,7 @@ fn meta_2023_s189_submarine() {
     assert_eq!(m.playerName, "TF2_Electric_Boogaloo");
     assert_eq!(m.playerVehicle, "PRSS508-S-189");
     assert_eq!(m.mapDisplayName, "42_Neighbors");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert_eq!(m.vehicles.len(), 24);
     assert!(m.clientVersionFromExe.starts_with("12,3,"));
 }
@@ -93,7 +93,7 @@ fn meta_2024_annapolis() {
     assert_eq!(m.playerName, "ChineseTechAbuser");
     assert_eq!(m.playerVehicle, "PASC111-Annapolis");
     assert_eq!(m.mapDisplayName, "22_tierra_del_fuego");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert_eq!(m.vehicles.len(), 24);
     assert!(m.clientVersionFromExe.starts_with("13,2,"));
 }
@@ -108,7 +108,7 @@ fn meta_2024_colbert() {
     assert_eq!(m.playerName, "John_The_Ruthless");
     assert_eq!(m.playerVehicle, "PFSC510-Colbert");
     assert_eq!(m.mapDisplayName, "44_Path_warrior");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert!(m.clientVersionFromExe.starts_with("13,10,"));
 }
 
@@ -122,7 +122,7 @@ fn meta_2025_oland() {
     assert_eq!(m.playerName, "awesome101_21x");
     assert_eq!(m.playerVehicle, "PWSD108-Oland");
     assert_eq!(m.mapDisplayName, "15_NE_north");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert!(m.clientVersionFromExe.starts_with("14,2,"));
 }
 
@@ -135,7 +135,7 @@ fn meta_2025_ocean_cv_event() {
 
     assert_eq!(m.playerName, "seaznutz");
     assert_eq!(m.playerVehicle, "PBSA710-Ocean");
-    assert_eq!(m.matchGroup, "event");
+    assert_eq!(m.matchGroup.as_deref(), Some("event"));
     assert_eq!(m.vehicles.len(), 17);
     assert!(m.clientVersionFromExe.starts_with("14,9,"));
 }
@@ -150,7 +150,7 @@ fn meta_2026_vermont() {
     assert_eq!(m.playerName, "P_yk");
     assert_eq!(m.playerVehicle, "PASB110-Vermont");
     assert_eq!(m.mapDisplayName, "22_tierra_del_fuego");
-    assert_eq!(m.matchGroup, "pvp");
+    assert_eq!(m.matchGroup.as_deref(), Some("pvp"));
     assert!(m.clientVersionFromExe.starts_with("15,1,"));
 }
 
@@ -164,7 +164,7 @@ fn meta_2026_narai_pve() {
     assert_eq!(m.playerName, "Minotaur_of_the_Seas");
     assert_eq!(m.playerVehicle, "PZSC718-Narai");
     assert_eq!(m.mapDisplayName, "s06_Atoll");
-    assert_eq!(m.matchGroup, "pve");
+    assert_eq!(m.matchGroup.as_deref(), Some("pve"));
     assert_eq!(m.mapId, 42);
 }
 
