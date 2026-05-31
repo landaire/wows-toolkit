@@ -183,7 +183,6 @@ def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
         "--output", str(output),
         "--filelist", str(filelist),
         "--max-downloads", "4",
-        "--non-atomic",
     ]
     # Steam intermittently rejects --use-steam-token with "login failed: invalid
     # password" even when the host client is logged in, and the CDN serves
@@ -231,7 +230,9 @@ def get_required_globs() -> list[str]:
     """The dump's required VFS path globs (cached; same for every build)."""
     global _REQUIRED_GLOBS
     if _REQUIRED_GLOBS is None:
-        res = run_wsl_tool("./target/release/wows-data-mgr required-paths")
+        # First wsl call of the run; a cold nix dev-shell eval can take ~30 min
+        # before anything is cached, so allow far more than the default timeout.
+        res = run_wsl_tool("./target/release/wows-data-mgr required-paths", timeout=2700)
         if res.returncode != 0:
             raise RuntimeError(f"required-paths failed: {res.stderr.strip()}")
         # `nix develop` may prepend "warning: Git tree ... is dirty" lines to
