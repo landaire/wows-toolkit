@@ -169,13 +169,17 @@ def already_complete(build: int) -> bool:
 
 def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
                   filelist: Path, timeout: int = 3600) -> bool:
-    """Run steamroom download. Returns True on success."""
-    # Use the token cached by the host Steam install (Steam must be running and
-    # logged in) rather than steamroom's own saved login, which expires and then
-    # fails every download with "login failed: invalid password".
+    """Run a steamroom download through the shared daemon. Returns True on success."""
+    # Route every download through the long-lived daemon (started by
+    # ensure_daemon) via --use-daemon. The daemon holds one authenticated Steam
+    # session and CDN connection pool for the whole run, so we avoid the
+    # per-process re-login and CDN re-handshake that caused constant 503 rate
+    # limiting, and its saved refresh token survives the host token expiring
+    # mid-run. --no-progress keeps the streamed progress bar out of the log.
     cmd = [
         str(STEAMROOM),
-        "--use-steam-token",
+        "--use-daemon",
+        "--no-progress",
         "download",
         "--app", str(APP_ID),
         "--depot", str(depot),
@@ -184,11 +188,10 @@ def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
         "--filelist", str(filelist),
         "--max-downloads", "4",
     ]
-    # Steam intermittently rejects --use-steam-token with "login failed: invalid
-    # password" even when the host client is logged in, and the CDN serves
-    # partial manifests under load. Both are transient, so retry several times
-    # with growing backoff; this lets a single pass heal builds that would
-    # otherwise need another full pass to retry.
+    # A download can still fail transiently (CDN 503s, a chunk error). The client
+    # blocks until the daemon job finishes and exits with its exit code, so retry
+    # a few times with growing backoff; this lets a single pass heal builds that
+    # would otherwise need another full pass to retry.
     attempts = 5
     for attempt in range(attempts):
         if attempt > 0:
@@ -204,6 +207,41 @@ def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
             return True
         print(f"  DOWNLOAD FAILED (exit {result.returncode})")
     return False
+
+
+def daemon_running() -> bool:
+    """True if a steamroom daemon is up and answering RPC."""
+    try:
+        # `daemon status` without --text opens an interactive TUI that would
+        # hang here; --text contacts the daemon and exits non-zero if none.
+        res = subprocess.run(
+            [str(STEAMROOM), "daemon", "status", "--text"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return res.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def ensure_daemon():
+    """Start a steamroom daemon (authenticated with the host Steam token) unless
+    one is already running. All downloads run through it, so a single Steam
+    session and CDN connection pool is reused for the whole archive run."""
+    if daemon_running():
+        print("steamroom daemon already running")
+        return
+    print("Starting steamroom daemon (host Steam token)...")
+    # Eager auth: --use-steam-token logs in with the host's cached token, saves a
+    # durable refresh token, then forks a detached background daemon. Steam must
+    # be running and logged in for this one-time login.
+    res = subprocess.run(
+        [str(STEAMROOM), "--use-steam-token", "--non-interactive", "daemon", "start"],
+        timeout=180,
+    )
+    if res.returncode != 0 or not daemon_running():
+        print("ERROR: failed to start steamroom daemon. Is Steam running and "
+              "logged in? See the daemon log under %LOCALAPPDATA%\\steamroom\\daemon.log")
+        sys.exit(1)
 
 
 WSL_REPO = "/mnt/g/dev/wows-toolkit"
@@ -319,6 +357,8 @@ def main():
     if not args.yes:
         print()
         input("Press Enter to start, Ctrl+C to abort...")
+
+    ensure_daemon()
 
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     discovered = {}
