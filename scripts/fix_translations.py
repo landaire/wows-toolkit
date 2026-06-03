@@ -100,11 +100,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--archive", default=r"G:\wows_builds")
     ap.add_argument("--limit", type=int, default=0, help="only process the first N missing builds")
+    ap.add_argument("--min-build", type=int, default=0, help="skip builds older than this number")
     ap.add_argument("--widen", type=int, default=6, help="how many nearby manifests to try per build")
     args = ap.parse_args()
 
     manifests = parse_manifests(MANIFESTS_FILE)
     miss = missing_builds(args.archive)
+    if args.min_build:
+        miss = [m for m in miss if int(m.rsplit("_", 1)[1]) >= args.min_build]
     if args.limit:
         miss = miss[: args.limit]
     print(f"{len(miss)} builds missing translations\n")
