@@ -1922,6 +1922,20 @@ impl UpdateFromReplayArgs for CrewModifiersCompactParams {
             };
 
             self.learned_skills = skills;
+        } else if let Some(ArgValue::Uint64(mask)) = args.get(LEARNED_SKILLS_KEY) {
+            // Pre-rework clients (<= 0.9.x) encode learned skills as a single bitmask
+            // over skill-type ids -- bit i set means skill type i is learned -- with no
+            // per-species split (a captain carried one shared skill set). Apply the
+            // decoded list to every species so it resolves regardless of ship type.
+            let ids: Vec<u8> = (0..64u32).filter(|i| mask & (1u64 << i) != 0).map(|i| i as u8).collect();
+            self.learned_skills = Skills {
+                aircraft_carrier: ids.clone(),
+                battleship: ids.clone(),
+                cruiser: ids.clone(),
+                destroyer: ids.clone(),
+                auxiliary: ids.clone(),
+                submarine: ids,
+            };
         }
     }
 }
