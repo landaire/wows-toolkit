@@ -1030,9 +1030,12 @@ impl UiReport {
                     achievements_array
                         .iter()
                         .filter_map(|achievement_info| {
+                            // Each entry is expected to be `[id, count]`, but some result
+                            // formats (e.g. older clients) carry empty or short arrays --
+                            // index defensively so a malformed entry is skipped, not panicked on.
                             let achievement_info = achievement_info.as_array()?;
-                            let achievement_id = achievement_info[0].as_u64()?;
-                            let achievement_count = achievement_info[1].as_u64()?;
+                            let achievement_id = achievement_info.first()?.as_u64()?;
+                            let achievement_count = achievement_info.get(1)?.as_u64()?;
 
                             // Look this achievement up from game params
                             let game_param = <GameMetadataProvider as GameParamProvider>::game_param_by_id(
