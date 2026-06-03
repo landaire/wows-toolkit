@@ -71,17 +71,14 @@ def main():
         "//! @generated -- do not edit by hand.\n"
     )
     lines.append("use crate::data::Version;\n")
-    lines.append("const fn v(major: u32, minor: u32, patch: u32) -> Version {")
-    lines.append("    Version { major, minor, patch, build: 0 }")
-    lines.append("}\n")
     lines.append(
-        "/// Consumable id -> name layouts, ascending by version. Each table is the full\n"
-        "/// id -> name map effective from that version until the next entry supersedes it."
+        "/// Consumable id -> name layouts, ascending by `(major, minor, patch)`. Each table\n"
+        "/// is the full id -> name map effective from that version until the next supersedes it."
     )
-    lines.append("pub static CONSUMABLE_ID_LAYOUTS: &[(Version, &[(i32, &str)])] = &[")
+    lines.append("pub static CONSUMABLE_ID_LAYOUTS: &[((u32, u32, u32), &[(i32, &str)])] = &[")
     for (a, b, c), ids in runs:
         pairs = ", ".join(f'({i}, "{ids[i]}")' for i in sorted(ids, key=int))
-        lines.append(f"    (v({a}, {b}, {c}), &[{pairs}]),")
+        lines.append(f"    (({a}, {b}, {c}), &[{pairs}]),")
     lines.append("];\n")
     lines.append(
         "/// The consumable id -> name table effective for `version`: the latest layout\n"
@@ -91,10 +88,11 @@ def main():
     lines.append(
         "pub fn consumable_ids_for_version(version: Version) -> Option<&'static [(i32, &'static str)]> {"
     )
+    lines.append("    let v = (version.major, version.minor, version.patch);")
     lines.append("    CONSUMABLE_ID_LAYOUTS")
     lines.append("        .iter()")
     lines.append("        .rev()")
-    lines.append("        .find(|(start, _)| version.is_at_least(start))")
+    lines.append("        .find(|(start, _)| v >= *start)")
     lines.append("        .or_else(|| CONSUMABLE_ID_LAYOUTS.first())")
     lines.append("        .map(|(_, table)| *table)")
     lines.append("}")
