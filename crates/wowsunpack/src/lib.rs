@@ -15,6 +15,9 @@ pub mod export;
 /// Constants parsed from the game's XML files in `res/gui/data/constants/`
 #[cfg(feature = "parsing")]
 pub mod game_constants;
+/// Per-version consumable id -> name tables recovered by static analysis of game scripts.
+#[cfg(feature = "parsing")]
+pub mod consumable_versions;
 /// Version-aware GUI asset resolution: request assets by type, not file path.
 #[cfg(feature = "parsing")]
 pub mod game_assets;

@@ -167,9 +167,21 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
 
 /// Build `GameConstants` from VFS and merge in replay constants (CONSUMABLE_IDS, BATTLE_STAGES).
 #[instrument(skip(vfs, replay_constants))]
-pub fn build_game_constants(vfs: &VfsPath, replay_constants: &serde_json::Value, build: u32) -> GameConstants {
+pub fn build_game_constants(
+    vfs: &VfsPath,
+    replay_constants: &serde_json::Value,
+    build: u32,
+    version: Option<Version>,
+) -> GameConstants {
     let mut game_constants = GameConstants::from_vfs(vfs);
     game_constants.merge_replay_constants(replay_constants, build);
+    // The replay's own client version is authoritative for consumable ids: their
+    // ordering shifts across versions, so resolve them against the static per-version
+    // table rather than the latest layout. Applied last so it wins over any bridged
+    // (newer-build) constants merged above.
+    if let Some(version) = version {
+        game_constants.common_mut().apply_version_consumables(version);
+    }
     game_constants
 }
 
@@ -182,6 +194,7 @@ pub fn load_wows_data_for_build(
     build: u32,
     locale: &str,
     fallback_constants: &serde_json::Value,
+    version: Option<Version>,
 ) -> Result<WorldOfWarshipsData, Report> {
     let game_patch = build as usize;
     let build_dir = wows_directory.join("bin").join(format!("{build}"));
@@ -271,11 +284,11 @@ pub fn load_wows_data_for_build(
         None => (fallback_constants.clone(), false),
     };
 
-    let game_constants = build_game_constants(&vfs, &replay_constants, build);
+    let game_constants = build_game_constants(&vfs, &replay_constants, build, version);
     let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds
-    let full_version = None; // Will be set by caller for latest build
+    let full_version = version; // Set by caller (replay version) when known
 
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,
@@ -366,7 +379,7 @@ pub fn load_wows_files(
     }
 
     // Load data for the latest build
-    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants)
+    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants, full_version)
         .context_with(|| format!("failed to load game data for build {latest_build}"))?;
     data.full_version = full_version;
     data.replays_dir = replays_dir.clone();
@@ -460,6 +473,7 @@ pub fn load_wows_data_from_dump(
     build: u32,
     locale: &str,
     fallback_constants: &serde_json::Value,
+    replay_version: Option<Version>,
 ) -> Result<WorldOfWarshipsData, Report> {
     use wowsunpack::game_params::provider::GameMetadataProvider;
     use wowsunpack::vfs::impls::physical::PhysicalFS;
@@ -546,7 +560,9 @@ pub fn load_wows_data_from_dump(
             }
         }
     };
-    let game_constants = build_game_constants(&vfs, &replay_constants, build);
+    // Prefer the replay's own version; fall back to the version recovered from the dump.
+    let constants_version = replay_version.or(full_version);
+    let game_constants = build_game_constants(&vfs, &replay_constants, build, constants_version);
 
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,

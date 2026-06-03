@@ -165,7 +165,7 @@ impl WoWsDataMap {
     /// Returns None if the version's build data is unavailable.
     #[instrument(skip(self))]
     pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
-        self.resolve_build(version.build)
+        self.resolve_build_with_version(version.build, Some(*version))
     }
 
     /// Resolve game data for a specific build number.
@@ -173,6 +173,14 @@ impl WoWsDataMap {
     /// Returns None if the build data is unavailable.
     #[instrument(skip(self))]
     pub fn resolve_build(&self, build: u32) -> Option<SharedWoWsData> {
+        self.resolve_build_with_version(build, None)
+    }
+
+    /// Like [`Self::resolve_build`], but threads the replay's friendly version through
+    /// so version-aware constants (consumable id layouts) resolve against the client
+    /// that produced the replay rather than the latest layout.
+    #[instrument(skip(self))]
+    pub fn resolve_build_with_version(&self, build: u32, version: Option<Version>) -> Option<SharedWoWsData> {
         // Check if already loaded
         if let Some(data) = self.get(build) {
             return Some(data);
@@ -203,7 +211,7 @@ impl WoWsDataMap {
         let build_dir = self.wows_dir.join("bin").join(build.to_string());
         if build_dir.exists() {
             debug!("Lazily loading game data for build {}", build);
-            match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants) {
+            match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants, version) {
                 Ok(wows_data) => {
                     if !wows_data.replay_constants_exact_match
                         && let Some(tx) = &self.network_job_tx
@@ -243,6 +251,7 @@ impl WoWsDataMap {
                     build,
                     &self.locale,
                     &fallback_constants,
+                    version,
                 ) {
                     Ok(wows_data) => {
                         if !wows_data.replay_constants_exact_match
@@ -269,6 +278,7 @@ impl WoWsDataMap {
                                 build,
                                 &self.locale,
                                 &fallback_constants,
+                                version,
                             ) {
                                 Ok(wows_data) => {
                                     let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
@@ -418,7 +428,8 @@ impl WorldOfWarshipsData {
             };
 
         // Rebuild game constants from VFS + new replay constants
-        let new_game_constants = build_game_constants(&self.vfs, &new_replay_constants, self.build_number);
+        let new_game_constants =
+            build_game_constants(&self.vfs, &new_replay_constants, self.build_number, self.full_version);
 
         // Reload all icons from game files
         let version = self.full_version.as_ref();

@@ -1126,6 +1126,18 @@ impl CommonConstants {
         &mut self.consumable_types
     }
 
+    /// Replace the consumable id -> name map with the layout recovered for `version`
+    /// (static analysis of the obfuscated game scripts; see
+    /// [`crate::consumable_versions`]). This lets a replay resolve consumable ids the
+    /// way its own client did rather than against the latest layout, which is
+    /// essential for older replays whose id ordering differs. No-op if the version
+    /// predates every known layout *and* no layout floor applies.
+    pub fn apply_version_consumables(&mut self, version: crate::data::Version) {
+        if let Some(table) = crate::consumable_versions::consumable_ids_for_version(version) {
+            self.consumable_types = table.iter().map(|(id, name)| (*id, Cow::Borrowed(*name))).collect();
+        }
+    }
+
     pub fn battle_stage(&self, id: i32) -> Option<&crate::game_types::BattleStage> {
         self.battle_stages.get(&id)
     }
@@ -1267,3 +1279,37 @@ pub const COMMON_CONSTANTS_PATH: &str = "gui/data/constants/common.xml";
 
 /// The file path within the game's `res/` directory for channel constants.
 pub const CHANNEL_CONSTANTS_PATH: &str = "gui/data/constants/channel.xml";
+
+#[cfg(all(test, feature = "parsing"))]
+mod version_consumable_tests {
+    use super::*;
+    use crate::data::Version;
+
+    fn v(major: u32, minor: u32, patch: u32, build: u32) -> Version {
+        Version { major, minor, patch, build }
+    }
+
+    #[test]
+    fn legacy_client_resolves_its_own_consumable_layout() {
+        // The 0.9.10 client (e.g. the Smaland replay, build 3052606) ordered consumables
+        // differently from current builds: depth charges sat at id 27 and the plane /
+        // tactical block did not exist yet. Resolving against the modern default would
+        // mislabel every id past the submarine block.
+        let mut common = CommonConstants::defaults();
+        common.apply_version_consumables(v(0, 9, 10, 3052606));
+        assert_eq!(common.consumable_type(22), Some("callFighters"));
+        assert_eq!(common.consumable_type(23), Some("regenerateHealth"));
+        assert_eq!(common.consumable_type(27), Some("depthCharges"));
+        // The modern default placed trigger7 at 27; confirm we replaced it.
+        assert_ne!(common.consumable_type(27), Some("trigger7"));
+    }
+
+    #[test]
+    fn modern_client_keeps_the_full_layout() {
+        let mut common = CommonConstants::defaults();
+        common.apply_version_consumables(v(15, 2, 0, 12116141));
+        assert_eq!(common.consumable_type(0), Some("crashCrew"));
+        // The modern layout is much larger than the legacy one.
+        assert!(common.consumable_types().len() > 40);
+    }
+}
