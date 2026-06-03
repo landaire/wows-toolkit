@@ -176,6 +176,19 @@ impl WoWsDataMap {
         self.resolve_build_with_version(build, None)
     }
 
+    /// Ship class icons from the newest loaded build. Used as a fallback when an older
+    /// replay's own build predates these assets -- pre-12.0 clients shipped no
+    /// `gui/fla/minimap/ship_icons`, so those dumps have an empty icon set. The class
+    /// icons (DD/CA/BB/CV) are generic, so borrowing the current build's is correct.
+    pub fn newest_ship_icons(&self) -> HashMap<Species, Arc<GameAsset>> {
+        let builds = self.builds.read();
+        builds
+            .values()
+            .max_by_key(|data| data.read().build_number)
+            .map(|data| data.read().ship_icons.clone())
+            .unwrap_or_default()
+    }
+
     /// Like [`Self::resolve_build`], but threads the replay's friendly version through
     /// so version-aware constants (consumable id layouts) resolve against the client
     /// that produced the replay rather than the latest layout.

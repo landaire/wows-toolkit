@@ -533,6 +533,11 @@ impl UiReport {
         deps: &crate::data::wows_data::ReplayDependencies,
         merge_active: bool,
     ) -> Self {
+        // Captured before locking the replay's build below (sequential, avoids a
+        // re-entrant read on the same data). Used to borrow class icons when the
+        // replay's own (pre-12.0) build shipped none.
+        let fallback_ship_icons = deps.wows_data_map.newest_ship_icons();
+
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
         let constants_inner = wows_data_inner.replay_constants.read();
@@ -595,8 +600,10 @@ impl UiReport {
                 })
                 .unwrap_or_default();
 
-            let icon =
-                known_species.as_ref().and_then(|species| ship_class_icon_from_species(*species, &wows_data_inner));
+            let icon = known_species.as_ref().and_then(|species| {
+                ship_class_icon_from_species(*species, &wows_data_inner)
+                    .or_else(|| fallback_ship_icons.get(species).cloned())
+            });
 
             let name_color = if player_state.is_abuser() {
                 Color32::from_rgb(0xFF, 0xC0, 0xCB) // pink
