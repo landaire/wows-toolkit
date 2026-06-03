@@ -42,6 +42,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Tool output (and the errors we echo from it) contains box-drawing characters
+# that the default cp1252 stdout on Windows can't encode, which would otherwise
+# crash the whole run on a single build's error message. Force utf-8 with
+# replacement so a print can never abort the driver.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 TEMP_DIR = Path(r"G:\wows_builds\temp_game_data")
 ARCHIVE_DIR = Path(r"G:\wows_builds")
 APP_ID = 552990
@@ -170,6 +180,13 @@ def already_complete(build: int) -> bool:
 def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
                   filelist: Path, timeout: int = 3600) -> bool:
     """Run a steamroom download through the shared daemon. Returns True on success."""
+    # steamroom's delta-update deletes files from the previously-installed
+    # manifest that aren't in the new one. We download many different manifests
+    # into the same temp dir, so that wrongly removes other builds' idx files
+    # (complete-build then fails "idx directory not found"). Drop the per-depot
+    # install record before each download so no delta-removal fires; the idx and
+    # package files already on disk are untouched.
+    (output / ".depotdownloader" / "depot.json").unlink(missing_ok=True)
     # Route every download through the long-lived daemon (started by
     # ensure_daemon) via --use-daemon. The daemon holds one authenticated Steam
     # session and CDN connection pool for the whole run, so we avoid the
@@ -223,19 +240,20 @@ def daemon_running() -> bool:
         return False
 
 
-def ensure_daemon():
+def ensure_daemon(steam_user: str):
     """Start a steamroom daemon (authenticated with the host Steam token) unless
     one is already running. All downloads run through it, so a single Steam
     session and CDN connection pool is reused for the whole archive run."""
     if daemon_running():
         print("steamroom daemon already running")
         return
-    print("Starting steamroom daemon (host Steam token)...")
+    print(f"Starting steamroom daemon for {steam_user} (host Steam token)...")
     # Eager auth: --use-steam-token logs in with the host's cached token, saves a
     # durable refresh token, then forks a detached background daemon. Steam must
-    # be running and logged in for this one-time login.
+    # be running and logged in for this one-time login. Pass -u explicitly so the
+    # daemon is bound to this account rather than a lazily-resolved one.
     res = subprocess.run(
-        [str(STEAMROOM), "--use-steam-token", "--non-interactive", "daemon", "start"],
+        [str(STEAMROOM), "-u", steam_user, "--use-steam-token", "--non-interactive", "daemon", "start"],
         timeout=180,
     )
     if res.returncode != 0 or not daemon_running():
@@ -358,7 +376,7 @@ def main():
         print()
         input("Press Enter to start, Ctrl+C to abort...")
 
-    ensure_daemon()
+    ensure_daemon(steam_user)
 
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     discovered = {}
