@@ -172,9 +172,22 @@ def map_count(build: int) -> int:
     return 0
 
 
+def has_translations(build: int) -> bool:
+    """True if this build's dump carries its gettext catalogs (at least English)."""
+    for entry in ARCHIVE_DIR.iterdir():
+        if entry.is_dir() and entry.name.endswith(f"_{build}"):
+            return (entry / "translations" / "en" / "LC_MESSAGES" / "global.mo").exists()
+    return False
+
+
 def already_complete(build: int) -> bool:
-    """True if this build's dump already has a healthy set of minimaps."""
-    return map_count(build) >= MIN_COMPLETE_MAPS
+    """True if this build's dump has a healthy minimap set and its translations.
+
+    Translations are required: older builds keep their .mo only in the localization
+    depot (552994), which earlier runs of this script never fetched, leaving the
+    dumps unable to localize ship/skill/module names. Re-running now re-completes them.
+    """
+    return map_count(build) >= MIN_COMPLETE_MAPS and has_translations(build)
 
 
 def run_steamroom(steam_user: str, depot: int, manifest: str, output: Path,
@@ -351,6 +364,10 @@ def main():
     download_list = major if args.no_skip else major[::2]
 
     content_manifests = parse_manifests(CONTENT_MANIFESTS_FILE) if CONTENT_MANIFESTS_FILE.exists() else []
+    localization_manifests = parse_manifests(LOCALIZATION_MANIFESTS_FILE) if LOCALIZATION_MANIFESTS_FILE.exists() else []
+    if not localization_manifests:
+        print(f"WARNING: no localization-depot manifests ({LOCALIZATION_MANIFESTS_FILE}); "
+              f"older builds' translations (depot {LOCALIZATION_DEPOT}) will be missing.")
     if not content_manifests:
         print(f"ERROR: no content-depot manifests ({CONTENT_MANIFESTS_FILE}); maps live in depot "
               f"{CONTENT_DEPOT} and cannot be dumped without it.")
@@ -415,6 +432,18 @@ def main():
         print(f"  Downloading idx: content depot {CONTENT_DEPOT} (manifest {content_manifest})...")
         if not run_steamroom(steam_user, CONTENT_DEPOT, content_manifest, TEMP_DIR, IDX_FILELIST, timeout=900):
             continue
+
+        # The per-locale gettext catalogs (global.mo) live in the localization depot.
+        # Older builds keep them ONLY there -- not in the client depot's
+        # bin/<build>/res/texts -- so without this fetch their translations are missed
+        # and the toolkit can't localize ship/skill/module names. Non-fatal: a build
+        # still dumps without it, but we want it whenever the depot has it.
+        loc_manifest = find_closest_manifest(manifest_date, localization_manifests) if manifest_date else None
+        if loc_manifest:
+            print(f"  Downloading translations: localization depot {LOCALIZATION_DEPOT} (manifest {loc_manifest})...")
+            run_steamroom(steam_user, LOCALIZATION_DEPOT, loc_manifest, TEMP_DIR, IDX_FILELIST, timeout=900)
+        else:
+            print(f"  No localization-depot manifest near {date_str}; translations may be missing.")
 
         # Detect new builds
         all_builds = detect_builds(TEMP_DIR)
