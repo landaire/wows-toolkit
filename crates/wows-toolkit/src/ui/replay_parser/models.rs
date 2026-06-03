@@ -89,7 +89,12 @@ pub struct TranslatedModule {
 /// A player's complete translated build including modules, abilities, and skills.
 #[derive(Clone, Serialize)]
 pub struct TranslatedBuild {
+    /// Modernization upgrades (slot upgrades).
     pub modules: Vec<TranslatedModule>,
+    /// Equipped tech-tree modules (hull, guns, fire control, engine, ...) from the
+    /// ship-config unit slots. Populated for every replay version that carries a
+    /// ship config, so old and new replays show the same loadout view.
+    pub loadout: Vec<TranslatedModule>,
     pub abilities: Vec<TranslatedAbility>,
     pub captain_skills: Option<Vec<TranslatedCrewSkill>>,
 }
@@ -112,6 +117,21 @@ impl TranslatedBuild {
                         wowsunpack::game_params::translations::translate_module(&game_params_name, metadata_provider);
 
                     Some(TranslatedModule { name, description, game_params_name })
+                })
+                .collect(),
+            loadout: config
+                .units()
+                .iter()
+                .filter(|id| id.raw() != 0)
+                .filter_map(|id| {
+                    let game_params_name =
+                        <GameMetadataProvider as GameParamProvider>::game_param_by_id(metadata_provider, *id)?
+                            .name()
+                            .to_string();
+                    let name =
+                        wowsunpack::game_params::translations::translate_unit(&game_params_name, metadata_provider);
+
+                    Some(TranslatedModule { name, description: None, game_params_name })
                 })
                 .collect(),
             abilities: config

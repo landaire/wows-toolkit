@@ -93,6 +93,14 @@ pub fn translate_module(
     (name, description)
 }
 
+/// Translate a ship unit/module (hull, main battery, torpedoes, fire control, engine,
+/// ...) by its GameParams name. Units localize as `IDS_<NAME>` -- unlike upgrades, which
+/// use `IDS_TITLE_<NAME>`, and unlike ships, whose `param.index()` is only the name prefix.
+pub fn translate_unit(game_params_name: &str, resource_loader: &dyn ResourceLoader) -> Option<String> {
+    let id = format!("IDS_{}", game_params_name.to_uppercase());
+    resource_loader.localized_name_from_id(&id)
+}
+
 /// Translate a consumable (ability) by its GameParams name.
 pub fn translate_consumable(game_params_name: &str, resource_loader: &dyn ResourceLoader) -> Option<String> {
     let id = format!("IDS_DOCK_CONSUME_TITLE_{}", game_params_name.to_uppercase());

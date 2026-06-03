@@ -2300,6 +2300,22 @@ impl UiReport {
 
                                     ui.separator();
 
+                                    if build_info.loadout.is_empty() {
+                                        ui.label(t!("ui.replay.sections.loadout_none"));
+                                    } else {
+                                        ui.label(t!("ui.replay.sections.loadout"));
+                                        for module in &build_info.loadout {
+                                            if let Some(name) = &module.name {
+                                                let label = ui.label(name);
+                                                if let Some(hover_text) = module.description.as_ref() {
+                                                    label.on_hover_text(hover_text);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ui.separator();
+
                                     if build_info.abilities.is_empty() {
                                         ui.label(t!("ui.replay.sections.abilities_none"));
                                     } else {
