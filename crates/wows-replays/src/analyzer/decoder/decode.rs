@@ -200,7 +200,10 @@ impl PlayerStateData {
     }
 
     fn player_key_map(version: &Version) -> HashMap<&'static str, i64> {
-        if version.is_at_least(&Version::from_client_exe("0,12,8,0")) {
+        // This 38-field layout is stable from 0.11.11 onward: verified against real
+        // 0.11.11 replays, every field this code reads sits at the same index as it
+        // does at 0.12.8 (only keyTargetMarkers at 22 differs, which is unused here).
+        if version.is_at_least(&Version::from_client_exe("0,11,11,0")) {
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
             h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
@@ -242,26 +245,88 @@ impl PlayerStateData {
             h.insert(Self::KEY_TTK_STATUS, 37);
             h
         } else if version.is_at_least(&Version::from_client_exe("0,10,9,0")) {
+            // 0.10.9-0.11.10 (37 fields): 0.10.7 layout plus antiAbuseEnabled(1) and
+            // shipComponents(30); still predates keyTargetMarkers. Verified against
+            // real replays across this range.
             let mut h = HashMap::new();
-            h.insert(Self::KEY_AVATAR_ID, 0x2);
-            h.insert(Self::KEY_CLAN_TAG, 0x6);
-            h.insert(Self::KEY_MAX_HEALTH, 0x17);
-            h.insert(Self::KEY_NAME, 0x18);
-            h.insert(Self::KEY_SHIP_ID, 0x20);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 0x21);
-            h.insert(Self::KEY_SKIN_ID, 0x22);
-            h.insert(Self::KEY_TEAM_ID, 0x23);
+            h.insert(Self::KEY_ACCOUNT_DBID, 0);
+            h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
+            h.insert(Self::KEY_AVATAR_ID, 2);
+            h.insert(Self::KEY_CAMOUFLAGE_INFO, 3);
+            h.insert(Self::KEY_CLAN_COLOR, 4);
+            h.insert(Self::KEY_CLAN_ID, 5);
+            h.insert(Self::KEY_CLAN_TAG, 6);
+            h.insert(Self::KEY_CREW_PARAMS, 7);
+            h.insert(Self::KEY_DOG_TAG, 8);
+            h.insert(Self::KEY_FRAGS_COUNT, 9);
+            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 10);
+            h.insert(Self::KEY_ID, 11);
+            h.insert(Self::KEY_INVITATIONS_ENABLED, 12);
+            h.insert(Self::KEY_IS_ABUSER, 13);
+            h.insert(Self::KEY_IS_ALIVE, 14);
+            h.insert(Self::KEY_IS_BOT, 15);
+            h.insert(Self::KEY_IS_CLIENT_LOADED, 16);
+            h.insert(Self::KEY_IS_CONNECTED, 17);
+            h.insert(Self::KEY_IS_HIDDEN, 18);
+            h.insert(Self::KEY_IS_LEAVER, 19);
+            h.insert(Self::KEY_IS_PRE_BATTLE_OWNER, 20);
+            h.insert(Self::KEY_IS_T_SHOOTER, 21);
+            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 22);
+            h.insert(Self::KEY_MAX_HEALTH, 23);
+            h.insert(Self::KEY_NAME, 24);
+            h.insert(Self::KEY_PLAYER_MODE, 25);
+            h.insert(Self::KEY_PRE_BATTLE_ID_ON_START, 26);
+            h.insert(Self::KEY_PRE_BATTLE_SIGN, 27);
+            h.insert(Self::KEY_PREBATTLE_ID, 28);
+            h.insert(Self::KEY_REALM, 29);
+            h.insert(Self::KEY_SHIP_COMPONENTS, 30);
+            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 31);
+            h.insert(Self::KEY_SHIP_ID, 32);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 33);
+            h.insert(Self::KEY_SKIN_ID, 34);
+            h.insert(Self::KEY_TEAM_ID, 35);
+            h.insert(Self::KEY_TTK_STATUS, 36);
             h
         } else if version.is_at_least(&Version::from_client_exe("0,10,7,0")) {
+            // 0.10.7-0.10.8 (35 fields): pre-0.10.7 layout plus isClientLoaded(15);
+            // still predates antiAbuseEnabled and shipComponents. Verified against a
+            // real 0.10.7 replay.
             let mut h = HashMap::new();
-            h.insert(Self::KEY_AVATAR_ID, 0x1);
-            h.insert(Self::KEY_CLAN_TAG, 0x5);
-            h.insert(Self::KEY_MAX_HEALTH, 0x16);
-            h.insert(Self::KEY_NAME, 0x17);
-            h.insert(Self::KEY_SHIP_ID, 0x1e);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 0x1f);
-            h.insert(Self::KEY_SKIN_ID, 0x20);
-            h.insert(Self::KEY_TEAM_ID, 0x21);
+            h.insert(Self::KEY_ACCOUNT_DBID, 0);
+            h.insert(Self::KEY_AVATAR_ID, 1);
+            h.insert(Self::KEY_CAMOUFLAGE_INFO, 2);
+            h.insert(Self::KEY_CLAN_COLOR, 3);
+            h.insert(Self::KEY_CLAN_ID, 4);
+            h.insert(Self::KEY_CLAN_TAG, 5);
+            h.insert(Self::KEY_CREW_PARAMS, 6);
+            h.insert(Self::KEY_DOG_TAG, 7);
+            h.insert(Self::KEY_FRAGS_COUNT, 8);
+            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 9);
+            h.insert(Self::KEY_ID, 10);
+            h.insert(Self::KEY_INVITATIONS_ENABLED, 11);
+            h.insert(Self::KEY_IS_ABUSER, 12);
+            h.insert(Self::KEY_IS_ALIVE, 13);
+            h.insert(Self::KEY_IS_BOT, 14);
+            h.insert(Self::KEY_IS_CLIENT_LOADED, 15);
+            h.insert(Self::KEY_IS_CONNECTED, 16);
+            h.insert(Self::KEY_IS_HIDDEN, 17);
+            h.insert(Self::KEY_IS_LEAVER, 18);
+            h.insert(Self::KEY_IS_PRE_BATTLE_OWNER, 19);
+            h.insert(Self::KEY_IS_T_SHOOTER, 20);
+            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 21);
+            h.insert(Self::KEY_MAX_HEALTH, 22);
+            h.insert(Self::KEY_NAME, 23);
+            h.insert(Self::KEY_PLAYER_MODE, 24);
+            h.insert(Self::KEY_PRE_BATTLE_ID_ON_START, 25);
+            h.insert(Self::KEY_PRE_BATTLE_SIGN, 26);
+            h.insert(Self::KEY_PREBATTLE_ID, 27);
+            h.insert(Self::KEY_REALM, 28);
+            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 29);
+            h.insert(Self::KEY_SHIP_ID, 30);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 31);
+            h.insert(Self::KEY_SKIN_ID, 32);
+            h.insert(Self::KEY_TEAM_ID, 33);
+            h.insert(Self::KEY_TTK_STATUS, 34);
             h
         } else {
             // Pre-0.10.7 layout (34 fields, indices 0-33), recovered from a 0.9.10
@@ -2583,5 +2648,50 @@ mod player_key_map_tests {
         // Fields that did not exist this early must be absent, not mis-indexed.
         assert_eq!(m.get(PlayerStateData::KEY_IS_CLIENT_LOADED), None);
         assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), None);
+    }
+
+    /// 0.10.7-0.10.8 added isClientLoaded; still no antiAbuseEnabled/shipComponents.
+    /// Verified against a real 0.10.7 replay.
+    #[test]
+    fn v10_7_layout() {
+        let m = PlayerStateData::player_key_map(&v(0, 10, 7));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_CLIENT_LOADED), Some(&15));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_CONNECTED), Some(&16));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&29));
+        assert_eq!(m.get(PlayerStateData::KEY_MAX_HEALTH), Some(&22));
+        assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&33));
+        assert_eq!(m.get(PlayerStateData::KEY_ANTI_ABUSE_ENABLED), None);
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), None);
+    }
+
+    /// 0.10.9-0.11.10 added antiAbuseEnabled(1) and shipComponents(30).
+    /// Verified against real replays across the range.
+    #[test]
+    fn v10_9_layout() {
+        let m = PlayerStateData::player_key_map(&v(0, 10, 9));
+        assert_eq!(m.get(PlayerStateData::KEY_ANTI_ABUSE_ENABLED), Some(&1));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_CONNECTED), Some(&17));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), Some(&30));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&31));
+        assert_eq!(m.get(PlayerStateData::KEY_MAX_HEALTH), Some(&23));
+        assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&35));
+    }
+
+    /// 0.11.11 onward shares the 38-field layout (every field this code reads matches
+    /// 0.12.8): isConnected and shipConfigDump stay put while name/ship ids shift.
+    #[test]
+    fn v11_11_matches_modern_for_read_fields() {
+        let a = PlayerStateData::player_key_map(&v(0, 11, 11));
+        let b = PlayerStateData::player_key_map(&v(0, 12, 8));
+        for key in [
+            PlayerStateData::KEY_IS_CONNECTED,
+            PlayerStateData::KEY_SHIP_CONFIG_DUMP,
+            PlayerStateData::KEY_MAX_HEALTH,
+            PlayerStateData::KEY_NAME,
+            PlayerStateData::KEY_SHIP_ID,
+            PlayerStateData::KEY_TEAM_ID,
+        ] {
+            assert_eq!(a.get(key), b.get(key), "field {key} diverges at 0.11.11");
+        }
     }
 }
