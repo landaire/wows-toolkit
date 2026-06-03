@@ -264,15 +264,49 @@ impl PlayerStateData {
             h.insert(Self::KEY_TEAM_ID, 0x21);
             h
         } else {
+            // Pre-0.10.7 layout (34 fields, indices 0-33), recovered from a 0.9.10
+            // replay's player FixedDict. BigWorld FixedDict keys are alphabetically
+            // ordered, so the index is the field's alphabetical position over the
+            // fields that existed then -- this era predates isClientLoaded,
+            // antiAbuseEnabled, keyTargetMarkers and shipComponents. Mapping the full
+            // set (not just the 8 fields older code needed) is what lets old replays
+            // resolve connection state and ship builds instead of defaulting to
+            // disconnected/empty.
             let mut h = HashMap::new();
-            h.insert(Self::KEY_AVATAR_ID, 0x1);
-            h.insert(Self::KEY_CLAN_TAG, 0x5);
-            h.insert(Self::KEY_MAX_HEALTH, 0x15);
-            h.insert(Self::KEY_NAME, 0x16);
-            h.insert(Self::KEY_SHIP_ID, 0x1d);
-            h.insert(Self::KEY_SHIP_PARAMS_ID, 0x1e);
-            h.insert(Self::KEY_SKIN_ID, 0x1f);
-            h.insert(Self::KEY_TEAM_ID, 0x20);
+            h.insert(Self::KEY_ACCOUNT_DBID, 0);
+            h.insert(Self::KEY_AVATAR_ID, 1);
+            h.insert(Self::KEY_CAMOUFLAGE_INFO, 2);
+            h.insert(Self::KEY_CLAN_COLOR, 3);
+            h.insert(Self::KEY_CLAN_ID, 4);
+            h.insert(Self::KEY_CLAN_TAG, 5);
+            h.insert(Self::KEY_CREW_PARAMS, 6);
+            h.insert(Self::KEY_DOG_TAG, 7);
+            h.insert(Self::KEY_FRAGS_COUNT, 8);
+            h.insert(Self::KEY_FRIENDLY_FIRE_ENABLED, 9);
+            h.insert(Self::KEY_ID, 10);
+            h.insert(Self::KEY_INVITATIONS_ENABLED, 11);
+            h.insert(Self::KEY_IS_ABUSER, 12);
+            h.insert(Self::KEY_IS_ALIVE, 13);
+            h.insert(Self::KEY_IS_BOT, 14);
+            h.insert(Self::KEY_IS_CONNECTED, 15);
+            h.insert(Self::KEY_IS_HIDDEN, 16);
+            h.insert(Self::KEY_IS_LEAVER, 17);
+            h.insert(Self::KEY_IS_PRE_BATTLE_OWNER, 18);
+            h.insert(Self::KEY_IS_T_SHOOTER, 19);
+            h.insert(Self::KEY_KILLED_BUILDINGS_COUNT, 20);
+            h.insert(Self::KEY_MAX_HEALTH, 21);
+            h.insert(Self::KEY_NAME, 22);
+            h.insert(Self::KEY_PLAYER_MODE, 23);
+            h.insert(Self::KEY_PRE_BATTLE_ID_ON_START, 24);
+            h.insert(Self::KEY_PRE_BATTLE_SIGN, 25);
+            h.insert(Self::KEY_PREBATTLE_ID, 26);
+            h.insert(Self::KEY_REALM, 27);
+            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 28);
+            h.insert(Self::KEY_SHIP_ID, 29);
+            h.insert(Self::KEY_SHIP_PARAMS_ID, 30);
+            h.insert(Self::KEY_SKIN_ID, 31);
+            h.insert(Self::KEY_TEAM_ID, 32);
+            h.insert(Self::KEY_TTK_STATUS, 33);
             h
         }
     }
@@ -2518,5 +2552,36 @@ impl Analyzer for Decoder {
         //println!("{}", serde_json::to_string_pretty(&decoded).unwrap());
         let encoded = serde_json::to_string(&decoded).unwrap();
         self.write(&encoded);
+    }
+}
+
+#[cfg(test)]
+mod player_key_map_tests {
+    use super::*;
+
+    fn v(major: u32, minor: u32, patch: u32) -> Version {
+        Version { major, minor, patch, build: 0 }
+    }
+
+    /// Pre-0.10.7 clients (e.g. the 0.9.10 Smaland replay) carry a 34-field player
+    /// FixedDict. Verified field-by-field against a real 0.9.10 replay: mapping the
+    /// full set -- not just the eight the old code needed -- is what lets these
+    /// replays resolve connection state and ship builds instead of reading every
+    /// player as disconnected with no build.
+    #[test]
+    fn pre_10_7_maps_connection_and_build_fields() {
+        let m = PlayerStateData::player_key_map(&v(0, 9, 10));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_CONNECTED), Some(&15));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&28));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_ALIVE), Some(&13));
+        assert_eq!(m.get(PlayerStateData::KEY_IS_BOT), Some(&14));
+        // Anchors that were already correct in the prior (partial) map.
+        assert_eq!(m.get(PlayerStateData::KEY_MAX_HEALTH), Some(&21));
+        assert_eq!(m.get(PlayerStateData::KEY_NAME), Some(&22));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_ID), Some(&29));
+        assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&32));
+        // Fields that did not exist this early must be absent, not mis-indexed.
+        assert_eq!(m.get(PlayerStateData::KEY_IS_CLIENT_LOADED), None);
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), None);
     }
 }
