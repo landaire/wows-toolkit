@@ -90,45 +90,52 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
         let _unk = le_u32.parse_next(i)?;
     }
 
-    // ModernizationSlots: count + items
-    let modernization_count = le_u32.parse_next(i)?;
-    let modernization: Vec<u32> = repeat(modernization_count as usize, le_u32).parse_next(i)?;
+    // The trailing layout has grown over time: clients up to ~0.11.x truncate the blob
+    // after the ensign slots (no ecoboosts, naval flag, or isOwned/lastBoardedCrew tail).
+    // Read each remaining length-prefixed section only while bytes remain, so an old
+    // loadout still yields its modernizations and consumables instead of the whole
+    // parse failing once it runs off the end of a shorter blob. Full (modern) blobs
+    // contain every section and parse identically.
+    fn take_u32(i: &mut &[u8]) -> Option<u32> {
+        let (head, rest) = i.split_first_chunk::<4>()?;
+        *i = rest;
+        Some(u32::from_le_bytes(*head))
+    }
+    fn take_section(i: &mut &[u8]) -> Vec<u32> {
+        let Some(count) = take_u32(i) else { return Vec::new() };
+        (0..count).map_while(|_| take_u32(i)).collect()
+    }
 
-    // ExteriorSlots: count + items (signals, camos, flags)
-    let exterior_count = le_u32.parse_next(i)?;
-    let exteriors: Vec<u32> = repeat(exterior_count as usize, le_u32).parse_next(i)?;
-
+    // ModernizationSlots
+    let modernization = take_section(i);
+    // ExteriorSlots (signals, camos, flags)
+    let exteriors = take_section(i);
     // Supply state (purpose unknown, typically 0)
-    let _supply_state = le_u32.parse_next(i)?;
-
+    let _supply_state = take_u32(i);
     // ExteriorSlots color schemes: count + (slot_idx, scheme_id) pairs
-    let color_scheme_count = le_u32.parse_next(i)?;
-    let _color_schemes: Vec<(u32, u32)> = repeat(color_scheme_count as usize, (le_u32, le_u32)).parse_next(i)?;
-
-    // AbilitySlots: count + items (consumables)
-    let abilities_count = le_u32.parse_next(i)?;
-    let abilities: Vec<u32> = repeat(abilities_count as usize, le_u32).parse_next(i)?;
-
-    // EnsignSlots: count + items
-    let ensign_count = le_u32.parse_next(i)?;
-    let ensigns: Vec<u32> = repeat(ensign_count as usize, le_u32).parse_next(i)?;
-
-    // EcoboostSlots: count + items (typically 4 slots, some may be 0)
-    let ecoboost_count = le_u32.parse_next(i)?;
-    let ecoboosts: Vec<u32> = repeat(ecoboost_count as usize, le_u32).parse_next(i)?;
-
+    if let Some(color_scheme_count) = take_u32(i) {
+        for _ in 0..color_scheme_count {
+            take_u32(i);
+            take_u32(i);
+        }
+    }
+    // AbilitySlots (consumables)
+    let abilities = take_section(i);
+    // EnsignSlots
+    let ensigns = take_section(i);
+    // EcoboostSlots (newer clients only)
+    let ecoboosts = take_section(i);
     // Naval flag ID (NationFlags index)
-    let naval_flag = le_u32.parse_next(i)?;
-
-    // Full format extras: isOwned, lastBoardedCrew (commander/crew param ID)
-    let _is_owned = le_u32.parse_next(i)?;
-    let last_boarded_crew = le_u32.parse_next(i)?;
+    let naval_flag = take_u32(i).unwrap_or(0);
+    // Full-format tail: isOwned, lastBoardedCrew (commander/crew param ID)
+    let _is_owned = take_u32(i);
+    let last_boarded_crew = take_u32(i).unwrap_or(0);
 
     let to_ids = |v: Vec<u32>| v.into_iter().map(GameParamId::from).collect();
     Ok(ShipConfig {
         ship_params_id: GameParamId::from(ship_params_id),
         abilities: to_ids(abilities),
-        hull: GameParamId::from(units[0]),
+        hull: GameParamId::from(units.first().copied().unwrap_or(0)),
         modernization: to_ids(modernization),
         units: to_ids(units),
         exteriors: to_ids(exteriors),
