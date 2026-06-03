@@ -614,7 +614,7 @@ pub(super) fn playback_thread(
             .map(|(eid, player)| {
                 let display_name = game_metadata.localized_name_from_param(player.vehicle()).unwrap_or_default();
                 let team_id = player.initial_state().team_id();
-                let hull_param_id = player.vehicle_entity().map(|ve| ve.props().ship_config().hull());
+                let hull_param_id = player.vehicle_entity().and_then(|ve| ve.props().ship_config().hull());
                 ReplayPlayerInfo {
                     entity_id: *eid,
                     username: player.initial_state().username().to_string(),

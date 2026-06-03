@@ -17,7 +17,6 @@ use crate::game_types::GameParamId;
 pub struct ShipConfig {
     ship_params_id: GameParamId,
     abilities: Vec<GameParamId>,
-    hull: GameParamId,
     modernization: Vec<GameParamId>,
     units: Vec<GameParamId>,
     /// Exterior slot items (signals, camos, flags). Despite the field name, this covers
@@ -25,8 +24,9 @@ pub struct ShipConfig {
     exteriors: Vec<GameParamId>,
     ensigns: Vec<GameParamId>,
     ecoboosts: Vec<GameParamId>,
-    naval_flag: u32,
-    last_boarded_crew: u32,
+    /// `None` when the (older, truncated) blob ended before these trailing fields.
+    naval_flag: Option<u32>,
+    last_boarded_crew: Option<u32>,
 }
 
 impl ShipConfig {
@@ -46,8 +46,9 @@ impl ShipConfig {
         self.modernization.as_ref()
     }
 
-    pub fn hull(&self) -> GameParamId {
-        self.hull
+    /// The hull is the first unit slot. `None` if no units were recorded.
+    pub fn hull(&self) -> Option<GameParamId> {
+        self.units.first().copied()
     }
 
     pub fn abilities(&self) -> &[GameParamId] {
@@ -62,11 +63,13 @@ impl ShipConfig {
         self.ecoboosts.as_ref()
     }
 
-    pub fn naval_flag(&self) -> u32 {
+    /// `None` for older clients whose blob omits the naval-flag field.
+    pub fn naval_flag(&self) -> Option<u32> {
         self.naval_flag
     }
 
-    pub fn last_boarded_crew(&self) -> u32 {
+    /// `None` for older clients whose blob omits the crew tail.
+    pub fn last_boarded_crew(&self) -> Option<u32> {
         self.last_boarded_crew
     }
 }
@@ -125,17 +128,16 @@ pub fn parse_ship_config(blob: &[u8], version: &Version) -> WResult<ShipConfig> 
     let ensigns = take_section(i);
     // EcoboostSlots (newer clients only)
     let ecoboosts = take_section(i);
-    // Naval flag ID (NationFlags index)
-    let naval_flag = take_u32(i).unwrap_or(0);
-    // Full-format tail: isOwned, lastBoardedCrew (commander/crew param ID)
+    // Naval flag ID (NationFlags index); absent on older truncated blobs.
+    let naval_flag = take_u32(i);
+    // Full-format tail: isOwned, lastBoardedCrew (commander/crew param ID).
     let _is_owned = take_u32(i);
-    let last_boarded_crew = take_u32(i).unwrap_or(0);
+    let last_boarded_crew = take_u32(i);
 
     let to_ids = |v: Vec<u32>| v.into_iter().map(GameParamId::from).collect();
     Ok(ShipConfig {
         ship_params_id: GameParamId::from(ship_params_id),
         abilities: to_ids(abilities),
-        hull: GameParamId::from(units.first().copied().unwrap_or(0)),
         modernization: to_ids(modernization),
         units: to_ids(units),
         exteriors: to_ids(exteriors),
@@ -264,15 +266,15 @@ mod tests {
         );
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 4_293_001_168);
-        assert_eq!(config.hull().raw(), 100);
+        assert_eq!(config.hull().map(|h| h.raw()), Some(100));
         assert_eq!(config.units().len(), 1);
         assert!(config.modernization().is_empty());
         assert!(config.exteriors().is_empty());
         assert!(config.abilities().is_empty());
         assert!(config.ensigns().is_empty());
         assert!(config.ecoboosts().is_empty());
-        assert_eq!(config.naval_flag(), 0);
-        assert_eq!(config.last_boarded_crew(), 0);
+        assert_eq!(config.naval_flag(), Some(0));
+        assert_eq!(config.last_boarded_crew(), Some(0));
     }
 
     #[test]
@@ -292,15 +294,15 @@ mod tests {
         );
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 1000);
-        assert_eq!(config.hull().raw(), 10);
+        assert_eq!(config.hull().map(|h| h.raw()), Some(10));
         assert_eq!(config.units().len(), 3);
         assert_eq!(config.modernization().len(), 2);
         assert_eq!(config.exteriors().len(), 1);
         assert_eq!(config.abilities().len(), 3);
         assert!(config.ensigns().is_empty());
         assert_eq!(config.ecoboosts().len(), 4);
-        assert_eq!(config.naval_flag(), 7);
-        assert_eq!(config.last_boarded_crew(), 9999);
+        assert_eq!(config.naval_flag(), Some(7));
+        assert_eq!(config.last_boarded_crew(), Some(9999));
     }
 
     #[test]
@@ -320,15 +322,15 @@ mod tests {
         );
         let config = parse_ship_config(&blob, &version_12_3()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 2000);
-        assert_eq!(config.hull().raw(), 50);
+        assert_eq!(config.hull().map(|h| h.raw()), Some(50));
         assert_eq!(config.units().len(), 2);
         assert_eq!(config.modernization().len(), 1);
         assert_eq!(config.exteriors().len(), 3);
         assert_eq!(config.abilities().len(), 1);
         assert_eq!(config.ensigns().len(), 1);
         assert!(config.ecoboosts().is_empty());
-        assert_eq!(config.naval_flag(), 3);
-        assert_eq!(config.last_boarded_crew(), 8888);
+        assert_eq!(config.naval_flag(), Some(3));
+        assert_eq!(config.last_boarded_crew(), Some(8888));
     }
 
     #[test]
@@ -380,15 +382,15 @@ mod tests {
         );
         let config = parse_ship_config(&blob, &version_15_1()).unwrap();
         assert_eq!(config.ship_params_id().raw(), 5000);
-        assert_eq!(config.hull().raw(), 100); // first unit
+        assert_eq!(config.hull().map(|h| h.raw()), Some(100)); // first unit
         assert_eq!(config.units().len(), 14);
         assert_eq!(config.modernization().len(), 6);
         assert_eq!(config.exteriors().len(), 8);
         assert_eq!(config.abilities().len(), 4);
         assert_eq!(config.ensigns().len(), 2);
         assert_eq!(config.ecoboosts().len(), 4);
-        assert_eq!(config.naval_flag(), 15);
-        assert_eq!(config.last_boarded_crew(), 7777);
+        assert_eq!(config.naval_flag(), Some(15));
+        assert_eq!(config.last_boarded_crew(), Some(7777));
 
         // Verify specific GameParamId values
         assert_eq!(config.units()[5].raw(), 105);
@@ -398,17 +400,39 @@ mod tests {
     }
 
     #[test]
+    fn parse_truncated_old_blob_yields_partial_loadout() {
+        // Clients up to ~0.11.x end the blob after the ensign slots: no ecoboost
+        // section, naval flag, or crew tail. Simulate by building a full blob with
+        // empty ecoboosts and lopping off the trailing four u32s (ecoboost count +
+        // naval flag + isOwned + lastBoardedCrew).
+        let mut blob =
+            build_blob(2000, &[10, 20, 30], &[200, 201], &[300], &[], &[400, 401], &[], &[], 0, 0, false);
+        blob.truncate(blob.len() - 16);
+
+        let config = parse_ship_config(&blob, &version_12_3()).unwrap();
+        // Everything up to the truncation still parses.
+        assert_eq!(config.units().len(), 3);
+        assert_eq!(config.hull().map(|h| h.raw()), Some(10));
+        assert_eq!(config.modernization().len(), 2);
+        assert_eq!(config.abilities().len(), 2);
+        // The absent trailing fields read as missing, not as a fabricated zero.
+        assert!(config.ecoboosts().is_empty());
+        assert_eq!(config.naval_flag(), None);
+        assert_eq!(config.last_boarded_crew(), None);
+    }
+
+    #[test]
     fn default_ship_config() {
         let config = ShipConfig::default();
         assert_eq!(config.ship_params_id().raw(), 0);
-        assert_eq!(config.hull().raw(), 0);
+        assert_eq!(config.hull(), None);
         assert!(config.units().is_empty());
         assert!(config.modernization().is_empty());
         assert!(config.exteriors().is_empty());
         assert!(config.abilities().is_empty());
         assert!(config.ensigns().is_empty());
         assert!(config.ecoboosts().is_empty());
-        assert_eq!(config.naval_flag(), 0);
-        assert_eq!(config.last_boarded_crew(), 0);
+        assert_eq!(config.naval_flag(), None);
+        assert_eq!(config.last_boarded_crew(), None);
     }
 }

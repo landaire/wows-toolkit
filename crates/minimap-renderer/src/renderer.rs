@@ -1549,7 +1549,7 @@ impl<'a> MinimapRenderer<'a> {
                 // Look up the equipped hull upgrade name from replay data
                 let hull_name = vehicle_entity.as_ref().and_then(|v| {
                     let v = v.borrow();
-                    let hull_id = v.props().ship_config().hull();
+                    let hull_id = v.props().ship_config().hull()?;
                     GameParamProvider::game_param_by_id(self.game_params, hull_id).map(|p| p.name().to_string())
                 });
 
