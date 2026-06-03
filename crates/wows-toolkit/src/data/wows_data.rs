@@ -178,11 +178,26 @@ impl WoWsDataMap {
             return Some(data);
         }
 
+        // Constants (CONSUMABLE_IDS / BATTLE_STAGES) are version-specific. Only
+        // bridge them FORWARD: an already-loaded build's constants may stand in
+        // for a build we're loading that is NEWER than it (a fresh game version
+        // we haven't dumped yet). Never apply newer constants to an OLDER replay
+        // -- that corrupts the interpretation (consumables, battle stages,
+        // connection/observed state all read wrong). For older builds, fall back
+        // to the build's own VFS constants (Null = no override).
         let fallback_constants = {
             let builds = self.builds.read();
-            builds.values().next().map(|d| d.read().replay_constants.read().clone())
+            let mut best: Option<(u32, serde_json::Value)> = None;
+            for data in builds.values() {
+                let guard = data.read();
+                if guard.build_number < build
+                    && best.as_ref().map_or(true, |(b, _)| guard.build_number > *b)
+                {
+                    best = Some((guard.build_number, guard.replay_constants.read().clone()));
+                }
+            }
+            best.map(|(_, constants)| constants).unwrap_or_default()
         };
-        let fallback_constants = fallback_constants.unwrap_or_default();
 
         // Try to load from the live game install first
         let build_dir = self.wows_dir.join("bin").join(build.to_string());
